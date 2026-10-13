@@ -46,7 +46,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   String? _sessionId;
   int _historyRevision = 0;
-  final Set<String> _clearingSessions = <String>{};
+  final Map<String, Completer<void>> _clearingSessions = {};
 
   // Every operation that can replace the visible conversation invalidates
   // earlier reads/callbacks. Repository cancellation and deadlines stay owned
@@ -66,7 +66,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     LoadMessagesEvent event,
     Emitter<ChatState> emit,
   ) async {
-    if (_clearingSessions.contains(event.sessionId)) return;
+    if (_clearingSessions.containsKey(event.sessionId)) return;
     // Use send ownership, not the currently displayed session. Returning to a
     // still-running session resumes its view and eventual reconciliation.
     final activeSend = _activeSend;
@@ -131,7 +131,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     EditMessageEvent event,
     Emitter<ChatState> emit,
   ) async {
-    if (_clearingSessions.contains(event.sessionId)) return;
+    if (_clearingSessions.containsKey(event.sessionId)) return;
     _log(
       '[EDIT_BEGIN] '
       'session=${event.sessionId} '
@@ -230,8 +230,12 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     SendMessageEvent event,
     Emitter<ChatState> emit,
   ) async {
-    if (_clearingSessions.contains(event.sessionId)) return;
-    if (_sendInFlight) {
+    final pendingClear = _clearingSessions[event.sessionId];
+    final activeSend = _activeSend;
+    if (activeSend != null &&
+        !(pendingClear != null &&
+            activeSend.sessionId == event.sessionId &&
+            activeSend.invalidatedByClear)) {
       _log(
         '[ENTRY_REENTRANCY_BLOCK] '
         'scope=OrchestratorStateEngine '
@@ -293,7 +297,10 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           // Keep one fallback for this turn in the visible history, including
           // attachment identity. Successful reads replace this snapshot with
           // persisted IDs; never append/heuristically match turns by text.
-          final sendHistory = <ChatMessage>[..._messages, optimisticUserMessage];
+          final sendHistory = <ChatMessage>[
+            if (pendingClear == null) ..._messages,
+            optimisticUserMessage,
+          ];
           _messages = sendHistory;
 
           final shouldShowAssistantPlaceholder =
@@ -367,6 +374,12 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
           try {
             var streamStarted = false;
+
+            // A submitted prompt already left the composer. Keep its snapshot
+            // visible and own the send gate while waiting for the clear, so it
+            // is neither dropped nor persisted into a deletion in progress.
+            if (pendingClear != null) await pendingClear.future;
+            if (send.invalidatedByClear || emit.isDone) return;
 
             final sendFuture =
                 _chatRepository.sendMessage(
@@ -577,7 +590,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     RecoverFromStuckUiEvent event,
     Emitter<ChatState> emit,
   ) async {
-    if (_clearingSessions.contains(event.sessionId)) return;
+    if (_clearingSessions.containsKey(event.sessionId)) return;
     if (_sessionId != event.sessionId) return;
     _log(
       '[inference_loop_detected] '
@@ -604,14 +617,19 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     DebugClearChatEvent event,
     Emitter<ChatState> emit,
   ) async {
-    if (!_clearingSessions.add(event.sessionId)) return;
+    if (_clearingSessions.containsKey(event.sessionId)) return;
+    final clearing = Completer<void>();
+    _clearingSessions[event.sessionId] = clearing;
     // A background clear invalidates that session's send, not the displayed
     // conversation. Only a visible clear may replace the current view.
     final revision = _sessionId == null || _sessionId == event.sessionId
         ? _beginHistoryOperation(event.sessionId)
         : null;
     final send = _activeSend;
-    if (send != null && send.sessionId == event.sessionId) send.resume = null;
+    if (send != null && send.sessionId == event.sessionId) {
+      send.resume = null;
+      send.invalidatedByClear = true;
+    }
     _log(
       '[UI_DEBUG] '
       'action=clear_chat_reset_begin '
@@ -663,6 +681,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       );
     } finally {
       _clearingSessions.remove(event.sessionId);
+      clearing.complete();
     }
   }
 
@@ -724,4 +743,5 @@ class _ActiveChatSend {
 
   final String sessionId;
   void Function()? resume;
+  bool invalidatedByClear = false;
 }

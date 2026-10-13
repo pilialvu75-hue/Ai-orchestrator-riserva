@@ -447,6 +447,94 @@ void main() {
     }
 
     testWidgets(
+      'a queued send retains attachments and ownership across cancellation and navigation',
+      (tester) async {
+        const other = ChatMessage(
+          id: 'other', sessionId: 'session-2', role: 'user',
+          content: 'Other conversation', timestamp: 3,
+        );
+        final repository = _PersistingChatRepository([other]);
+        final replies = <Completer<ChatMessage>>[];
+        repository.onReply = (_) {
+          final reply = Completer<ChatMessage>();
+          replies.add(reply);
+          return reply.future;
+        };
+        late Completer<void> clear;
+        repository.onClear = () {
+          clear = Completer<void>();
+          return clear.future;
+        };
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        engine.add(const SendMessageEvent(sessionId: 'session-1', userPrompt: 'Old'));
+        await tester.pump();
+        engine.add(const DebugClearChatEvent(sessionId: 'session-1'));
+        await tester.pump();
+        final attachments = [attachment];
+        engine.add(SendMessageEvent(
+          sessionId: event.sessionId, userPrompt: event.userPrompt,
+          attachments: attachments,
+        ));
+        await tester.pump();
+        attachments.clear();
+        final waiting = (engine.state as ChatSending).messages.first;
+        expect(waiting.content, event.userPrompt);
+        expect(waiting.attachments, [attachment]);
+        replies.single.completeError(inferenceError);
+        await tester.pump();
+        engine.add(event);
+        await tester.pump();
+        expect(repository.sendCount, 1);
+        engine.add(const LoadMessagesEvent(sessionId: 'session-2'));
+        await tester.pump();
+        clear.complete();
+        await tester.pump();
+        expect((engine.state as ChatLoaded).messages, [other]);
+        expect(repository.sendCount, 2);
+        replies.last.completeError(inferenceError);
+        await tester.pump();
+        expect((engine.state as ChatLoaded).messages, [other]);
+        engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+        await tester.pump();
+        final saved = (engine.state as ChatLoaded).messages.single;
+        expect(saved.id, 'saved-user-2');
+        expect(saved.content, event.userPrompt.trim());
+        expect(saved.attachments, [attachment]);
+        await tester.runAsync(engine.close);
+      },
+    );
+
+    testWidgets(
+      'a failed clear also releases the queued send without dropping its question',
+      (tester) async {
+        final repository = _PersistingChatRepository([oldQuestion]);
+        late Completer<void> clear;
+        repository.onClear = () {
+          clear = Completer<void>();
+          return clear.future;
+        };
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+        await tester.pump();
+        engine.add(const DebugClearChatEvent(sessionId: 'session-1'));
+        await tester.pump();
+        engine.add(event);
+        await tester.pump();
+        expect(repository.sendCount, 0);
+        clear.completeError(StateError('Clear failed'));
+        await tester.pump();
+        expect(repository.sendCount, 1);
+        final loaded = engine.state as ChatLoaded;
+        expect(loaded.messages.map((message) => message.id), [
+          'old-user', 'saved-user-1', 'saved-answer-1',
+        ]);
+        expect(loaded.messages[1].content, event.userPrompt.trim());
+        expect(loaded.messages[1].attachments, [attachment]);
+        await tester.runAsync(engine.close);
+      },
+    );
+
+    testWidgets(
       'ignores callbacks once send failed while recovery read is still pending',
       (tester) async {
         final repository = _PersistingChatRepository([]);
@@ -577,7 +665,7 @@ void main() {
   });
 
   testWidgets(
-    'does not read or send into a session while its clear is pending',
+    'retains a submitted question until clear finishes before sending it',
     (tester) async {
       final repository = _PersistingChatRepository([
         const ChatMessage(
@@ -605,15 +693,20 @@ void main() {
       await tester.pump();
       expect(repository.readCount, 1);
       expect(repository.sendCount, 0);
+      expect((engine.state as ChatSending).messages.first.content, 'Too early');
       clear.complete();
       await tester.pump();
-      expect((engine.state as ChatLoaded).messages, isEmpty);
+      expect((engine.state as ChatLoaded).messages, repository.messages);
+      expect(repository.messages.map((message) => message.id), [
+        'saved-user-1', 'saved-answer-1',
+      ]);
+      expect(repository.messages.first.content, 'Too early');
       engine.add(
         const SendMessageEvent(sessionId: 'session-1', userPrompt: 'New'),
       );
       await tester.pump();
       expect((engine.state as ChatLoaded).messages, repository.messages);
-      expect(repository.sendCount, 1);
+      expect(repository.sendCount, 2);
       await tester.runAsync(engine.close);
     },
   );
