@@ -102,6 +102,7 @@ final class WorkshopProposalWorkspaceStager {
     var offset = 0;
     var statementStart = true;
     var braceDepth = 0;
+    var inImportDirective = false;
     while (offset < source.length) {
       final char = source[offset];
       final next = offset + 1 < source.length ? source[offset + 1] : '';
@@ -125,6 +126,13 @@ final class WorkshopProposalWorkspaceStager {
       final rawString = (char == 'r' || char == 'R') &&
           (next == "'" || next == '"');
       if (char == "'" || char == '"' || rawString) {
+        // A conditional import has more than one URI. Inspect each literal
+        // in that import directive, not just the default branch. All string
+        // literals outside a directive are skipped regardless of contents.
+        if (inImportDirective && braceDepth == 0) {
+          final uri = _readDartImportUri(source, offset);
+          if (uri != null) yield uri;
+        }
         offset = _skipDartString(
           source,
           rawString ? offset + 1 : offset,
@@ -138,9 +146,7 @@ final class WorkshopProposalWorkspaceStager {
           source.startsWith('import', offset) &&
           (offset + 6 == source.length ||
               !_isDartIdentifierChar(source[offset + 6]))) {
-        final valueStart = _skipDartTrivia(source, offset + 6);
-        final uri = _readDartImportUri(source, valueStart);
-        if (uri != null) yield uri;
+        inImportDirective = true;
       }
       if (char == '{') {
         braceDepth++;
@@ -148,6 +154,7 @@ final class WorkshopProposalWorkspaceStager {
         braceDepth--;
       } else if (char == ';' && braceDepth == 0) {
         statementStart = true;
+        inImportDirective = false;
         offset++;
         continue;
       }
@@ -224,6 +231,15 @@ final class WorkshopProposalWorkspaceStager {
         index += 2;
         continue;
       }
+      if (!raw &&
+          source.codeUnitAt(index) == 36 &&
+          index + 1 < source.length &&
+          source[index + 1] == '{') {
+        // Nested interpolation expressions can contain same-quote strings,
+        // semicolons, comments, braces and further interpolations.
+        index = _skipDartInterpolation(source, index + 2);
+        continue;
+      }
       if (source[index] == quote) {
         if (!triple) return index + 1;
         if (index + 2 < source.length &&
@@ -231,6 +247,44 @@ final class WorkshopProposalWorkspaceStager {
             source[index + 2] == quote) {
           return index + 3;
         }
+      }
+      index++;
+    }
+    return source.length;
+  }
+
+  static int _skipDartInterpolation(String source, int index) {
+    var depth = 1;
+    while (index < source.length) {
+      final char = source[index];
+      final next = index + 1 < source.length ? source[index + 1] : '';
+      if (char == '/' && next == '/') {
+        index += 2;
+        while (index < source.length &&
+            source[index] != '\n' &&
+            source[index] != '\r') {
+          index++;
+        }
+        continue;
+      }
+      if (char == '/' && next == '*') {
+        index = _skipDartBlockComment(source, index);
+        continue;
+      }
+      final rawString = (char == 'r' || char == 'R') &&
+          (next == "'" || next == '"');
+      if (char == "'" || char == '"' || rawString) {
+        index = _skipDartString(
+          source,
+          rawString ? index + 1 : index,
+          raw: rawString,
+        );
+        continue;
+      }
+      if (char == '{') {
+        depth++;
+      } else if (char == '}' && --depth == 0) {
+        return index + 1;
       }
       index++;
     }
