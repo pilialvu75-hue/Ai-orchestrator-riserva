@@ -31,12 +31,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-          cache: pip
-          cache-dependency-path: tools/aivexus/cad/requirements-ci.txt
 
       - name: Install isolated domain dependencies
         run: |
-          python -m pip install --disable-pip-version-check --only-binary=:all: -r tools/aivexus/cad/requirements-ci.txt
+          python -m pip install --disable-pip-version-check --only-binary=:all: 'cadquery==2.8.0' 'trimesh==4.11.1'
 
       - name: Run real CAD regression tests
         run: |
