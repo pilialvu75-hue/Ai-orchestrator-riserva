@@ -252,6 +252,10 @@ void main() {
     });
 
     for (final nativeImport in <String>[
+      "\\uFEFF#!/usr/bin/env dart\\nimport 'java.util.Date';\\nvoid main() {}",
+      "import 'java.' 'util.Date';\\nvoid main() {}",
+      "import r'''kotlin.''' '''String''';\\nvoid main() {}",
+      "import 'stub.dart' if (dart.library.io) 'java.' 'util.Date';\\nvoid main() {}",
       "import '''java.util.Date''';\nvoid main() {}",
       "import r'''kotlin.String''';\nvoid main() {}",
       "import \"\"\"com.example.Foo\"\"\";\nvoid main() {}",
@@ -305,6 +309,9 @@ void main() {
     }
 
     for (final harmlessCode in <String>[
+      "import 'stub.dart' if (dart.library.io == 'java.util.Date') 'io.dart';\\nvoid main() {}",
+      "import 'stub.dart' if (dart.library.io == \"kotlin.String\") 'io.dart';\\nvoid main() {}",
+      "import 'stub.dart' if (dart.library.io == 'com.example.Bad') 'io.dart' if (dart.library.html) 'web.dart';\\nvoid main() {}",
       "#!/usr/bin/env dart\nimport 'package:flutter/material.dart';\nvoid main() {}",
       "const ignored = \"\"\"\nimport 'java.util.Date';\n\"\"\";\nvoid main() {}",
       "/*\nimport 'com.example.Foo';\n*/\nvoid main() {}",
