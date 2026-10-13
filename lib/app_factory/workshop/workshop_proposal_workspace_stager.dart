@@ -220,7 +220,7 @@ final class WorkshopProposalWorkspaceStager {
         source[quoteIndex + 2] == quote;
     var index = quoteIndex + (triple ? 3 : 1);
     while (index < source.length) {
-      if (!raw && source[index] == r'\') {
+      if (!raw && source.codeUnitAt(index) == 92) {
         index += 2;
         continue;
       }
