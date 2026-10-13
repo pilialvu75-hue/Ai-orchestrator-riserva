@@ -103,6 +103,15 @@ final class WorkshopProposalWorkspaceStager {
     var statementStart = true;
     var braceDepth = 0;
     var inImportDirective = false;
+    // Dart permits a Unix script tag before directives. Treat it as trivia
+    // rather than turning off the import-directive state until the next ';'.
+    if (source.startsWith('#!')) {
+      while (offset < source.length &&
+          source[offset] != '\n' &&
+          source[offset] != '\r') {
+        offset++;
+      }
+    }
     while (offset < source.length) {
       final char = source[offset];
       final next = offset + 1 < source.length ? source[offset + 1] : '';
@@ -365,9 +374,19 @@ final class WorkshopProposalWorkspaceStager {
         source[end - 1] != quote) {
       return null;
     }
-    // Import URIs are normal single-quoted/double-quoted string literals.
-    // An escaped URI is not a canonical JVM dotted class name, so no match.
-    return source.substring(index + 1, end - 1);
+    // Dart import URIs may also use raw/triple-quoted literals. Strip the
+    // actual width of both delimiters before validating the native URI.
+    final triple = index + 2 < source.length &&
+        source[index + 1] == quote &&
+        source[index + 2] == quote;
+    final delimiterWidth = triple ? 3 : 1;
+    if (end - index < 2 * delimiterWidth) return null;
+    // Escaped URIs are not canonical JVM dotted names; they remain outside
+    // this narrow guard and must still pass the mandatory review/validator.
+    return source.substring(
+      index + delimiterWidth,
+      end - delimiterWidth,
+    );
   }
 
   static bool _materializesWorkspaceChange({
