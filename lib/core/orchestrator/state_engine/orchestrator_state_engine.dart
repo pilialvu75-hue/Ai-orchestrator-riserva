@@ -66,7 +66,6 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     LoadMessagesEvent event,
     Emitter<ChatState> emit,
   ) async {
-    if (_clearingSessions.containsKey(event.sessionId)) return;
     // Use send ownership, not the currently displayed session. Returning to a
     // still-running session resumes its view and eventual reconciliation.
     final activeSend = _activeSend;
@@ -76,6 +75,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       activeSend.resume!();
       return;
     }
+    final pendingClear = _clearingSessions[event.sessionId];
     final revision = _beginHistoryOperation(event.sessionId);
     _log(
       'listener load_messages session=${event.sessionId}',
@@ -84,6 +84,8 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     emit(const ChatLoading());
 
     try {
+      if (pendingClear != null) await pendingClear.future;
+      if (!_isCurrent(revision, emit)) return;
       final messages =
           await _chatRepository.getMessages(event.sessionId);
       if (!_isCurrent(revision, emit)) return;

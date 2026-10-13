@@ -446,60 +446,114 @@ void main() {
       );
     }
 
+    for (final returnBeforeClear in [false, true]) {
+      testWidgets(
+        'a queued send retains attachments and ownership across cancellation and navigation (return: $returnBeforeClear)',
+        (tester) async {
+          const other = ChatMessage(
+            id: 'other', sessionId: 'session-2', role: 'user',
+            content: 'Other conversation', timestamp: 3,
+          );
+          final repository = _PersistingChatRepository([other]);
+          final replies = <Completer<ChatMessage>>[];
+          repository.onReply = (_) {
+            final reply = Completer<ChatMessage>();
+            replies.add(reply);
+            return reply.future;
+          };
+          late Completer<void> clear;
+          repository.onClear = () {
+            clear = Completer<void>();
+            return clear.future;
+          };
+          final engine = OrchestratorStateEngine(chatRepository: repository);
+          engine.add(const SendMessageEvent(sessionId: 'session-1', userPrompt: 'Old'));
+          await tester.pump();
+          engine.add(const DebugClearChatEvent(sessionId: 'session-1'));
+          await tester.pump();
+          final attachments = [attachment];
+          engine.add(SendMessageEvent(
+            sessionId: event.sessionId, userPrompt: event.userPrompt,
+            attachments: attachments,
+          ));
+          await tester.pump();
+          attachments.clear();
+          final waiting = (engine.state as ChatSending).messages.first;
+          expect(waiting.content, event.userPrompt);
+          expect(waiting.attachments, [attachment]);
+          replies.single.completeError(inferenceError);
+          await tester.pump();
+          engine.add(event);
+          await tester.pump();
+          expect(repository.sendCount, 1);
+          engine.add(const LoadMessagesEvent(sessionId: 'session-2'));
+          await tester.pump();
+          if (returnBeforeClear) {
+            engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+            await tester.pump();
+            final resumed = (engine.state as ChatSending).messages.first;
+            expect(resumed.content, event.userPrompt);
+            expect(resumed.attachments, [attachment]);
+            expect(repository.readCount, 1);
+          }
+          clear.complete();
+          await tester.pump();
+          if (returnBeforeClear) {
+            expect(engine.state, isA<ChatSending>());
+          } else {
+            expect((engine.state as ChatLoaded).messages, [other]);
+          }
+          expect(repository.sendCount, 2);
+          replies.last.completeError(inferenceError);
+          await tester.pump();
+          if (returnBeforeClear) {
+            final failed = engine.state as ChatLoaded;
+            expect(failed.messages.single.id, 'saved-user-2');
+            expect(failed.runtimeMessage, inferenceError.message);
+          } else {
+            expect((engine.state as ChatLoaded).messages, [other]);
+          }
+          engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+          await tester.pump();
+          final saved = (engine.state as ChatLoaded).messages.single;
+          expect(saved.id, 'saved-user-2');
+          expect(saved.content, event.userPrompt.trim());
+          expect(saved.attachments, [attachment]);
+          await tester.runAsync(engine.close);
+        },
+      );
+    }
+
     testWidgets(
-      'a queued send retains attachments and ownership across cancellation and navigation',
+      'returning to a clearing session waits for its history without retaining the other view',
       (tester) async {
         const other = ChatMessage(
           id: 'other', sessionId: 'session-2', role: 'user',
           content: 'Other conversation', timestamp: 3,
         );
-        final repository = _PersistingChatRepository([other]);
-        final replies = <Completer<ChatMessage>>[];
-        repository.onReply = (_) {
-          final reply = Completer<ChatMessage>();
-          replies.add(reply);
-          return reply.future;
-        };
+        final repository = _PersistingChatRepository([oldQuestion, other]);
         late Completer<void> clear;
         repository.onClear = () {
           clear = Completer<void>();
           return clear.future;
         };
         final engine = OrchestratorStateEngine(chatRepository: repository);
-        engine.add(const SendMessageEvent(sessionId: 'session-1', userPrompt: 'Old'));
+        engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
         await tester.pump();
         engine.add(const DebugClearChatEvent(sessionId: 'session-1'));
         await tester.pump();
-        final attachments = [attachment];
-        engine.add(SendMessageEvent(
-          sessionId: event.sessionId, userPrompt: event.userPrompt,
-          attachments: attachments,
-        ));
-        await tester.pump();
-        attachments.clear();
-        final waiting = (engine.state as ChatSending).messages.first;
-        expect(waiting.content, event.userPrompt);
-        expect(waiting.attachments, [attachment]);
-        replies.single.completeError(inferenceError);
-        await tester.pump();
-        engine.add(event);
-        await tester.pump();
-        expect(repository.sendCount, 1);
         engine.add(const LoadMessagesEvent(sessionId: 'session-2'));
-        await tester.pump();
-        clear.complete();
-        await tester.pump();
-        expect((engine.state as ChatLoaded).messages, [other]);
-        expect(repository.sendCount, 2);
-        replies.last.completeError(inferenceError);
         await tester.pump();
         expect((engine.state as ChatLoaded).messages, [other]);
         engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
         await tester.pump();
-        final saved = (engine.state as ChatLoaded).messages.single;
-        expect(saved.id, 'saved-user-2');
-        expect(saved.content, event.userPrompt.trim());
-        expect(saved.attachments, [attachment]);
+        expect(engine.state, isA<ChatLoading>());
+        expect(repository.readCount, 2);
+        clear.complete();
+        await tester.pump();
+        expect((engine.state as ChatLoaded).messages, isEmpty);
+        expect(repository.readCount, 3);
+        expect(repository.sendCount, 0);
         await tester.runAsync(engine.close);
       },
     );
