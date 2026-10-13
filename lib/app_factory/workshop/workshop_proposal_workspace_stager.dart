@@ -88,7 +88,7 @@ final class WorkshopProposalWorkspaceStager {
       return false; // Normal Dart file, dart:/package:, or relative URI.
     }
     final parts = uri.split('.');
-    if (parts.length < 3 ||
+    if (parts.length < 2 ||
         !const <String>[
           'com', 'org', 'android', 'androidx', 'java', 'javax', 'kotlin',
         ].contains(parts.first)) {
@@ -141,6 +141,13 @@ final class WorkshopProposalWorkspaceStager {
         statementStart = false;
         continue;
       }
+      if (braceDepth == 0 && statementStart && char == '@') {
+        final afterMetadata = _skipDartDirectiveMetadata(source, offset);
+        if (afterMetadata > offset) {
+          offset = afterMetadata;
+          continue; // Metadata precedes a directive; preserve eligibility.
+        }
+      }
       if (braceDepth == 0 &&
           statementStart &&
           source.startsWith('import', offset) &&
@@ -161,6 +168,57 @@ final class WorkshopProposalWorkspaceStager {
       statementStart = false;
       offset++;
     }
+  }
+
+  static int _skipDartDirectiveMetadata(String source, int offset) {
+    var index = offset + 1;
+    if (index >= source.length ||
+        !_isDartIdentifierChar(source[index])) {
+      return offset;
+    }
+    // Read the annotation identifier (including qualified constructor names).
+    while (index < source.length &&
+        (_isDartIdentifierChar(source[index]) || source[index] == '.')) {
+      index++;
+    }
+    index = _skipDartTrivia(source, index);
+    if (index >= source.length || source[index] != '(') return index;
+    var depth = 1;
+    index++;
+    while (index < source.length && depth > 0) {
+      final char = source[index];
+      final next = index + 1 < source.length ? source[index + 1] : '';
+      if (char == '/' && next == '/') {
+        index += 2;
+        while (index < source.length &&
+            source[index] != '\r' &&
+            source[index] != '\n') {
+          index++;
+        }
+        continue;
+      }
+      if (char == '/' && next == '*') {
+        index = _skipDartBlockComment(source, index);
+        continue;
+      }
+      final rawString = (char == 'r' || char == 'R') &&
+          (next == "'" || next == '"');
+      if (char == "'" || char == '"' || rawString) {
+        index = _skipDartString(
+          source,
+          rawString ? index + 1 : index,
+          raw: rawString,
+        );
+        continue;
+      }
+      if (char == '(') {
+        depth++;
+      } else if (char == ')') {
+        depth--;
+      }
+      index++;
+    }
+    return _skipDartTrivia(source, index);
   }
 
   static bool _isDartSpace(String c) =>
