@@ -251,6 +251,99 @@ void main() {
       expect(gateway.writeCalls, 0);
     });
 
+    for (final nativeImport in <String>[
+      "import 'java.util.Date';\nvoid main() {}",
+      "import 'kotlin.collections.List';\nvoid main() {}",
+      "import 'javax.net.Socket';\nvoid main() {}",
+      "import /* legal comment */ 'android.graphics.Canvas';\nvoid main() {}",
+    ]) {
+      test('rejects actual JVM import before staging: $nativeImport',
+          () async {
+        final gateway = _RecordingGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'reject-real-jvm-import',
+            title: 'Flutter entry point',
+            instruction: 'Use Dart widget classes.',
+            operation: WorkshopOperation.create,
+            targetFiles: <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        final response = jsonEncode(<String, Object?>{
+          'explanation': 'Invalid native class in Dart import',
+          'changes': <Map<String, String>>[
+            <String, String>{
+              'path': 'lib/main.dart',
+              'type': 'addition',
+              'content': nativeImport,
+            },
+          ],
+        });
+        expect(
+          () => const WorkshopProposalWorkspaceStager().stage(
+            session: session,
+            responseText: response,
+          ),
+          throwsA(isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('Android/JVM class directly'),
+          )),
+        );
+        expect(session.hasChanges, isFalse);
+        expect(session.status, WorkspaceSessionStatus.ready);
+        expect(gateway.writeCalls, 0);
+      });
+    }
+
+    for (final harmlessCode in <String>[
+      "/*\nimport 'com.example.Foo';\n*/\nvoid main() {}",
+      "// import 'java.util.Date';\nvoid main() {}",
+      "/* outer\n /* nested\n import 'kotlin.collections.List';\n */\n */\nvoid main() {}",
+      "const documentation = \"\"\"\nimport 'com.example.Foo';\n\"\"\";\nvoid main() {}",
+      "const documentation = r'''\nimport 'java.util.Date';\n''';\nvoid main() {}",
+      "const documentation = '''\nimport 'kotlin.collections.List';\n''';\nvoid main() {}",
+      "void main() { print(\"import 'com.example.Foo';\"); }",
+      "/* comment */ import 'package:flutter/material.dart';\nvoid main() {}",
+      "import 'dart:math';\nimport 'package:flutter/material.dart';\nimport 'widgets/star.dart';\nvoid main() {}",
+    ]) {
+      test('keeps import-looking text in comments/strings legal: $harmlessCode',
+          () async {
+        final gateway = _RecordingGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'ignore-non-directive-import',
+            title: 'Flutter source with documentation',
+            instruction: 'Keep comment and string literals intact.',
+            operation: WorkshopOperation.create,
+            targetFiles: <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        final response = jsonEncode(<String, Object?>{
+          'explanation': 'Existing comment or string literal content',
+          'changes': <Map<String, String>>[
+            <String, String>{
+              'path': 'lib/main.dart',
+              'type': 'addition',
+              'content': harmlessCode,
+            },
+          ],
+        });
+        const WorkshopProposalWorkspaceStager().stage(
+          session: session,
+          responseText: response,
+        );
+        expect(session.status, WorkspaceSessionStatus.review);
+        expect(session.workspace.read('lib/main.dart'), harmlessCode);
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      });
+    }
+
     test('does not enter review or materialize malformed output', () async {
       final gateway = _RecordingGateway(
         files: <String, String>{'lib/existing.dart': 'old'},
