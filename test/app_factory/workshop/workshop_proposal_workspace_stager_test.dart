@@ -344,6 +344,94 @@ void main() {
       });
     }
 
+    // Second Codex pass: JVM classes may use only two segments, and legal
+    // annotations (including arguments) may precede Dart import directives.
+    for (final annotatedNativeImport in <String>[
+      "import 'kotlin.String';\nvoid main() {}",
+      "import 'android.R';\nvoid main() {}",
+      "import 'stub.dart' if (dart.library.io) 'kotlin.String';\nvoid main() {}",
+      "@deprecated\nimport 'java.util.Date';\nvoid main() {}",
+      "@Deprecated('native import; must be rejected')\nimport 'kotlin.String';\nvoid main() {}",
+      "@Deprecated('quote; import \"com.example.Foo\";')\nimport 'android.R';\nvoid main() {}",
+    ]) {
+      test('rejects two-segment or annotated JVM import: $annotatedNativeImport',
+          () async {
+        final gateway = _RecordingGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'annotated-jvm-import',
+            title: 'Flutter entrypoint',
+            instruction: 'Do not import JVM native classes into Dart.',
+            operation: WorkshopOperation.create,
+            targetFiles: <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        final response = jsonEncode(<String, Object?>{
+          'explanation': 'Reject JVM class import at lexical stage',
+          'changes': <Map<String, String>>[
+            <String, String>{
+              'path': 'lib/main.dart',
+              'type': 'addition',
+              'content': annotatedNativeImport,
+            },
+          ],
+        });
+        expect(
+          () => const WorkshopProposalWorkspaceStager().stage(
+            session: session,
+            responseText: response,
+          ),
+          throwsA(isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('Android/JVM class directly'),
+          )),
+        );
+        expect(session.status, WorkspaceSessionStatus.ready);
+        expect(session.hasChanges, isFalse);
+        expect(gateway.writeCalls, 0);
+      });
+    }
+
+    test('permits annotated legal Dart imports and ignores annotation strings',
+        () async {
+      final gateway = _RecordingGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'annotated-legal-import',
+          title: 'Legal Flutter imports',
+          instruction: 'Preserve declared Dart package imports.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      const source =
+          "@Deprecated('nested; import \"kotlin.String\";')\n"
+          "import 'package:flutter/material.dart';\n"
+          "void main() {}";
+      final response = jsonEncode(<String, Object?>{
+        'explanation': 'Dart library import is valid',
+        'changes': <Map<String, String>>[
+          <String, String>{
+            'path': 'lib/main.dart',
+            'type': 'addition',
+            'content': source,
+          },
+        ],
+      });
+      const WorkshopProposalWorkspaceStager().stage(
+        session: session,
+        responseText: response,
+      );
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.workspace.read('lib/main.dart'), source);
+      expect(gateway.writeCalls, 0);
+    });
+
     // Physical +3140 P2: inspect every conditional branch URI, not just the
     // primary stub. A platform branch can reference an invalid JVM class.
     for (final nativeConditional in <String>[
