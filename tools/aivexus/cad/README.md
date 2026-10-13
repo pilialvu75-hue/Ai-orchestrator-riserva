@@ -52,3 +52,21 @@ stored and verified through the authorized Cantiere attachment interface;
 only then may the shared ProjectExtension/ResourceExchange record
 `ref`, revision and provenance. Never treat an unpersisted local file
 path or its SHA-256 as proof that downstream consumers can retrieve it.
+
+
+## STL/3MF bore-position regression gate
+
+A watertight plate with both bores shifted inward can have the **same**
+volume, bounding box and triangle count as the requested shape; these
+properties alone are insufficient to verify measured geometry. The validator
+now inspects cross-sections at 10%, 50% and 90% thickness and requires an
+exterior rectangular loop plus exactly two round bore contours matching
+the CAD input's center positions and diameters within stated meshing
+tolerances. This is a bounded check for the CAD-1 plate, not a general
+3D mesh shape-comparison engine.
+
+The dedicated Python CI rejects deliberately shifted-hole STL and 3MF
+examples and verifies three successful cross-sections in legitimate output.
+It must pass on the **exact current PR head** before reporting this fix as
+validated. Fusion 360, physical printing, the secure execution runner and
+persistent project attachment refs remain separate evidence gates.
