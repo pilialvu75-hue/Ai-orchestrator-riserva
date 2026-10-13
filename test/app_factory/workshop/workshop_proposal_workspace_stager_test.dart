@@ -344,6 +344,102 @@ void main() {
       });
     }
 
+    // Physical +3140 P2: inspect every conditional branch URI, not just the
+    // primary stub. A platform branch can reference an invalid JVM class.
+    for (final nativeConditional in <String>[
+      "import 'stub.dart' if (dart.library.io) 'java.util.Date';\nvoid main() {}",
+      "import 'stub.dart' if (dart.library.html) 'kotlin.collections.List';\nvoid main() {}",
+      "import /*c*/ 'stub.dart' if (dart.library.io) /*c*/ 'javax.net.Socket';\nvoid main() {}",
+      "import 'stub.dart' if (dart.library.io) 'stub_io.dart' if (dart.library.html) 'com.example.Bad';\nvoid main() {}",
+    ]) {
+      test('rejects JVM URI in conditional import: $nativeConditional',
+          () async {
+        final gateway = _RecordingGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'conditional-jvm-import',
+            title: 'Flutter conditional import',
+            instruction: 'Keep native integration explicit.',
+            operation: WorkshopOperation.create,
+            targetFiles: <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        final response = jsonEncode(<String, Object?>{
+          'explanation': 'Unusable conditional JVM library',
+          'changes': <Map<String, String>>[
+            <String, String>{
+              'path': 'lib/main.dart',
+              'type': 'addition',
+              'content': nativeConditional,
+            },
+          ],
+        });
+        expect(
+          () => const WorkshopProposalWorkspaceStager().stage(
+            session: session,
+            responseText: response,
+          ),
+          throwsA(isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('Android/JVM class directly'),
+          )),
+        );
+        expect(session.hasChanges, isFalse);
+        expect(session.status, WorkspaceSessionStatus.ready);
+        expect(gateway.writeCalls, 0);
+      });
+    }
+
+    // Same-quote nested interpolation contains semicolons and import-looking
+    // text but is not an import directive. It must never trigger a retry.
+    for (final interpolationSource in <String>[
+      r'''final s = "${"x; import 'java.util.Date';"}";
+void main() {}''',
+      r'''final s = "${'x; import "kotlin.collections.List";'}";
+void main() {}''',
+      r'''final s = "${"x; ${"nested; import 'com.example.Foo';"}"}";
+void main() {}''',
+      r'''final s = "${() { /* comment */ return "x; import 'java.util.Date';"; }()}";
+void main() {}''',
+      "import 'stub.dart' if (dart.library.io) 'io_stub.dart';\nvoid main() {}",
+    ]) {
+      test('does not classify interpolations or legal conditional URIs: $interpolationSource',
+          () async {
+        final gateway = _RecordingGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'interpolated-source',
+            title: 'Valid Dart source',
+            instruction: 'Ignore comments and interpolation string contents.',
+            operation: WorkshopOperation.create,
+            targetFiles: <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        final response = jsonEncode(<String, Object?>{
+          'explanation': 'Valid source containing ordinary strings',
+          'changes': <Map<String, String>>[
+            <String, String>{
+              'path': 'lib/main.dart',
+              'type': 'addition',
+              'content': interpolationSource,
+            },
+          ],
+        });
+        const WorkshopProposalWorkspaceStager().stage(
+          session: session,
+          responseText: response,
+        );
+        expect(session.status, WorkspaceSessionStatus.review);
+        expect(session.workspace.read('lib/main.dart'), interpolationSource);
+        expect(gateway.writeCalls, 0);
+      });
+    }
+
     test('does not enter review or materialize malformed output', () async {
       final gateway = _RecordingGateway(
         files: <String, String>{'lib/existing.dart': 'old'},
