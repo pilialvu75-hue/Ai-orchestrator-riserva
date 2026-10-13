@@ -42,6 +42,171 @@ void main() {
       attachments: [attachment],
     );
     const inferenceError = ServerFailure('Inference failed. Open Settings.');
+    const editedQuestion = ChatMessage(
+      id: 'edit-user', sessionId: 'session-1', role: 'user',
+      content: 'Original question', timestamp: 3,
+    );
+    const editedAnswer = ChatMessage(
+      id: 'edit-answer', sessionId: 'session-1', role: 'assistant',
+      content: 'Original answer', timestamp: 4,
+    );
+    const editEvent = EditMessageEvent(
+      sessionId: 'session-1', originalMessageId: 'edit-user',
+      newUserPrompt: 'Edited question', attachments: [attachment],
+    );
+
+    for (final navigation in ['refresh', 'other', 'return']) {
+      testWidgets(
+        'completes an edit after pending truncation despite $navigation navigation',
+        (tester) async {
+          const other = ChatMessage(
+            id: 'other', sessionId: 'session-2', role: 'user',
+            content: 'Other conversation', timestamp: 5,
+          );
+          final repository = _PersistingChatRepository([
+            oldQuestion, oldAnswer, editedQuestion, editedAnswer, other,
+          ]);
+          late Completer<void> deletion;
+          repository.onDelete = () {
+            deletion = Completer<void>();
+            return deletion.future;
+          };
+          final engine = OrchestratorStateEngine(chatRepository: repository);
+          engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+          await tester.pump();
+          engine.add(editEvent);
+          await tester.pump();
+          expect(repository.sendCount, 0);
+          engine.add(LoadMessagesEvent(
+            sessionId: navigation == 'refresh' ? 'session-1' : 'session-2',
+          ));
+          await tester.pump();
+          if (navigation == 'return') {
+            engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+            await tester.pump();
+          }
+          deletion.complete();
+          await tester.pump();
+          expect(repository.deleteCount, 1);
+          expect(repository.sendCount, 1);
+          if (navigation == 'other') {
+            expect((engine.state as ChatLoaded).messages, [other]);
+            engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+            await tester.pump();
+          }
+          final loaded = engine.state as ChatLoaded;
+          expect(loaded.messages.map((message) => message.id), [
+            'old-user', 'old-assistant', 'saved-user-1', 'saved-answer-1',
+          ]);
+          expect(loaded.messages[2].content, editEvent.newUserPrompt);
+          expect(loaded.messages[2].attachments, [attachment]);
+          await tester.runAsync(engine.close);
+        },
+      );
+    }
+
+    testWidgets(
+      'saves the edited question before a failing history reload can interrupt it',
+      (tester) async {
+        final repository = _PersistingChatRepository([
+          oldQuestion, oldAnswer, editedQuestion, editedAnswer,
+        ]);
+        int? sendsAtReload;
+        repository.onRead = (sessionId) async {
+          if (repository.readCount == 2) {
+            sendsAtReload = repository.sendCount;
+            throw StateError('Reload failed');
+          }
+          return repository.messages.where((m) => m.sessionId == sessionId).toList();
+        };
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+        await tester.pump();
+        engine.add(editEvent);
+        await tester.pump();
+        expect(repository.sendCount, 1);
+        expect(sendsAtReload, 1);
+        final loaded = engine.state as ChatLoaded;
+        expect(loaded.messages.map((message) => message.id), [
+          'old-user', 'old-assistant', 'saved-user-1', 'saved-answer-1',
+        ]);
+        expect(loaded.messages[2].content, editEvent.newUserPrompt);
+        await tester.runAsync(engine.close);
+      },
+    );
+
+    for (final clearFails in [false, true]) {
+      testWidgets(
+        'preserves an edit submitted during a clear (failure: $clearFails)',
+        (tester) async {
+          final repository = _PersistingChatRepository([
+            oldQuestion, oldAnswer, editedQuestion, editedAnswer,
+          ]);
+          late Completer<void> clear;
+          repository.onClear = () {
+            clear = Completer<void>();
+            return clear.future;
+          };
+          final engine = OrchestratorStateEngine(chatRepository: repository);
+          engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+          await tester.pump();
+          engine.add(const DebugClearChatEvent(sessionId: 'session-1'));
+          await tester.pump();
+          final attachments = [attachment];
+          engine.add(EditMessageEvent(
+            sessionId: editEvent.sessionId,
+            originalMessageId: editEvent.originalMessageId,
+            newUserPrompt: editEvent.newUserPrompt,
+            attachments: attachments,
+          ));
+          await tester.pump();
+          attachments.clear();
+          expect((engine.state as ChatSending).messages.first.content, editEvent.newUserPrompt);
+          expect(repository.deleteCount, 0);
+          expect(repository.sendCount, 0);
+          if (clearFails) {
+            clear.completeError(StateError('Clear failed'));
+          } else {
+            clear.complete();
+          }
+          await tester.pump();
+          expect(repository.deleteCount, 1);
+          expect(repository.sendCount, 1);
+          final loaded = engine.state as ChatLoaded;
+          expect(loaded.messages.map((message) => message.id), [
+            if (clearFails) ...['old-user', 'old-assistant'],
+            'saved-user-1', 'saved-answer-1',
+          ]);
+          final saved = loaded.messages.firstWhere((m) => m.id == 'saved-user-1');
+          expect(saved.content, editEvent.newUserPrompt);
+          expect(saved.attachments, [attachment]);
+          await tester.runAsync(engine.close);
+        },
+      );
+    }
+
+    testWidgets(
+      'retains edited input when destructive preparation fails before saving it',
+      (tester) async {
+        final repository = _PersistingChatRepository([
+          oldQuestion, oldAnswer, editedQuestion, editedAnswer,
+        ]);
+        repository.onDelete = () async => throw StateError('Truncation failed');
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        engine.add(const LoadMessagesEvent(sessionId: 'session-1'));
+        await tester.pump();
+        engine.add(editEvent);
+        await tester.pump();
+        final loaded = engine.state as ChatLoaded;
+        expect(loaded.messages.take(2), [oldQuestion, oldAnswer]);
+        expect(loaded.messages.last.content, editEvent.newUserPrompt);
+        expect(loaded.messages.last.attachments, [attachment]);
+        expect(loaded.runtimeMessage, contains('Truncation failed'));
+        expect(repository.sendCount, 0);
+        expect(repository.readCount, 1);
+        await tester.runAsync(engine.close);
+      },
+    );
 
     for (final partial in ['', 'Unfinished answer']) {
       testWidgets(
@@ -1027,11 +1192,13 @@ class _PersistingChatRepository implements IChatRepository {
   Future<ChatMessage> Function(ChatMessage user)? onReply;
   Future<List<ChatMessage>> Function(String sessionId)? onRead;
   Future<void> Function()? onClear;
+  Future<void> Function()? onDelete;
   void Function(String)? partial;
   void Function(String)? notice;
   bool failReads = false;
   int readCount = 0;
   int sendCount = 0;
+  int deleteCount = 0;
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) async {
@@ -1082,7 +1249,18 @@ class _PersistingChatRepository implements IChatRepository {
   }
 
   @override
-  Future<int> deleteMessagesFrom(String sessionId, String messageId) async => 0;
+  Future<int> deleteMessagesFrom(String sessionId, String messageId) async {
+    deleteCount++;
+    if (onDelete != null) await onDelete!();
+    final index = messages.indexWhere(
+      (message) => message.sessionId == sessionId && message.id == messageId,
+    );
+    if (index < 0) return 0;
+    final removed = messages.skip(index)
+        .where((message) => message.sessionId == sessionId).toList();
+    messages.removeWhere(removed.contains);
+    return removed.length;
+  }
 
   @override
   Future<int> pruneHistory({int maxAgeDays = 0, int maxRows = 0}) async => 0;

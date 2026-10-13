@@ -42,7 +42,6 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
   List<ChatMessage> _messages = [];
 
   _ActiveChatSend? _activeSend;
-  bool get _sendInFlight => _activeSend != null;
 
   String? _sessionId;
   int _historyRevision = 0;
@@ -123,115 +122,37 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     }
   }
 
-  /// Handles editing of an existing user message.
-  ///
-  /// The selected message and every message after it are removed
-  /// from persistent storage. The remaining conversation is then
-  /// loaded into [_messages] and the edited prompt is dispatched
-  /// through the normal SendMessageEvent pipeline.
   Future<void> _onEditMessage(
     EditMessageEvent event,
     Emitter<ChatState> emit,
   ) async {
-    if (_clearingSessions.containsKey(event.sessionId)) return;
     _log(
       '[EDIT_BEGIN] '
       'session=${event.sessionId} '
       'original_message_id=${event.originalMessageId} '
       'new_prompt_chars=${event.newUserPrompt.length}',
     );
-
-    if (_sendInFlight) {
-      _log(
-        '[EDIT_BLOCKED] '
-        'session=${event.sessionId} '
-        'reason=send_in_flight',
-      );
-
-      emit(
-        ChatLoaded(
-          messages: List.unmodifiable(_messages),
-          runtimeMessage:
-              'Another send is already running. Please wait.',
-        ),
-      );
-
-      return;
-    }
-
-    final revision = _beginHistoryOperation(event.sessionId);
-    try {
-      final deletedCount =
-          await _chatRepository.deleteMessagesFrom(
-        event.sessionId,
-        event.originalMessageId,
-      );
-      if (!_isCurrent(revision, emit)) return;
-
-      _log(
-        '[EDIT_HISTORY_TRUNCATED] '
-        'session=${event.sessionId} '
-        'message_id=${event.originalMessageId} '
-        'deleted=$deletedCount',
-      );
-
-      final remainingMessages =
-          await _chatRepository.getMessages(
-        event.sessionId,
-      );
-      if (!_isCurrent(revision, emit)) return;
-
-      _messages =
-          List<ChatMessage>.from(remainingMessages);
-
-      _log(
-        '[EDIT_HISTORY_RELOADED] '
-        'session=${event.sessionId} '
-        'remaining=${_messages.length}',
-      );
-
-      emit(
-        ChatSending(
-          messages: List.unmodifiable(_messages),
-        ),
-      );
-
-      _log(
-        '[EDIT_RESUBMIT] '
-        'session=${event.sessionId} '
-        'prompt_chars=${event.newUserPrompt.length}',
-      );
-
-      add(
-        SendMessageEvent(
-          sessionId: event.sessionId,
-          userPrompt: event.newUserPrompt,
-          attachments: event.attachments,
-        ),
-      );
-    } catch (error) {
-      if (!_isCurrent(revision, emit)) return;
-      _log(
-        '[EDIT_ERROR] '
-        'session=${event.sessionId} '
-        'error=$error',
-      );
-
-      emit(
-        ChatLoaded(
-          messages: List.unmodifiable(_messages),
-          runtimeMessage: _extractErrorMessage(error),
-          suggestOpeningSettings:
-              _shouldSuggestOpeningSettings(error),
-        ),
-      );
-    }
+    await _sendMessage(
+      SendMessageEvent(
+        sessionId: event.sessionId,
+        userPrompt: event.newUserPrompt,
+        attachments: event.attachments,
+      ),
+      emit,
+      originalMessageId: event.originalMessageId,
+    );
   }
 
   Future<void> _onSendMessage(
     SendMessageEvent event,
     Emitter<ChatState> emit,
-  ) async {
+  ) => _sendMessage(event, emit);
+
+  Future<void> _sendMessage(
+    SendMessageEvent event,
+    Emitter<ChatState> emit, {
+    String? originalMessageId,
+  }) async {
     final pendingClear = _clearingSessions[event.sessionId];
     final activeSend = _activeSend;
     if (activeSend != null &&
@@ -299,8 +220,12 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           // Keep one fallback for this turn in the visible history, including
           // attachment identity. Successful reads replace this snapshot with
           // persisted IDs; never append/heuristically match turns by text.
+          final editIndex = originalMessageId == null
+              ? -1
+              : _messages.indexWhere((message) => message.id == originalMessageId);
           final sendHistory = <ChatMessage>[
-            if (pendingClear == null) ..._messages,
+            if (pendingClear == null)
+              ...(editIndex < 0 ? _messages : _messages.take(editIndex)),
             optimisticUserMessage,
           ];
           _messages = sendHistory;
@@ -374,6 +299,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
             ),
           );
 
+          var repositorySendStarted = false;
           try {
             var streamStarted = false;
 
@@ -383,6 +309,25 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
             if (pendingClear != null) await pendingClear.future;
             if (send.invalidatedByClear || emit.isDone) return;
 
+            if (originalMessageId != null) {
+              // Editing owns the same send throughout truncation and resubmit.
+              // Navigation suppresses emissions, but must not abandon a prompt
+              // after its original turn has already been deleted.
+              final deleted = await _chatRepository.deleteMessagesFrom(
+                event.sessionId, originalMessageId,
+              );
+              if (send.invalidatedByClear || emit.isDone) return;
+              _log(
+                '[EDIT_HISTORY_TRUNCATED] '
+                'session=${event.sessionId} '
+                'message_id=$originalMessageId deleted=$deleted',
+              );
+              // Save the replacement next. The repository builds its context
+              // from the truncated DB; a preview read must not delay saving it.
+              _log('[EDIT_RESUBMIT] session=${event.sessionId}');
+            }
+
+            repositorySendStarted = true;
             final sendFuture =
                 _chatRepository.sendMessage(
               sessionId: event.sessionId,
@@ -505,6 +450,10 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                 suggestOpeningSettings: _shouldSuggestOpeningSettings(error),
               ),
             );
+
+            // A failed edit preparation has not saved the replacement yet;
+            // retain its input instead of replacing it with the old DB turn.
+            if (!repositorySendStarted) return;
 
             try {
               final messages = await _chatRepository.getMessages(
