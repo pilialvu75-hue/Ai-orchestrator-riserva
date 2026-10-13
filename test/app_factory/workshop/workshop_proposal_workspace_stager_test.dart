@@ -252,6 +252,8 @@ void main() {
     });
 
     for (final nativeImport in <String>[
+      "import 'io.flutter.plugin.common.MethodChannel';\nvoid main() {}",
+      "import 'stub.dart' if (dart.library.io) 'io.flutter.embedding.engine.FlutterEngine';\nvoid main() {}",
       "\uFEFF#!/usr/bin/env dart\nimport 'java.util.Date';\nvoid main() {}",
       "import 'java.' 'util.Date';\nvoid main() {}",
       "import r'''kotlin.''' '''String''';\nvoid main() {}",
@@ -309,6 +311,8 @@ void main() {
     }
 
     for (final harmlessCode in <String>[
+      "import 'package:flutter/services.dart';\nvoid main() {}",
+      "import 'io.other.utility';\nvoid main() {}",
       "import 'stub.dart' if (dart.library.io == 'java.util.Date') 'io.dart';\nvoid main() {}",
       "import 'stub.dart' if (dart.library.io == \"kotlin.String\") 'io.dart';\nvoid main() {}",
       "import 'stub.dart' if (dart.library.io == 'com.example.Bad') 'io.dart' if (dart.library.html) 'web.dart';\nvoid main() {}",
