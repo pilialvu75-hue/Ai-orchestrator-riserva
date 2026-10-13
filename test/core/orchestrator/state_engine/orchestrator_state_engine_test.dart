@@ -322,7 +322,10 @@ void main() {
         final engine = OrchestratorStateEngine(chatRepository: repository);
         engine.add(event);
         await tester.pump();
-        final state = engine.state;
+        final state = engine.state as ChatLoaded;
+        expect(state.runtimeMessage, inferenceError.message);
+        expect(state.suggestOpeningSettings, isTrue);
+        expect(state.messages.single.content, event.userPrompt);
         repository.partial?.call('After failure');
         repository.notice?.call('After failure notice');
         await tester.pump();
@@ -333,6 +336,42 @@ void main() {
           (engine.state as ChatLoaded).runtimeMessage,
           inferenceError.message,
         );
+        await tester.runAsync(engine.close);
+      },
+    );
+
+    testWidgets(
+      'allows retry before recovery read completes and rejects its late snapshot',
+      (tester) async {
+        final repository = _PersistingChatRepository([]);
+        repository.onReply = (_) async => throw inferenceError;
+        late Completer<List<ChatMessage>> recovery;
+        repository.onRead = (_) {
+          recovery = Completer<List<ChatMessage>>();
+          return recovery.future;
+        };
+        final engine = OrchestratorStateEngine(chatRepository: repository);
+        engine.add(event);
+        await tester.pump();
+        final failed = engine.state as ChatLoaded;
+        expect(failed.runtimeMessage, inferenceError.message);
+        expect(failed.messages.single.content, event.userPrompt);
+        final oldSnapshot = List<ChatMessage>.of(repository.messages);
+
+        // Recovery is still outstanding; a second inference is independent.
+        repository.onReply = null;
+        repository.onRead = null;
+        engine.add(event);
+        await tester.pump();
+        expect(repository.sendCount, 2);
+        final retried = engine.state as ChatLoaded;
+        expect(retried.runtimeMessage, isNull);
+        expect(retried.messages.map((message) => message.id), [
+          'saved-user-1', 'saved-user-2', 'saved-answer-2',
+        ]);
+        recovery.complete(oldSnapshot);
+        await tester.pump();
+        expect(engine.state, retried);
         await tester.runAsync(engine.close);
       },
     );

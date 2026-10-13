@@ -465,6 +465,18 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               'session=${event.sessionId}: $error',
             );
 
+            // Inference is terminal even if storage is slow or unavailable.
+            // Surface its error and release this send before awaiting recovery;
+            // a retry/clear/load will invalidate the recovery via its revision.
+            if (identical(_activeSend, send)) _activeSend = null;
+            emit(
+              ChatLoaded(
+                messages: List.unmodifiable(_messages),
+                runtimeMessage: _extractErrorMessage(error),
+                suggestOpeningSettings: _shouldSuggestOpeningSettings(error),
+              ),
+            );
+
             try {
               final messages = await _chatRepository.getMessages(
                 event.sessionId,
