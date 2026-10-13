@@ -252,6 +252,12 @@ void main() {
     });
 
     for (final nativeImport in <String>[
+      "import '''java.util.Date''';\nvoid main() {}",
+      "import r'''kotlin.String''';\nvoid main() {}",
+      "import \"\"\"com.example.Foo\"\"\";\nvoid main() {}",
+      "import 'stub.dart' if (dart.library.io) '''javax.net.Socket''';\nvoid main() {}",
+      "#!/usr/bin/env dart\nimport 'java.util.Date';\nvoid main() {}",
+      "#!/usr/bin/env dart\n// comment before import\nimport 'kotlin.String';\nvoid main() {}",
       "import 'java.util.Date';\nvoid main() {}",
       "import 'kotlin.collections.List';\nvoid main() {}",
       "import 'javax.net.Socket';\nvoid main() {}",
@@ -299,6 +305,8 @@ void main() {
     }
 
     for (final harmlessCode in <String>[
+      "#!/usr/bin/env dart\nimport 'package:flutter/material.dart';\nvoid main() {}",
+      "const ignored = \"\"\"\nimport 'java.util.Date';\n\"\"\";\nvoid main() {}",
       "/*\nimport 'com.example.Foo';\n*/\nvoid main() {}",
       "// import 'java.util.Date';\nvoid main() {}",
       "/* outer\n /* nested\n import 'kotlin.collections.List';\n */\n */\nvoid main() {}",
