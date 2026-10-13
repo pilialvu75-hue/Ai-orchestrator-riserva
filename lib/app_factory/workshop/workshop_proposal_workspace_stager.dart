@@ -99,13 +99,13 @@ final class WorkshopProposalWorkspaceStager {
   }
 
   static Iterable<String> _dartImportUris(String source) sync* {
-    var offset = 0;
+    var offset = source.startsWith('\uFEFF') ? 1 : 0;
     var statementStart = true;
     var braceDepth = 0;
     var inImportDirective = false;
     // Dart permits a Unix script tag before directives. Treat it as trivia
     // rather than turning off the import-directive state until the next ';'.
-    if (source.startsWith('#!')) {
+    if (source.startsWith('#!', offset)) {
       while (offset < source.length &&
           source[offset] != '\n' &&
           source[offset] != '\r') {
@@ -135,18 +135,39 @@ final class WorkshopProposalWorkspaceStager {
       final rawString = (char == 'r' || char == 'R') &&
           (next == "'" || next == '"');
       if (char == "'" || char == '"' || rawString) {
-        // A conditional import has more than one URI. Inspect each literal
-        // in that import directive, not just the default branch. All string
-        // literals outside a directive are skipped regardless of contents.
         if (inImportDirective && braceDepth == 0) {
-          final uri = _readDartImportUri(source, offset);
-          if (uri != null) yield uri;
+          // Dart accepts adjacent URI string segments: concatenate all of
+          // them before checking the JVM namespace, including raw/triple.
+          final first = _readDartImportUri(source, offset);
+          if (first != null) {
+            var uri = first;
+            var cursor = _skipDartUriLiteral(source, offset);
+            while (cursor < source.length) {
+              final nextSegment = _skipDartTrivia(source, cursor);
+              final part = _readDartImportUri(source, nextSegment);
+              if (part == null) break;
+              uri += part;
+              cursor = _skipDartUriLiteral(source, nextSegment);
+            }
+            yield uri;
+            offset = cursor;
+            statementStart = false;
+            continue;
+          }
         }
         offset = _skipDartString(
           source,
           rawString ? offset + 1 : offset,
           raw: rawString,
         );
+        statementStart = false;
+        continue;
+      }
+      // Conditional import test strings are not imported URIs. Ignore the
+      // entire balanced parenthetical condition; only its following URI
+      // operand (and the leading URI) is eligible for native-class checks.
+      if (inImportDirective && braceDepth == 0 && char == '(') {
+        offset = _skipDartImportCondition(source, offset);
         statementStart = false;
         continue;
       }
@@ -228,6 +249,51 @@ final class WorkshopProposalWorkspaceStager {
       index++;
     }
     return _skipDartTrivia(source, index);
+  }
+
+  static int _skipDartUriLiteral(String source, int offset) {
+    final raw = (source[offset] == 'r' || source[offset] == 'R') &&
+        offset + 1 < source.length &&
+        (source[offset + 1] == "'" || source[offset + 1] == '"');
+    return _skipDartString(
+      source,
+      raw ? offset + 1 : offset,
+      raw: raw,
+    );
+  }
+
+  static int _skipDartImportCondition(String source, int offset) {
+    var nesting = 1;
+    offset++;
+    while (offset < source.length && nesting > 0) {
+      final char = source[offset];
+      final next = offset + 1 < source.length ? source[offset + 1] : '';
+      if (char == '/' && next == '/') {
+        offset += 2;
+        while (offset < source.length &&
+            source[offset] != '\n' && source[offset] != '\r') {
+          offset++;
+        }
+        continue;
+      }
+      if (char == '/' && next == '*') {
+        offset = _skipDartBlockComment(source, offset);
+        continue;
+      }
+      final raw = (char == 'r' || char == 'R') &&
+          (next == "'" || next == '"');
+      if (char == "'" || char == '"' || raw) {
+        offset = _skipDartString(source, raw ? offset + 1 : offset, raw: raw);
+        continue;
+      }
+      if (char == '(') {
+        nesting++;
+      } else if (char == ')') {
+        nesting--;
+      }
+      offset++;
+    }
+    return offset;
   }
 
   static bool _isDartSpace(String c) =>
