@@ -443,6 +443,10 @@ UI LITERAL FIDELITY: preserve labels, titles, units and symbols verbatim; never
 "improve" "+" into "+1" or rename "Azzera" without an explicit request.
 For addition/modification supply complete content as a valid JSON string with
 quotes, newlines and backslashes escaped. For deletion omit content.
+A Flutter app targeting Android uses Dart widgets for UI/touch (e.g.
+GestureDetector + setState). Never import Kotlin/Java classes into Dart.
+Native Kotlin/XML requires a real declared platform-channel integration.
+Opaque black in Flutter is 0xFF000000, not 0xFF0000.
 Prefer SDK-only Flutter/Dart. Any undeclared third-party import requires its
 matching pubspec.yaml change within the allowlist. No unused imports; satisfy
 flutter analyze lints. Rebuild changed StatefulWidget state with setState or an
@@ -491,7 +495,10 @@ with "./", never use "../", and never use an absolute path.
 Do not use markdown. For deletion omit content. Every addition/modification must
 contain the complete resulting file content. Every content value must be a valid
 JSON string with line breaks, double quotes and backslashes escaped according to
-JSON. Prefer Flutter/Dart SDK-only code for the smallest MVP. If a third-party
+JSON. Flutter Android UI belongs in Dart. Implement taps with Flutter widgets and
+state updates, not unimplemented Kotlin/XML classes. Never import JVM class
+names directly into Dart. Opaque black uses 0xFF000000 / Colors.black.
+Prefer Flutter/Dart SDK-only code for the smallest MVP. If a third-party
 package is truly required and is not already declared, include the matching
 pubspec.yaml addition/modification in the same proposal. Never emit an
 undeclared package import or an unused import. Generated Dart must be clean
@@ -764,7 +771,9 @@ requested. Do not review, approve or apply.
       'change must alter the current workspace content; rewriting identical '
       'content is invalid. '
       'Produce the smallest complete compilable change, preferably one concise '
-      'file when possible. The compact input targetFiles are a hard allowlist: '
+      'file when possible. Never import Android/JVM classes directly into '
+      'Dart; keep Flutter UI and touch behavior in Dart widgets. '
+      'The compact input targetFiles are a hard allowlist: '
       'never invent a path outside them. If the rejected proposal used an '
       'outside path, fold that behavior into an allowed target file instead '
       'of proposing the outside file again. Finish valid JSON before optional '
