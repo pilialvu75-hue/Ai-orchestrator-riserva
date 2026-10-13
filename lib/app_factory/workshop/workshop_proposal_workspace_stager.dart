@@ -65,7 +65,8 @@ final class WorkshopProposalWorkspaceStager {
   // targeting Android must use Dart widgets or an explicit platform channel.
   // Fail before staging so the existing single structural retry can repair it.
   static final RegExp _dartImportPattern = RegExp(
-    r'''(?m)^\s*import\s+['"]([^'"]+)['"]''',
+    r'''^\s*import\s+['"]([^'"]+)['"]''',
+    multiLine: true,
   );
 
   static void _validateDartNativeImports(WorkshopChangeProposal proposal) {
