@@ -225,6 +225,14 @@ final class WorkshopTaskInferencePipeline {
     void Function(WorkshopStage stage)? onStage,
   }) async {
     final implementationPlan = preflight?.architecture?.text;
+    // Preserve the exact staged baseline before this task's Engineer run.
+    // Library-certified reuse may already be staged in the same workspace;
+    // its files remain reviewable but are not new Engineer scope violations.
+    final workspaceOriginal = session.workspace.originalSnapshot;
+    final retainedStagedPaths = <String>{
+      ...revisionBaseline.keys,
+      ...workspaceOriginal.keys,
+    }.where((path) => revisionBaseline[path] != workspaceOriginal[path]).toSet();
     var currentProposal = proposal;
     var repairAttempts = 0;
 
@@ -233,6 +241,7 @@ final class WorkshopTaskInferencePipeline {
       final review = await _reviewRunner.run(
         session: session,
         implementationPlan: implementationPlan,
+        retainedStagedPaths: retainedStagedPaths,
         isOffline: isOffline,
         cancellationToken: cancellationToken,
       );
