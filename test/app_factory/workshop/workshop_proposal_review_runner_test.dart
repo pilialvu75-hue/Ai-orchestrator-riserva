@@ -116,6 +116,117 @@ void main() {
       expect(gateways[AppAiRole.engineer]!.calls, 0);
     });
 
+    test('explicit scope rejects retained out-of-task diff before Reviewer',
+        () async {
+      RuntimeEventLog.instance.clear();
+      const nativePath = 'android/app/src/main/res/drawable/star.xml';
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        nativePath: '<shape/>',
+      });
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'star-create-retained-workspace',
+          title: 'Black star app',
+          instruction: 'Create a Flutter star that changes color on tap.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      // Simulate the existing virtual-workspace diff already carrying native
+      // edits from an earlier recovery, alongside a valid current task edit.
+      session.workspace.write(
+        path: nativePath,
+        content: '<shape android:shape="rectangle"/>',
+      );
+      session.workspace.write(
+        path: 'lib/main.dart',
+        content: 'void main() { print("star"); }',
+      );
+      session.beginReview();
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"approved":true,"summary":"LLM would approve without checking scope"}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+
+      expect(verdict.approved, isFalse);
+      expect(verdict.summary, contains('explicit_scope'));
+      expect(verdict.findings, contains(contains(nativePath)));
+      expect(reviewer.calls, 0);
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.workspace.read(nativePath),
+          '<shape android:shape="rectangle"/>');
+      expect(session.isApplyApproved, isFalse);
+      final receipts = RuntimeEventLog.instance.entries
+          .where((entry) => entry.tag == 'WORKSHOP_REVIEW_SCOPE')
+          .map((entry) => entry.message)
+          .toList();
+      expect(receipts, hasLength(1));
+      expect(receipts.single, contains('outside=1'));
+      expect(receipts.single, isNot(contains(nativePath)));
+    });
+
+    test('in-scope CREATE diff still obeys a rejecting Reviewer verdict',
+        () async {
+      RuntimeEventLog.instance.clear();
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+      });
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'star-create-correct-scope',
+          title: 'Black star app',
+          instruction: 'Create an interactive Flutter star.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      session.workspace.write(
+        path: 'lib/main.dart',
+        content: 'void main() { missingSymbol(); }',
+      );
+      session.beginReview();
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text:
+              '{"approved":false,"summary":"Invented out-of-scope path","findings":["lib/main.dart is missing from targetFiles"],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+
+      // The host attests to matching paths, but never silently overturns
+      // either a false scope finding or a genuine source-code rejection.
+      expect(verdict.approved, isFalse);
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(reviewer.calls, 1);
+      expect(reviewer.lastPrompt,
+          contains('"deterministicScopeCheck":"staged_diff_within_task_allowlist"'));
+      expect(reviewer.lastPrompt, contains('"targetFiles":["lib/main.dart"]'));
+      expect(session.isApplyApproved, isFalse);
+      expect(
+        RuntimeEventLog.instance.entries
+            .where((entry) => entry.tag == 'WORKSHOP_REVIEW_SCOPE')
+            .single
+            .message,
+        contains('outside=0'),
+      );
+    });
+
     test('oversized first Reviewer prompt starts compact without extra retry',
         () async {
       RuntimeEventLog.instance.clear();
