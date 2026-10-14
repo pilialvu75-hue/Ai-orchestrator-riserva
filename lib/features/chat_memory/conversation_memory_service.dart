@@ -122,7 +122,7 @@ class ConversationMemoryService {
       // runtime can count tokens. Cloud/Hybrid still need a portable bundle:
       // otherwise their later 24-turn bound would discard recalled exchanges.
       final recallWindow = usePortableRecallEnvelope
-          ? _portableRecentTail(normalizedHistory)
+          ? _portableRecentTail(recent.contextTurns)
           : recent.contextTurns;
       recallRequested = recallWindow.length < normalizedHistory.length;
       if (recallRequested) {

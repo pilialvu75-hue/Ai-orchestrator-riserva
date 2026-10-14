@@ -40,19 +40,23 @@ List<ChatMessage> _history(int exchanges) => [
   ],
 ];
 
-ConversationMemoryService _service({bool compact = false}) =>
-    ConversationMemoryService(
-      rollingContextBuilder: RollingContextBuilder(
-        windowManager: MemoryWindowManager(
-          tokenEstimator: const CharacterLengthEstimator(),
-          configProvider: () => compact
+ConversationMemoryService _service({
+  bool compact = false,
+  MemoryWindowConfig? config,
+}) => ConversationMemoryService(
+  rollingContextBuilder: RollingContextBuilder(
+    windowManager: MemoryWindowManager(
+      tokenEstimator: const CharacterLengthEstimator(),
+      configProvider: () =>
+          config ??
+          (compact
               ? MemoryWindowConfig.compact(isWeb: false)
-              : MemoryWindowConfig.standard(isWeb: false),
-        ),
-      ),
-      semanticWorkspaceIndex: _NoSearchIndex(),
-      embeddingService: const _NoQueryEmbedding(),
-    );
+              : MemoryWindowConfig.standard(isWeb: false)),
+    ),
+  ),
+  semanticWorkspaceIndex: _NoSearchIndex(),
+  embeddingService: const _NoQueryEmbedding(),
+);
 
 Map<String, dynamic> _receipt() {
   final entry = RuntimeEventLog.instance.entries.lastWhere(
@@ -78,6 +82,43 @@ int _tokens(String prompt) => prompt.split(RegExp(r'\s+')).length;
 
 void main() {
   setUp(() => RuntimeEventLog.instance.clear());
+
+  test(
+    'portable recall uses the actual 16-turn window on Web and custom profiles',
+    () async {
+      for (final config in [
+        MemoryWindowConfig.compact(isWeb: true),
+        MemoryWindowConfig.custom(
+          maxContextLines: 16,
+          maxTotalSize: 3072,
+          isWeb: false,
+        ),
+      ]) {
+        for (final exchanges in [10, 15]) {
+          final history = _history(exchanges);
+          final context = await _service(config: config).buildContext(
+            usePortableRecallEnvelope: true,
+            sessionId: _session,
+            messages: history,
+            userPrompt: _reread,
+          );
+          // The last eight exchanges are already retained. Recall the two
+          // complete exchanges immediately before that actual window, including
+          // when all persisted turns would fit the wider 24-turn portable cap.
+          expect(
+            context.map((t) => t.content),
+            history.skip(history.length - 20).map((m) => m.content),
+          );
+          expect(context, hasLength(20));
+          expect(context.last.content, 'Answer ${exchanges - 1}.');
+          expect(_receipt()['recent_turns'], 16);
+          expect(_receipt()['recall_requested'], isTrue);
+          expect(_receipt()['recall_turns'], 4);
+          expect(_receipt()['trimmed_turns'], history.length - 20);
+        }
+      }
+    },
+  );
 
   test(
     'a reference does not shrink already retained history before token fitting',
