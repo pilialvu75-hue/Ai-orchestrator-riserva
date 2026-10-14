@@ -829,6 +829,91 @@ void main() {
     expect(score.averageObservedGpuLayers, 10);
   });
 
+  test('Vulkan quality miss does not erase stable GPU acceleration', () {
+    LocalModelBenchmarkCaseResult result({
+      required int score,
+      required int firstMs,
+      required int totalMs,
+      required int prefillMs,
+      required double decode,
+      required int observed,
+    }) =>
+        LocalModelBenchmarkCaseResult(
+          caseId: 'vulkan_fact',
+          response: score == 0 ? 'Vulkan grafica Khronos' : 'Vulkan API Khronos',
+          score: score,
+          maxScore: 2,
+          forbiddenHits: 0,
+          firstContentMs: firstMs,
+          totalMs: totalMs,
+          reportedTokens: 40,
+          prefillMs: prefillMs,
+          observedGpuLayers: observed,
+          observedBatch: 128,
+          observedMicroBatch: 32,
+          startPressure: 'normal',
+          endPressure: 'normal',
+          startAvailableBytes: 1000,
+          endAvailableBytes: 900,
+          startBatteryTemperatureDeciC: 300,
+          endBatteryTemperatureDeciC: 305,
+          sessionStart: 'cold',
+          sessionEnd: 'kept',
+          decodeTokensPerSecond: decode,
+        );
+
+    final samples = <VulkanLayerSweepSample>[
+      for (final repetition in <int>[1, 2]) ...<VulkanLayerSweepSample>[
+        VulkanLayerSweepSample(
+          requestedGpuLayers: 0,
+          modelId: model.effectiveRuntimeModelId,
+          catalogModelId: model.id,
+          displayName: model.displayName,
+          repetition: repetition,
+          result: result(
+            score: 2,
+            firstMs: 2000,
+            totalMs: 6000,
+            prefillMs: 800,
+            decode: 20,
+            observed: 0,
+          ),
+        ),
+        VulkanLayerSweepSample(
+          requestedGpuLayers: 99,
+          modelId: model.effectiveRuntimeModelId,
+          catalogModelId: model.id,
+          displayName: model.displayName,
+          repetition: repetition,
+          result: result(
+            score: 0,
+            firstMs: 1000,
+            totalMs: 3000,
+            prefillMs: 400,
+            decode: 40,
+            observed: 17,
+          ),
+        ),
+      ],
+    ];
+
+    final vulkan = LocalBenchmarkScoring.vulkanScore(
+      VulkanLayerSweepReport(
+        createdAt: DateTime.utc(2026, 10, 14),
+        samples: samples,
+      ),
+      model.id,
+    );
+
+    expect(vulkan, isNotNull);
+    expect(vulkan!.score, 100);
+    expect(vulkan.speedScore, 100);
+    expect(vulkan.qualityFactor, 0);
+    expect(vulkan.stabilityFactor, 1);
+    expect(vulkan.bestRequestedGpuLayers, 99);
+    expect(vulkan.averageObservedGpuLayers, 17);
+  });
+
   test('Vulkan score reaches 100 for a complete 2x GPU acceleration', () {
     LocalModelBenchmarkCaseResult result({
       required int firstMs,
