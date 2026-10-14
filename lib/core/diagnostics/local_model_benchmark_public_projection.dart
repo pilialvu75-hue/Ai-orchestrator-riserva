@@ -394,17 +394,17 @@ String? localModelBenchmarkPublicProjection({
       r'^model=([A-Za-z0-9_.-]{1,120}) '
       r'(?:catalog=([A-Za-z0-9_.-]{1,120}) )?'
       r'requested_gpu_layers=(0|10|99) '
-      r'observed_gpu_layers=(-?\\d{1,6}) '
+      r'observed_gpu_layers=(-?\d{1,6}) '
       r'repetition=(1|2) '
-      r'(?:score=(\\d{1,6})/(\\d{1,6}) forbidden_hits=(\\d{1,6}) )?'
-      r'first_content_ms=(\\d{1,12}) '
-      r'prefill_ms=(-?\\d{1,12}) '
-      r'total_ms=(\\d{1,12}) '
-      r'reported_tokens=(\\d{1,12}) '
+      r'(?:score=(\d{1,6})/(\d{1,6}) forbidden_hits=(\d{1,6}) )?'
+      r'first_content_ms=(\d{1,12}) '
+      r'prefill_ms=(-?\d{1,12}) '
+      r'total_ms=(\d{1,12}) '
+      r'reported_tokens=(\d{1,12}) '
       r'decode_tokens_s=([0-9.]{1,16}) '
       r'pressure=(unknown|normal|high|critical)->(unknown|normal|high|critical) '
-      r'start_available_bytes=(-?\\d{1,15}) end_available_bytes=(-?\\d{1,15}) '
-      r'start_battery_temp_decic=(-?\\d{1,6}) end_battery_temp_decic=(-?\\d{1,6})$',
+      r'start_available_bytes=(-?\d{1,15}) end_available_bytes=(-?\d{1,15}) '
+      r'start_battery_temp_decic=(-?\d{1,6}) end_battery_temp_decic=(-?\d{1,6})$',
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode(<String, Object>{
@@ -434,7 +434,7 @@ String? localModelBenchmarkPublicProjection({
 
   if (event == 'LOCAL_VULKAN_SWEEP_END') {
     final m = RegExp(
-      r'^samples=(\\d{1,3})(?: failures=(\\d{1,3}))? '
+      r'^samples=(\d{1,3})(?: failures=(\d{1,3}))? '
       r'status=(success|failed|partial)$',
     ).firstMatch(rest);
     if (m == null) return null;
