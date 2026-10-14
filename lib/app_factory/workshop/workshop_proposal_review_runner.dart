@@ -81,6 +81,41 @@ final class WorkshopProposalReviewRunner {
       );
     }
 
+    // The Engineer stager checks the *proposal*, but a recovered or reused
+    // workspace can contain earlier staged changes not owned by this task.
+    // Check the complete Review diff independently of the Reviewer LLM.
+    // Never silently discard these paths or widen the authorized scope.
+    final allowedPaths = session.context.request.targetFiles
+        .map((path) => path.trim())
+        .where((path) => path.isNotEmpty)
+        .toSet();
+    final stagedPaths = changes.map((change) => change.path).toSet();
+    final outsideScope = allowedPaths.isEmpty
+        ? <String>[]
+        : (stagedPaths.difference(allowedPaths).toList()..sort());
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_REVIEW_SCOPE] '
+      'policy=${allowedPaths.isEmpty ? 'unspecified' : 'explicit_scope'} '
+      'allowed=${allowedPaths.length} staged=${stagedPaths.length} '
+      'outside=${outsideScope.length}',
+    );
+    if (outsideScope.isNotEmpty) {
+      final verdict = WorkshopReviewVerdict(
+        approved: false,
+        summary: 'Staged workspace diff violates task targetFiles (explicit_scope).',
+        findings: outsideScope
+            .map(
+              (path) =>
+                  'Staged workspace path "$path" is outside current task '
+                  'targetFiles; reconcile retained changes before retry.',
+            )
+            .toList(growable: false),
+        warnings: const <String>[],
+      );
+      _gate.applyVerdict(session: session, verdict: verdict);
+      return verdict;
+    }
+
     final coverage = _coverageManifest(session);
     final batchCount = (changes.length + _filesPerBatch - 1) ~/ _filesPerBatch;
     final summaries = <String>[];
@@ -449,6 +484,7 @@ final class WorkshopProposalReviewRunner {
       'targetFilesPolicy': request.targetFiles.isEmpty
           ? 'unspecified_for_initial_create_task'
           : 'explicit_scope',
+      'deterministicScopeCheck': 'staged_diff_within_task_allowlist',
       'constraints': request.constraints,
       'repairEvidence': repairEvidence,
       'context': taskContext,
@@ -478,7 +514,10 @@ UI strings, labels, titles, units and symbols. Architect implementationPlan is
 guidance only: do not add future features, tests or documentation requirements
 from it or from background context. targetFiles is a hard allowlist only for
 explicit_scope; an empty list for unspecified_for_initial_create_task is not
-itself a rejection. The builder supplies the baseline Flutter scaffold and
+itself a rejection. deterministicScopeCheck confirms the complete staged diff
+was checked by the host against targetFiles; never invent a missing/extra path.
+Still review every source file for validity and reject broken code. The builder
+supplies the baseline Flutter scaffold and
 pubspec.yaml. Require configuration changes only for explicit configuration
 work or added dependencies/assets.
 
@@ -547,7 +586,10 @@ CONTRACT PRECEDENCE:
    "explicit_scope". When targetFilesPolicy is
    "unspecified_for_initial_create_task", an empty targetFiles list means the
    initial create task did not preselect files; it does NOT mean "no files are
-   allowed" and is not by itself a mismatch.
+   allowed" and is not by itself a mismatch. The host has deterministically
+   checked the entire staged diff against the explicit task allowlist before
+   invoking you. Do not invent absent or extra paths; reject actual source
+   defects even when the scope is valid.
 4. GENERIC FLUTTER SCAFFOLD CONTRACT: the remote/local Cantiere builder supplies
    the baseline Flutter project configuration (including pubspec.yaml and the
    platform scaffold) when the staged task only contributes app source. Do NOT
