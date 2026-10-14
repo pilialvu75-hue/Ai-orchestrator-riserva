@@ -36,7 +36,7 @@ final randomColor = Random().nextInt(16777216);
       expect(output, contains('broken_star.dart'));
       expect(output, contains('StarWidget'));
       expect(output, contains('Random'));
-      expect(output, contains('color'));
+      expect(output, contains('argument_type_not_assignable'));
     } finally {
       await scratch.delete(recursive: true);
     }
