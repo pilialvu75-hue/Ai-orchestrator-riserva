@@ -835,7 +835,6 @@ void main() {
       required int firstMs,
       required int totalMs,
       required int prefillMs,
-      required double decode,
       required int observed,
     }) =>
         LocalModelBenchmarkCaseResult(
@@ -859,7 +858,6 @@ void main() {
           endBatteryTemperatureDeciC: 305,
           sessionStart: 'cold',
           sessionEnd: 'kept',
-          decodeTokensPerSecond: decode,
         );
 
     final samples = <VulkanLayerSweepSample>[
@@ -873,9 +871,8 @@ void main() {
           result: result(
             score: 2,
             firstMs: 2000,
-            totalMs: 6000,
+            totalMs: 4000,
             prefillMs: 800,
-            decode: 20,
             observed: 0,
           ),
         ),
@@ -888,9 +885,8 @@ void main() {
           result: result(
             score: 0,
             firstMs: 1000,
-            totalMs: 3000,
+            totalMs: 2000,
             prefillMs: 400,
-            decode: 40,
             observed: 17,
           ),
         ),
