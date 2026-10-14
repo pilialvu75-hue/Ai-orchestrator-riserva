@@ -337,6 +337,11 @@ void main() {
       expect(engineer.calls, 2);
       expect(engineer.maxTokensValues, <int?>[640, 768]);
       expect(engineer.prompts.first, contains('Never import JVM class'));
+      expect(engineer.prompts.first, contains('main() + runApp()'));
+      expect(engineer.prompts.first, contains("Random requires import 'dart:math'"));
+      expect(engineer.prompts.first, contains('Container.color requires a Color'));
+      expect(engineer.prompts.last, contains('main() + runApp()'));
+      expect(engineer.prompts.last, contains('Container.color expects a Color'));
       expect(engineer.prompts.last,
           contains('Android/JVM class directly'));
       expect(engineer.systemPrompts.last,
