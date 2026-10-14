@@ -175,11 +175,11 @@ void main() {
       expect(receipts.single, isNot(contains(nativePath)));
     });
 
-    test('retained prior edits stay in review without becoming Engineer scope',
+    test('prior staged edits without Library proof cannot widen explicit scope',
         () async {
       final reviewer = _StaticGateway(
         result: const WorkshopInferenceResult(
-          text: '{"approved":true,"summary":"Retained and new edits checked"}',
+          text: '{"approved":true,"summary":"Model would approve"}',
           terminalState: InferenceTerminalState.success,
         ),
       );
@@ -189,7 +189,7 @@ void main() {
       });
       final session = WorkspaceSession(
         request: const WorkshopRequest(
-          id: 'certified-retained-scope',
+          id: 'unverified-retained-scope',
           title: 'Update UI',
           instruction: 'Implement scoped entrypoint.',
           targetFiles: <String>['lib/main.dart'],
@@ -197,23 +197,18 @@ void main() {
         gateway: gateway,
       );
       await session.initialize();
-      session.workspace.write(path: 'lib/reuse.dart', content: 'certified');
+      session.workspace.write(path: 'lib/reuse.dart', content: 'unverified');
       session.workspace.write(path: 'lib/main.dart', content: 'new');
       session.beginReview();
-
       final verdict = await WorkshopProposalReviewRunner(
         inference: _stageInference(_gateways(reviewer)),
-      ).run(
-        session: session,
-        retainedStagedPaths: <String>{'lib/reuse.dart'},
-      );
+      ).run(session: session);
 
-      expect(verdict.approved, isTrue);
-      expect(reviewer.calls, 1);
-      expect(session.status, WorkspaceSessionStatus.validation);
-      expect(reviewer.lastPrompt, contains('"retainedStagedPaths":["lib/reuse.dart"]'));
-      expect(reviewer.lastPrompt, contains('retainedStagedPaths'));
-      expect(session.workspace.read('lib/reuse.dart'), 'certified');
+      expect(verdict.approved, isFalse);
+      expect(verdict.findings, contains(contains('lib/reuse.dart')));
+      expect(reviewer.calls, 0);
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.workspace.read('lib/reuse.dart'), 'unverified');
     });
 
     test('in-scope CREATE diff still obeys a rejecting Reviewer verdict',
@@ -256,7 +251,7 @@ void main() {
       expect(session.status, WorkspaceSessionStatus.blocked);
       expect(reviewer.calls, 1);
       expect(reviewer.lastPrompt,
-          contains('"deterministicScopeCheck":"staged_diff_within_task_allowlist_or_retained"'));
+          contains('"deterministicScopeCheck":"staged_diff_within_target_or_certified_reuse"'));
       expect(reviewer.lastPrompt, contains('"targetFiles":["lib/main.dart"]'));
       expect(session.isApplyApproved, isFalse);
       expect(
