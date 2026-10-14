@@ -2298,6 +2298,9 @@ class _DebugOverlayState
       ..writeln('VULKAN SCORE')
       ..writeln(
         'relative_to_cpu: 50=pari, >50=vantaggio GPU, <50=regressione',
+      )
+      ..writeln(
+        'quality_factor: diagnostico, non moltiplica il punteggio prestazionale',
       );
 
     final catalogIds = report.samples

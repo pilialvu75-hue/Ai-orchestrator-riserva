@@ -2561,6 +2561,7 @@ class LocalModelBenchmarkRunner {
               final result = await _runCase(
                 model: model,
                 benchmarkCase: benchmarkCase,
+                temperature: 0.0,
               );
               samples.add(
                 VulkanLayerSweepSample(
@@ -2893,6 +2894,7 @@ class LocalModelBenchmarkRunner {
     required AiModel model,
     required LocalModelBenchmarkCase benchmarkCase,
     bool reasoningAware = false,
+    double? temperature,
   }) async {
     final androidRuntime = _runtimeProvider is AndroidFfiRuntimeProvider
         ? _runtimeProvider
@@ -2954,7 +2956,7 @@ class LocalModelBenchmarkRunner {
         modelId: model.effectiveRuntimeModelId,
         modelPath: model.localPath,
         maxTokens: maxTokens,
-        temperature: _temperature,
+        temperature: temperature ?? _temperature,
         topP: 0.9,
         repeatPenalty: 1.1,
         isOffline: true,
