@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_reuse_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
@@ -57,7 +58,6 @@ final class WorkshopProposalReviewRunner {
   Future<WorkshopReviewVerdict> run({
     required WorkspaceSession session,
     String? implementationPlan,
-    Set<String> retainedStagedPaths = const <String>{},
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
@@ -91,10 +91,11 @@ final class WorkshopProposalReviewRunner {
         .where((path) => path.isNotEmpty)
         .toSet();
     final stagedPaths = changes.map((change) => change.path).toSet();
-    // Captured by the task pipeline *before* Engineer ran. Existing certified
-    // Library/earlier staged increments are still reviewed; they do not become
-    // unauthorized Engineer changes simply because they predate this task.
-    final retainedPaths = retainedStagedPaths.intersection(stagedPaths);
+    // Only verified, content-bound staging receipts minted by the certified
+    // Library intake can expand the task scope. Temporal pre-existence alone
+    // is not an authorization, and the caller cannot supply a forged allowlist.
+    final retainedPaths = WorkshopLibraryReuseService
+        .verifiedStagedPaths(session).intersection(stagedPaths);
     final authorizedPaths = <String>{...allowedPaths, ...retainedPaths};
     final outsideScope = allowedPaths.isEmpty
         ? <String>[]
@@ -499,8 +500,8 @@ final class WorkshopProposalReviewRunner {
       'targetFilesPolicy': request.targetFiles.isEmpty
           ? 'unspecified_for_initial_create_task'
           : 'explicit_scope',
-      'deterministicScopeCheck': 'staged_diff_within_task_allowlist_or_retained',
-      'retainedStagedPaths': batch
+      'deterministicScopeCheck': 'staged_diff_within_target_or_certified_reuse',
+      'authorizedCertifiedPaths': batch
           .where((change) => retainedPaths.contains(change.path))
           .map((change) => change.path)
           .toList(growable: false),
@@ -534,7 +535,7 @@ guidance only: do not add future features, tests or documentation requirements
 from it or from background context. targetFiles is a hard allowlist only for
 explicit_scope; an empty list for unspecified_for_initial_create_task is not
 itself a rejection. targetFiles contains Engineer task paths;
-retainedStagedPaths were staged earlier. Both remain subject to source review:
+authorizedCertifiedPaths came from content-verified Library intake. Both require source review:
 do not invent scope violations or approve broken code. The builder
 pubspec.yaml. Require configuration changes only for explicit configuration
 work or added dependencies/assets.
@@ -605,8 +606,8 @@ CONTRACT PRECEDENCE:
    "unspecified_for_initial_create_task", an empty targetFiles list means the
    initial create task did not preselect files; it does NOT mean "no files are
    allowed" and is not by itself a mismatch. The host checks the complete
-   staged diff against targetFiles plus retainedStagedPaths recorded before
-   Engineer ran. Retained files must also pass source review but do not become
+   staged diff against targetFiles plus authorizedCertifiedPaths verified by
+   the Library intake and matching staged contents. Such files must pass source review but do not become
    new Engineer scope violations. Do not invent absent/extra paths; reject
    real source defects even when scope is valid.
 4. GENERIC FLUTTER SCAFFOLD CONTRACT: the remote/local Cantiere builder supplies
