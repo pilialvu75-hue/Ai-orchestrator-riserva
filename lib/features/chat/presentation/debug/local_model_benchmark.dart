@@ -2580,6 +2580,8 @@ class LocalModelBenchmarkRunner {
                 'requested_gpu_layers=$requestedLayers '
                 'observed_gpu_layers=${result.observedGpuLayers} '
                 'repetition=$repetition '
+                'score=${result.score}/${result.maxScore} '
+                'forbidden_hits=${result.forbiddenHits} '
                 'first_content_ms=${result.firstContentMs} '
                 'prefill_ms=${result.prefillMs} '
                 'total_ms=${result.totalMs} '
