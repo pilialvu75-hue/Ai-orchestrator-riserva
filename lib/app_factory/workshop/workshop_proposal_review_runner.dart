@@ -500,7 +500,10 @@ final class WorkshopProposalReviewRunner {
           ? 'unspecified_for_initial_create_task'
           : 'explicit_scope',
       'deterministicScopeCheck': 'staged_diff_within_task_allowlist_or_retained',
-      'retainedStagedPaths': retainedPaths.toList()..sort(),
+      'retainedStagedPaths': batch
+          .where((change) => retainedPaths.contains(change.path))
+          .map((change) => change.path)
+          .toList(growable: false),
       'constraints': request.constraints,
       'repairEvidence': repairEvidence,
       'context': taskContext,
@@ -530,11 +533,9 @@ UI strings, labels, titles, units and symbols. Architect implementationPlan is
 guidance only: do not add future features, tests or documentation requirements
 from it or from background context. targetFiles is a hard allowlist only for
 explicit_scope; an empty list for unspecified_for_initial_create_task is not
-itself a rejection. deterministicScopeCheck verifies every staged path is
-either in targetFiles or in retainedStagedPaths (already staged before Engineer).
-Review retained files for correctness but do not call them new Engineer scope
-violations. Never invent a missing/extra path. The builder
-supplies the baseline Flutter scaffold and
+itself a rejection. targetFiles contains Engineer task paths;
+retainedStagedPaths were staged earlier. Both remain subject to source review:
+do not invent scope violations or approve broken code. The builder
 pubspec.yaml. Require configuration changes only for explicit configuration
 work or added dependencies/assets.
 
