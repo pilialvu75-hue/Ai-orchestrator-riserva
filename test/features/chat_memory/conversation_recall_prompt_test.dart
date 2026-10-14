@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/diagnostics/public_log_projection.dart';
+import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android/native_token_context_budget.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
@@ -25,12 +26,14 @@ ChatMessage _message(
   String content, {
   String role = 'user',
   String session = _session,
+  List<ChatAttachment> attachments = const [],
 }) => ChatMessage(
   id: id,
   sessionId: session,
   role: role,
   content: content,
   timestamp: 1,
+  attachments: attachments,
 );
 
 List<ChatMessage> _history(int exchanges) => [
@@ -82,6 +85,62 @@ int _tokens(String prompt) => prompt.split(RegExp(r'\s+')).length;
 
 void main() {
   setUp(() => RuntimeEventLog.instance.clear());
+
+  const attachment = ChatAttachment(
+    id: 'fixture-file',
+    type: ChatAttachmentType.file,
+    path: '/fixture/new-topic.txt',
+    name: 'new-topic.txt',
+  );
+
+  test(
+    'empty and attachment-bearing persisted actions stop retry inheritance',
+    () async {
+      final service = _service(compact: true);
+      for (final boundary in [
+        _message('empty', ''),
+        _message('empty-answer', '', role: 'assistant'),
+        _message('attachment-only', '', attachments: [attachment]),
+        _message('attachment-retry', 'riprova', attachments: [attachment]),
+      ]) {
+        final context = await service.buildContext(
+          usePortableRecallEnvelope: false,
+          sessionId: _session,
+          messages: [
+            ..._history(15),
+            _message('failed', _reread),
+            boundary,
+            _message('current', 'riprova'),
+          ],
+          excludedMessageId: 'current',
+          userPrompt: 'riprova',
+        );
+        expect(_receipt()['recall_intent'], isFalse);
+        expect(_receipt()['recall_requested'], isFalse);
+        expect(_receipt()['recall_turns'], 0);
+        expect(context.first.content, 'Topic 4.');
+      }
+    },
+  );
+
+  test(
+    'a current retry carrying attachments is a new action, not a bare retry',
+    () async {
+      await _service(compact: true).buildContext(
+        usePortableRecallEnvelope: false,
+        sessionId: _session,
+        messages: [
+          ..._history(15),
+          _message('failed', _reread),
+          _message('current', 'riprova', attachments: [attachment]),
+        ],
+        excludedMessageId: 'current',
+        userPrompt: 'riprova',
+      );
+      expect(_receipt()['recall_intent'], isFalse);
+      expect(_receipt()['recall_turns'], 0);
+    },
+  );
 
   test(
     'portable recall uses the actual 16-turn window on Web and custom profiles',

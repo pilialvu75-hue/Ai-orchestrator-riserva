@@ -103,14 +103,25 @@ class ConversationMemoryService {
     );
 
     var recallIntent = ChronologicalRecallPolicy.shouldRecall(userPrompt);
-    if (!recallIntent && ChronologicalRecallPolicy.isRetry(userPrompt)) {
+    final currentHasAttachments = sessionMessages.any((message) =>
+        message.id == excludedMessageId && message.attachments.isNotEmpty);
+    if (!recallIntent &&
+        !currentHasAttachments &&
+        ChronologicalRecallPolicy.isRetry(userPrompt)) {
       // A failed inference persists its user turn without an assistant answer.
       // A bare retry inherits only that unanswered request's recall intent.
       // Stop at an answer or any different request; do not search older topics.
-      for (final turn in normalizedHistory.reversed) {
-        if (turn.role != ChatRole.user) break;
-        if (ChronologicalRecallPolicy.isRetry(turn.content)) continue;
-        recallIntent = ChronologicalRecallPolicy.shouldRecall(turn.content);
+      // Scan persisted actions, not the content-only prompt projection: empty
+      // or attachment-only user messages are still a newer request boundary.
+      for (final message in sessionMessages.reversed) {
+        if (message.id == excludedMessageId) continue;
+        if (ChatTurnNormalizer.roleFromText(message.role) != ChatRole.user ||
+            message.attachments.isNotEmpty) {
+          break;
+        }
+        final content = _normalizer.normalizeContent(message.content);
+        if (ChronologicalRecallPolicy.isRetry(content)) continue;
+        recallIntent = ChronologicalRecallPolicy.shouldRecall(content);
         break;
       }
     }
