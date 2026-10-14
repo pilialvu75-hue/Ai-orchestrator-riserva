@@ -175,6 +175,47 @@ void main() {
       expect(receipts.single, isNot(contains(nativePath)));
     });
 
+    test('retained prior edits stay in review without becoming Engineer scope',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"approved":true,"summary":"Retained and new edits checked"}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+        'lib/main.dart': 'old',
+        'lib/reuse.dart': 'original',
+      });
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'certified-retained-scope',
+          title: 'Update UI',
+          instruction: 'Implement scoped entrypoint.',
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      session.workspace.write(path: 'lib/reuse.dart', content: 'certified');
+      session.workspace.write(path: 'lib/main.dart', content: 'new');
+      session.beginReview();
+
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(
+        session: session,
+        retainedStagedPaths: <String>{'lib/reuse.dart'},
+      );
+
+      expect(verdict.approved, isTrue);
+      expect(reviewer.calls, 1);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(reviewer.lastPrompt, contains('"retainedStagedPaths":["lib/reuse.dart"]'));
+      expect(reviewer.lastPrompt, contains('retainedStagedPaths'));
+      expect(session.workspace.read('lib/reuse.dart'), 'certified');
+    });
+
     test('in-scope CREATE diff still obeys a rejecting Reviewer verdict',
         () async {
       RuntimeEventLog.instance.clear();
