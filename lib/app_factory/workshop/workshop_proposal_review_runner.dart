@@ -57,6 +57,7 @@ final class WorkshopProposalReviewRunner {
   Future<WorkshopReviewVerdict> run({
     required WorkspaceSession session,
     String? implementationPlan,
+    Set<String> retainedStagedPaths = const <String>{},
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
@@ -90,14 +91,19 @@ final class WorkshopProposalReviewRunner {
         .where((path) => path.isNotEmpty)
         .toSet();
     final stagedPaths = changes.map((change) => change.path).toSet();
+    // Captured by the task pipeline *before* Engineer ran. Existing certified
+    // Library/earlier staged increments are still reviewed; they do not become
+    // unauthorized Engineer changes simply because they predate this task.
+    final retainedPaths = retainedStagedPaths.intersection(stagedPaths);
+    final authorizedPaths = <String>{...allowedPaths, ...retainedPaths};
     final outsideScope = allowedPaths.isEmpty
         ? <String>[]
-        : (stagedPaths.difference(allowedPaths).toList()..sort());
+        : (stagedPaths.difference(authorizedPaths).toList()..sort());
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_REVIEW_SCOPE] '
       'policy=${allowedPaths.isEmpty ? 'unspecified' : 'explicit_scope'} '
       'allowed=${allowedPaths.length} staged=${stagedPaths.length} '
-      'outside=${outsideScope.length}',
+      'retained=${retainedPaths.length} outside=${outsideScope.length}',
     );
     if (outsideScope.isNotEmpty) {
       final verdict = WorkshopReviewVerdict(
@@ -136,6 +142,7 @@ final class WorkshopProposalReviewRunner {
         batchIndex: batchIndex,
         batchCount: batchCount,
         coverage: coverage,
+        retainedPaths: retainedPaths,
         isOffline: isOffline,
         cancellationToken: cancellationToken,
       );
@@ -197,6 +204,7 @@ final class WorkshopProposalReviewRunner {
     required int batchIndex,
     required int batchCount,
     required _WorkshopReviewCoverageManifest coverage,
+    required Set<String> retainedPaths,
     required bool isOffline,
     required CancellationToken? cancellationToken,
   }) async {
@@ -218,6 +226,7 @@ final class WorkshopProposalReviewRunner {
             batchIndex: batchIndex,
             batchCount: batchCount,
             coverage: coverage,
+            retainedPaths: retainedPaths,
             compact: false,
             emitMetrics: false,
           );
@@ -232,6 +241,7 @@ final class WorkshopProposalReviewRunner {
         batchIndex: batchIndex,
         batchCount: batchCount,
         coverage: coverage,
+        retainedPaths: retainedPaths,
         compact: primaryCompact,
       ),
       systemPrompt: _systemPrompt,
@@ -306,6 +316,7 @@ final class WorkshopProposalReviewRunner {
         batchIndex: batchIndex,
         batchCount: batchCount,
         coverage: coverage,
+        retainedPaths: retainedPaths,
         compact: true,
       ),
       firstTokenTimeout: _retryFirstTokenTimeout,
@@ -383,6 +394,7 @@ final class WorkshopProposalReviewRunner {
     required int batchIndex,
     required int batchCount,
     required _WorkshopReviewCoverageManifest coverage,
+    required Set<String> retainedPaths,
     String? implementationPlan,
     required bool compact,
   }) {
@@ -393,6 +405,7 @@ final class WorkshopProposalReviewRunner {
       batchIndex: batchIndex,
       batchCount: batchCount,
       coverage: coverage,
+      retainedPaths: retainedPaths,
       compact: compact,
       emitMetrics: false,
     );
@@ -414,6 +427,7 @@ final class WorkshopProposalReviewRunner {
       batchIndex: batchIndex,
       batchCount: batchCount,
       coverage: coverage,
+      retainedPaths: retainedPaths,
       compact: compact,
     );
   }
@@ -424,6 +438,7 @@ final class WorkshopProposalReviewRunner {
     required int batchIndex,
     required int batchCount,
     required _WorkshopReviewCoverageManifest coverage,
+    required Set<String> retainedPaths,
     String? implementationPlan,
     bool compact = false,
     bool emitMetrics = true,
@@ -484,7 +499,8 @@ final class WorkshopProposalReviewRunner {
       'targetFilesPolicy': request.targetFiles.isEmpty
           ? 'unspecified_for_initial_create_task'
           : 'explicit_scope',
-      'deterministicScopeCheck': 'staged_diff_within_task_allowlist',
+      'deterministicScopeCheck': 'staged_diff_within_task_allowlist_or_retained',
+      'retainedStagedPaths': retainedPaths.toList()..sort(),
       'constraints': request.constraints,
       'repairEvidence': repairEvidence,
       'context': taskContext,
@@ -514,9 +530,10 @@ UI strings, labels, titles, units and symbols. Architect implementationPlan is
 guidance only: do not add future features, tests or documentation requirements
 from it or from background context. targetFiles is a hard allowlist only for
 explicit_scope; an empty list for unspecified_for_initial_create_task is not
-itself a rejection. deterministicScopeCheck confirms the complete staged diff
-was checked by the host against targetFiles; never invent a missing/extra path.
-Still review every source file for validity and reject broken code. The builder
+itself a rejection. deterministicScopeCheck verifies every staged path is
+either in targetFiles or in retainedStagedPaths (already staged before Engineer).
+Review retained files for correctness but do not call them new Engineer scope
+violations. Never invent a missing/extra path. The builder
 supplies the baseline Flutter scaffold and
 pubspec.yaml. Require configuration changes only for explicit configuration
 work or added dependencies/assets.
@@ -586,10 +603,11 @@ CONTRACT PRECEDENCE:
    "explicit_scope". When targetFilesPolicy is
    "unspecified_for_initial_create_task", an empty targetFiles list means the
    initial create task did not preselect files; it does NOT mean "no files are
-   allowed" and is not by itself a mismatch. The host has deterministically
-   checked the entire staged diff against the explicit task allowlist before
-   invoking you. Do not invent absent or extra paths; reject actual source
-   defects even when the scope is valid.
+   allowed" and is not by itself a mismatch. The host checks the complete
+   staged diff against targetFiles plus retainedStagedPaths recorded before
+   Engineer ran. Retained files must also pass source review but do not become
+   new Engineer scope violations. Do not invent absent/extra paths; reject
+   real source defects even when scope is valid.
 4. GENERIC FLUTTER SCAFFOLD CONTRACT: the remote/local Cantiere builder supplies
    the baseline Flutter project configuration (including pubspec.yaml and the
    platform scaffold) when the staged task only contributes app source. Do NOT
