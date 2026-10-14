@@ -479,8 +479,12 @@ abstract final class LocalBenchmarkScoring {
           cpu.stabilityFactor < gpu.stabilityFactor
               ? cpu.stabilityFactor
               : gpu.stabilityFactor;
+      // Vulkan score is explicitly relative-to-CPU performance.
+      // Quality remains diagnostic evidence, but a single rubric miss must not
+      // erase a stable GPU speedup. Physical corruption is tracked separately
+      // through per-case score/forbidden-hit telemetry.
       final score =
-          (speedScore * qualityFactor * stabilityFactor)
+          (speedScore * stabilityFactor)
               .round()
               .clamp(0, 100)
               .toInt();
