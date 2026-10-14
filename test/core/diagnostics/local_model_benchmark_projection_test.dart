@@ -221,7 +221,31 @@ void main() {
     expect(release, isNot(contains('native_session')));
   });
 
-  test('exports Vulkan sweep metrics without private session data', () {
+  test('exports Vulkan sweep quality metrics without response text', () {
+    final line = publicLogProjection(
+      '$time [LOCAL_VULKAN_SWEEP_CASE] '
+      'model=llama3_2_1b catalog=llama3_2_1b '
+      'requested_gpu_layers=99 observed_gpu_layers=17 '
+      'repetition=2 score=0/2 forbidden_hits=1 '
+      'first_content_ms=1471 prefill_ms=134 total_ms=2385 '
+      'reported_tokens=35 decode_tokens_s=38.29 pressure=normal->normal '
+      'start_available_bytes=2626355200 end_available_bytes=1937080320 '
+      'start_battery_temp_decic=300 end_battery_temp_decic=300',
+    );
+
+    final decoded = jsonDecode(line!) as Map<String, dynamic>;
+    expect(decoded['requested_gpu_layers'], 99);
+    expect(decoded['observed_gpu_layers'], 17);
+    expect(decoded['score'], 0);
+    expect(decoded['max_score'], 2);
+    expect(decoded['forbidden_hits'], 1);
+    expect(decoded['prefill_ms'], 134);
+    expect(decoded['end_battery_temp_decic'], 300);
+    expect(line, isNot(contains('response=')));
+    expect(line, isNot(contains('session=')));
+  });
+
+  test('keeps historical Vulkan sweep case grammar readable', () {
     final line = publicLogProjection(
       '$time [LOCAL_VULKAN_SWEEP_CASE] '
       'model=phi3_5_mini requested_gpu_layers=99 observed_gpu_layers=33 '
@@ -234,9 +258,33 @@ void main() {
     final decoded = jsonDecode(line!) as Map<String, dynamic>;
     expect(decoded['requested_gpu_layers'], 99);
     expect(decoded['observed_gpu_layers'], 33);
-    expect(decoded['prefill_ms'], 4400);
-    expect(decoded['end_battery_temp_decic'], 381);
-    expect(line, isNot(contains('session=')));
+    expect(decoded.containsKey('score'), isFalse);
+  });
+
+  test('exports current and historical Vulkan sweep completion grammar', () {
+    final current = publicLogProjection(
+      '$time [LOCAL_VULKAN_SWEEP_END] samples=6 failures=0 status=success',
+    );
+    final partial = publicLogProjection(
+      '$time [LOCAL_VULKAN_SWEEP_END] samples=4 failures=1 status=partial',
+    );
+    final historical = publicLogProjection(
+      '$time [LOCAL_VULKAN_SWEEP_END] samples=6 status=success',
+    );
+
+    final decodedCurrent = jsonDecode(current!) as Map<String, dynamic>;
+    expect(decodedCurrent['samples'], 6);
+    expect(decodedCurrent['failures'], 0);
+    expect(decodedCurrent['status'], 'success');
+
+    final decodedPartial = jsonDecode(partial!) as Map<String, dynamic>;
+    expect(decodedPartial['failures'], 1);
+    expect(decodedPartial['status'], 'partial');
+
+    final decodedHistorical =
+        jsonDecode(historical!) as Map<String, dynamic>;
+    expect(decodedHistorical.containsKey('failures'), isFalse);
+    expect(decodedHistorical['status'], 'success');
   });
 
   test('keeps historical benchmark case grammar readable', () {
