@@ -92,6 +92,7 @@ void main() {
       ]) {
         final current = _message('current', question);
         final context = await service.buildContext(
+          usePortableRecallEnvelope: false,
           sessionId: _session,
           messages: [...history, current],
           excludedMessageId: current.id,
@@ -124,6 +125,7 @@ void main() {
     'compact in-window fact reaches Phi prompt without durable memory',
     () async {
       final context = await _service(compact: true).buildContext(
+        usePortableRecallEnvelope: false,
         sessionId: _session,
         messages: _history(10),
         userPrompt: 'What is my sample name?',
@@ -136,6 +138,7 @@ void main() {
 
   test('rereading recalls only two older complete exchanges outside the actual window', () async {
     final context = await _service(compact: true).buildContext(
+      usePortableRecallEnvelope: false,
       sessionId: _session,
       messages: _history(15),
       userPrompt: _reread,
@@ -163,6 +166,7 @@ void main() {
         _message('current', 'riprova'),
       ];
       final context = await _service(compact: true).buildContext(
+        usePortableRecallEnvelope: false,
         sessionId: _session,
         messages: messages,
         userPrompt: 'riprova',
@@ -186,6 +190,7 @@ void main() {
         _message('new-question', 'Explain photosynthesis.'),
       ]) {
         await service.buildContext(
+          usePortableRecallEnvelope: false,
           sessionId: _session,
           messages: [..._history(15), _message('old', _reread), boundary],
           userPrompt: 'riprova',
@@ -193,6 +198,7 @@ void main() {
         expect(_receipt()['recall_intent'], isFalse);
       }
       await service.buildContext(
+        usePortableRecallEnvelope: false,
         sessionId: 'other',
         messages: [..._history(15), _message('failed', _reread)],
         userPrompt: 'riprova',
@@ -204,12 +210,16 @@ void main() {
 
   test('rebuilding from saved history works after restart and empty history clears intent', () async {
     final saved = [..._history(15), _message('failed', _reread)];
-    final first = await _service(
-      compact: true,
-    ).buildContext(sessionId: _session, messages: saved, userPrompt: 'riprova');
+    final first = await _service(compact: true).buildContext(
+      usePortableRecallEnvelope: false,
+      sessionId: _session,
+      messages: saved,
+      userPrompt: 'riprova',
+    );
     final restarted = _service(compact: true);
     expect(
       await restarted.buildContext(
+        usePortableRecallEnvelope: false,
         sessionId: _session,
         messages: saved,
         userPrompt: 'riprova',
@@ -218,6 +228,7 @@ void main() {
     );
     expect(
       await restarted.buildContext(
+        usePortableRecallEnvelope: false,
         sessionId: _session,
         messages: const [],
         userPrompt: 'riprova',
@@ -229,6 +240,7 @@ void main() {
 
   test('identical persisted prompts remain distinct and current ID alone is excluded', () async {
     final context = await _service().buildContext(
+      usePortableRecallEnvelope: false,
       sessionId: _session,
       userPrompt: _fact,
       excludedMessageId: 'current',
@@ -249,6 +261,7 @@ void main() {
     () async {
       const question = 'What is my sample name?';
       final context = await _service().buildContext(
+        usePortableRecallEnvelope: false,
         sessionId: _session,
         messages: _history(15),
         userPrompt: question,

@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
@@ -21,10 +22,12 @@ const _reread = 'rileggere questa chat, e rispondere alla domanda';
 
 ChatRepositoryImpl _repository(
   _SavedRows store,
-  _RecordingOrchestrator runtime,
-) => ChatRepositoryImpl(
+  _RecordingOrchestrator runtime, {
+  AiRuntimeMode mode = AiRuntimeMode.local,
+}) => ChatRepositoryImpl(
   localDataSource: store,
   orchestrator: runtime,
+  runtimeSettingsService: _Settings(mode),
   conversationMemoryService: ConversationMemoryService(
     rollingContextBuilder: RollingContextBuilder(
       windowManager: MemoryWindowManager(
@@ -38,6 +41,46 @@ ChatRepositoryImpl _repository(
 );
 
 void main() {
+  test('Cloud and Hybrid keep the portable recalled exchanges before their provider bound', () async {
+    for (final mode in [AiRuntimeMode.cloud, AiRuntimeMode.hybrid]) {
+      final store = _SavedRows();
+      for (var i = 0; i < 15; i++) {
+        await store.insertMessage(
+          ChatMessageModel(
+            id: 'u$i',
+            sessionId: 's',
+            role: 'user',
+            content: 'Topic $i',
+            timestamp: i * 2,
+          ),
+        );
+        await store.insertMessage(
+          ChatMessageModel(
+            id: 'a$i',
+            sessionId: 's',
+            role: 'assistant',
+            content: 'Answer $i',
+            timestamp: i * 2 + 1,
+          ),
+        );
+      }
+      final runtime = _RecordingOrchestrator();
+      await _repository(
+        store,
+        runtime,
+        mode: mode,
+      ).sendMessage(sessionId: 's', userPrompt: 'Come avevamo deciso?');
+      expect(runtime.contexts.single, hasLength(24));
+      expect(runtime.contexts.single.take(4).map((t) => t.content), [
+        'Topic 1',
+        'Answer 1',
+        'Topic 2',
+        'Answer 2',
+      ]);
+      expect(runtime.contexts.single.last.content, 'Answer 14');
+    }
+  });
+
   test('persisted fact and failed question reach retry without duplicate IDs after reconstruction', () async {
     final store = _SavedRows();
     for (var i = 0; i < 15; i++) {
@@ -156,6 +199,14 @@ class _SavedRows implements ChatLocalDataSource {
     return before - _rows.length;
   }
 
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _Settings implements AiRuntimeSettingsService {
+  _Settings(this.runtimeMode);
+  @override
+  final AiRuntimeMode runtimeMode;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

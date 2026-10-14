@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/core/runtime/inference/conversation_context_limits.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat_memory/chronological_recall_policy.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
@@ -78,6 +79,10 @@ class ConversationMemoryService {
     required String userPrompt,
     String? systemPrompt,
     String? excludedMessageId,
+    // Cloud/Hybrid can still enforce the portable envelope downstream. Only
+    // explicit Local callers may retain the full ordinary window for their
+    // runtime to budget; unknown callers keep the portable recall contract.
+    bool usePortableRecallEnvelope = true,
   }) async {
     // Recall is rebuilt from this session's persisted snapshot on every send.
     // Never carry an intent or a fact over from another conversation/restart.
@@ -113,14 +118,17 @@ class ConversationMemoryService {
     List<ChatTurn> recalled = const <ChatTurn>[];
 
     if (recallIntent) {
-      // A recall request must not shrink a history the ordinary window already
-      // retained. The old fixed 24-turn comparison unnecessarily rebuilt such
-      // histories, dropping facts before the runtime could count their tokens.
-      recallRequested = recent.contextTurns.length < normalizedHistory.length;
+      // Local recall must not shrink an already retained history before the
+      // runtime can count tokens. Cloud/Hybrid still need a portable bundle:
+      // otherwise their later 24-turn bound would discard recalled exchanges.
+      final recallWindow = usePortableRecallEnvelope
+          ? _portableRecentTail(normalizedHistory)
+          : recent.contextTurns;
+      recallRequested = recallWindow.length < normalizedHistory.length;
       if (recallRequested) {
         recalled = _selectChronologicalRecall(
           history: normalizedHistory,
-          recentContext: recent.contextTurns,
+          recentContext: recallWindow,
           maxExchanges: ChronologicalRecallPolicy.maxRecalledExchanges,
         );
       }
@@ -191,6 +199,15 @@ class ConversationMemoryService {
     }
 
     return List<ChatTurn>.unmodifiable(turns);
+  }
+
+  List<ChatTurn> _portableRecentTail(List<ChatTurn> history) {
+    const maxTurns = ConversationContextLimits.safeCrossRuntimeTurns;
+    var start = history.length > maxTurns ? history.length - maxTurns : 0;
+    while (start < history.length && history[start].role == ChatRole.assistant) {
+      start++;
+    }
+    return List<ChatTurn>.unmodifiable(history.sublist(start));
   }
 
   List<ChatTurn> _selectChronologicalRecall({
