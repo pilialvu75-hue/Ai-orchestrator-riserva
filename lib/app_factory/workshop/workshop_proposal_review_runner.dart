@@ -529,16 +529,13 @@ names, quotes and escape sequences belonging to the envelope are NOT part of
 the source file. Judge the decoded "after" source text itself; never reject a
 change merely because source evidence is serialized inside JSON.
 
-The explicit instruction and constraints are authoritative, including literal
-UI strings, labels, titles, units and symbols. Architect implementationPlan is
-guidance only: do not add future features, tests or documentation requirements
-from it or from background context. targetFiles is a hard allowlist only for
-explicit_scope; an empty list for unspecified_for_initial_create_task is not
-itself a rejection. targetFiles contains Engineer task paths;
-authorizedCertifiedPaths came from content-verified Library intake. Both require source review:
-do not invent scope violations or approve broken code. The builder
-pubspec.yaml. Require configuration changes only for explicit configuration
-work or added dependencies/assets.
+Explicit instruction and constraints (including literal UI labels) outrank
+Architect guidance. Do not demand future features or extra tests.
+targetFiles limits explicit_scope; an empty unspecified_for_initial_create_task
+allows CREATE source. authorizedCertifiedPaths are content-verified Library
+intake, not arbitrary earlier edits. Review all files; reject broken code and
+invent no scope violations. The builder supplies the Flutter scaffold and
+pubspec.yaml; demand config edits only when dependencies or requirements need them.
 
 BUILD REPAIR SEMANTICS:
 When buildRepair is true, repairEvidence carries the bounded failed-build
