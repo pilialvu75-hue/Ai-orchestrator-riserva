@@ -41,12 +41,41 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
   List<ChatMessage> _messages = [];
 
-  bool _sendInFlight = false;
+  _ActiveChatSend? _activeSend;
+
+  String? _sessionId;
+  int _historyRevision = 0;
+  final Map<String, Completer<bool>> _clearingSessions = {};
+
+  // Every operation that can replace the visible conversation invalidates
+  // earlier reads/callbacks. Repository cancellation and deadlines stay owned
+  // by the repository/runtime.
+  int _beginHistoryOperation(String sessionId) {
+    if (_sessionId != sessionId) {
+      _sessionId = sessionId;
+      _messages = <ChatMessage>[];
+    }
+    return ++_historyRevision;
+  }
+
+  bool _isCurrent(int revision, Emitter<ChatState> emit) =>
+      revision == _historyRevision && !emit.isDone;
 
   Future<void> _onLoadMessages(
     LoadMessagesEvent event,
     Emitter<ChatState> emit,
   ) async {
+    // Use send ownership, not the currently displayed session. Returning to a
+    // still-running session resumes its view and eventual reconciliation.
+    final activeSend = _activeSend;
+    if (activeSend != null &&
+        activeSend.sessionId == event.sessionId &&
+        activeSend.resume != null) {
+      activeSend.resume!();
+      return;
+    }
+    final pendingClear = _clearingSessions[event.sessionId];
+    final revision = _beginHistoryOperation(event.sessionId);
     _log(
       'listener load_messages session=${event.sessionId}',
     );
@@ -54,8 +83,11 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     emit(const ChatLoading());
 
     try {
+      if (pendingClear != null) await pendingClear.future;
+      if (!_isCurrent(revision, emit)) return;
       final messages =
           await _chatRepository.getMessages(event.sessionId);
+      if (!_isCurrent(revision, emit)) return;
 
       _messages =
           List<ChatMessage>.from(messages);
@@ -72,6 +104,16 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         ),
       );
     } catch (error) {
+      if (!_isCurrent(revision, emit)) return;
+      if (_messages.isNotEmpty) {
+        emit(
+          ChatLoaded(
+            messages: List.unmodifiable(_messages),
+            runtimeMessage: _extractErrorMessage(error),
+          ),
+        );
+        return;
+      }
       emit(
         ChatError(
           message: _extractErrorMessage(error),
@@ -80,12 +122,6 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     }
   }
 
-  /// Handles editing of an existing user message.
-  ///
-  /// The selected message and every message after it are removed
-  /// from persistent storage. The remaining conversation is then
-  /// loaded into [_messages] and the edited prompt is dispatched
-  /// through the normal SendMessageEvent pipeline.
   Future<void> _onEditMessage(
     EditMessageEvent event,
     Emitter<ChatState> emit,
@@ -96,95 +132,33 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       'original_message_id=${event.originalMessageId} '
       'new_prompt_chars=${event.newUserPrompt.length}',
     );
-
-    if (_sendInFlight) {
-      _log(
-        '[EDIT_BLOCKED] '
-        'session=${event.sessionId} '
-        'reason=send_in_flight',
-      );
-
-      emit(
-        ChatLoaded(
-          messages: List.unmodifiable(_messages),
-          runtimeMessage:
-              'Another send is already running. Please wait.',
-        ),
-      );
-
-      return;
-    }
-
-    try {
-      final deletedCount =
-          await _chatRepository.deleteMessagesFrom(
-        event.sessionId,
-        event.originalMessageId,
-      );
-
-      _log(
-        '[EDIT_HISTORY_TRUNCATED] '
-        'session=${event.sessionId} '
-        'message_id=${event.originalMessageId} '
-        'deleted=$deletedCount',
-      );
-
-      final remainingMessages =
-          await _chatRepository.getMessages(
-        event.sessionId,
-      );
-
-      _messages =
-          List<ChatMessage>.from(remainingMessages);
-
-      _log(
-        '[EDIT_HISTORY_RELOADED] '
-        'session=${event.sessionId} '
-        'remaining=${_messages.length}',
-      );
-
-      emit(
-        ChatSending(
-          messages: List.unmodifiable(_messages),
-        ),
-      );
-
-      _log(
-        '[EDIT_RESUBMIT] '
-        'session=${event.sessionId} '
-        'prompt_chars=${event.newUserPrompt.length}',
-      );
-
-      add(
-        SendMessageEvent(
-          sessionId: event.sessionId,
-          userPrompt: event.newUserPrompt,
-          attachments: event.attachments,
-        ),
-      );
-    } catch (error) {
-      _log(
-        '[EDIT_ERROR] '
-        'session=${event.sessionId} '
-        'error=$error',
-      );
-
-      emit(
-        ChatLoaded(
-          messages: List.unmodifiable(_messages),
-          runtimeMessage: _extractErrorMessage(error),
-          suggestOpeningSettings:
-              _shouldSuggestOpeningSettings(error),
-        ),
-      );
-    }
+    await _sendMessage(
+      SendMessageEvent(
+        sessionId: event.sessionId,
+        userPrompt: event.newUserPrompt,
+        attachments: event.attachments,
+      ),
+      emit,
+      originalMessageId: event.originalMessageId,
+    );
   }
 
   Future<void> _onSendMessage(
     SendMessageEvent event,
     Emitter<ChatState> emit,
-  ) async {
-    if (_sendInFlight) {
+  ) => _sendMessage(event, emit);
+
+  Future<void> _sendMessage(
+    SendMessageEvent event,
+    Emitter<ChatState> emit, {
+    String? originalMessageId,
+  }) async {
+    final pendingClear = _clearingSessions[event.sessionId];
+    final activeSend = _activeSend;
+    if (activeSend != null &&
+        !(pendingClear != null &&
+            activeSend.sessionId == event.sessionId &&
+            activeSend.invalidatedByClear)) {
       _log(
         '[ENTRY_REENTRANCY_BLOCK] '
         'scope=OrchestratorStateEngine '
@@ -196,7 +170,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
       return;
     }
 
-    _sendInFlight = true;
+    final send = _ActiveChatSend(event.sessionId);
+    _activeSend = send;
+    var revision = _beginHistoryOperation(event.sessionId);
 
     try {
       await runInferenceGuarded<void>(
@@ -233,13 +209,26 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
           final optimisticUserMessage =
               ChatMessage(
-            id: 'pending-user-$now',
+            id: 'pending-user-$now-$revision',
             sessionId: event.sessionId,
             role: 'user',
             content: event.userPrompt,
             timestamp: now,
-            attachments: event.attachments,
+            attachments: List.unmodifiable(event.attachments),
           );
+
+          // Keep one fallback for this turn in the visible history, including
+          // attachment identity. Successful reads replace this snapshot with
+          // persisted IDs; never append/heuristically match turns by text.
+          final editIndex = originalMessageId == null
+              ? -1
+              : _messages.indexWhere((message) => message.id == originalMessageId);
+          final sendHistory = <ChatMessage>[
+            if (pendingClear == null)
+              ...(editIndex < 0 ? _messages : _messages.take(editIndex)),
+            optimisticUserMessage,
+          ];
+          _messages = sendHistory;
 
           final shouldShowAssistantPlaceholder =
               event.userPrompt.trim().isNotEmpty ||
@@ -258,8 +247,10 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           String? runtimeNotice;
           var pendingAssistantProvider = 'assistant';
           var latestPartialContent = '';
+          var acceptingCallbacks = true;
 
           void emitTransientSendingState() {
+            if (!_isCurrent(revision, emit)) return;
             final shouldRenderAssistantBubble =
                 shouldShowAssistantPlaceholder ||
                     latestPartialContent
@@ -272,7 +263,6 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                     List.unmodifiable(
                   <ChatMessage>[
                     ..._messages,
-                    optimisticUserMessage,
                     if (shouldRenderAssistantBubble)
                       optimisticAssistantMessage
                           .copyWith(
@@ -289,13 +279,19 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
             );
           }
 
+          send.resume = () {
+            if (emit.isDone || _sessionId == event.sessionId) return;
+            revision = _beginHistoryOperation(event.sessionId);
+            _messages = sendHistory;
+            emitTransientSendingState();
+          };
+
           emit(
             ChatSending(
               messages:
                   List.unmodifiable(
                 <ChatMessage>[
                   ..._messages,
-                  optimisticUserMessage,
                   if (shouldShowAssistantPlaceholder)
                     optimisticAssistantMessage,
                 ],
@@ -303,17 +299,57 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
             ),
           );
 
+          var repositorySendStarted = false;
           try {
             var streamStarted = false;
 
+            // A submitted prompt already left the composer. Keep its snapshot
+            // visible and own the send gate while waiting for the clear, so it
+            // is neither dropped nor persisted into a deletion in progress.
+            final clearedBeforeSend = pendingClear != null
+                ? await pendingClear.future
+                : false;
+            if (send.invalidatedByClear || emit.isDone) return;
+
+            if (originalMessageId != null) {
+              // A fallback has no proven DB identity. Never guess by text or
+              // silently turn its edit into a duplicate appended user turn.
+              if (!clearedBeforeSend && originalMessageId.startsWith('pending-user-')) {
+                throw const DatabaseFailure(
+                  'Saved message identity is unavailable. Reload the conversation before retrying this edit.',
+                );
+              }
+              // Editing owns the same send throughout truncation and resubmit.
+              // Navigation suppresses emissions, but must not abandon a prompt
+              // after its original turn has already been deleted.
+              final deleted = await _chatRepository.deleteMessagesFrom(
+                event.sessionId, originalMessageId,
+              );
+              if (send.invalidatedByClear || emit.isDone) return;
+              if (deleted == 0 && !clearedBeforeSend) {
+                throw const DatabaseFailure(
+                  'The original message is no longer available. Reload the conversation before retrying this edit.',
+                );
+              }
+              _log(
+                '[EDIT_HISTORY_TRUNCATED] '
+                'session=${event.sessionId} '
+                'message_id=$originalMessageId deleted=$deleted',
+              );
+              // Save the replacement next. The repository builds its context
+              // from the truncated DB; a preview read must not delay saving it.
+              _log('[EDIT_RESUBMIT] session=${event.sessionId}');
+            }
+
+            repositorySendStarted = true;
             final sendFuture =
                 _chatRepository.sendMessage(
               sessionId: event.sessionId,
               userPrompt: event.userPrompt,
               systemPrompt: event.systemPrompt,
-              attachments: event.attachments,
+              attachments: optimisticUserMessage.attachments,
               onPartialResponse: (partialText) {
-                if (emit.isDone) {
+                if (!acceptingCallbacks || !_isCurrent(revision, emit)) {
                   return;
                 }
 
@@ -339,6 +375,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                 emitTransientSendingState();
               },
               onRuntimeNotice: (notice) {
+                if (!acceptingCallbacks || !_isCurrent(revision, emit)) return;
                 runtimeNotice = notice;
 
                 const cloudProviderPrefix =
@@ -373,12 +410,18 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
             // The repository/runtime owns deadlines and cancellation. A UI-only
             // Future.timeout abandons the wait without stopping inference, hides
             // late persisted replies and releases the send gate too early.
-            await sendFuture;
+            try {
+              await sendFuture;
+            } finally {
+              acceptingCallbacks = false;
+            }
+            if (!_isCurrent(revision, emit)) return;
 
             final messages =
                 await _chatRepository.getMessages(
               event.sessionId,
             );
+            if (!_isCurrent(revision, emit)) return;
 
             _messages =
                 List<ChatMessage>.from(messages);
@@ -403,10 +446,48 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
               'session=${event.sessionId}',
             );
           } catch (error) {
+            acceptingCallbacks = false;
+            if (!_isCurrent(revision, emit)) return;
             _log(
               'send_message error '
               'session=${event.sessionId}: $error',
             );
+
+            // Inference is terminal even if storage is slow or unavailable.
+            // Surface its error and release this send before awaiting recovery;
+            // a retry/clear/load will invalidate the recovery via its revision.
+            if (identical(_activeSend, send)) _activeSend = null;
+            emit(
+              ChatLoaded(
+                messages: List.unmodifiable(_messages),
+                runtimeMessage: _extractErrorMessage(error),
+                suggestOpeningSettings: _shouldSuggestOpeningSettings(error),
+              ),
+            );
+
+            // A failed edit preparation has not saved the replacement yet;
+            // retain its input instead of replacing it with the old DB turn.
+            if (!repositorySendStarted) return;
+
+            try {
+              final messages = await _chatRepository.getMessages(
+                event.sessionId,
+              );
+              if (!_isCurrent(revision, emit)) return;
+              _messages = List<ChatMessage>.from(messages);
+            } catch (_) {
+              if (!_isCurrent(revision, emit)) return;
+              // Retain the previous turns and this question if storage cannot
+              // be read. The original inference error remains the notice.
+              _log(
+                'message persistence recovery_reload_failed '
+                'session=${event.sessionId}',
+              );
+            }
+
+            // Unpersisted partial assistant text is deliberately discarded on
+            // failure, as is the empty placeholder. Only stored replies can
+            // appear as completed answers in the terminal state.
 
             emit(
               ChatLoaded(
@@ -428,7 +509,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           }
         },
         onError: (error, stackTrace) {
-          if (!emit.isDone) {
+          if (_isCurrent(revision, emit)) {
             emit(
               ChatLoaded(
                 messages:
@@ -452,7 +533,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         },
       );
     } finally {
-      _sendInFlight = false;
+      // A clear may have released this send and a newer request may own the
+      // gate. An obsolete completion must not unlock that newer request.
+      if (identical(_activeSend, send)) _activeSend = null;
     }
   }
 
@@ -472,6 +555,8 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     RecoverFromStuckUiEvent event,
     Emitter<ChatState> emit,
   ) async {
+    if (_clearingSessions.containsKey(event.sessionId)) return;
+    if (_sessionId != event.sessionId) return;
     _log(
       '[inference_loop_detected] '
       'session=${event.sessionId} '
@@ -497,19 +582,37 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
     DebugClearChatEvent event,
     Emitter<ChatState> emit,
   ) async {
+    if (_clearingSessions.containsKey(event.sessionId)) return;
+    final clearing = Completer<bool>();
+    _clearingSessions[event.sessionId] = clearing;
+    // A background clear invalidates that session's send, not the displayed
+    // conversation. Only a visible clear may replace the current view.
+    final revision = _sessionId == null || _sessionId == event.sessionId
+        ? _beginHistoryOperation(event.sessionId)
+        : null;
+    final send = _activeSend;
+    if (send != null && send.sessionId == event.sessionId) {
+      send.resume = null;
+      send.invalidatedByClear = true;
+    }
     _log(
       '[UI_DEBUG] '
       'action=clear_chat_reset_begin '
       'session=${event.sessionId}',
     );
 
+    var cleared = false;
     try {
       await _chatRepository.clearSession(
         event.sessionId,
       );
+      cleared = true;
+      if (send?.sessionId == event.sessionId && identical(_activeSend, send)) {
+        _activeSend = null;
+      }
+      if (revision == null || !_isCurrent(revision, emit)) return;
 
       _messages = <ChatMessage>[];
-      _sendInFlight = false;
 
       emit(
         const ChatLoaded(
@@ -523,6 +626,7 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
         'session=${event.sessionId}',
       );
     } catch (error) {
+      if (revision == null || !_isCurrent(revision, emit)) return;
       _log(
         '[UI_DEBUG] '
         'action=clear_chat_reset_failed '
@@ -542,6 +646,9 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
           ),
         ),
       );
+    } finally {
+      _clearingSessions.remove(event.sessionId);
+      clearing.complete(cleared);
     }
   }
 
@@ -596,4 +703,12 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
 
     return super.close();
   }
+}
+
+class _ActiveChatSend {
+  _ActiveChatSend(this.sessionId);
+
+  final String sessionId;
+  void Function()? resume;
+  bool invalidatedByClear = false;
 }
