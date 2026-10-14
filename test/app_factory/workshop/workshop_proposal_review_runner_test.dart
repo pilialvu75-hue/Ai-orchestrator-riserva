@@ -215,7 +215,7 @@ void main() {
       expect(session.status, WorkspaceSessionStatus.blocked);
       expect(reviewer.calls, 1);
       expect(reviewer.lastPrompt,
-          contains('"deterministicScopeCheck":"staged_diff_within_task_allowlist"'));
+          contains('"deterministicScopeCheck":"staged_diff_within_task_allowlist_or_retained"'));
       expect(reviewer.lastPrompt, contains('"targetFiles":["lib/main.dart"]'));
       expect(session.isApplyApproved, isFalse);
       expect(
