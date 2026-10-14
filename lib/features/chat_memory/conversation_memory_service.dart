@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
-import 'package:ai_orchestrator/core/runtime/inference/conversation_context_limits.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat_memory/chronological_recall_policy.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn_normalizer.dart';
@@ -79,34 +79,48 @@ class ConversationMemoryService {
     String? systemPrompt,
     String? excludedMessageId,
   }) async {
+    // Recall is rebuilt from this session's persisted snapshot on every send.
+    // Never carry an intent or a fact over from another conversation/restart.
+    final sessionMessages = messages
+        .where((message) => message.sessionId == sessionId)
+        .toList(growable: false);
+    final normalizedHistory = _normalizedConversationTurns(
+      messages: sessionMessages,
+      excludedMessageId: excludedMessageId,
+    );
     // First build the ordinary recent chronological window. This path never
     // executes semantic search or query embeddings.
     final recent = _rollingContextBuilder.build(
-      messages: messages,
+      messages: sessionMessages,
       userPrompt: userPrompt,
       systemPrompt: systemPrompt,
       excludedMessageId: excludedMessageId,
     );
 
-    final recallIntent = ChronologicalRecallPolicy.shouldRecall(userPrompt);
+    var recallIntent = ChronologicalRecallPolicy.shouldRecall(userPrompt);
+    if (!recallIntent && ChronologicalRecallPolicy.isRetry(userPrompt)) {
+      // A failed inference persists its user turn without an assistant answer.
+      // A bare retry inherits only that unanswered request's recall intent.
+      // Stop at an answer or any different request; do not search older topics.
+      for (final turn in normalizedHistory.reversed) {
+        if (turn.role != ChatRole.user) break;
+        if (ChronologicalRecallPolicy.isRetry(turn.content)) continue;
+        recallIntent = ChronologicalRecallPolicy.shouldRecall(turn.content);
+        break;
+      }
+    }
     var recallRequested = false;
     List<ChatTurn> recalled = const <ChatTurn>[];
 
     if (recallIntent) {
-      final normalizedHistory = _normalizedConversationTurns(
-        messages: messages,
-        excludedMessageId: excludedMessageId,
-      );
-      final portableRecent = _portableRecentTail(
-        normalizedHistory,
-        maxTurns: ConversationContextLimits.safeCrossRuntimeTurns,
-      );
-
-      recallRequested = portableRecent.length < normalizedHistory.length;
+      // A recall request must not shrink a history the ordinary window already
+      // retained. The old fixed 24-turn comparison unnecessarily rebuilt such
+      // histories, dropping facts before the runtime could count their tokens.
+      recallRequested = recent.contextTurns.length < normalizedHistory.length;
       if (recallRequested) {
         recalled = _selectChronologicalRecall(
           history: normalizedHistory,
-          recentContext: portableRecent,
+          recentContext: recent.contextTurns,
           maxExchanges: ChronologicalRecallPolicy.maxRecalledExchanges,
         );
       }
@@ -115,7 +129,7 @@ class ConversationMemoryService {
     final result = recalled.isEmpty
         ? recent
         : _rollingContextBuilder.build(
-            messages: messages,
+            messages: sessionMessages,
             userPrompt: userPrompt,
             systemPrompt: systemPrompt,
             excludedMessageId: excludedMessageId,
@@ -136,11 +150,16 @@ class ConversationMemoryService {
       debugPrint('[CONTEXT_OVERFLOW] session=$sessionId detected=true');
     }
 
-    debugPrint(
-      '[CONTEXT_REBUILD] session=$sessionId '
+    // This receipt is persisted/exportable even in release builds. Only
+    // counts and closed enums/booleans cross the public Diagnostics boundary.
+    RuntimeEventLog.instance.emit(
+      '[CONTEXT_REBUILD] history_turns=${normalizedHistory.length} '
+      'recent_turns=${recent.contextTurns.length} '
       'context_turns=${result.contextTurns.length} '
+      'trimmed_turns=${(normalizedHistory.length - result.contextTurns.length).clamp(0, normalizedHistory.length)} '
       'recall_turns=${recalled.length} '
       'recall_mode=${recalled.isEmpty ? 'recent_only' : 'chronological_conditional'} '
+      'recall_intent=$recallIntent '
       'recall_requested=$recallRequested',
     );
 
@@ -172,27 +191,6 @@ class ConversationMemoryService {
     }
 
     return List<ChatTurn>.unmodifiable(turns);
-  }
-
-  List<ChatTurn> _portableRecentTail(
-    List<ChatTurn> history, {
-    required int maxTurns,
-  }) {
-    if (maxTurns <= 0 || history.isEmpty) {
-      return const <ChatTurn>[];
-    }
-
-    var start = history.length > maxTurns ? history.length - maxTurns : 0;
-
-    while (start < history.length && history[start].role == ChatRole.assistant) {
-      start++;
-    }
-
-    if (start >= history.length) {
-      return const <ChatTurn>[];
-    }
-
-    return List<ChatTurn>.unmodifiable(history.sublist(start));
   }
 
   List<ChatTurn> _selectChronologicalRecall({

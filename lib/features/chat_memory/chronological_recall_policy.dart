@@ -22,6 +22,10 @@ abstract final class ChronologicalRecallPolicy {
       'riprendi da dove',
       'ti ricordi',
       'ricordi quando',
+      'rileggi questa chat',
+      'rileggere questa chat',
+      'rileggi la conversazione',
+      'rileggere la conversazione',
 
       // English.
       'what we discussed',
@@ -33,6 +37,8 @@ abstract final class ChronologicalRecallPolicy {
       'go back to the previous point',
       'do you remember',
       'you remember when',
+      'reread this chat',
+      'reread the conversation',
 
       // French.
       'comme on avait décidé',
@@ -41,6 +47,7 @@ abstract final class ChronologicalRecallPolicy {
       'reprends où',
       'reprends la discussion',
       'tu te souviens',
+      'relis cette conversation',
 
       // Spanish.
       'como decidimos',
@@ -50,13 +57,26 @@ abstract final class ChronologicalRecallPolicy {
       'retoma la conversación',
       'te acuerdas',
       'recuerdas cuando',
+      'relee esta conversación',
     ];
 
     return referentialPhrases.any(normalized.contains);
   }
 
+  /// Only an explicit, otherwise empty retry can inherit an unanswered turn's
+  /// recall intent. A new request containing "retry" is not a continuation.
+  static bool isRetry(String userPrompt) => const <String>{
+    'riprova',
+    'ritenta',
+    'retry',
+    'try again',
+    'réessaie',
+    'reintenta',
+  }.contains(_normalize(userPrompt));
+
   static String _normalize(String input) {
     var value = input.trim().toLowerCase();
+    value = value.replaceAll(RegExp(r'\s+'), ' ');
     value = value.replaceAll(RegExp(r'[.!?,;:…]+$'), '').trim();
     return value;
   }

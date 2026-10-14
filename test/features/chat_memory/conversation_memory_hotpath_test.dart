@@ -148,6 +148,7 @@ void main() {
     final service = _createService(
       semanticIndex: _FailIfQueriedSemanticIndex(),
       embeddingService: const _FailIfQueriedEmbeddingService(),
+      config: MemoryWindowConfig.compact(isWeb: false),
     );
 
     final context = await service.buildContext(
