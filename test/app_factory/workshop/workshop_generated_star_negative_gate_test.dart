@@ -43,11 +43,22 @@ final randomColor = Random().nextInt(16777216);
   }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('Android AAPT2 rejects malformed generated drawable XML', () async {
-    // The Android workflow provides the same AAPT2 resource compiler that
-    // Gradle uses. Desktop CI without an Android SDK cannot run this gate.
+    // Mandatory in the existing Android First App GitHub Actions workflow.
+    // Other non-Android environments may lack the SDK and skip this fixture.
+    // GITHUB_WORKFLOW is GitHub's runner-owned workflow identity, not input
+    // provided by the generated app or the Reviewer.
+    final androidFirstAppCi =
+        Platform.environment['GITHUB_ACTIONS'] == 'true' &&
+        Platform.environment['GITHUB_WORKFLOW'] == 'Cantiere First App APK';
     final sdk = Platform.environment['ANDROID_HOME'] ??
         Platform.environment['ANDROID_SDK_ROOT'];
-    if (sdk == null || sdk.trim().isEmpty) return;
+    if (sdk == null || sdk.trim().isEmpty) {
+      if (androidFirstAppCi) {
+        fail('CANTIERE_AAPT2_REQUIRED: Android First App CI must provide '
+            'ANDROID_HOME or ANDROID_SDK_ROOT; skipping is forbidden.');
+      }
+      return;
+    }
     final buildTools = Directory('$sdk/build-tools');
     expect(await buildTools.exists(), isTrue);
     final binaries = await buildTools.list().where((item) =>
@@ -78,6 +89,11 @@ final randomColor = Random().nextInt(16777216);
       );
       expect(result.exitCode, isNot(0),
           reason: '${result.stdout}\n${result.stderr}');
+      // Print only after the real compiler process returns a nonzero code.
+      // The exact marker in the expanded Android CI log proves invocation
+      // rather than a silent SDK-missing early-return.
+      print('[CANTIERE_AAPT2_NEGATIVE] executable=$executable '
+          'command=compile exit_code=${result.exitCode} rejection=PASS');
     } finally {
       await scratch.delete(recursive: true);
     }
