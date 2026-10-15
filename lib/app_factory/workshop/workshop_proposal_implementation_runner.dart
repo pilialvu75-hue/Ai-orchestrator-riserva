@@ -447,6 +447,12 @@ A Flutter app targeting Android uses Dart widgets for UI/touch (e.g.
 GestureDetector + setState). Never import Kotlin/Java classes into Dart.
 Native Kotlin/XML requires a real declared platform-channel integration.
 Opaque black in Flutter is 0xFF000000, not 0xFF0000.
+For a UI-only CREATE, prefer a complete self-contained Flutter lib/main.dart
+when it is within targetFiles: provide main() + runApp(), define every custom
+widget or import only files that actually exist in the workspace or allowed
+changes. Container.color expects a Color (e.g. Colors.black), not a bare int.
+Import dart:math when using Random; do not emit literal backslash-n escapes
+outside strings. No unresolved native XML classes or platform-view references.
 Prefer SDK-only Flutter/Dart. Any undeclared third-party import requires its
 matching pubspec.yaml change within the allowlist. No unused imports; satisfy
 flutter analyze lints. Rebuild changed StatefulWidget state with setState or an
@@ -498,6 +504,12 @@ JSON string with line breaks, double quotes and backslashes escaped according to
 JSON. Flutter Android UI belongs in Dart. Implement taps with Flutter widgets and
 state updates, not unimplemented Kotlin/XML classes. Never import JVM class
 names directly into Dart. Opaque black uses 0xFF000000 / Colors.black.
+For UI-only CREATE tasks, prefer one complete lib/main.dart when that path is
+authorized. Include main() + runApp(), and define every referenced custom Dart
+widget in the changed files or import only existing/authorized source files.
+Container.color requires a Color, not a bare int (e.g. Colors.black or
+const Color(0xFF000000)). Random requires import 'dart:math'. Avoid literal
+backslash-n tokens outside source strings and unresolved native XML classes.
 Prefer Flutter/Dart SDK-only code for the smallest MVP. If a third-party
 package is truly required and is not already declared, include the matching
 pubspec.yaml addition/modification in the same proposal. Never emit an

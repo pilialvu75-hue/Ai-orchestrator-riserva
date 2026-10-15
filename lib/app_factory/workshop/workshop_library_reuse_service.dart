@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_reuse_planner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_capability_shopping_list.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_read_client.dart';
@@ -55,6 +58,26 @@ final class WorkshopLibraryReuseService {
   });
 
   final WorkshopLibraryReadClient client;
+
+  // These receipts are minted only after verified remote Library package
+  // intake and successful staging. Callers cannot authorize arbitrary paths
+  // by supplying an untrusted list to Reviewer.
+  static final Expando<Map<String, String>> _certifiedStagedDigests =
+      Expando<Map<String, String>>('verified-cantiere-library-staging');
+
+  static Set<String> verifiedStagedPaths(WorkspaceSession session) {
+    final recorded = _certifiedStagedDigests[session];
+    if (recorded == null || recorded.isEmpty) return const <String>{};
+    final current = session.workspace.snapshot;
+    return <String>{
+      for (final entry in recorded.entries)
+        if (current[entry.key] != null &&
+            _digest(current[entry.key]!) == entry.value)
+          entry.key,
+    };
+  }
+
+  static String _digest(String content) => sha256.convert(utf8.encode(content)).toString();
   final WorkshopCapabilityShoppingListBuilder shoppingListBuilder;
   final WorkshopCapabilityReusePlanner reusePlanner;
   final WorkshopModuleAssemblyPlanner assemblyPlanner;
@@ -136,6 +159,22 @@ final class WorkshopLibraryReuseService {
         staged.add(change.path);
       }
       staged.sort();
+      if (staged.isNotEmpty) {
+        final verifiedIdentity = _verifiedReuseIdentity(
+          remote: remote,
+          pins: assembly.pins,
+        );
+        if (verifiedIdentity.isEmpty) {
+          throw const FormatException('Certified Library reuse identity missing.');
+        }
+        final previous = _certifiedStagedDigests[session] ?? <String, String>{};
+        _certifiedStagedDigests[session] = <String, String>{
+          ...previous,
+          for (final path in staged)
+            if (session.workspace.read(path) != null)
+              path: _digest(session.workspace.read(path)!),
+        };
+      }
       return WorkshopLibraryReuseResult(
         attempted: true,
         reusedPins: List<String>.unmodifiable(assembly.pins),

@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+
+import 'workshop_generated_star_negative_gate_test.dart' as star_negative;
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_plan_projection.dart';
 
@@ -22,6 +24,8 @@ import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
+  // Execute the actual SDK/AAPT2 negative fixture in the first-app CI suite.
+  star_negative.main();
   group('WorkshopProposalImplementationRunner', () {
     test(
         'routes only to Engineer and stages proposal for review without writes',
@@ -337,6 +341,11 @@ void main() {
       expect(engineer.calls, 2);
       expect(engineer.maxTokensValues, <int?>[640, 768]);
       expect(engineer.prompts.first, contains('Never import JVM class'));
+      expect(engineer.prompts.first, contains('main() + runApp()'));
+      expect(engineer.prompts.first, contains("Random requires import 'dart:math'"));
+      expect(engineer.prompts.first, contains('Container.color requires a Color'));
+      expect(engineer.prompts.last, contains('main() + runApp()'));
+      expect(engineer.prompts.last, contains('Container.color expects a Color'));
       expect(engineer.prompts.last,
           contains('Android/JVM class directly'));
       expect(engineer.systemPrompts.last,

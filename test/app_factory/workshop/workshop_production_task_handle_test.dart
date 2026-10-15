@@ -413,8 +413,22 @@ void main() {
     expect(libraryClient.loadStateCalls, 1);
     expect(libraryClient.loadPackageCalls, 1);
     expect(
+      WorkshopLibraryReuseService.verifiedStagedPaths(handle.session),
+      contains('lib/certified_storage.dart'),
+    );
+    expect(
       handle.session.workspace.snapshot['lib/certified_storage.dart'],
       'class CertifiedStorage {}\n',
+    );
+    // A replaced/stale Library path immediately loses its digest-bound
+    // authorization; temporal pre-existence cannot stand in for certification.
+    handle.session.workspace.write(
+      path: 'lib/certified_storage.dart',
+      content: 'class TamperedStorage {}',
+    );
+    expect(
+      WorkshopLibraryReuseService.verifiedStagedPaths(handle.session),
+      isNot(contains('lib/certified_storage.dart')),
     );
     expect(workspaceGateway.files.containsKey('lib/certified_storage.dart'),
         isFalse);

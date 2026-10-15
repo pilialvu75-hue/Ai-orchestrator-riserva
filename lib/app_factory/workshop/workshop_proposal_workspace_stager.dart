@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal_de
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_workspace_proposal_applier.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Bridges an Engineer response into the existing VirtualWorkspace pipeline.
 ///
@@ -491,6 +492,28 @@ final class WorkshopProposalWorkspaceStager {
         .map((path) => path.trim())
         .where((path) => path.isNotEmpty)
         .toSet();
+
+    // Keep provenance distinct: Engineer's proposed paths are not equivalent
+    // to an already-staged virtual workspace diff (e.g. after recovery).
+    // Count-only receipts avoid exporting source and private project identity.
+    final proposedPaths = proposal.changes
+        .map((change) => change.path.trim())
+        .toSet();
+    final priorStagedPaths =
+        session.diff.files.map((change) => change.path).toSet();
+    final proposedOutside = targetFiles.isEmpty
+        ? 0
+        : proposedPaths.difference(targetFiles).length;
+    final priorOutside = targetFiles.isEmpty
+        ? 0
+        : priorStagedPaths.difference(targetFiles).length;
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_ENGINEER_SCOPE] '
+      'policy=${targetFiles.isEmpty ? 'unspecified' : 'explicit_scope'} '
+      'allowed=${targetFiles.length} proposal=${proposedPaths.length} '
+      'proposal_outside=$proposedOutside '
+      'prior_staged=${priorStagedPaths.length} prior_outside=$priorOutside',
+    );
 
     if (targetFiles.isNotEmpty) {
       for (final change in proposal.changes) {

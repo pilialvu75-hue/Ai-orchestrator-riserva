@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_workspace_stager.dart';
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 void main() {
   group('WorkshopProposalWorkspaceStager', () {
@@ -57,6 +58,39 @@ void main() {
       expect(gateway.pullRequestCalls, 0);
     });
 
+
+    test('records separate proposal and retained diff counts', () async {
+      RuntimeEventLog.instance.clear();
+      final gateway = _RecordingGateway(files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'extra.xml': 'before',
+      });
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'star-scope-evidence',
+          title: 'Star',
+          instruction: 'Create Flutter app',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      session.workspace.write(path: 'extra.xml', content: 'after');
+      const WorkshopProposalWorkspaceStager().stage(
+        session: session,
+        responseText: '{"explanation":"update","changes":[{"path":"lib/main.dart","type":"modification","content":"void main() { print(1); }"}]}',
+      );
+      final receipt = RuntimeEventLog.instance.entries
+          .where((entry) => entry.tag == 'WORKSHOP_ENGINEER_SCOPE')
+          .single
+          .message;
+      expect(receipt, contains('proposal=1 proposal_outside=0'));
+      expect(receipt, contains('prior_staged=1 prior_outside=1'));
+      expect(receipt, isNot(contains('extra.xml')));
+      expect(session.workspace.read('extra.xml'), 'after');
+      expect(gateway.writeCalls, 0);
+    });
 
     test('rejects a proposal that escapes an explicit task target scope',
         () async {

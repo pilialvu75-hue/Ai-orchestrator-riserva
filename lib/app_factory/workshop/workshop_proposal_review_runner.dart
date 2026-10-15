@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_library_reuse_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
@@ -81,6 +82,47 @@ final class WorkshopProposalReviewRunner {
       );
     }
 
+    // The Engineer stager checks the *proposal*, but a recovered or reused
+    // workspace can contain earlier staged changes not owned by this task.
+    // Check the complete Review diff independently of the Reviewer LLM.
+    // Never silently discard these paths or widen the authorized scope.
+    final allowedPaths = session.context.request.targetFiles
+        .map((path) => path.trim())
+        .where((path) => path.isNotEmpty)
+        .toSet();
+    final stagedPaths = changes.map((change) => change.path).toSet();
+    // Only verified, content-bound staging receipts minted by the certified
+    // Library intake can expand the task scope. Temporal pre-existence alone
+    // is not an authorization, and the caller cannot supply a forged allowlist.
+    final retainedPaths = WorkshopLibraryReuseService
+        .verifiedStagedPaths(session).intersection(stagedPaths);
+    final authorizedPaths = <String>{...allowedPaths, ...retainedPaths};
+    final outsideScope = allowedPaths.isEmpty
+        ? <String>[]
+        : (stagedPaths.difference(authorizedPaths).toList()..sort());
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_REVIEW_SCOPE] '
+      'policy=${allowedPaths.isEmpty ? 'unspecified' : 'explicit_scope'} '
+      'allowed=${allowedPaths.length} staged=${stagedPaths.length} '
+      'retained=${retainedPaths.length} outside=${outsideScope.length}',
+    );
+    if (outsideScope.isNotEmpty) {
+      final verdict = WorkshopReviewVerdict(
+        approved: false,
+        summary: 'Staged workspace diff violates task targetFiles (explicit_scope).',
+        findings: outsideScope
+            .map(
+              (path) =>
+                  'Staged workspace path "$path" is outside current task '
+                  'targetFiles; reconcile retained changes before retry.',
+            )
+            .toList(growable: false),
+        warnings: const <String>[],
+      );
+      _gate.applyVerdict(session: session, verdict: verdict);
+      return verdict;
+    }
+
     final coverage = _coverageManifest(session);
     final batchCount = (changes.length + _filesPerBatch - 1) ~/ _filesPerBatch;
     final summaries = <String>[];
@@ -101,6 +143,7 @@ final class WorkshopProposalReviewRunner {
         batchIndex: batchIndex,
         batchCount: batchCount,
         coverage: coverage,
+        retainedPaths: retainedPaths,
         isOffline: isOffline,
         cancellationToken: cancellationToken,
       );
@@ -162,6 +205,7 @@ final class WorkshopProposalReviewRunner {
     required int batchIndex,
     required int batchCount,
     required _WorkshopReviewCoverageManifest coverage,
+    required Set<String> retainedPaths,
     required bool isOffline,
     required CancellationToken? cancellationToken,
   }) async {
@@ -183,6 +227,7 @@ final class WorkshopProposalReviewRunner {
             batchIndex: batchIndex,
             batchCount: batchCount,
             coverage: coverage,
+            retainedPaths: retainedPaths,
             compact: false,
             emitMetrics: false,
           );
@@ -197,6 +242,7 @@ final class WorkshopProposalReviewRunner {
         batchIndex: batchIndex,
         batchCount: batchCount,
         coverage: coverage,
+        retainedPaths: retainedPaths,
         compact: primaryCompact,
       ),
       systemPrompt: _systemPrompt,
@@ -271,6 +317,7 @@ final class WorkshopProposalReviewRunner {
         batchIndex: batchIndex,
         batchCount: batchCount,
         coverage: coverage,
+        retainedPaths: retainedPaths,
         compact: true,
       ),
       firstTokenTimeout: _retryFirstTokenTimeout,
@@ -348,6 +395,7 @@ final class WorkshopProposalReviewRunner {
     required int batchIndex,
     required int batchCount,
     required _WorkshopReviewCoverageManifest coverage,
+    required Set<String> retainedPaths,
     String? implementationPlan,
     required bool compact,
   }) {
@@ -358,6 +406,7 @@ final class WorkshopProposalReviewRunner {
       batchIndex: batchIndex,
       batchCount: batchCount,
       coverage: coverage,
+      retainedPaths: retainedPaths,
       compact: compact,
       emitMetrics: false,
     );
@@ -379,6 +428,7 @@ final class WorkshopProposalReviewRunner {
       batchIndex: batchIndex,
       batchCount: batchCount,
       coverage: coverage,
+      retainedPaths: retainedPaths,
       compact: compact,
     );
   }
@@ -389,6 +439,7 @@ final class WorkshopProposalReviewRunner {
     required int batchIndex,
     required int batchCount,
     required _WorkshopReviewCoverageManifest coverage,
+    required Set<String> retainedPaths,
     String? implementationPlan,
     bool compact = false,
     bool emitMetrics = true,
@@ -449,6 +500,11 @@ final class WorkshopProposalReviewRunner {
       'targetFilesPolicy': request.targetFiles.isEmpty
           ? 'unspecified_for_initial_create_task'
           : 'explicit_scope',
+      'deterministicScopeCheck': 'staged_diff_within_target_or_certified_reuse',
+      'authorizedCertifiedPaths': batch
+          .where((change) => retainedPaths.contains(change.path))
+          .map((change) => change.path)
+          .toList(growable: false),
       'constraints': request.constraints,
       'repairEvidence': repairEvidence,
       'context': taskContext,
@@ -473,14 +529,13 @@ names, quotes and escape sequences belonging to the envelope are NOT part of
 the source file. Judge the decoded "after" source text itself; never reject a
 change merely because source evidence is serialized inside JSON.
 
-The explicit instruction and constraints are authoritative, including literal
-UI strings, labels, titles, units and symbols. Architect implementationPlan is
-guidance only: do not add future features, tests or documentation requirements
-from it or from background context. targetFiles is a hard allowlist only for
-explicit_scope; an empty list for unspecified_for_initial_create_task is not
-itself a rejection. The builder supplies the baseline Flutter scaffold and
-pubspec.yaml. Require configuration changes only for explicit configuration
-work or added dependencies/assets.
+Explicit instruction and constraints (including literal UI labels) outrank
+Architect guidance. Do not demand future features or extra tests.
+targetFiles limits explicit_scope; an empty unspecified_for_initial_create_task
+allows CREATE source. authorizedCertifiedPaths are content-verified Library
+intake, not arbitrary earlier edits. Review all files; reject broken code and
+invent no scope violations. The builder supplies the Flutter scaffold and
+pubspec.yaml; demand config edits only when dependencies or requirements need them.
 
 BUILD REPAIR SEMANTICS:
 When buildRepair is true, repairEvidence carries the bounded failed-build
@@ -547,7 +602,11 @@ CONTRACT PRECEDENCE:
    "explicit_scope". When targetFilesPolicy is
    "unspecified_for_initial_create_task", an empty targetFiles list means the
    initial create task did not preselect files; it does NOT mean "no files are
-   allowed" and is not by itself a mismatch.
+   allowed" and is not by itself a mismatch. The host checks the complete
+   staged diff against targetFiles plus authorizedCertifiedPaths verified by
+   the Library intake and matching staged contents. Such files must pass source review but do not become
+   new Engineer scope violations. Do not invent absent/extra paths; reject
+   real source defects even when scope is valid.
 4. GENERIC FLUTTER SCAFFOLD CONTRACT: the remote/local Cantiere builder supplies
    the baseline Flutter project configuration (including pubspec.yaml and the
    platform scaffold) when the staged task only contributes app source. Do NOT

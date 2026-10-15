@@ -179,8 +179,6 @@ void main() {
         files: <String, String>{'lib/app.dart': 'old'},
       );
       final session = await _session(realGateway);
-      session.workspace.write(path: 'lib/reuse.dart', content: 'reused');
-
       final result = await WorkshopTaskInferencePipeline(
         inference: _stageInference(
           _gateways(
@@ -196,7 +194,6 @@ void main() {
       expect(result.validation?.valid, isTrue);
       expect(session.status, WorkspaceSessionStatus.validation);
       expect(session.workspace.read('lib/app.dart'), 'repaired');
-      expect(session.workspace.read('lib/reuse.dart'), 'reused');
       expect(engineer.calls, 2);
       expect(engineer.prompts[1], contains('gateFeedback'));
       expect(engineer.prompts[1], contains('regression'));
@@ -409,9 +406,6 @@ void main() {
         files: <String, String>{'lib/app.dart': 'old'},
       );
       final session = await _session(realGateway);
-      // Simulate certified Library code already staged before Engineer.
-      session.workspace.write(path: 'lib/reuse.dart', content: 'library reuse');
-
       final result = await WorkshopTaskInferencePipeline(
         inference: _stageInference(
           _gateways(
