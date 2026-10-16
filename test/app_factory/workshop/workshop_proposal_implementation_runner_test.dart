@@ -27,6 +27,122 @@ void main() {
   // Execute the actual SDK/AAPT2 negative fixture in the first-app CI suite.
   star_negative.main();
   group('WorkshopProposalImplementationRunner', () {
+    test('scopes shadowed bundle parameters without masking global calls',
+        () async {
+      const inputs = <({String id, String code, bool retry})>[
+        (
+          id: 'local-parameter-in-other-function',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+void main() { rootBundle.loadString('res/drawable/star.xml'); }
+''',
+          retry: true,
+        ),
+        (
+          id: 'nullable-local-parameter',
+          code: '''
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle? rootBundle) {
+  rootBundle?.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'prefixed-flutter-services',
+          code: '''
+import 'package:flutter/services.dart' as services;
+void main() {
+  services.rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'getter-between-cascade-sections',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+void main() {
+  rootBundle..loadString('assets/config').asStream().first.then(print)
+      ..loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'indexed-cascade-tail',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+void main() {
+  rootBundle..load('assets/config')[0]
+      ..loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+      ];
+      for (final sample in inputs) {
+        final proposed = jsonEncode(<String, Object?>{
+          'explanation': 'Review tokenized bundle source',
+          'changes': <Map<String, String>>[
+            <String, String>{
+              'path': 'lib/main.dart',
+              'type': 'addition',
+              'content': sample.code,
+            },
+          ],
+        });
+        const repaired = '{"explanation":"Bounded Engineer repair",'
+            '"changes":[{"path":"lib/main.dart","type":"addition",'
+            '"content":"void main() {}"}]}';
+        final engineer = _StaticGateway(
+          results: <WorkshopInferenceResult>[
+            WorkshopInferenceResult(
+              text: proposed,
+              terminalState: InferenceTerminalState.success,
+            ),
+            if (sample.retry)
+              const WorkshopInferenceResult(
+                text: repaired,
+                terminalState: InferenceTerminalState.success,
+              ),
+          ],
+        );
+        final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'root-bundle-scope-${sample.id}',
+            title: 'Respect Dart bundle receiver',
+            instruction: 'Use the requested Flutter behavior.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, sample.retry ? 2 : 1, reason: sample.id);
+        expect(session.workspace.read('lib/main.dart'),
+            sample.retry ? 'void main() {}' : sample.code);
+        if (sample.retry) {
+          expect(engineer.prompts.last,
+              contains('rootBundle cannot load Android res/drawable'));
+        }
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      }
+    });
+
     test('rejects undeclared nested asset files and alternate loaders',
         () async {
       const cases = <String>[
