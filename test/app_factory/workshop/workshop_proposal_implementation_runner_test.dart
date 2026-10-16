@@ -27,6 +27,123 @@ void main() {
   // Execute the actual SDK/AAPT2 negative fixture in the first-app CI suite.
   star_negative.main();
   group('WorkshopProposalImplementationRunner', () {
+    test('rejects undeclared nested asset files and alternate loaders',
+        () async {
+      const cases = <String>[
+        'rootBundle.loadStructuredData("res/drawable/star.xml", (s) => s)',
+        'rootBundle.loadStructuredBinaryData("res/drawable/star.xml", (s) => s)',
+        'rootBundle..loadString("res/drawable/star.xml")',
+        'rootBundle?..loadBuffer("drawable/star.xml")',
+        'rootBundle.loadString("drawable/config/help.txt")',
+      ];
+      for (var i = 0; i < cases.length; i++) {
+        final source = 'void main() { ' + cases[i] + '; }';
+        final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: jsonEncode(<String, Object?>{
+              'explanation': 'Resource call should be rejected',
+              'changes': <Map<String, String>>[
+                <String, String>{
+                  'path': 'lib/main.dart',
+                  'type': 'addition',
+                  'content': source,
+                },
+              ],
+            }),
+            terminalState: InferenceTerminalState.success,
+          ),
+          const WorkshopInferenceResult(
+            text: '{"explanation":"Use Flutter implementation",'
+                '"changes":[{"path":"lib/main.dart","type":"addition",'
+                '"content":"void main() {}"}]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ]);
+        final workspaceGateway = _RecordingWorkspaceGateway(
+          files: <String, String>{
+            if (i == 4)
+              'pubspec.yaml': 'name: example\nflutter:\n'
+                  '  assets:\n    - drawable/\n',
+          },
+        );
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'native-resource-method-$i',
+            title: 'Validate requested native resource usage',
+            instruction: 'Implement one Flutter screen.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: workspaceGateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, 2, reason: 'Unsafe resource case $i');
+        expect(engineer.prompts.last,
+            contains('rootBundle cannot load Android res/drawable'));
+        expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+        expect(session.isApplyApproved, isFalse);
+        expect(workspaceGateway.writeCalls, 0);
+      }
+    });
+
+    test('accepts Flutter assets declared with comments and direct subfolders',
+        () async {
+      const source = 'void main() { '
+          'rootBundle.loadString("drawable/config/help.txt"); }';
+      const pubspecs = <String>[
+        'name: example\nflutter: # Flutter settings\n'
+            '  assets: # bundled files\n'
+            '    - drawable/config/ # include direct files\n',
+        'name: example\nflutter:\n'
+            '    assets: # assets\n'
+            '      - "drawable/config/help.txt" # declared file\n',
+      ];
+      for (var i = 0; i < pubspecs.length; i++) {
+        final engineer = _StaticGateway(
+          result: WorkshopInferenceResult(
+            text: jsonEncode(<String, Object?>{
+              'explanation': 'Use Flutter asset key',
+              'changes': <Map<String, String>>[
+                <String, String>{
+                  'path': 'lib/main.dart',
+                  'type': 'addition',
+                  'content': source,
+                },
+              ],
+            }),
+            terminalState: InferenceTerminalState.success,
+          ),
+        );
+        final workspaceGateway = _RecordingWorkspaceGateway(
+          files: <String, String>{
+            'pubspec.yaml': pubspecs[i],
+            'drawable/config/help.txt': 'Help text',
+          },
+        );
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'declared-subfolder-$i',
+            title: 'Read declared Flutter asset',
+            instruction: 'Load packaged Help text.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: workspaceGateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, 1, reason: 'Valid declared asset $i');
+        expect(session.workspace.read('lib/main.dart'), source);
+        expect(session.isApplyApproved, isFalse);
+        expect(workspaceGateway.writeCalls, 0);
+      }
+    });
+
     test('rejects native resource invocation inside Dart string interpolation',
         () async {
       for (final source in <String>[
