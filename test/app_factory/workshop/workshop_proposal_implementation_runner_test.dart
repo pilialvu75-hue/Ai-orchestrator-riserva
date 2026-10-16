@@ -125,6 +125,113 @@ void main() {
       expect(gateway.writeCalls, 0);
     });
 
+    test('accepts YAML-indented Flutter assets without a repair retry',
+        () async {
+      const source = 'import "package:flutter/services.dart" show rootBundle; '
+          'void main() { rootBundle.loadString("drawable/help.txt"); }';
+      const validPubspecs = <String>[
+        'name: test_app\nflutter:\n    assets:\n      - drawable/help.txt\n',
+        'name: test_app\nflutter:\n      uses-material-design: true\n'
+            '      assets:\n        - drawable/\n',
+      ];
+      for (var i = 0; i < validPubspecs.length; i++) {
+        final engineer = _StaticGateway(
+          result: WorkshopInferenceResult(
+            text: jsonEncode(<String, Object?>{
+              'explanation': 'Existing Flutter asset declared with valid indentation',
+              'changes': <Map<String, String>>[
+                <String, String>{
+                  'path': 'lib/main.dart',
+                  'type': 'addition',
+                  'content': source,
+                },
+              ],
+            }),
+            terminalState: InferenceTerminalState.success,
+          ),
+        );
+        final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+          'pubspec.yaml': validPubspecs[i],
+          'drawable/help.txt': 'Flutter asset content',
+        });
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'flutter-asset-indented-$i',
+            title: 'Use declared Flutter resource',
+            instruction: 'Load the declared Flutter asset.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, 1, reason: 'Valid indent sample $i');
+        expect(session.workspace.read('lib/main.dart'), source);
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      }
+    });
+
+    test('accepts concurrently staged indented Flutter assets',
+        () async {
+      const source = 'import "package:flutter/services.dart" show rootBundle; '
+          'void main() { rootBundle.load("drawable/help.txt"); }';
+      const pubspec =
+          'name: test_app\nflutter:\n    assets:\n      - drawable/\n';
+      final engineer = _StaticGateway(
+        result: WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Stage valid indented Flutter asset declaration',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': source,
+              },
+              <String, String>{
+                'path': 'pubspec.yaml',
+                'type': 'addition',
+                'content': pubspec,
+              },
+              <String, String>{
+                'path': 'drawable/help.txt',
+                'type': 'addition',
+                'content': 'Hello',
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'indented-asset-in-same-proposal',
+          title: 'Flutter app with packaged asset',
+          instruction: 'Add a declared Flutter drawable asset.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>[
+            'lib/main.dart',
+            'pubspec.yaml',
+            'drawable/help.txt',
+          ],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 1);
+      expect(session.workspace.read('lib/main.dart'), source);
+      expect(session.workspace.read('pubspec.yaml'), pubspec);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
     test('accepts drawable asset concurrently declared in pubspec',
         () async {
       const source = 'import "package:flutter/services.dart" show rootBundle; '
