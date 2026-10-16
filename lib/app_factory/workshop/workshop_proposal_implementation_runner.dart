@@ -419,13 +419,25 @@ final class WorkshopProposalImplementationRunner {
       // Parenthesized receivers such as (rootBundle).loadString(...) or
       // ((rootBundle)).load(...) still refer to the same imported bundle.
       // Only unwrap when the expression contains exactly this receiver.
-      var before = i - 1;
+      // Start before the complete qualified receiver, e.g. the opening
+      // '(' in (services.rootBundle). Do not mistake the argument list in
+      // makeCustomBundle(rootBundle).loadString(...) for grouping.
+      var before = qualified ? i - 3 : i - 1;
       while (before >= 0 &&
           !tokens[before].isString &&
           tokens[before].value == '(' &&
           offset < tokens.length &&
           !tokens[offset].isString &&
           tokens[offset].value == ')') {
+        final preceding = before > 0 ? tokens[before - 1] : null;
+        if (preceding != null && !preceding.isString &&
+            (_isDartSourceIdentifierChar(preceding.value) ||
+                preceding.value == ')' ||
+                preceding.value == ']' ||
+                preceding.value == '.')) {
+          // This is a call/index/member argument, not a grouped receiver.
+          break;
+        }
         before--;
         offset++;
       }
@@ -626,23 +638,44 @@ final class WorkshopProposalImplementationRunner {
     List<_WorkshopDartSourceToken> tokens,
     int end,
   ) {
-    if (end < 0) return false;
+    if (end < 0 || tokens[end].isString) return false;
     var index = end;
     if (tokens[index].value == '>') {
       var depth = 0;
+      var sawArgument = false;
       while (index >= 0) {
         final token = tokens[index].value;
-        if (token == '>') depth++;
-        if (token == '<') {
+        if (tokens[index].isString) return false;
+        if (token == '>') {
+          depth++;
+        } else if (token == '<') {
           depth--;
           if (depth == 0) {
             index--;
             break;
           }
+        } else if (depth > 0) {
+          // Only type-argument syntax is eligible for shadow detection.
+          // In particular, relational and logical expressions such as
+          // Foo < x && x > rootBundle must not create a false scope.
+          if (token == ',' || token == '.' || token == '?' ||
+              token == '[' || token == ']') {
+            // Allowed type punctuation.
+          } else if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$')
+              .hasMatch(token)) {
+            return false;
+          } else if (!RegExp(
+            r'^(?:[A-Z][A-Za-z0-9_]*|int|double|num|bool|dynamic|void)$',
+          ).hasMatch(token)) {
+            // A lowercase expression operand is not a type identifier.
+            return false;
+          } else {
+            sawArgument = true;
+          }
         }
         index--;
       }
-      if (depth != 0 || index < 0) return false;
+      if (depth != 0 || index < 0 || !sawArgument) return false;
     }
     return !tokens[index].isString &&
         RegExp(r'^[A-Z][A-Za-z0-9_]*$').hasMatch(tokens[index].value);
