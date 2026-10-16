@@ -507,7 +507,7 @@ final class WorkshopProposalImplementationRunner {
                 : source[cursor] == quote) {
               break;
             }
-            if (!raw && source.startsWith('${', cursor)) {
+            if (!raw && source.startsWith(r'${', cursor)) {
               // Keep the surrounding literal separate from executable code.
               result.add(_WorkshopDartSourceToken(
                 source.substring(literalStart, cursor),
