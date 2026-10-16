@@ -133,6 +133,7 @@ void main() {
         'name: test_app\nflutter:\n    assets:\n      - drawable/help.txt\n',
         'name: test_app\nflutter:\n      uses-material-design: true\n'
             '      assets:\n        - drawable/\n',
+        'name: test_app\nflutter:\n  assets:\n  - drawable/help.txt\n',
       ];
       for (var i = 0; i < validPubspecs.length; i++) {
         final engineer = _StaticGateway(
@@ -173,6 +174,107 @@ void main() {
         expect(session.isApplyApproved, isFalse);
         expect(gateway.writeCalls, 0);
       }
+    });
+
+    test('does not authorize nested mapping entries as Flutter assets',
+        () async {
+      const invalidPubspec =
+          'name: test_app\nflutter:\n  assets:\n'
+          '    configuration:\n      - drawable/help.txt\n';
+      const badSource =
+          'import "package:flutter/services.dart" show rootBundle; '
+          'void main() { rootBundle.loadString("drawable/help.txt"); }';
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Nested mapping is not a Flutter asset list',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': badSource,
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: '{"explanation":"Repair invalid resource lookup",'
+              '"changes":[{"path":"lib/main.dart","type":"addition",'
+              '"content":"void main() {}"}]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+        'pubspec.yaml': invalidPubspec,
+      });
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'invalid-nested-flutter-asset',
+          title: 'Validate Flutter resource access',
+          instruction: 'Avoid invalid native asset paths.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('loadBuffer native drawable access triggers bounded retry',
+        () async {
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Invalid buffer resource',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': 'import "package:flutter/services.dart" show rootBundle; '
+                    'void main() { rootBundle.loadBuffer("res/drawable/star.xml"); }',
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: '{"explanation":"Valid Flutter fallback",'
+              '"changes":[{"path":"lib/main.dart","type":"addition",'
+              '"content":"void main() {}"}]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'native-drawable-load-buffer',
+          title: 'Repair invalid Flutter loading',
+          instruction: 'Do not load an Android XML as Flutter bundle.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
     });
 
     test('accepts concurrently staged indented Flutter assets',
