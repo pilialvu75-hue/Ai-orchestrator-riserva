@@ -173,6 +173,53 @@ void main() { services.rootBundle.loadString('res/drawable/star.xml'); }
           retry: true,
         ),
         (
+          id: 'grouped-prefixed-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+void main() {
+  (services.rootBundle).loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'nested-grouped-prefixed-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+void main() {
+  ((services.rootBundle)).loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'call-argument-not-grouped-receiver',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+CustomBundle makeCustomBundle(Object value) => CustomBundle();
+void main() {
+  makeCustomBundle(rootBundle).loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'relational-expression-must-not-shadow-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+void main() {
+  dynamic Foo = 3;
+  dynamic x = 4;
+  print(Foo < x && x > rootBundle);
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
           id: 'string-key-in-cascade-index',
           code: '''
 import 'package:flutter/services.dart' show rootBundle;
