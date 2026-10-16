@@ -392,27 +392,63 @@ final class WorkshopProposalImplementationRunner {
       'loadStructuredData',
       'loadStructuredBinaryData',
     };
-    for (var i = 0; i + 4 < tokens.length; i++) {
+    // Match the rootBundle receiver, including every section of a Dart
+    // cascade. Never associate methods on unrelated receiver expressions.
+    for (var i = 0; i < tokens.length; i++) {
       if (tokens[i].isString || tokens[i].value != 'rootBundle') continue;
-      // Account for ordinary method calls, null-aware access and the Dart
-      // cascade syntax: rootBundle..loadString('...').
-      var member = i + 1;
-      if (tokens[member].value == '?') member++;
-      if (member >= tokens.length || tokens[member].value != '.') continue;
-      member++;
-      if (member < tokens.length && tokens[member].value == '.') member++;
-      if (member + 2 >= tokens.length ||
-          !loadMethods.contains(tokens[member].value) ||
-          tokens[member + 1].value != '(' ||
-          !tokens[member + 2].isString) {
-        continue;
-      }
-      final path = tokens[member + 2].value;
-      if ((path.startsWith('drawable/') ||
-              path.startsWith('res/drawable/') ||
-              path.startsWith('android/app/src/main/res/')) &&
-          !_isDeclaredFlutterAsset(path, pubspec)) {
-        return true;
+      var offset = i + 1;
+      var inCascade = false;
+      while (offset < tokens.length) {
+        if (tokens[offset].value == '?') offset++;
+        if (offset >= tokens.length || tokens[offset].value != '.') break;
+        offset++;
+        final cascade = offset < tokens.length &&
+            tokens[offset].value == '.';
+        if (cascade) offset++;
+        if (inCascade && !cascade) break;
+        if (offset >= tokens.length || tokens[offset].isString) break;
+        final method = tokens[offset].value;
+        offset++;
+        // Generic AssetBundle methods accept explicit <T>, potentially
+        // with nested generic arguments. Only skip balanced angle tokens.
+        if (offset < tokens.length && tokens[offset].value == '<') {
+          var depth = 0;
+          do {
+            final value = tokens[offset].value;
+            if (value == '<') depth++;
+            if (value == '>') depth--;
+            offset++;
+          } while (offset < tokens.length && depth > 0);
+          if (depth != 0) break;
+        }
+        if (offset >= tokens.length || tokens[offset].value != '(') break;
+        final open = offset;
+        final argument = open + 1;
+        if (loadMethods.contains(method) &&
+            argument < tokens.length &&
+            tokens[argument].isString) {
+          final path = tokens[argument].value;
+          if ((path.startsWith('drawable/') ||
+                  path.startsWith('res/drawable/') ||
+                  path.startsWith('android/app/src/main/res/')) &&
+              !_isDeclaredFlutterAsset(path, pubspec)) {
+            return true;
+          }
+        }
+        // Skip the entire call, including nested parentheses, before
+        // considering a subsequent cascade method on the same rootBundle.
+        var depth = 1;
+        offset = open + 1;
+        while (offset < tokens.length && depth > 0) {
+          if (!tokens[offset].isString) {
+            if (tokens[offset].value == '(') depth++;
+            if (tokens[offset].value == ')') depth--;
+          }
+          offset++;
+        }
+        if (depth != 0) break;
+        if (!cascade && !inCascade) break;
+        inCascade = true;
       }
     }
     return false;
@@ -447,7 +483,24 @@ final class WorkshopProposalImplementationRunner {
       // with the assets: key rather than being indented further.
       final isListEntry = trimmed.startsWith('- ');
       if (indent == flutterChildIndent && !(inAssets && isListEntry)) {
-        inAssets = trimmed == 'assets:';
+        if (trimmed.startsWith('assets:')) {
+          final inlineValue = trimmed.substring('assets:'.length).trim();
+          if (inlineValue.startsWith('[') && inlineValue.endsWith(']')) {
+            final flow = inlineValue.substring(1, inlineValue.length - 1);
+            // This bounded YAML-flow representation supports the common
+            // comma-separated, quoted/unquoted asset paths. Ambiguous YAML
+            // remains fail-closed for later Flutter validation.
+            for (final value in _yamlFlowAssetEntries(flow)) {
+              if (_flutterAssetEntryMatches(value, path)) return true;
+            }
+            inAssets = false;
+            assetEntryIndent = null;
+            continue;
+          }
+          inAssets = trimmed == 'assets:';
+        } else {
+          inAssets = false;
+        }
         assetEntryIndent = null;
         continue;
       }
@@ -468,16 +521,61 @@ final class WorkshopProposalImplementationRunner {
               (entry.startsWith('"') && entry.endsWith('"')))) {
         entry = entry.substring(1, entry.length - 1);
       }
-      // Declaring a directory packages its immediate files, not arbitrary
-      // descendants. Subdirectories must have their own assets: entries.
-      final child = entry.endsWith('/') && path.startsWith(entry)
-          ? path.substring(entry.length)
-          : '';
-      if (entry == path || (child.isNotEmpty && !child.contains('/'))) {
-        return true;
-      }
+      if (_flutterAssetEntryMatches(entry, path)) return true;
     }
     return false;
+  }
+
+  static bool _flutterAssetEntryMatches(String entry, String path) {
+    // Flutter's directory asset entries include only immediate children.
+    final child = entry.endsWith('/') && path.startsWith(entry)
+        ? path.substring(entry.length)
+        : '';
+    return entry == path || (child.isNotEmpty && !child.contains('/'));
+  }
+
+  static Iterable<String> _yamlFlowAssetEntries(String flow) sync* {
+    final buf = StringBuffer();
+    String? quote;
+    for (var i = 0; i < flow.length; i++) {
+      final ch = flow[i];
+      if (ch.codeUnitAt(0) == 92 && quote == '"' &&
+          i + 1 < flow.length) {
+        buf.write(ch);
+        buf.write(flow[++i]);
+        continue;
+      }
+      if ((ch == '"' || ch == "'") &&
+          (quote == null || quote == ch)) {
+        if (quote == null) {
+          quote = ch;
+        } else {
+          quote = null;
+        }
+        buf.write(ch);
+        continue;
+      }
+      if (ch == ',' && quote == null) {
+        final entry = _unquoteYamlAssetEntry(buf.toString());
+        if (entry.isNotEmpty) yield entry;
+        buf.clear();
+        continue;
+      }
+      buf.write(ch);
+    }
+    if (quote != null) return;
+    final last = _unquoteYamlAssetEntry(buf.toString());
+    if (last.isNotEmpty) yield last;
+  }
+
+  static String _unquoteYamlAssetEntry(String text) {
+    var entry = text.trim();
+    if (entry.length >= 2 &&
+        ((entry.startsWith("'") && entry.endsWith("'")) ||
+            (entry.startsWith('"') && entry.endsWith('"')))) {
+      entry = entry.substring(1, entry.length - 1);
+    }
+    return entry;
   }
 
   static String _withoutYamlInlineComment(String text) {
