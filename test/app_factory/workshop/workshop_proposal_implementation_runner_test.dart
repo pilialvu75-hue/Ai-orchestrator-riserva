@@ -27,6 +27,92 @@ void main() {
   // Execute the actual SDK/AAPT2 negative fixture in the first-app CI suite.
   star_negative.main();
   group('WorkshopProposalImplementationRunner', () {
+    test('post +3204 star native asset misuse triggers bounded Engineer retry before staging', () async {
+      String response(List<Map<String, String>> changes) =>
+          jsonEncode(<String, Object?>{
+            'explanation': 'Implement the requested star screen',
+            'changes': changes,
+          });
+      final broken = response(<Map<String, String>>[
+        <String, String>{
+          'path': 'lib/main.dart',
+          'type': 'addition',
+          'content': 'import "package:flutter/services.dart" show rootBundle; '
+              'void main() { rootBundle.load("drawable/star.xml"); }',
+        },
+        <String, String>{
+          'path': 'android/app/src/main/res/drawable/star.xml',
+          'type': 'addition',
+          'content': '<shape/>',
+        },
+      ]);
+      final repairedSource = '''
+import 'package:flutter/material.dart';
+void main() => runApp(const MaterialApp(home: StarScreen()));
+class StarScreen extends StatefulWidget {
+  const StarScreen({super.key});
+  @override State<StarScreen> createState() => _StarScreenState();
+}
+class _StarScreenState extends State<StarScreen> {
+  Color starColor = Colors.yellow;
+  @override Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Colors.black,
+    body: Center(child: GestureDetector(
+      onTap: () => setState(() => starColor =
+          starColor == Colors.yellow ? Colors.blue : Colors.yellow),
+      child: Icon(Icons.star, color: starColor),
+    )),
+  );
+}
+''';
+      final repaired = response(<Map<String, String>>[
+        <String, String>{
+          'path': 'lib/main.dart',
+          'type': 'addition',
+          'content': repairedSource,
+        },
+      ]);
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: broken, terminalState: InferenceTerminalState.success,
+        ),
+        WorkshopInferenceResult(
+          text: repaired, terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'first-star-post-3204',
+          title: 'Una stella',
+          instruction: 'Crea app Android con sfondo nero e stella che cambia colore al tocco',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>[
+            'lib/main.dart',
+            'android/app/src/main/res/drawable/star.xml',
+          ],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(engineer.calls, 2);
+      expect(engineer.maxTokensValues, <int?>[640, 768]);
+      expect(engineer.prompts.first, contains('ACCEPTANCE: show a visible centered star'));
+      expect(engineer.prompts.last, contains('rootBundle cannot load Android res/drawable'));
+      expect(proposal.affectedPaths, <String>['lib/main.dart']);
+      expect(session.workspace.read('lib/main.dart'), contains('Icon(Icons.star'));
+      expect(session.workspace.read('lib/main.dart'), contains('onTap:'));
+      expect(session.workspace.read('lib/main.dart'), contains('setState('));
+      expect(session.workspace.read('android/app/src/main/res/drawable/star.xml'), isNull);
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
     test(
         'routes only to Engineer and stages proposal for review without writes',
         () async {
