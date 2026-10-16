@@ -436,7 +436,7 @@ final class WorkshopProposalImplementationRunner {
       if (raw || ch == "'" || ch == '"') {
         final quoteOffset = raw ? offset + 1 : offset;
         final quote = source[quoteOffset];
-        final triple = source.startsWith(quote * 3, quoteOffset);
+        final triple = source.startsWith('$quote$quote$quote', quoteOffset);
         final contentStart = quoteOffset + (triple ? 3 : 1);
         var cursor = contentStart;
         while (cursor < source.length) {
@@ -445,7 +445,7 @@ final class WorkshopProposalImplementationRunner {
             continue;
           }
           if (triple
-              ? source.startsWith(quote * 3, cursor)
+              ? source.startsWith('$quote$quote$quote', cursor)
               : source[cursor] == quote) {
             break;
           }
