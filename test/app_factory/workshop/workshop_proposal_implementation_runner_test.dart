@@ -30,8 +30,8 @@ void main() {
     test('rejects native resource invocation inside Dart string interpolation',
         () async {
       for (final source in <String>[
-        "import \"package:flutter/services.dart\" show rootBundle; void main() { print('${await rootBundle.loadString(\"drawable/star.xml\")}'); }",
-        "import \"package:flutter/services.dart\" show rootBundle; void main() { print('${({\"v\": rootBundle.load(\"res/drawable/star.xml\")})}'); }",
+        r'''import "package:flutter/services.dart" show rootBundle; void main() { print('${await rootBundle.loadString("drawable/star.xml")}'); }''',
+        r'''import "package:flutter/services.dart" show rootBundle; void main() { print('${({"v": rootBundle.load("res/drawable/star.xml")})}'); }''',
       ]) {
         final invalid = jsonEncode(<String, Object?>{
           'explanation': 'Native resource invoked during interpolation',
