@@ -45,6 +45,32 @@ void main() { rootBundle.loadString('res/drawable/star.xml'); }
           retry: true,
         ),
         (
+          id: 'nonnullable-generic-local-parameter',
+          code: '''
+class CustomBundle<T> {
+  String loadString(String key) => key;
+}
+void helper(CustomBundle<String> rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'nonnullable-generic-parameter-then-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle<T> {
+  String loadString(String key) => key;
+}
+void helper(CustomBundle<String> rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+void main() { rootBundle.loadString('res/drawable/star.xml'); }
+''',
+          retry: true,
+        ),
+        (
           id: 'nullable-local-parameter',
           code: '''
 class CustomBundle {
@@ -225,6 +251,8 @@ void main() {
         'rootBundle..loadString("assets/config").then(parse)..loadString("res/drawable/star.xml")',
         "rootBundle.loadString('res/' 'drawable/star.xml')",
         'rootBundle?..loadBuffer("drawable/star.xml")',
+        '(rootBundle).loadString("res/drawable/star.xml")',
+        '((rootBundle)).loadBuffer("drawable/star.xml")',
         'rootBundle.loadString("drawable/config/help.txt")',
       ];
       for (var i = 0; i < cases.length; i++) {
