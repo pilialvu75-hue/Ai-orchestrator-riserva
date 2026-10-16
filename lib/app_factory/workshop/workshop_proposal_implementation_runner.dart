@@ -570,7 +570,7 @@ final class WorkshopProposalImplementationRunner {
           // Function parameter: resolve its following body, if any.
           var cursor = endParen + 1;
           while (cursor < tokens.length && cursor < endParen + 8 &&
-              !<String>{'{', ';', '=>'}.contains(tokens[cursor].value)) {
+              !<String>{'{', ';', '='}.contains(tokens[cursor].value)) {
             cursor++;
           }
           if (cursor < tokens.length && tokens[cursor].value == '{' &&
@@ -582,11 +582,14 @@ final class WorkshopProposalImplementationRunner {
             ));
             continue;
           }
-          if (cursor < tokens.length && tokens[cursor].value == '=>') {
+          // The lightweight Dart lexer emits '=>' as '=' and '>'.
+          if (cursor + 1 < tokens.length &&
+              tokens[cursor].value == '=' &&
+              tokens[cursor + 1].value == '>') {
             scopes.add((
               identifier: tokens[i].value,
-              start: cursor + 1,
-              end: _arrowExpressionEnd(tokens, cursor + 1),
+              start: cursor + 2,
+              end: _arrowExpressionEnd(tokens, cursor + 2),
             ));
             continue;
           }
