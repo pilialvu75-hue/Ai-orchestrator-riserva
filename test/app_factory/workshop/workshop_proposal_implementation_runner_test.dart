@@ -27,6 +27,106 @@ void main() {
   // Execute the actual SDK/AAPT2 negative fixture in the first-app CI suite.
   star_negative.main();
   group('WorkshopProposalImplementationRunner', () {
+    test('comments and strings containing drawable lookup do not trigger retry',
+        () async {
+      final validSources = <String>[
+        'void main() { // rootBundle.load("drawable/star.xml")\n}',
+        'void main() { /* rootBundle.load("drawable/star.xml") */ }',
+        'void main() { /* before /* rootBundle.load("drawable/star.xml") */ after */ }',
+        "void main() { final help = 'Avoid rootBundle.load(\"drawable/star.xml\")'; }",
+        "void main() { final help = r'rootBundle.load(\"drawable/star.xml\")'; }",
+        "void main() { final help = '''Avoid rootBundle.load(\"drawable/star.xml\")'''; }",
+        'import "package:flutter/services.dart" show rootBundle; '
+            'void main() { rootBundle.load("assets/models/logo.png"); }',
+      ];
+      for (var i = 0; i < validSources.length; i++) {
+        final source = validSources[i];
+        final engineer = _StaticGateway(
+          result: WorkshopInferenceResult(
+            text: jsonEncode(<String, Object?>{
+              'explanation': 'Source should remain reviewable',
+              'changes': <Map<String, String>>[
+                <String, String>{
+                  'path': 'lib/main.dart',
+                  'type': 'addition',
+                  'content': source,
+                },
+              ],
+            }),
+            terminalState: InferenceTerminalState.success,
+          ),
+        );
+        final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'drawable-lexical-safe-$i',
+            title: 'Safe source literal or comment',
+            instruction: 'Preserve existing code comments.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, 1, reason: 'Safe sample $i must not retry');
+        expect(session.workspace.read('lib/main.dart'), source);
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      }
+    });
+
+    test('tokenized native lookup separated by comments still rejects',
+        () async {
+      final bad = jsonEncode(<String, Object?>{
+        'explanation': 'Invalid native drawable dependency',
+        'changes': <Map<String, String>>[
+          <String, String>{
+            'path': 'lib/main.dart',
+            'type': 'addition',
+            'content': 'void main() { rootBundle /* comment */ . '
+                'loadString /* another */ (r"res/drawable/star.xml"); }',
+          },
+        ],
+      });
+      const fixed = '{"explanation":"Flutter-only implementation",'
+          '"changes":[{"path":"lib/main.dart","type":"addition",'
+          '"content":"void main() {}"}]}';
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: bad,
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: fixed,
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'native-resource-tokenized-comment-trivia',
+          title: 'Reject invalid native asset use',
+          instruction: 'Build Flutter app.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
     test('normalizes fenced Engineer JSON before rejecting native resource lookup',
         () async {
       final bad = jsonEncode(<String, Object?>{
