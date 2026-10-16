@@ -484,7 +484,7 @@ final class WorkshopProposalImplementationRunner {
     String? quote;
     for (var i = 0; i < text.length; i++) {
       final ch = text[i];
-      if (ch == r'\' && quote == '"' && i + 1 < text.length) {
+      if (ch.codeUnitAt(0) == 92 && quote == '"' && i + 1 < text.length) {
         i++;
         continue;
       }
