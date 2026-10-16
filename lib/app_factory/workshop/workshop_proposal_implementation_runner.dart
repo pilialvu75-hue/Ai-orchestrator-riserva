@@ -385,18 +385,29 @@ final class WorkshopProposalImplementationRunner {
     required String? pubspec,
   }) {
     final tokens = _dartSourceTokens(source);
+    const loadMethods = <String>{
+      'load',
+      'loadString',
+      'loadBuffer',
+      'loadStructuredData',
+      'loadStructuredBinaryData',
+    };
     for (var i = 0; i + 4 < tokens.length; i++) {
-      if (tokens[i].isString ||
-          tokens[i].value != 'rootBundle' ||
-          tokens[i + 1].value != '.' ||
-          (tokens[i + 2].value != 'load' &&
-              tokens[i + 2].value != 'loadString' &&
-              tokens[i + 2].value != 'loadBuffer') ||
-          tokens[i + 3].value != '(' ||
-          !tokens[i + 4].isString) {
+      if (tokens[i].isString || tokens[i].value != 'rootBundle') continue;
+      // Account for ordinary method calls, null-aware access and the Dart
+      // cascade syntax: rootBundle..loadString('...').
+      var member = i + 1;
+      if (tokens[member].value == '?') member++;
+      if (member >= tokens.length || tokens[member].value != '.') continue;
+      member++;
+      if (member < tokens.length && tokens[member].value == '.') member++;
+      if (member + 2 >= tokens.length ||
+          !loadMethods.contains(tokens[member].value) ||
+          tokens[member + 1].value != '(' ||
+          !tokens[member + 2].isString) {
         continue;
       }
-      final path = tokens[i + 4].value;
+      final path = tokens[member + 2].value;
       if ((path.startsWith('drawable/') ||
               path.startsWith('res/drawable/') ||
               path.startsWith('android/app/src/main/res/')) &&
@@ -417,8 +428,8 @@ final class WorkshopProposalImplementationRunner {
     int? flutterChildIndent;
     int? assetEntryIndent;
     for (final line in pubspec.split('\n')) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+      final trimmed = _withoutYamlInlineComment(line.trim());
+      if (trimmed.isEmpty) continue;
       final indent = line.length - line.trimLeft().length;
       if (indent == 0) {
         inFlutter = trimmed == 'flutter:';
@@ -457,12 +468,46 @@ final class WorkshopProposalImplementationRunner {
               (entry.startsWith('"') && entry.endsWith('"')))) {
         entry = entry.substring(1, entry.length - 1);
       }
-      if (entry == path ||
-          (entry.endsWith('/') && path.startsWith(entry))) {
+      // Declaring a directory packages its immediate files, not arbitrary
+      // descendants. Subdirectories must have their own assets: entries.
+      final child = entry.endsWith('/') && path.startsWith(entry)
+          ? path.substring(entry.length)
+          : '';
+      if (entry == path || (child.isNotEmpty && !child.contains('/'))) {
         return true;
       }
     }
     return false;
+  }
+
+  static String _withoutYamlInlineComment(String text) {
+    String? quote;
+    for (var i = 0; i < text.length; i++) {
+      final ch = text[i];
+      if (ch == r'\' && quote == '"' && i + 1 < text.length) {
+        i++;
+        continue;
+      }
+      if (quote == "'" && ch == "'" && i + 1 < text.length &&
+          text[i + 1] == "'") {
+        i++;
+        continue;
+      }
+      if ((ch == "'" || ch == '"')) {
+        if (quote == null) {
+          quote = ch;
+        } else if (quote == ch) {
+          quote = null;
+        }
+        continue;
+      }
+      if (ch == '#' &&
+          quote == null &&
+          (i == 0 || RegExp(r'\s').hasMatch(text[i - 1]))) {
+        return text.substring(0, i).trimRight();
+      }
+    }
+    return text;
   }
 
   // Tokenize executable Dart including nested \${...} interpolation, without
