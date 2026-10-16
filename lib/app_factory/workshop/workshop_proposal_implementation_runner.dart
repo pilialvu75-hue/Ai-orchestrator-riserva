@@ -430,8 +430,14 @@ final class WorkshopProposalImplementationRunner {
           !tokens[offset].isString &&
           tokens[offset].value == ')') {
         final preceding = before > 0 ? tokens[before - 1] : null;
+        // Expression-leading keywords are not callable receivers:
+        // return (rootBundle).loadString(...) remains a grouped call.
+        const expressionKeywords = <String>{
+          'return', 'await', 'throw', 'yield',
+        };
         if (preceding != null && !preceding.isString &&
-            (_isDartSourceIdentifierChar(preceding.value) ||
+            ((_isDartSourceIdentifierChar(preceding.value) &&
+                !expressionKeywords.contains(preceding.value)) ||
                 preceding.value == ')' ||
                 preceding.value == ']' ||
                 preceding.value == '>' ||
