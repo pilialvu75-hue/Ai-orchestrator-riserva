@@ -32,7 +32,11 @@ void main() {
       const cases = <String>[
         'rootBundle.loadStructuredData("res/drawable/star.xml", (s) => s)',
         'rootBundle.loadStructuredBinaryData("res/drawable/star.xml", (s) => s)',
+        'rootBundle.loadStructuredData<String>("res/drawable/star.xml", (s) => s)',
+        'rootBundle.loadStructuredBinaryData<List<int>>("res/drawable/star.xml", (s) => s)',
         'rootBundle..loadString("res/drawable/star.xml")',
+        'rootBundle..evict("drawable/star.xml")..loadString("drawable/star.xml")',
+        'rootBundle..evict("drawable/star.xml")..loadStructuredData<String>("res/drawable/star.xml", (s) => s)',
         'rootBundle?..loadBuffer("drawable/star.xml")',
         'rootBundle.loadString("drawable/config/help.txt")',
       ];
@@ -100,6 +104,10 @@ void main() {
         'name: example\nflutter:\n'
             '    assets: # assets\n'
             '      - "drawable/config/help.txt" # declared file\n',
+        'name: example\nflutter:\n'
+            '  assets: [drawable/config/help.txt] # direct asset\n',
+        'name: example\nflutter:\n'
+            '    assets: ["drawable/config/", drawable/unused.txt]\n',
       ];
       for (var i = 0; i < pubspecs.length; i++) {
         final engineer = _StaticGateway(
