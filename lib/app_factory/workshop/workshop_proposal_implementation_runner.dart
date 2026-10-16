@@ -526,15 +526,14 @@ final class WorkshopProposalImplementationRunner {
       braceAt[i] = braces.isEmpty ? null : braces.last;
       parenAt[i] = parens.isEmpty ? null : parens.last;
       if (tokens[i].isString) continue;
-      switch (tokens[i].value) {
-        case '{':
-          braces.add(i);
-        case '}':
-          if (braces.isNotEmpty) braceEnds[braces.removeLast()] = i;
-        case '(':
-          parens.add(i);
-        case ')':
-          if (parens.isNotEmpty) parenEnds[parens.removeLast()] = i;
+      if (tokens[i].value == '{') {
+        braces.add(i);
+      } else if (tokens[i].value == '}') {
+        if (braces.isNotEmpty) braceEnds[braces.removeLast()] = i;
+      } else if (tokens[i].value == '(') {
+        parens.add(i);
+      } else if (tokens[i].value == ')') {
+        if (parens.isNotEmpty) parenEnds[parens.removeLast()] = i;
       }
     }
     for (var i = 1; i + 1 < tokens.length; i++) {
