@@ -416,6 +416,19 @@ final class WorkshopProposalImplementationRunner {
         continue;
       }
       var offset = i + 1;
+      // Parenthesized receivers such as (rootBundle).loadString(...) or
+      // ((rootBundle)).load(...) still refer to the same imported bundle.
+      // Only unwrap when the expression contains exactly this receiver.
+      var before = i - 1;
+      while (before >= 0 &&
+          !tokens[before].isString &&
+          tokens[before].value == '(' &&
+          offset < tokens.length &&
+          !tokens[offset].isString &&
+          tokens[offset].value == ')') {
+        before--;
+        offset++;
+      }
       var inCascade = false;
       while (offset < tokens.length) {
         if (tokens[offset].value == '?') offset++;
@@ -557,7 +570,11 @@ final class WorkshopProposalImplementationRunner {
           .contains(prev)) continue;
       final nullableType =
           prev == '?' && _looksLikeNullableType(tokens, i - 2);
-      final hasType = nullableType ||
+      // Non-nullable generic declarations end in '>' immediately before
+      // the parameter (e.g. CustomBundle<String> rootBundle).
+      final genericType =
+          prev == '>' && _looksLikeNullableType(tokens, i - 1);
+      final hasType = nullableType || genericType ||
           <String>{'var', 'final', 'late', 'dynamic'}.contains(prev) ||
           RegExp(r'^[A-Z][A-Za-z0-9_]*$').hasMatch(prev);
       if (!hasType ||
