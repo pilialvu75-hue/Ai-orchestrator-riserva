@@ -353,9 +353,6 @@ final class WorkshopProposalImplementationRunner {
       responseText: responseText,
       existingPaths: session.workspace.paths.toSet(),
     );
-    final androidDrawableLookup = RegExp(
-      r'''rootBundle\s*\.\s*load(?:String)?\s*\(\s*["'](?:drawable/|res/drawable/|android/app/src/main/res/)''',
-    );
     for (final change in proposal.changes) {
       if (change.isDeletion ||
           !change.path.toLowerCase().endsWith('.dart')) {
@@ -363,16 +360,132 @@ final class WorkshopProposalImplementationRunner {
       }
       final content = change.afterContent;
       if (content == null) continue;
-      if (androidDrawableLookup.hasMatch(content)) {
+      if (_usesNativeDrawableAsFlutterAsset(content)) {
         throw FormatException(
           'Flutter rootBundle cannot load Android res/drawable files as '
-          'Flutter assets. Implement the visual element and its touch/color '
-          'state in Dart widgets instead.',
+          'Flutter assets. Use Dart widgets or a declared Flutter asset; '
+          'preserve only the behavior required by the current task.',
           change.path,
         );
       }
     }
   }
+
+  // Lex source, rather than regexp matching the raw file: literal text in a
+  // comment, documentation or string is not an invocation. This is a bounded
+  // source-shape guard, not a substitute for analyzer, Reviewer or Validation.
+  static bool _usesNativeDrawableAsFlutterAsset(String source) {
+    final tokens = _dartSourceTokens(source);
+    for (var i = 0; i + 4 < tokens.length; i++) {
+      if (tokens[i].isString ||
+          tokens[i].value != 'rootBundle' ||
+          tokens[i + 1].value != '.' ||
+          (tokens[i + 2].value != 'load' &&
+              tokens[i + 2].value != 'loadString') ||
+          tokens[i + 3].value != '(' ||
+          !tokens[i + 4].isString) {
+        continue;
+      }
+      final path = tokens[i + 4].value;
+      if (path.startsWith('drawable/') ||
+          path.startsWith('res/drawable/') ||
+          path.startsWith('android/app/src/main/res/')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static List<_WorkshopDartSourceToken> _dartSourceTokens(String source) {
+    final result = <_WorkshopDartSourceToken>[];
+    var offset = 0;
+    while (offset < source.length) {
+      final ch = source[offset];
+      final next = offset + 1 < source.length ? source[offset + 1] : '';
+      if (RegExp(r'\s').hasMatch(ch)) {
+        offset++;
+        continue;
+      }
+      if (ch == '/' && next == '/') {
+        offset += 2;
+        while (offset < source.length &&
+            source[offset] != '\n' &&
+            source[offset] != '\r') {
+          offset++;
+        }
+        continue;
+      }
+      if (ch == '/' && next == '*') {
+        var depth = 1;
+        offset += 2;
+        while (offset < source.length && depth > 0) {
+          if (source.startsWith('/*', offset)) {
+            depth++;
+            offset += 2;
+          } else if (source.startsWith('*/', offset)) {
+            depth--;
+            offset += 2;
+          } else {
+            offset++;
+          }
+        }
+        continue;
+      }
+      final raw = (ch == 'r' || ch == 'R') &&
+          (next == "'" || next == '"');
+      if (raw || ch == "'" || ch == '"') {
+        final quoteOffset = raw ? offset + 1 : offset;
+        final quote = source[quoteOffset];
+        final triple = source.startsWith(quote * 3, quoteOffset);
+        final contentStart = quoteOffset + (triple ? 3 : 1);
+        var cursor = contentStart;
+        while (cursor < source.length) {
+          if (!raw && source.codeUnitAt(cursor) == 92) {
+            cursor += 2;
+            continue;
+          }
+          if (triple
+              ? source.startsWith(quote * 3, cursor)
+              : source[cursor] == quote) {
+            break;
+          }
+          cursor++;
+        }
+        final contentEnd = cursor < source.length ? cursor : source.length;
+        result.add(_WorkshopDartSourceToken(
+          source.substring(contentStart, contentEnd),
+          isString: true,
+        ));
+        offset = cursor < source.length
+            ? cursor + (triple ? 3 : 1)
+            : source.length;
+        continue;
+      }
+      if (_isDartSourceIdentifierChar(ch)) {
+        final start = offset;
+        while (offset < source.length &&
+            _isDartSourceIdentifierChar(source[offset])) {
+          offset++;
+        }
+        result.add(_WorkshopDartSourceToken(source.substring(start, offset)));
+        continue;
+      }
+      result.add(_WorkshopDartSourceToken(ch));
+      offset++;
+    }
+    return result;
+  }
+
+  static bool _isDartSourceIdentifierChar(String c) {
+    if (c.isEmpty) return false;
+    final unit = c.codeUnitAt(0);
+    return (unit >= 65 && unit <= 90) ||
+        (unit >= 97 && unit <= 122) ||
+        (unit >= 48 && unit <= 57) ||
+        c == '_' ||
+        c == r'$';
+  }
+
   String _buildPrompt(
     WorkspaceSession session, {
     WorkshopPreflightInferenceResult? preflight,
@@ -857,4 +970,11 @@ final class _WorkshopWorkspaceSelection {
 
   final Map<String, String> files;
   final List<String> replaceableTargets;
+}
+
+final class _WorkshopDartSourceToken {
+  const _WorkshopDartSourceToken(this.value, {this.isString = false});
+
+  final String value;
+  final bool isString;
 }
