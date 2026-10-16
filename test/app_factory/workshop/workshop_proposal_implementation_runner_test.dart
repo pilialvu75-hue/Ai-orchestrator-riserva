@@ -27,6 +27,136 @@ void main() {
   // Execute the actual SDK/AAPT2 negative fixture in the first-app CI suite.
   star_negative.main();
   group('WorkshopProposalImplementationRunner', () {
+    test('normalizes fenced Engineer JSON before rejecting native resource lookup',
+        () async {
+      final bad = jsonEncode(<String, Object?>{
+        'explanation': 'Native drawable lookup',
+        'changes': <Map<String, String>>[
+          <String, String>{
+            'path': 'lib/main.dart',
+            'type': 'addition',
+            'content': 'import "package:flutter/services.dart" show rootBundle; '
+                'void main() { rootBundle.load("drawable/star.xml"); }',
+          },
+        ],
+      });
+      const recovered = '{"explanation":"Recovered Flutter source",'
+          '"changes":[{"path":"lib/main.dart","type":"addition",'
+          '"content":"void main() {}"}]}';
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: 'Here is the proposal:\n```json\n$bad\n```',
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: recovered,
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'native-drawable-fenced-3204',
+          title: 'Flutter drawable integrity',
+          instruction: 'Implement this application in Flutter.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('normalizes aliased files and code before native asset guard',
+        () async {
+      final bad = jsonEncode(<String, Object?>{
+        'summary': 'Native XML misuse',
+        'files': <Map<String, String>>[
+          <String, String>{
+            'file': 'lib/main.dart',
+            'code': 'import "package:flutter/services.dart" show rootBundle; '
+                'void main() { rootBundle.load("res/drawable/star.xml"); }',
+          },
+        ],
+      });
+      const recovered = '{"explanation":"Recovered Flutter source",'
+          '"changes":[{"path":"lib/main.dart","type":"addition",'
+          '"content":"void main() {}"}]}';
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: bad,
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: recovered,
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'native-drawable-alias-3204',
+          title: 'Native resource boundary',
+          instruction: 'Build Flutter view.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('static red star on white does not gain unrequested tap or black background',
+        () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"explanation":"Static star",'
+              '"changes":[{"path":"lib/main.dart","type":"addition",'
+              '"content":"void main() {}"}]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'static-star-no-extra-interaction',
+          title: 'Static red star',
+          instruction: 'Display a red star on a white background.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(engineer.lastPrompt, isNot(contains('ACCEPTANCE: follow only')));
+      expect(engineer.lastPrompt, contains('Display a red star on a white background.'));
+      expect(engineer.calls, 1);
+    });
+
     test('post +3204 star native asset misuse triggers bounded Engineer retry before staging', () async {
       String response(List<Map<String, String>> changes) =>
           jsonEncode(<String, Object?>{
@@ -101,7 +231,7 @@ class _StarScreenState extends State<StarScreen> {
 
       expect(engineer.calls, 2);
       expect(engineer.maxTokensValues, <int?>[640, 768]);
-      expect(engineer.prompts.first, contains('ACCEPTANCE: show a visible centered star'));
+      expect(engineer.prompts.first, contains('ACCEPTANCE: follow only the explicitly requested star interaction'));
       expect(engineer.prompts.last, contains('rootBundle cannot load Android res/drawable'));
       expect(proposal.affectedPaths, <String>['lib/main.dart']);
       expect(session.workspace.read('lib/main.dart'), contains('Icon(Icons.star'));
