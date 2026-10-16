@@ -390,7 +390,8 @@ final class WorkshopProposalImplementationRunner {
           tokens[i].value != 'rootBundle' ||
           tokens[i + 1].value != '.' ||
           (tokens[i + 2].value != 'load' &&
-              tokens[i + 2].value != 'loadString') ||
+              tokens[i + 2].value != 'loadString' &&
+              tokens[i + 2].value != 'loadBuffer') ||
           tokens[i + 3].value != '(' ||
           !tokens[i + 4].isString) {
         continue;
@@ -431,12 +432,21 @@ final class WorkshopProposalImplementationRunner {
       // number of spaces. Only direct children of flutter: are eligible
       // for an assets: list, never nested unrelated keys.
       flutterChildIndent ??= indent;
-      if (indent == flutterChildIndent) {
+      // YAML also permits an indentationless sequence: the '-' may align
+      // with the assets: key rather than being indented further.
+      final isListEntry = trimmed.startsWith('- ');
+      if (indent == flutterChildIndent && !(inAssets && isListEntry)) {
         inAssets = trimmed == 'assets:';
         assetEntryIndent = null;
         continue;
       }
-      if (!inAssets || indent <= flutterChildIndent || !trimmed.startsWith('- ')) {
+      if (!inAssets || indent < flutterChildIndent) continue;
+      if (!isListEntry) {
+        // A nested mapping or scalar under assets: is not a direct member
+        // of the Flutter asset list. Never treat later nested '-' entries as
+        // authorized Flutter asset keys.
+        inAssets = false;
+        assetEntryIndent = null;
         continue;
       }
       assetEntryIndent ??= indent;
