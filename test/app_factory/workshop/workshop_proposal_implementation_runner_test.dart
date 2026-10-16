@@ -220,6 +220,51 @@ void main() {
           retry: true,
         ),
         (
+          id: 'generic-call-argument-not-grouped-receiver',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+CustomBundle makeCustomBundle<T>(Object value) => CustomBundle();
+void main() {
+  makeCustomBundle<Object>(rootBundle).loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'qualified-generic-parameter-shadow',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:local/models.dart' as models;
+class CustomBundle<T> {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle<models.Payload> rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'qualified-generic-parameter-then-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:local/models.dart' as models;
+class CustomBundle<T> {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle<models.Payload> rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+void main() {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
           id: 'string-key-in-cascade-index',
           code: '''
 import 'package:flutter/services.dart' show rootBundle;
