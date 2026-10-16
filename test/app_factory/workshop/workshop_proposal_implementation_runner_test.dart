@@ -37,6 +37,8 @@ void main() {
         'rootBundle..loadString("res/drawable/star.xml")',
         'rootBundle..evict("drawable/star.xml")..loadString("drawable/star.xml")',
         'rootBundle..evict("drawable/star.xml")..loadStructuredData<String>("res/drawable/star.xml", (s) => s)',
+        'rootBundle..loadString("assets/config").then(parse)..loadString("res/drawable/star.xml")',
+        "rootBundle.loadString('res/' 'drawable/star.xml')",
         'rootBundle?..loadBuffer("drawable/star.xml")',
         'rootBundle.loadString("drawable/config/help.txt")',
       ];
@@ -65,7 +67,7 @@ void main() {
         ]);
         final workspaceGateway = _RecordingWorkspaceGateway(
           files: <String, String>{
-            if (i == 4)
+            if (i == cases.length - 1)
               'pubspec.yaml': 'name: example\nflutter:\n'
                   '  assets:\n    - drawable/\n',
           },
@@ -91,6 +93,47 @@ void main() {
         expect(session.isApplyApproved, isFalse);
         expect(workspaceGateway.writeCalls, 0);
       }
+    });
+
+    test('locally shadowed rootBundle is not treated as Flutter global',
+        () async {
+      const source = 'class CustomBundle { String loadString(String key) => key; } '
+          'void read(CustomBundle rootBundle) { '
+          'rootBundle.loadString("drawable/help.txt"); }';
+      final engineer = _StaticGateway(
+        result: WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Use a custom bundle parameter',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': source,
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'shadowed-root-bundle-parameter',
+          title: 'Custom bundle use',
+          instruction: 'Use a locally passed asset bundle.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 1);
+      expect(session.workspace.read('lib/main.dart'), source);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
     });
 
     test('accepts Flutter assets declared with comments and direct subfolders',
