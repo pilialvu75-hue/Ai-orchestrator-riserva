@@ -353,6 +353,12 @@ final class WorkshopProposalImplementationRunner {
       responseText: responseText,
       existingPaths: session.workspace.paths.toSet(),
     );
+    var pubspec = session.workspace.read('pubspec.yaml');
+    for (final change in proposal.changes) {
+      if (change.path == 'pubspec.yaml') {
+        pubspec = change.isDeletion ? null : change.afterContent;
+      }
+    }
     for (final change in proposal.changes) {
       if (change.isDeletion ||
           !change.path.toLowerCase().endsWith('.dart')) {
@@ -360,7 +366,7 @@ final class WorkshopProposalImplementationRunner {
       }
       final content = change.afterContent;
       if (content == null) continue;
-      if (_usesNativeDrawableAsFlutterAsset(content)) {
+      if (_usesNativeDrawableAsFlutterAsset(content, pubspec: pubspec)) {
         throw FormatException(
           'Flutter rootBundle cannot load Android res/drawable files as '
           'Flutter assets. Use Dart widgets or a declared Flutter asset; '
@@ -374,7 +380,10 @@ final class WorkshopProposalImplementationRunner {
   // Lex source, rather than regexp matching the raw file: literal text in a
   // comment, documentation or string is not an invocation. This is a bounded
   // source-shape guard, not a substitute for analyzer, Reviewer or Validation.
-  static bool _usesNativeDrawableAsFlutterAsset(String source) {
+  static bool _usesNativeDrawableAsFlutterAsset(
+    String source, {
+    required String? pubspec,
+  }) {
     final tokens = _dartSourceTokens(source);
     for (var i = 0; i + 4 < tokens.length; i++) {
       if (tokens[i].isString ||
@@ -387,92 +396,155 @@ final class WorkshopProposalImplementationRunner {
         continue;
       }
       final path = tokens[i + 4].value;
-      if (path.startsWith('drawable/') ||
-          path.startsWith('res/drawable/') ||
-          path.startsWith('android/app/src/main/res/')) {
+      if ((path.startsWith('drawable/') ||
+              path.startsWith('res/drawable/') ||
+              path.startsWith('android/app/src/main/res/')) &&
+          !_isDeclaredFlutterAsset(path, pubspec)) {
         return true;
       }
     }
     return false;
   }
 
+  // Only actual flutter.assets entries authorize keys under drawable/.
+  // Supports individual files and Flutter asset-directory prefixes, but
+  // never treats Android's res/drawable folder as a Flutter declaration.
+  static bool _isDeclaredFlutterAsset(String path, String? pubspec) {
+    if (pubspec == null || pubspec.isEmpty) return false;
+    var inFlutter = false;
+    var inAssets = false;
+    for (final line in pubspec.split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+      final indent = line.length - line.trimLeft().length;
+      if (indent == 0) {
+        inFlutter = trimmed == 'flutter:';
+        inAssets = false;
+        continue;
+      }
+      if (!inFlutter) continue;
+      if (indent == 2) {
+        inAssets = trimmed == 'assets:';
+        continue;
+      }
+      if (!inAssets || indent < 4 || !trimmed.startsWith('- ')) continue;
+      var entry = trimmed.substring(2).trim();
+      if (entry.length >= 2 &&
+          ((entry.startsWith("'") && entry.endsWith("'")) ||
+              (entry.startsWith('"') && entry.endsWith('"')))) {
+        entry = entry.substring(1, entry.length - 1);
+      }
+      if (entry == path ||
+          (entry.endsWith('/') && path.startsWith(entry))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Tokenize executable Dart including nested \${...} interpolation, without
+  // misclassifying documentation, strings or comments as live invocations.
+  // This bounded lexer is not an analyzer; later review/validation remain strict.
   static List<_WorkshopDartSourceToken> _dartSourceTokens(String source) {
     final result = <_WorkshopDartSourceToken>[];
-    var offset = 0;
-    while (offset < source.length) {
-      final ch = source[offset];
-      final next = offset + 1 < source.length ? source[offset + 1] : '';
-      if (RegExp(r'\s').hasMatch(ch)) {
-        offset++;
-        continue;
-      }
-      if (ch == '/' && next == '/') {
-        offset += 2;
-        while (offset < source.length &&
-            source[offset] != '\n' &&
-            source[offset] != '\r') {
+    late int Function(int, {bool untilClosingBrace}) scan;
+    scan = (int start, {bool untilClosingBrace = false}) {
+      var offset = start;
+      var braceDepth = 0;
+      while (offset < source.length) {
+        final ch = source[offset];
+        final next = offset + 1 < source.length ? source[offset + 1] : '';
+        if (RegExp(r'\s').hasMatch(ch)) {
           offset++;
+          continue;
         }
-        continue;
-      }
-      if (ch == '/' && next == '*') {
-        var depth = 1;
-        offset += 2;
-        while (offset < source.length && depth > 0) {
-          if (source.startsWith('/*', offset)) {
-            depth++;
-            offset += 2;
-          } else if (source.startsWith('*/', offset)) {
-            depth--;
-            offset += 2;
-          } else {
+        if (ch == '/' && next == '/') {
+          offset += 2;
+          while (offset < source.length &&
+              source[offset] != '\n' &&
+              source[offset] != '\r') {
             offset++;
           }
+          continue;
         }
-        continue;
-      }
-      final raw = (ch == 'r' || ch == 'R') &&
-          (next == "'" || next == '"');
-      if (raw || ch == "'" || ch == '"') {
-        final quoteOffset = raw ? offset + 1 : offset;
-        final quote = source[quoteOffset];
-        final triple = source.startsWith('$quote$quote$quote', quoteOffset);
-        final contentStart = quoteOffset + (triple ? 3 : 1);
-        var cursor = contentStart;
-        while (cursor < source.length) {
-          if (!raw && source.codeUnitAt(cursor) == 92) {
-            cursor += 2;
-            continue;
+        if (ch == '/' && next == '*') {
+          var depth = 1;
+          offset += 2;
+          while (offset < source.length && depth > 0) {
+            if (source.startsWith('/*', offset)) {
+              depth++;
+              offset += 2;
+            } else if (source.startsWith('*/', offset)) {
+              depth--;
+              offset += 2;
+            } else {
+              offset++;
+            }
           }
-          if (triple
-              ? source.startsWith('$quote$quote$quote', cursor)
-              : source[cursor] == quote) {
-            break;
+          continue;
+        }
+        if (ch == '}' && untilClosingBrace) {
+          if (braceDepth == 0) return offset + 1;
+          braceDepth--;
+        } else if (ch == '{' && untilClosingBrace) {
+          braceDepth++;
+        }
+        final raw = (ch == 'r' || ch == 'R') &&
+            (next == "'" || next == '"');
+        if (raw || ch == "'" || ch == '"') {
+          final quoteOffset = raw ? offset + 1 : offset;
+          final quote = source[quoteOffset];
+          final triple = source.startsWith('$quote$quote$quote', quoteOffset);
+          var cursor = quoteOffset + (triple ? 3 : 1);
+          var literalStart = cursor;
+          while (cursor < source.length) {
+            if (!raw && source.codeUnitAt(cursor) == 92) {
+              cursor += 2;
+              continue;
+            }
+            if (triple
+                ? source.startsWith('$quote$quote$quote', cursor)
+                : source[cursor] == quote) {
+              break;
+            }
+            if (!raw && source.startsWith('${', cursor)) {
+              // Keep the surrounding literal separate from executable code.
+              result.add(_WorkshopDartSourceToken(
+                source.substring(literalStart, cursor),
+                isString: true,
+              ));
+              cursor = scan(cursor + 2, untilClosingBrace: true);
+              literalStart = cursor;
+              continue;
+            }
+            cursor++;
           }
-          cursor++;
+          result.add(_WorkshopDartSourceToken(
+            source.substring(literalStart,
+                cursor < source.length ? cursor : source.length),
+            isString: true,
+          ));
+          offset = cursor < source.length
+              ? cursor + (triple ? 3 : 1)
+              : source.length;
+          continue;
         }
-        final contentEnd = cursor < source.length ? cursor : source.length;
-        result.add(_WorkshopDartSourceToken(
-          source.substring(contentStart, contentEnd),
-          isString: true,
-        ));
-        offset = cursor < source.length
-            ? cursor + (triple ? 3 : 1)
-            : source.length;
-        continue;
-      }
-      if (_isDartSourceIdentifierChar(ch)) {
-        final start = offset;
-        while (offset < source.length &&
-            _isDartSourceIdentifierChar(source[offset])) {
-          offset++;
+        if (_isDartSourceIdentifierChar(ch)) {
+          final begin = offset;
+          while (offset < source.length &&
+              _isDartSourceIdentifierChar(source[offset])) {
+            offset++;
+          }
+          result.add(_WorkshopDartSourceToken(
+              source.substring(begin, offset)));
+          continue;
         }
-        result.add(_WorkshopDartSourceToken(source.substring(start, offset)));
-        continue;
+        result.add(_WorkshopDartSourceToken(ch));
+        offset++;
       }
-      result.add(_WorkshopDartSourceToken(ch));
-      offset++;
-    }
+      return offset;
+    };
+    scan(0);
     return result;
   }
 
