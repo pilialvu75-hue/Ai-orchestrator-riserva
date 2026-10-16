@@ -88,6 +88,75 @@ void main() {
 ''',
           retry: true,
         ),
+        (
+          id: 'arrow-parameter-then-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+String helper(CustomBundle rootBundle) =>
+    rootBundle.loadString('drawable/help.txt');
+void main() { rootBundle.loadString('res/drawable/star.xml'); }
+''',
+          retry: true,
+        ),
+        (
+          id: 'nullable-generic-custom-bundle',
+          code: '''
+class CustomBundle<T> {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle<String>? rootBundle) {
+  rootBundle?.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'prefixed-local-services',
+          code: '''
+import 'package:flutter/services.dart' as services;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+class LocalServices {
+  final rootBundle = CustomBundle();
+}
+void helper(LocalServices services) {
+  services.rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'prefixed-local-then-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+class LocalServices {
+  final rootBundle = CustomBundle();
+}
+void helper(LocalServices services) {
+  services.rootBundle.loadString('drawable/help.txt');
+}
+void main() { services.rootBundle.loadString('res/drawable/star.xml'); }
+''',
+          retry: true,
+        ),
+        (
+          id: 'string-key-in-cascade-index',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+void main() {
+  rootBundle..loadString('assets/config')['[']
+      ..loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
       ];
       for (final sample in inputs) {
         final proposed = jsonEncode(<String, Object?>{
