@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal_decoder.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
@@ -333,47 +334,45 @@ final class WorkshopProposalImplementationRunner {
 
     // Fail before staging: Android res/drawable is not a Flutter asset.
     // A bounded malformed-proposal retry can then repair this concrete error.
-    _rejectInvalidFlutterResourceLookup(result.text);
+    _rejectInvalidFlutterResourceLookup(session, result.text);
     return _stager.stage(
       session: session,
       responseText: result.text,
     );
   }
 
-  static void _rejectInvalidFlutterResourceLookup(String responseText) {
-    Object? decoded;
-    try {
-      decoded = jsonDecode(responseText);
-    } on FormatException {
-      // Let the canonical proposal decoder report malformed JSON itself.
-      return;
-    }
-    if (decoded is! Map<String, dynamic>) return;
-    final changes = decoded['changes'];
-    if (changes is! List) return;
+  static void _rejectInvalidFlutterResourceLookup(
+    WorkspaceSession session,
+    String responseText,
+  ) {
+    // Decode through the same normalizer as the stager: local proposals may
+    // carry JSON fences, leading prose, file aliases or repaired strings.
+    // Check exactly the file contents that would otherwise be staged.
+    final proposal = WorkshopChangeProposalDecoder.decode(
+      requestId: session.context.request.id,
+      responseText: responseText,
+      existingPaths: session.workspace.paths.toSet(),
+    );
     final androidDrawableLookup = RegExp(
       r'''rootBundle\s*\.\s*load(?:String)?\s*\(\s*["'](?:drawable/|res/drawable/|android/app/src/main/res/)''',
     );
-    for (final change in changes) {
-      if (change is! Map) continue;
-      final path = change['path'];
-      final content = change['content'];
-      if (path is! String ||
-          !path.toLowerCase().endsWith('.dart') ||
-          content is! String) {
+    for (final change in proposal.changes) {
+      if (change.isDeletion ||
+          !change.path.toLowerCase().endsWith('.dart')) {
         continue;
       }
+      final content = change.afterContent;
+      if (content == null) continue;
       if (androidDrawableLookup.hasMatch(content)) {
         throw FormatException(
           'Flutter rootBundle cannot load Android res/drawable files as '
           'Flutter assets. Implement the visual element and its touch/color '
           'state in Dart widgets instead.',
-          path,
+          change.path,
         );
       }
     }
   }
-
   String _buildPrompt(
     WorkspaceSession session, {
     WorkshopPreflightInferenceResult? preflight,
@@ -384,17 +383,21 @@ final class WorkshopProposalImplementationRunner {
     final request = session.context.request;
     final snapshot = session.workspace.snapshot;
     final taskText = '${request.title} ${request.instruction}'.toLowerCase();
-    final starInteraction = RegExp(r'\b(stella|stelle|star)\b')
-            .hasMatch(taskText) &&
-        RegExp(r'(tocc|tap|clic|click|prem|color|colore)')
+    final mentionsStar = RegExp(r'\b(stella|stelle|star|stars)\b').hasMatch(taskText);
+    final requestsTouch =
+        RegExp(r'\b(tocc\w*|tap\w*|tapp\w*|clic\w*|click\w*|prem\w*)\b')
             .hasMatch(taskText);
-    final starAcceptance = starInteraction
-        ? 'ACCEPTANCE: show a visible centered star on black background; '
-            'touch must change the STAR color via Flutter state/setState, '
-            'not the background. Use Icon(Icons.star) or a real star path; '
-            'never read Android drawable XML with rootBundle.'
+    final requestsColorChange =
+        RegExp(r'\b(cambi\w*|modific\w*|altern\w*|chang\w*|switch\w*|cycl\w*|varia\w*)\b')
+                .hasMatch(taskText) &&
+            RegExp(r'\b(colou?r\w*|tint\w*)\b').hasMatch(taskText);
+    final starAcceptance = mentionsStar && requestsTouch && requestsColorChange
+        ? 'ACCEPTANCE: follow only the explicitly requested star interaction. '
+            'If the task requires tapping to change the STAR color, update '
+            'that star via Flutter state/setState, not unrelated background. '
+            'Preserve the specified layout, backdrop and initial colors; '
+            'do not add defaults or extra behavior.'
         : '';
-
     final architectPlan = WorkshopTaskPlanProjection.project(
       preflight?.architecture?.text,
     );
