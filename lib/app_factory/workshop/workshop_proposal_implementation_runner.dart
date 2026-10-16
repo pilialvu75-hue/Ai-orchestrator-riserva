@@ -392,17 +392,36 @@ final class WorkshopProposalImplementationRunner {
       'loadStructuredData',
       'loadStructuredBinaryData',
     };
-    // Defer ambiguous locally shadowed identifiers to Reviewer/Validation.
-    if (_hasLocalRootBundleBinding(tokens)) return false;
+    // Suppress only occurrences shadowed by a local/parameter binding.
+    // Other functions still use Flutter's imported global rootBundle.
+    final localScopes = _rootBundleLocalScopes(tokens);
+    final flutterPrefixes = _flutterServicesImportPrefixes(tokens);
     // Match the rootBundle receiver, including every section of a Dart
     // cascade. Never associate methods on unrelated receiver expressions.
     for (var i = 0; i < tokens.length; i++) {
-      if (tokens[i].isString || tokens[i].value != 'rootBundle' ||
-          (i > 0 && tokens[i - 1].value == '.')) continue;
+      if (tokens[i].isString || tokens[i].value != 'rootBundle') continue;
+      if (localScopes.any((range) => i >= range.start && i < range.end)) {
+        continue;
+      }
+      if (i > 0 && tokens[i - 1].value == '.' &&
+          !(i >= 2 && flutterPrefixes.contains(tokens[i - 2].value))) {
+        continue;
+      }
       var offset = i + 1;
       var inCascade = false;
       while (offset < tokens.length) {
         if (tokens[offset].value == '?') offset++;
+        if (inCascade && offset < tokens.length &&
+            tokens[offset].value == '[') {
+          var level = 0;
+          do {
+            if (tokens[offset].value == '[') level++;
+            if (tokens[offset].value == ']') level--;
+            offset++;
+          } while (offset < tokens.length && level > 0);
+          if (level != 0) break;
+          continue;
+        }
         if (offset >= tokens.length || tokens[offset].value != '.') break;
         offset++;
         final cascade = offset < tokens.length &&
@@ -426,7 +445,12 @@ final class WorkshopProposalImplementationRunner {
           } while (offset < tokens.length && depth > 0);
           if (depth != 0) break;
         }
-        if (offset >= tokens.length || tokens[offset].value != '(') break;
+        if (offset >= tokens.length || tokens[offset].value != '(') {
+          // A getter (.first, .length) can appear between cascade
+          // sections. It does not change the cascade's original receiver.
+          if (tailSelector) continue;
+          break;
+        }
         final open = offset;
         final argument = open + 1;
         if (!tailSelector && loadMethods.contains(method) &&
@@ -464,27 +488,93 @@ final class WorkshopProposalImplementationRunner {
     return false;
   }
 
-  static bool _hasLocalRootBundleBinding(
+  static Set<String> _flutterServicesImportPrefixes(
     List<_WorkshopDartSourceToken> tokens,
   ) {
-    for (var i = 1; i + 1 < tokens.length; i++) {
-      if (tokens[i].isString || tokens[i].value != 'rootBundle') continue;
-      final previous = tokens[i - 1].value;
-      final following = tokens[i + 1].value;
-      // Conservative source-only check: declarations or parameters can
-      // shadow the Flutter global. Leave such cases to Reviewer/Validation.
-      if (<String>{'show', 'hide', 'as', 'import', 'export'}
-          .contains(previous)) continue;
-      final possibleType =
-          previous == 'var' || previous == 'final' ||
-          previous == 'late' || previous == 'dynamic' ||
-          RegExp(r'^[A-Z][A-Za-z0-9_]*$').hasMatch(previous);
-      if (possibleType &&
-          <String>{'=', ';', ')', ','}.contains(following)) {
-        return true;
+    final prefixes = <String>{};
+    for (var i = 0; i + 3 < tokens.length; i++) {
+      if (tokens[i].value != 'import' ||
+          !tokens[i + 1].isString ||
+          tokens[i + 1].value != 'package:flutter/services.dart') {
+        continue;
+      }
+      for (var j = i + 2; j + 1 < tokens.length; j++) {
+        if (tokens[j].value == ';') break;
+        if (tokens[j].value == 'as' && !tokens[j + 1].isString) {
+          prefixes.add(tokens[j + 1].value);
+          break;
+        }
       }
     }
-    return false;
+    return prefixes;
+  }
+
+  static List<({int start, int end})> _rootBundleLocalScopes(
+    List<_WorkshopDartSourceToken> tokens,
+  ) {
+    // Scope an obvious local/parameter binding to its enclosing block.
+    // Avoid the previous file-wide suppression: helper parameters may
+    // coexist with genuine global accesses in other functions.
+    final scopes = <({int start, int end})>[];
+    final braces = <int>[];
+    final parens = <int>[];
+    final braceAt = List<int?>.filled(tokens.length, null);
+    final parenAt = List<int?>.filled(tokens.length, null);
+    final braceEnds = <int, int>{};
+    final parenEnds = <int, int>{};
+    for (var i = 0; i < tokens.length; i++) {
+      braceAt[i] = braces.isEmpty ? null : braces.last;
+      parenAt[i] = parens.isEmpty ? null : parens.last;
+      if (tokens[i].isString) continue;
+      switch (tokens[i].value) {
+        case '{':
+          braces.add(i);
+        case '}':
+          if (braces.isNotEmpty) braceEnds[braces.removeLast()] = i;
+        case '(':
+          parens.add(i);
+        case ')':
+          if (parens.isNotEmpty) parenEnds[parens.removeLast()] = i;
+      }
+    }
+    for (var i = 1; i + 1 < tokens.length; i++) {
+      if (tokens[i].isString || tokens[i].value != 'rootBundle') continue;
+      final prev = tokens[i - 1].value;
+      final next = tokens[i + 1].value;
+      if (<String>{'show', 'hide', 'as', 'import', 'export'}
+          .contains(prev)) continue;
+      final nullableType = prev == '?' && i >= 2 &&
+          RegExp(r'^[A-Z][A-Za-z0-9_]*$').hasMatch(tokens[i - 2].value);
+      final hasType = nullableType ||
+          <String>{'var', 'final', 'late', 'dynamic'}.contains(prev) ||
+          RegExp(r'^[A-Z][A-Za-z0-9_]*$').hasMatch(prev);
+      if (!hasType ||
+          !<String>{'=', ';', ')', ',', '?'}.contains(next)) continue;
+
+      final enclosingParen = parenAt[i];
+      if (enclosingParen != null) {
+        final endParen = parenEnds[enclosingParen];
+        if (endParen != null) {
+          // Function parameter: resolve its following body, if any.
+          var cursor = endParen + 1;
+          while (cursor < tokens.length && cursor < endParen + 8 &&
+              !<String>{'{', ';', '=>'}.contains(tokens[cursor].value)) {
+            cursor++;
+          }
+          if (cursor < tokens.length && tokens[cursor].value == '{' &&
+              braceEnds.containsKey(cursor)) {
+            scopes.add((start: cursor, end: braceEnds[cursor]! + 1));
+            continue;
+          }
+        }
+      }
+      final block = braceAt[i];
+      scopes.add((
+        start: i,
+        end: block == null ? tokens.length : (braceEnds[block] ?? tokens.length),
+      ));
+    }
+    return scopes;
   }
 
   // Only actual flutter.assets entries authorize keys under drawable/.
