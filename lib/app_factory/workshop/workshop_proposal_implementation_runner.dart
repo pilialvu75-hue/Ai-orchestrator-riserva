@@ -384,7 +384,7 @@ final class WorkshopProposalImplementationRunner {
     final request = session.context.request;
     final snapshot = session.workspace.snapshot;
     final taskText = '${request.title} ${request.instruction}'.toLowerCase();
-    final starInteraction = RegExp(r'\\b(stella|stelle|star)\\b')
+    final starInteraction = RegExp(r'\b(stella|stelle|star)\b')
             .hasMatch(taskText) &&
         RegExp(r'(tocc|tap|clic|click|prem|color|colore)')
             .hasMatch(taskText);
