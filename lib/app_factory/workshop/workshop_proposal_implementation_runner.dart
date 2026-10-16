@@ -413,6 +413,8 @@ final class WorkshopProposalImplementationRunner {
     if (pubspec == null || pubspec.isEmpty) return false;
     var inFlutter = false;
     var inAssets = false;
+    int? flutterChildIndent;
+    int? assetEntryIndent;
     for (final line in pubspec.split('\n')) {
       final trimmed = line.trim();
       if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
@@ -420,14 +422,25 @@ final class WorkshopProposalImplementationRunner {
       if (indent == 0) {
         inFlutter = trimmed == 'flutter:';
         inAssets = false;
+        flutterChildIndent = null;
+        assetEntryIndent = null;
         continue;
       }
       if (!inFlutter) continue;
-      if (indent == 2) {
+      // YAML block indentation is relative to its parent, not a fixed
+      // number of spaces. Only direct children of flutter: are eligible
+      // for an assets: list, never nested unrelated keys.
+      flutterChildIndent ??= indent;
+      if (indent == flutterChildIndent) {
         inAssets = trimmed == 'assets:';
+        assetEntryIndent = null;
         continue;
       }
-      if (!inAssets || indent < 4 || !trimmed.startsWith('- ')) continue;
+      if (!inAssets || indent <= flutterChildIndent || !trimmed.startsWith('- ')) {
+        continue;
+      }
+      assetEntryIndent ??= indent;
+      if (indent != assetEntryIndent) continue;
       var entry = trimmed.substring(2).trim();
       if (entry.length >= 2 &&
           ((entry.startsWith("'") && entry.endsWith("'")) ||
