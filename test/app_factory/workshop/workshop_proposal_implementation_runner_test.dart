@@ -173,6 +173,26 @@ void main() { services.rootBundle.loadString('res/drawable/star.xml'); }
           retry: true,
         ),
         (
+          id: 'keyword-return-grouped-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+Future<String> helper() async {
+  return (rootBundle).loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'keyword-await-grouped-prefixed-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+Future<void> main() async {
+  await (services.rootBundle).loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
           id: 'grouped-prefixed-global',
           code: '''
 import 'package:flutter/services.dart' as services;
