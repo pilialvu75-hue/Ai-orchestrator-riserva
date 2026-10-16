@@ -447,8 +447,8 @@ final class WorkshopProposalImplementationRunner {
   // This bounded lexer is not an analyzer; later review/validation remain strict.
   static List<_WorkshopDartSourceToken> _dartSourceTokens(String source) {
     final result = <_WorkshopDartSourceToken>[];
-    late int Function(int, {bool untilClosingBrace}) scan;
-    scan = (int start, {bool untilClosingBrace = false}) {
+    late int Function(int, {required bool untilClosingBrace}) scan;
+    scan = (int start, {required bool untilClosingBrace}) {
       var offset = start;
       var braceDepth = 0;
       while (offset < source.length) {
@@ -544,7 +544,7 @@ final class WorkshopProposalImplementationRunner {
       }
       return offset;
     };
-    scan(0);
+    scan(0, untilClosingBrace: false);
     return result;
   }
 
