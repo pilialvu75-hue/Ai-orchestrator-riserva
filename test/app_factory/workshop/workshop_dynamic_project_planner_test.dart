@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dynamic_project_planner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_router.dart';
@@ -19,6 +20,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
+import 'package:ai_orchestrator/core/tools/tool.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -508,6 +510,220 @@ void main() {
         isTrue);
   });
 
+  test('oversized owner request never reaches initial Orchestrator inference',
+      () async {
+    final provider = _ScriptedProvider(<String>[]);
+    final gateways = <AppAiRole, WorkshopInferenceGateway>{
+      for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+        role: WorkshopInferenceGateway(provider: provider),
+    };
+    final planner = WorkshopDynamicProjectPlanner(
+      enableOrchestratorBrief: true,
+      inference: WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(gateways: gateways),
+        ),
+      ),
+    );
+    await expectLater(
+      planner.plan(
+        request: WorkshopRequest(
+          id: 'oversized-owner',
+          title: 'Offline app',
+          instruction: 'x' * 1801,
+          operation: WorkshopOperation.create,
+        ),
+      ),
+      throwsFormatException,
+    );
+    await expectLater(
+      planner.plan(
+        request: const WorkshopRequest(
+          id: 'oversized-rules',
+          title: 'Offline app',
+          instruction: 'Create an app',
+          operation: WorkshopOperation.create,
+        ),
+        requirements: <String>['mandatory rule ' * 190],
+      ),
+      throwsFormatException,
+    );
+    expect(provider.requests, isEmpty);
+  });
+
+  test('long untrusted source URLs are bounded in both Architect attempts',
+      () async {
+    final provider = _ScriptedProvider(<String>[
+      'bad',
+      _singlePlan(),
+    ]);
+    final longUrl = 'https://malicious.example/' + ('redirect=' * 5000);
+    final evidence = WorkshopWebEvidencePack(
+      attempted: true,
+      evidence: <WorkshopWebResearchEvidence>[
+        WorkshopWebResearchEvidence(
+          lane: WorkshopWebResearchLane.competitors,
+          query: 'similar apps',
+          output: 'Comparable app ideas',
+          success: true,
+          sources: <WorkshopWebResearchSource>[
+            WorkshopWebResearchSource(
+              title: 'Untrusted redirect',
+              url: longUrl,
+              snippet: 'Features',
+            ),
+          ],
+        ),
+      ],
+    );
+    await _planner(provider).plan(
+      request: const WorkshopRequest(
+        id: 'long-url',
+        title: 'Shopping list',
+        instruction: 'Build an offline shopping list.',
+        operation: WorkshopOperation.create,
+      ),
+      webEvidence: evidence,
+    );
+    expect(provider.requests, hasLength(2));
+    for (final request in provider.requests) {
+      expect(request.prompt.length, lessThan(5500));
+      expect(request.prompt, contains('https://malicious.example/'));
+      expect(request.prompt, isNot(contains(longUrl)));
+    }
+  });
+
+  test('greenfield compares apps before the initial Architect plan', () async {
+    final web = _RecordingProjectSearch();
+    final provider = _ScriptedProvider(<String>[_singlePlan()]);
+    final controller = WorkshopDashboardController(
+      engine: WorkshopEngine(),
+      projectPlanner: _planner(provider),
+      webResearchService: WorkshopWebResearchService(webSearchTool: web),
+    );
+    addTearDown(controller.dispose);
+    final plan = await controller.startPlannedProduction(
+      title: 'Lista Spesa',
+      instruction: 'Crea un app per la lista della spesa.',
+    );
+    expect(plan.tasks, hasLength(1));
+    expect(web.queries, hasLength(3));
+    expect(provider.requests.single.prompt, contains('EXTERNAL DESIGN REFERENCES'));
+    expect(provider.requests.single.prompt, contains('similar apps products features UX'));
+    expect(provider.requests.single.prompt, contains('untrusted-example.test'));
+  });
+
+  test('offline greenfield makes no Web requests while planning', () async {
+    final web = _RecordingProjectSearch();
+    final provider = _ScriptedProvider(<String>[_singlePlan()]);
+    final controller = WorkshopDashboardController(
+      engine: WorkshopEngine(),
+      projectPlanner: _planner(provider),
+      webResearchService: WorkshopWebResearchService(webSearchTool: web),
+    );
+    addTearDown(controller.dispose);
+    await controller.startPlannedProduction(
+      title: 'Lista Spesa',
+      instruction: 'Crea una lista della spesa offline.',
+      isOffline: true,
+    );
+    expect(web.queries, isEmpty);
+    expect(provider.requests.single.prompt,
+        isNot(contains('EXTERNAL DESIGN REFERENCES')));
+    expect(provider.requests.single.isOffline, isTrue);
+  });
+
+  test('failed similar-app research does not block project planning', () async {
+    final web = _RecordingProjectSearch(fail: true);
+    final provider = _ScriptedProvider(<String>[_singlePlan()]);
+    final controller = WorkshopDashboardController(
+      engine: WorkshopEngine(),
+      projectPlanner: _planner(provider),
+      webResearchService: WorkshopWebResearchService(webSearchTool: web),
+    );
+    addTearDown(controller.dispose);
+    final plan = await controller.startPlannedProduction(
+      title: 'Lista Spesa',
+      instruction: 'Crea una lista della spesa.',
+    );
+    expect(plan.tasks, hasLength(1));
+    expect(web.queries, hasLength(3));
+    expect(provider.requests.single.prompt,
+        isNot(contains('EXTERNAL DESIGN REFERENCES')));
+  });
+
+  test('initial Orchestrator brief reaches Architect without rewriting owner goal',
+      () async {
+    final provider = _ScriptedProvider(<String>[
+      '{"objective":"Color-change star","implementationGuidance":'
+      '"Use Flutter state for touch handling","verificationIdeas":'
+      '["Tap recolors star, not background"],"assumptions":[]}',
+      _singlePlan(),
+    ]);
+    final gateways = <AppAiRole, WorkshopInferenceGateway>{
+      for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+        role: WorkshopInferenceGateway(provider: provider),
+    };
+    final planner = WorkshopDynamicProjectPlanner(
+      enableOrchestratorBrief: true,
+      inference: WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(gateways: gateways),
+        ),
+      ),
+    );
+    final plan = await planner.plan(
+      request: const WorkshopRequest(
+        id: 'initial-brief',
+        title: 'Stella',
+        instruction: 'Sfondo nero, stella centrale che cambia colore al tocco.',
+        operation: WorkshopOperation.create,
+      ),
+      validationCriteria: const <String>['Touch recolors the star.'],
+    );
+    expect(plan.tasks, hasLength(1));
+    expect(provider.requests, hasLength(2));
+    expect(provider.requests.first.sessionId, contains('initial-orchestrator'));
+    expect(provider.requests.last.sessionId, contains(':project-plan'));
+    expect(provider.requests.last.prompt, contains('ORCHESTRATOR DESIGN BRIEF'));
+    expect(provider.requests.last.prompt, contains('Use Flutter state'));
+    expect(provider.requests.last.prompt, contains('Sfondo nero, stella centrale'));
+    expect(provider.requests.last.prompt, contains('Touch recolors the star.'));
+  });
+
+  test('malformed Orchestrator analysis cannot block first project plan',
+      () async {
+    final provider = _ScriptedProvider(<String>[
+      'broken summary',
+      _singlePlan(),
+    ]);
+    final gateways = <AppAiRole, WorkshopInferenceGateway>{
+      for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+        role: WorkshopInferenceGateway(provider: provider),
+    };
+    final planner = WorkshopDynamicProjectPlanner(
+      enableOrchestratorBrief: true,
+      inference: WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(gateways: gateways),
+        ),
+      ),
+    );
+    final plan = await planner.plan(
+      request: const WorkshopRequest(
+        id: 'failed-brief',
+        title: 'Stella',
+        instruction: 'Crea una stella interattiva.',
+        operation: WorkshopOperation.create,
+      ),
+    );
+    expect(plan.tasks, hasLength(1));
+    expect(provider.requests, hasLength(2));
+    expect(provider.requests.last.prompt,
+        isNot(contains('ORCHESTRATOR DESIGN BRIEF')));
+    expect(provider.requests.last.prompt, contains('Crea una stella interattiva.'));
+  });
+
   test('planner preserves explicit offline mode to Architect inference',
       () async {
     final provider = _ScriptedProvider(<String>[_singlePlan()]);
@@ -765,6 +981,33 @@ void main() {
     expect(engine.requests, isEmpty);
     expect(controller.state.hasProject, isFalse);
   });
+}
+
+final class _RecordingProjectSearch implements Tool {
+  _RecordingProjectSearch({this.fail = false});
+
+  final bool fail;
+  final List<String> queries = <String>[];
+
+  @override
+  String get id => 'web_search';
+  @override
+  String get name => 'Mock project discovery';
+  @override
+  String get description => 'Test-only comparable app search';
+
+  @override
+  Future<ToolResult> execute(Map<String, dynamic> params) async {
+    queries.add((params['query'] as String?) ?? '');
+    if (fail) {
+      return const ToolResult(toolId: 'web_search', output: '', success: false);
+    }
+    return const ToolResult(
+      toolId: 'web_search',
+      output: 'Example: https://untrusted-example.test/similar-app patterns',
+      success: true,
+    );
+  }
 }
 
 WorkshopDynamicProjectPlanner _planner(_ScriptedProvider provider) {

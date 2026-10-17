@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_acceptance_ledger.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 
 /// Esecutore del piano di progetto del Cantiere.
@@ -125,12 +126,13 @@ final class WorkshopProjectExecutor {
       projectPath: null,
       targetFiles: targetFiles,
       constraints: <String>[
-        // Task criteria may be bounded summaries. Carry the complete original
-        // project acceptance into every normal/resumed execution and gate.
-        if (plan.validationCriteria.isNotEmpty)
-          'Project acceptance: ${plan.validationCriteria.join(' | ')}',
-        if (task.validationCriteria.isNotEmpty)
-          'Task acceptance: ${task.validationCriteria.join(' | ')}',
+        // Preserve every authoritative acceptance as an individually indexed,
+        // full-length criterion. Prioritize THIS task within bounded prompts;
+        // Reviewer and Validation still receive the complete constraint list.
+        ...WorkshopAcceptanceLedger.entries(
+          taskCriteria: task.validationCriteria,
+          projectCriteria: plan.validationCriteria,
+        ).map((entry) => entry.asConstraint),
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),
@@ -226,12 +228,13 @@ final class WorkshopProjectExecutor {
       operation: operation,
       targetFiles: targetFiles,
       constraints: <String>[
-        // Task criteria may be bounded summaries. Carry the complete original
-        // project acceptance into every normal/resumed execution and gate.
-        if (plan.validationCriteria.isNotEmpty)
-          'Project acceptance: ${plan.validationCriteria.join(' | ')}',
-        if (task.validationCriteria.isNotEmpty)
-          'Task acceptance: ${task.validationCriteria.join(' | ')}',
+        // Preserve every authoritative acceptance as an individually indexed,
+        // full-length criterion. Prioritize THIS task within bounded prompts;
+        // Reviewer and Validation still receive the complete constraint list.
+        ...WorkshopAcceptanceLedger.entries(
+          taskCriteria: task.validationCriteria,
+          projectCriteria: plan.validationCriteria,
+        ).map((entry) => entry.asConstraint),
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),

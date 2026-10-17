@@ -69,8 +69,16 @@ void main() {
         original.effectiveWorkspaceProjectId);
     expect(bundle.dashboardController.engine.plans, contains(original));
     expect(handle.session.context.request.targetFiles, ['lib/app.dart']);
-    expect(handle.session.context.request.constraints.join(' '),
-        contains(originalCriteria.join(' | ')));
+    // Every exact owner acceptance survives independently, not as a
+    // truncated mega-string. The original long trailing criterion stays whole.
+    final receivedConstraints = handle.session.context.request.constraints;
+    for (var index = 0; index < originalCriteria.length; index++) {
+      expect(
+        receivedConstraints,
+        contains('Project acceptance [PROJECT-${(index + 1).toString().padLeft(3, '0')}]: '
+            '${originalCriteria[index]}'),
+      );
+    }
     expect(handle.plan.validationCriteria, containsAll(originalCriteria));
     expect(handle.plan.tasks.single.validationCriteria.length,
         lessThanOrEqualTo(8));
@@ -121,6 +129,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
@@ -301,7 +310,10 @@ void main() {
         AppAiRole.workshopOrchestrator: _QueueGateway(
           role: AppAiRole.workshopOrchestrator,
           calls: calls,
-          results: <WorkshopInferenceResult>[_success('{}')],
+          results: <WorkshopInferenceResult>[
+          _success(_orchestratorBriefJson),
+          _success('{}'),
+        ],
         ),
         AppAiRole.architect: _QueueGateway(
           role: AppAiRole.architect,
@@ -351,6 +363,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
@@ -436,6 +449,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
@@ -548,6 +562,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
@@ -658,6 +673,12 @@ final class _FakeLibraryReadClient implements WorkshopLibraryReadClient {
   }
 }
 
+const String _orchestratorBriefJson =
+    '{"objective":"Implement approved app behavior",'
+    '"implementationGuidance":"Keep the project in Flutter",'
+    '"verificationIdeas":["Verify intended interaction"],'
+    '"assumptions":[]}';
+
 const String _planningJson =
     '{"phases":[{"id":"implementation","title":"Implementation",'
     '"description":"Implement and verify the requested change","dependsOn":[]}],'
@@ -686,7 +707,10 @@ Map<AppAiRole, WorkshopInferenceGateway> _gateways(List<AppAiRole> calls) =>
       AppAiRole.workshopOrchestrator: _QueueGateway(
         role: AppAiRole.workshopOrchestrator,
         calls: calls,
-        results: <WorkshopInferenceResult>[_success('{}')],
+        results: <WorkshopInferenceResult>[
+          _success(_orchestratorBriefJson),
+          _success('{}'),
+        ],
       ),
       AppAiRole.architect: _QueueGateway(
         role: AppAiRole.architect,

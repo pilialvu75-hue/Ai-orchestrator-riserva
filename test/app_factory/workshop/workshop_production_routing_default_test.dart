@@ -19,6 +19,10 @@ void main() {
     final executor = WorkshopProjectExecutor(gateway: workspace);
 
     final orchestrator = _CapturingGateway(<WorkshopInferenceResult>[
+      _success('{"objective":"Update app safely",'
+          '"implementationGuidance":"Use a bounded Flutter change",'
+          '"verificationIdeas":["Review the actual behavior"],'
+          '"assumptions":[]}'),
       _success('{}'),
     ]);
     final architect = _CapturingGateway(<WorkshopInferenceResult>[
