@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_de
 import 'package:ai_orchestrator/app_factory/workshop/workshop_local_toolchain_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_planner.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_web_research_service.dart';
 //import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
@@ -215,11 +216,13 @@ final class WorkshopDashboardController extends ChangeNotifier {
     WorkshopLocalToolchainService? localToolchainService,
     WorkshopBuildLab? buildLab,
     WorkshopDynamicProjectPlanner? projectPlanner,
+    WorkshopWebResearchService? webResearchService,
   })  : _engine = engine,
         _localToolchainService =
             localToolchainService ?? WorkshopLocalToolchainService(),
         _buildLab = buildLab ?? WorkshopBuildLab(),
-        _projectPlanner = projectPlanner {
+        _projectPlanner = projectPlanner,
+        _webResearchService = webResearchService {
     _stageSubscription = _engine.stageStream.listen(
       _handleStageEvent,
     );
@@ -232,6 +235,9 @@ final class WorkshopDashboardController extends ChangeNotifier {
   final WorkshopBuildLab _buildLab;
 
   final WorkshopDynamicProjectPlanner? _projectPlanner;
+
+  /// Optional read-only similar-app discovery for the first project plan.
+  final WorkshopWebResearchService? _webResearchService;
 
   WorkshopDashboardControllerState _state =
       const WorkshopDashboardControllerState();
@@ -614,6 +620,17 @@ final class WorkshopDashboardController extends ChangeNotifier {
 
     _setBusy(true);
     try {
+      // Comparable apps are evidence for planning, not new requirements.
+      // Offline, missing HTTP, or failed Web discovery never block creation.
+      var webEvidence = const WorkshopWebEvidencePack();
+      final research = _webResearchService;
+      if (!isOffline && !buildRepair && research != null) {
+        try {
+          webEvidence = await research.research(request: request);
+        } catch (_) {
+          // Best-effort discovery does not change project authorization.
+        }
+      }
       final dynamicPlan = await planner.plan(
         request: request,
         requirements: requirements,
@@ -622,6 +639,7 @@ final class WorkshopDashboardController extends ChangeNotifier {
         validationCriteria: validationCriteria,
         buildRepair: buildRepair,
         isOffline: isOffline,
+        webEvidence: webEvidence,
       );
 
       _engine.createProjectPlan(
