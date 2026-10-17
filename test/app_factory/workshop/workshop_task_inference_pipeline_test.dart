@@ -155,6 +155,177 @@ void main() {
       expect(gateway.pushCalls, 0);
     });
 
+    test('architecture rejection hands off to Architect then the same Engineer',
+        () async {
+      final order = <AppAiRole>[];
+      final engineer = _QueueGateway(
+        role: AppAiRole.engineer,
+        callOrder: order,
+        results: <WorkshopInferenceResult>[
+          _success(_proposalJson),
+          _success(_repairedProposalJson),
+        ],
+      );
+      final reviewer = _QueueGateway(
+        role: AppAiRole.reviewer,
+        callOrder: order,
+        results: <WorkshopInferenceResult>[
+          _success('{"approved":false,"summary":"Plan needs a state design",'
+              '"findings":["HANDOFF:ARCHITECT"],"warnings":[]}'),
+          _success(_approvedReviewJson),
+          _success(_validValidationJson),
+        ],
+      );
+      final gateways = _gateways(
+        engineer: engineer,
+        reviewer: reviewer,
+        callOrder: order,
+      );
+      gateways[AppAiRole.architect] = _QueueGateway(
+        role: AppAiRole.architect,
+        callOrder: order,
+        results: <WorkshopInferenceResult>[
+          _success('Use a local stateful widget for the requested change.'),
+        ],
+      );
+      final realGateway = _RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      );
+      final session = await _session(realGateway);
+      final result = await WorkshopTaskInferencePipeline(
+        inference: _stageInference(gateways),
+      ).run(session: session);
+
+      expect(result.readyForApproval, isTrue);
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(order, <AppAiRole>[
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.architect,
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+      ]);
+      expect(engineer.prompts.last, contains('stateful widget'));
+      expect(gateways[AppAiRole.architect]!.prompts.single,
+          contains('Authorized file scope: lib/app.dart'));
+      expect(realGateway.writeCalls, 0);
+    });
+
+    test('owner conflict routes Orchestrator then Architect before Engineer',
+        () async {
+      final order = <AppAiRole>[];
+      final engineer = _QueueGateway(
+        role: AppAiRole.engineer,
+        callOrder: order,
+        results: <WorkshopInferenceResult>[
+          _success(_proposalJson),
+          _success(_repairedProposalJson),
+        ],
+      );
+      final reviewer = _QueueGateway(
+        role: AppAiRole.reviewer,
+        callOrder: order,
+        results: <WorkshopInferenceResult>[
+          _success('{"approved":false,"summary":"Owner scope needs analysis",'
+              '"findings":["HANDOFF:ORCHESTRATOR"],"warnings":[]}'),
+          _success(_approvedReviewJson),
+          _success(_validValidationJson),
+        ],
+      );
+      final gateways = _gateways(
+        engineer: engineer,
+        reviewer: reviewer,
+        callOrder: order,
+      );
+      gateways[AppAiRole.workshopOrchestrator] = _QueueGateway(
+        role: AppAiRole.workshopOrchestrator,
+        callOrder: order,
+        results: <WorkshopInferenceResult>[
+          _success('Keep the original owner task; do not add features.'),
+        ],
+      );
+      gateways[AppAiRole.architect] = _QueueGateway(
+        role: AppAiRole.architect,
+        callOrder: order,
+        results: <WorkshopInferenceResult>[
+          _success('Implement only the current authorized files.'),
+        ],
+      );
+      final session = await _session(_RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      ));
+      final result = await WorkshopTaskInferencePipeline(
+        inference: _stageInference(gateways),
+      ).run(session: session);
+
+      expect(result.readyForApproval, isTrue);
+      expect(order, <AppAiRole>[
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.workshopOrchestrator,
+        AppAiRole.architect,
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+      ]);
+      expect(engineer.prompts.last,
+          contains('Implement only the current authorized files.'));
+    });
+
+    test('failed Architect handoff leaves Reviewer rejection authoritative',
+        () async {
+      final order = <AppAiRole>[];
+      final engineer = _QueueGateway(
+        role: AppAiRole.engineer,
+        callOrder: order,
+        results: <WorkshopInferenceResult>[
+          _success(_proposalJson),
+          _success(_repairedProposalJson),
+        ],
+      );
+      final reviewer = _QueueGateway(
+        role: AppAiRole.reviewer,
+        callOrder: order,
+        results: <WorkshopInferenceResult>[
+          _success('{"approved":false,"summary":"Replan required",'
+              '"findings":["HANDOFF:ARCHITECT"],"warnings":[]}'),
+        ],
+      );
+      final gateways = _gateways(
+        engineer: engineer,
+        reviewer: reviewer,
+        callOrder: order,
+      );
+      gateways[AppAiRole.architect] = _QueueGateway(
+        role: AppAiRole.architect,
+        callOrder: order,
+        results: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '',
+            terminalState: InferenceTerminalState.failed,
+          ),
+        ],
+      );
+      final session = await _session(_RecordingWorkspaceGateway(
+        files: <String, String>{'lib/app.dart': 'old'},
+      ));
+      final result = await WorkshopTaskInferencePipeline(
+        inference: _stageInference(gateways),
+      ).run(session: session);
+
+      expect(result.readyForApproval, isFalse);
+      expect(result.review.approved, isFalse);
+      expect(engineer.calls, 1);
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.isApplyApproved, isFalse);
+      expect(order, <AppAiRole>[
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.architect,
+      ]);
+    });
+
     test('Reviewer rejection triggers one Engineer revision and re-review',
         () async {
       final callOrder = <AppAiRole>[];
