@@ -285,6 +285,80 @@ void main() {
           retry: true,
         ),
         (
+          id: 'arrow-grouped-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+Future<String> helper() =>
+    (rootBundle).loadString('res/drawable/star.xml');
+''',
+          retry: true,
+        ),
+        (
+          id: 'arrow-grouped-prefixed-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+Future<String> helper() async =>
+    await (services.rootBundle).loadString('res/drawable/star.xml');
+''',
+          retry: true,
+        ),
+        (
+          id: 'named-last-custom-parameter',
+          code: '''
+class CustomBundle {
+  String loadString(String value) => value;
+}
+void helper({required CustomBundle rootBundle}) {
+  rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'optional-last-custom-parameter',
+          code: '''
+class CustomBundle {
+  String loadString(String value) => value;
+}
+void helper([CustomBundle? rootBundle]) {
+  rootBundle?.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'const-inferred-custom-local',
+          code: '''
+class CustomBundle {
+  const CustomBundle();
+  String loadString(String value) => value;
+}
+void helper() {
+  const rootBundle = CustomBundle();
+  rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'const-inferred-local-does-not-mask-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  const CustomBundle();
+  String loadString(String value) => value;
+}
+void helper() {
+  const rootBundle = CustomBundle();
+  rootBundle.loadString('drawable/help.txt');
+}
+void main() {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
           id: 'string-key-in-cascade-index',
           code: '''
 import 'package:flutter/services.dart' show rootBundle;
