@@ -69,8 +69,16 @@ void main() {
         original.effectiveWorkspaceProjectId);
     expect(bundle.dashboardController.engine.plans, contains(original));
     expect(handle.session.context.request.targetFiles, ['lib/app.dart']);
-    expect(handle.session.context.request.constraints.join(' '),
-        contains(originalCriteria.join(' | ')));
+    // Every exact owner acceptance survives independently, not as a
+    // truncated mega-string. The original long trailing criterion stays whole.
+    final receivedConstraints = handle.session.context.request.constraints;
+    for (var index = 0; index < originalCriteria.length; index++) {
+      expect(
+        receivedConstraints,
+        contains('Project acceptance [PROJECT-${(index + 1).toString().padLeft(3, '0')}]: '
+            '${originalCriteria[index]}'),
+      );
+    }
     expect(handle.plan.validationCriteria, containsAll(originalCriteria));
     expect(handle.plan.tasks.single.validationCriteria.length,
         lessThanOrEqualTo(8));
