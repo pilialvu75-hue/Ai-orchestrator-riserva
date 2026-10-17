@@ -127,6 +127,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         projectPlanner: WorkshopDynamicProjectPlanner(
           inference: stageInference,
         ),
+        webResearchService: resolvedWebResearchService,
       ),
       preflight: preflight,
       taskLifecycle: lifecycle,
