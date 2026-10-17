@@ -121,6 +121,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
@@ -301,7 +302,10 @@ void main() {
         AppAiRole.workshopOrchestrator: _QueueGateway(
           role: AppAiRole.workshopOrchestrator,
           calls: calls,
-          results: <WorkshopInferenceResult>[_success('{}')],
+          results: <WorkshopInferenceResult>[
+          _success(_orchestratorBriefJson),
+          _success('{}'),
+        ],
         ),
         AppAiRole.architect: _QueueGateway(
           role: AppAiRole.architect,
@@ -351,6 +355,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
@@ -436,6 +441,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
@@ -548,6 +554,7 @@ void main() {
     expect(
       calls,
       <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
@@ -658,6 +665,12 @@ final class _FakeLibraryReadClient implements WorkshopLibraryReadClient {
   }
 }
 
+const String _orchestratorBriefJson =
+    '{"objective":"Implement approved app behavior",'
+    '"implementationGuidance":"Keep the project in Flutter",'
+    '"verificationIdeas":["Verify intended interaction"],'
+    '"assumptions":[]}';
+
 const String _planningJson =
     '{"phases":[{"id":"implementation","title":"Implementation",'
     '"description":"Implement and verify the requested change","dependsOn":[]}],'
@@ -686,7 +699,10 @@ Map<AppAiRole, WorkshopInferenceGateway> _gateways(List<AppAiRole> calls) =>
       AppAiRole.workshopOrchestrator: _QueueGateway(
         role: AppAiRole.workshopOrchestrator,
         calls: calls,
-        results: <WorkshopInferenceResult>[_success('{}')],
+        results: <WorkshopInferenceResult>[
+          _success(_orchestratorBriefJson),
+          _success('{}'),
+        ],
       ),
       AppAiRole.architect: _QueueGateway(
         role: AppAiRole.architect,
