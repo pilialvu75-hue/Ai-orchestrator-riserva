@@ -54,6 +54,16 @@ final class WorkshopDynamicProjectPlanner {
     bool isOffline = false,
     CancellationToken? cancellationToken,
   }) async {
+    // Validate owner input before any Orchestrator/Architect inference. A
+    // malformed oversized task must not consume cloud calls or local RAM.
+    _validatePlanningInput(
+      request,
+      requirements: requirements,
+      technologies: technologies,
+      deliverables: deliverables,
+      validationCriteria: validationCriteria,
+      buildRepair: buildRepair,
+    );
     // The owner's exact instruction/constraints remain authoritative. The
     // Orchestrator's interpretation is only advisory context for the Architect.
     final orchestratorBrief =
@@ -451,29 +461,20 @@ final class WorkshopDynamicProjectPlanner {
     );
   }
 
-  static String _prompt(
+  static void _validatePlanningInput(
     WorkshopRequest request, {
     required List<String> requirements,
     required List<String> technologies,
     required List<String> deliverables,
     required List<String> validationCriteria,
-    required WorkshopWebEvidencePack webEvidence,
-    required String orchestratorBrief,
-    required bool compact,
     required bool buildRepair,
   }) {
-    // Keep exact path identities. Silently truncating an allowlist would change
-    // the authorized scope rather than just shortening planning context.
+    // Validate the same authoritative bounds before any model invocation.
     final targets = request.targetFiles.join(', ');
     if (targets.length > 1024) {
       throw const FormatException(
           'Project planning targetFiles exceed prompt bounds.');
     }
-    final bounded = compact || buildRepair;
-    // Mandatory entries must reach the planner intact: dropping a middle
-    // requirement could produce a task allowlist that makes it impossible to
-    // implement later. Reject over-budget scope explicitly, never silently
-    // narrow it. This budget is the same on the primary and compact attempt.
     final mandatory = <String, String>{
       'constraints': request.constraints.join(' | '),
       'requirements': requirements.join(' | '),
@@ -487,12 +488,42 @@ final class WorkshopDynamicProjectPlanner {
         'Project planning requirements/constraints exceed prompt bounds; split the request.',
       );
     }
-    final instruction = request.instruction.trim();
-    if (!buildRepair && instruction.length > 1800) {
+    if (!buildRepair && request.instruction.trim().length > 1800) {
       throw const FormatException(
         'Project planning instruction exceeds prompt bounds; split the request.',
       );
     }
+  }
+
+  static String _prompt(
+    WorkshopRequest request, {
+    required List<String> requirements,
+    required List<String> technologies,
+    required List<String> deliverables,
+    required List<String> validationCriteria,
+    required WorkshopWebEvidencePack webEvidence,
+    required String orchestratorBrief,
+    required bool compact,
+    required bool buildRepair,
+  }) {
+    _validatePlanningInput(
+      request,
+      requirements: requirements,
+      technologies: technologies,
+      deliverables: deliverables,
+      validationCriteria: validationCriteria,
+      buildRepair: buildRepair,
+    );
+    final targets = request.targetFiles.join(', ');
+    final bounded = compact || buildRepair;
+    final mandatory = <String, String>{
+      'constraints': request.constraints.join(' | '),
+      'requirements': requirements.join(' | '),
+      'technologies': technologies.join(' | '),
+      'deliverables': deliverables.join(' | '),
+      'validationCriteria': validationCriteria.join(' | '),
+    };
+    final instruction = request.instruction.trim();
     final buffer = StringBuffer()
       ..writeln('CANTIERE PROJECT PLANNING REQUEST')
       ..writeln('title: ${_excerpt(request.title, bounded ? 120 : 160)}')
@@ -525,7 +556,7 @@ final class WorkshopDynamicProjectPlanner {
           ..writeln('lane: ${entry.lane.name}')
           ..writeln('query: ${_excerpt(entry.query, 100)}')
           ..writeln('evidence: ${_excerpt(entry.output, compact ? 180 : 360)}')
-          ..writeln('sources: ${entry.sources.take(2).map((source) => source.url).join(' | ')}');
+          ..writeln('sources: ${entry.sources.take(2).map((source) => _excerpt(source.url, 160)).join(' | ')}');
       }
     }
 
