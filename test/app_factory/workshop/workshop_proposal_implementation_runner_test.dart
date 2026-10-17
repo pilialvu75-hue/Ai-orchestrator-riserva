@@ -1314,6 +1314,113 @@ class _StarScreenState extends State<StarScreen> {
       expect(gateway.writeCalls, 0);
     });
 
+    test('full TASK and PROJECT acceptance reaches Engineer on every path',
+        () async {
+      final originalInstruction =
+          'Build the exact requested app behavior and preserve owner wording.';
+      final mandatory = <String>[
+        'Task acceptance [TASK-001]: tapping increments the visible counter.',
+        'Task acceptance [TASK-002]: the reset action restores exactly zero.',
+        'Task acceptance [TASK-003]: the controls remain accessible offline.',
+        'Project acceptance [PROJECT-001]: preserve the original black background.',
+        'Project acceptance [PROJECT-002]: Android output remains installable.',
+      ];
+      const successful = WorkshopInferenceResult(
+        text: '{"explanation":"Implements the requested task",'
+            '"changes":[{"path":"lib/app.dart","type":"modification",'
+            '"content":"new"}]}',
+        terminalState: InferenceTerminalState.success,
+      );
+      const runtimeFailure = WorkshopInferenceResult(
+        text: '',
+        terminalState: InferenceTerminalState.failed,
+        errorMessage: 'Local model stalled',
+      );
+      for (final mode in <String>['primary', 'revision', 'runtime-retry']) {
+        final engineer = _StaticGateway(
+          results: mode == 'runtime-retry'
+              ? <WorkshopInferenceResult>[runtimeFailure, successful]
+              : <WorkshopInferenceResult>[successful],
+        );
+        final gateway = _RecordingWorkspaceGateway(
+          files: <String, String>{'lib/app.dart': 'old'},
+        );
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'acceptance-fidelity-$mode',
+            title: 'Owner acceptance contract',
+            instruction: originalInstruction,
+            constraints: mandatory,
+            targetFiles: const <String>['lib/app.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(
+          session: session,
+          revisionAttempt: mode == 'revision' ? 1 : 0,
+        );
+        expect(engineer.calls, mode == 'runtime-retry' ? 2 : 1);
+        for (final prompt in engineer.prompts) {
+          expect(prompt, contains(originalInstruction),
+              reason: 'The owner goal must reach the Engineer in $mode');
+          for (final criterion in mandatory) {
+            expect(prompt, contains(criterion),
+                reason: 'No TASK or PROJECT entry may be lost in $mode');
+          }
+          expect(prompt, contains(mandatory.last),
+              reason: 'Check the final project-wide acceptance entry.');
+        }
+        expect(session.workspace.read('lib/app.dart'), 'new');
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      }
+    });
+
+    test('unrepresentable owner acceptance fails before Engineer inference',
+        () async {
+      const successful = WorkshopInferenceResult(
+        text: '{"explanation":"Unused","changes":'
+            '[{"path":"lib/app.dart","type":"modification","content":"new"}]}',
+        terminalState: InferenceTerminalState.success,
+      );
+      for (final isLongInstruction in <bool>[false, true]) {
+        final engineer = _StaticGateway(result: successful);
+        final gateway = _RecordingWorkspaceGateway(
+          files: <String, String>{'lib/app.dart': 'old'},
+        );
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'unrepresentable-owner-$isLongInstruction',
+            title: 'Never drop mandatory words',
+            instruction: isLongInstruction
+                ? 'original requirement ' * 90
+                : 'Build exactly the required UI',
+            constraints: isLongInstruction
+                ? const <String>['Preserve the layout']
+                : <String>['Project acceptance [PROJECT-001]: '
+                    '${'required behavior ' * 120}FINAL_CRITERION'],
+            targetFiles: const <String>['lib/app.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await expectLater(
+          WorkshopProposalImplementationRunner(
+            inference: _stageInference(_gateways(engineer)),
+          ).run(session: session),
+          throwsA(isA<StateError>().having(
+            (e) => e.message, 'message', contains('bounded context'),
+          )),
+        );
+        expect(engineer.calls, 0);
+        expect(gateway.writeCalls, 0);
+        expect(session.isApplyApproved, isFalse);
+      }
+    });
+
     test(
         'routes only to Engineer and stages proposal for review without writes',
         () async {
