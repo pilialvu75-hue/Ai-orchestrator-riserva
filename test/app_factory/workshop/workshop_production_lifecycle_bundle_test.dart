@@ -77,7 +77,7 @@ void main() {
       );
       expect(
         session.context.request.constraints.first,
-        startsWith('Task acceptance: '),
+        startsWith('Task acceptance [TASK-001]: '),
       );
       expect(
         session.context.request.context,
