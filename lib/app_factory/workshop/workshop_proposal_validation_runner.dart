@@ -101,25 +101,49 @@ final class WorkshopProposalValidationRunner {
     if (covered.length != changes.length) {
       throw StateError('Workshop validation file coverage is incomplete.');
     }
-    // Per-file approvals do not establish cross-file API compatibility.
-    // One additional read-only holistic verdict must pass for multi-file sets.
-    if (changes.length > _filesPerBatch) {
-      _assertUnchanged(session, changes, before, after);
-      final combined = await _validateBatch(
-        session: session,
-        batch: changes,
-        batchIndex: 0,
-        batchCount: 1,
-        holistic: true,
-        implementationPlan: implementationPlan,
-        isOffline: isOffline,
-        cancellationToken: cancellationToken,
+    // Every pair of per-file groups is checked together: pairwise complete
+    // across groups, while each local-model prompt contains at most four files.
+    if (batchCount > 1) {
+      final groups = <List<GitWorkspaceFileChange>>[
+        for (var start = 0; start < changes.length; start += _filesPerBatch)
+          changes.sublist(
+            start,
+            start + _filesPerBatch < changes.length
+                ? start + _filesPerBatch
+                : changes.length,
+          ),
+      ];
+      final pairCount = (groups.length * (groups.length - 1)) ~/ 2;
+      var pairIndex = 0;
+      for (var left = 0; left < groups.length; left++) {
+        for (var right = left + 1; right < groups.length; right++) {
+          _assertUnchanged(session, changes, before, after);
+          final window = <GitWorkspaceFileChange>[
+            ...groups[left],
+            ...groups[right],
+          ];
+          final combined = await _validateBatch(
+            session: session,
+            batch: window,
+            batchIndex: pairIndex,
+            batchCount: pairCount,
+            holistic: true,
+            implementationPlan: implementationPlan,
+            isOffline: isOffline,
+            cancellationToken: cancellationToken,
+          );
+          _assertUnchanged(session, changes, before, after);
+          if (!combined.valid) return combined;
+          summaries.add(combined.summary);
+          checks.addAll(combined.checks);
+          warnings.addAll(combined.warnings);
+          pairIndex++;
+        }
+      }
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_VALIDATION_CROSS_FILE] windows=$pairCount '
+        'groups=${groups.length} files=${changes.length}',
       );
-      _assertUnchanged(session, changes, before, after);
-      if (!combined.valid) return combined;
-      summaries.add(combined.summary);
-      checks.addAll(combined.checks);
-      warnings.addAll(combined.warnings);
     }
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_VALIDATION_COVERAGE] '
@@ -181,7 +205,7 @@ final class WorkshopProposalValidationRunner {
     }
 
     final sessionId = 'workshop:validation:${session.context.request.id}'
-        '${holistic ? ':holistic' : batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount'}';
+        '${holistic ? ':holistic-${batchIndex + 1}-of-$batchCount' : batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount'}';
     var didRetry = false;
     var result = await _inference.complete(
       stage: WorkshopStage.validation,
@@ -471,7 +495,9 @@ Do not return markdown fences or any text outside the JSON object.
     return prompt;
   }
 
-  // A global witness is bounded independently of the number of staged files.
+  // Cross-file witness includes callable declarations AND their call sites
+  // anywhere in the file, not just the beginning/end source excerpt.
+  // Missing detail is never silently promoted to a valid holistic verdict.
   static String? _crossFileExcerpt(String? raw) {
     if (raw == null) return null;
     if (raw.length <= 320) return raw;
@@ -481,20 +507,34 @@ Do not return markdown fences or any text outside the JSON object.
 
   static String _apiSurface(String? raw) {
     if (raw == null || raw.isEmpty) return '';
-    final signature = RegExp(
-      r'^(?:import |export |part |library |class |abstract class |'
-      r'enum |mixin |typedef |extension |(?:static )?(?:void |int |'
-      r'String |bool |Future<|Widget |double |final |const ))',
+    final lines = <String>[];
+    // Any custom return type is allowed. Capture declaration and invocation
+    // lines from the full source, including code in the omitted middle.
+    final callable = RegExp(
+      r'^(?:[\w<>?,.\[\] ]+\s+)?[a-zA-Z_]\w*\s*\([^\n]*\)'
+      r'|\b[a-zA-Z_]\w*\.[a-zA-Z_]\w*\s*\(',
     );
-    final result = <String>[];
+    final directive = RegExp(
+      r'^(?:import |export |part |library |class |abstract class |'
+      r'enum |mixin |typedef |extension )',
+    );
     for (final sourceLine in raw.split('\n')) {
       final line = sourceLine.trim();
-      if (signature.hasMatch(line)) result.add(line);
+      if (line.isEmpty || line.startsWith('//')) continue;
+      if (directive.hasMatch(line) || callable.hasMatch(line)) {
+        lines.add(line);
+      }
     }
-    final joined = result.join('\n');
-    return joined.length <= 480
-        ? joined
-        : '${joined.substring(0, 480)}...[API list truncated]';
+    // Do not silently drop an API/call-site line; it could be the entire
+    // reason for incompatibility. A larger witness cannot receive PASS.
+    final joined = lines.join('\n');
+    if (joined.length > 1400) {
+      throw StateError(
+        'Workshop cross-file API witness exceeds bounded context; '
+        'cannot verify compatibility without additional evidence.',
+      );
+    }
+    return joined;
   }
 
   static bool _isRetryableValidationFormatException(
