@@ -129,18 +129,63 @@ void main() {
       ).run(session: session);
 
       expect(verdict.valid, isTrue);
-      expect(reviewer.calls, 3);
-      expect(verdict.checks, hasLength(3));
+      expect(reviewer.calls, 4); // Three batches plus a global API check.
+      expect(verdict.checks, hasLength(4));
+      expect(reviewer.sessionIdsSeen.last, contains(':holistic'));
+      expect(reviewer.promptsSeen.last, contains('FINAL CROSS-FILE CONSISTENCY CHECK'));
       expect(reviewer.sessionIdsSeen[0], contains('batch-1-of-3'));
       expect(reviewer.sessionIdsSeen[2], contains('batch-3-of-3'));
-      final allPrompts = reviewer.promptsSeen.join(' ');
+      final allPrompts = reviewer.promptsSeen.take(3).join(' ');
       for (final path in <String>[
         'lib/app.dart', 'lib/b.dart', 'lib/c.dart', 'lib/d.dart', 'lib/e.dart',
       ]) {
         expect(allPrompts.split('"path":"$path"').length - 1, 1,
             reason: 'exactly one validation batch must contain $path');
       }
+      for (final path in <String>[
+        'lib/app.dart', 'lib/b.dart', 'lib/c.dart', 'lib/d.dart', 'lib/e.dart',
+      ]) {
+        expect(reviewer.promptsSeen.last, contains('"path":"$path"'));
+      }
       expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.isApplyApproved, isFalse);
+    });
+
+    test('final cross-file contradiction blocks despite green file batches',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"valid":true,"summary":"ok","checks":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '{"valid":true,"summary":"Batch 1 valid"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text: '{"valid":true,"summary":"Batch 2 valid"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text: '{"valid":false,"summary":"Cross-file API mismatch"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final session = await _validationSession(
+        additionalPaths: const <String>['lib/b.dart', 'lib/c.dart'],
+      );
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+      expect(verdict.valid, isFalse);
+      expect(verdict.summary, 'Cross-file API mismatch');
+      expect(reviewer.calls, 3);
+      expect(reviewer.sessionIdsSeen.last, contains(':holistic'));
+      expect(reviewer.promptsSeen.last, contains('"path":"lib/app.dart"'));
+      expect(reviewer.promptsSeen.last, contains('"path":"lib/c.dart"'));
+      expect(session.status, WorkspaceSessionStatus.blocked);
       expect(session.isApplyApproved, isFalse);
     });
 
