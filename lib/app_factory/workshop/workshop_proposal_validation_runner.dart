@@ -38,6 +38,7 @@ final class WorkshopProposalValidationRunner {
   static const int _primaryContextChars = 320;
   static const int _retryContextChars = 160;
   static const int _filesPerBatch = 2;
+  static const int _maxHolisticPromptChars = 7000;
 
   Future<WorkshopValidationVerdict> run({
     required WorkspaceSession session,
@@ -100,6 +101,26 @@ final class WorkshopProposalValidationRunner {
     if (covered.length != changes.length) {
       throw StateError('Workshop validation file coverage is incomplete.');
     }
+    // Per-file approvals do not establish cross-file API compatibility.
+    // One additional read-only holistic verdict must pass for multi-file sets.
+    if (changes.length > _filesPerBatch) {
+      _assertUnchanged(session, changes, before, after);
+      final combined = await _validateBatch(
+        session: session,
+        batch: changes,
+        batchIndex: 0,
+        batchCount: 1,
+        holistic: true,
+        implementationPlan: implementationPlan,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+      _assertUnchanged(session, changes, before, after);
+      if (!combined.valid) return combined;
+      summaries.add(combined.summary);
+      checks.addAll(combined.checks);
+      warnings.addAll(combined.warnings);
+    }
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_VALIDATION_COVERAGE] '
       'files=${covered.length} batches=$batchCount',
@@ -143,6 +164,7 @@ final class WorkshopProposalValidationRunner {
     required List<GitWorkspaceFileChange> batch,
     required int batchIndex,
     required int batchCount,
+    bool holistic = false,
     String? implementationPlan,
     required bool isOffline,
     CancellationToken? cancellationToken,
@@ -159,7 +181,7 @@ final class WorkshopProposalValidationRunner {
     }
 
     final sessionId = 'workshop:validation:${session.context.request.id}'
-        '${batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount'}';
+        '${holistic ? ':holistic' : batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount'}';
     var didRetry = false;
     var result = await _inference.complete(
       stage: WorkshopStage.validation,
@@ -168,6 +190,8 @@ final class WorkshopProposalValidationRunner {
         batch: batch,
         batchIndex: batchIndex,
         batchCount: batchCount,
+
+        holistic: holistic,
         implementationPlan: implementationPlan,
       ),
       systemPrompt: _systemPrompt,
@@ -195,6 +219,8 @@ final class WorkshopProposalValidationRunner {
           batch: batch,
           batchIndex: batchIndex,
           batchCount: batchCount,
+
+          holistic: holistic,
           implementationPlan: implementationPlan,
           compact: true,
         ),
@@ -246,6 +272,8 @@ final class WorkshopProposalValidationRunner {
           batch: batch,
           batchIndex: batchIndex,
           batchCount: batchCount,
+
+          holistic: holistic,
           implementationPlan: implementationPlan,
           compact: true,
         ),
@@ -292,6 +320,7 @@ final class WorkshopProposalValidationRunner {
     required int batchCount,
     String? implementationPlan,
     bool compact = false,
+    bool holistic = false,
   }) {
     final request = session.context.request;
     final original = session.workspace.originalSnapshot;
@@ -303,8 +332,13 @@ final class WorkshopProposalValidationRunner {
         <String, Object?>{
           'path': change.path,
           'type': change.changeType.name,
-          'before': _boundedNullable(original[change.path], fileChars),
-          'after': _boundedNullable(current[change.path], fileChars),
+          'before': holistic
+              ? _crossFileExcerpt(original[change.path])
+              : _boundedNullable(original[change.path], fileChars),
+          'after': holistic
+              ? _crossFileExcerpt(current[change.path])
+              : _boundedNullable(current[change.path], fileChars),
+          if (holistic) 'apiSurface': _apiSurface(current[change.path]),
         },
     ];
 
@@ -345,7 +379,25 @@ final class WorkshopProposalValidationRunner {
       'changes': changes,
     };
 
-    final prompt = '''
+    final prompt = holistic
+        ? '''
+FINAL CROSS-FILE CONSISTENCY CHECK — READ-ONLY.
+All per-file batches passed, but cross-file safety is not yet established.
+Examine EVERY staged path, imports/exports and apiSurface definitions together.
+Confirm producers and consumers expose compatible symbols and the original owner
+instruction/constraints remain satisfied. before/after may be SOURCE EXCERPTS,
+not full files. Reject if missing source prevents verifying cross-file uses;
+never assume an unseen definition exists. Baseline Flutter scaffold is provided.
+This is never permission to apply, merge or add unrelated future requirements.
+
+Workshop input JSON:
+${jsonEncode(payload)}
+
+Return JSON ONLY: {"valid":false,"summary":"reason","checks":[],"warnings":[]}
+Set valid to boolean based on evidence; always provide a nonempty summary.
+'''
+            .trim()
+        : '''
 Validate the staged Workshop change set below before apply approval.
 Check requirement compliance, internal consistency, regressions and whether
 all staged edits are safe to hand to the explicit approval/apply gate.
@@ -405,12 +457,44 @@ The "valid" field MUST be one JSON boolean: true or false. Never output a string
 Do not return markdown fences or any text outside the JSON object.
 '''.trim();
 
+    if (holistic && prompt.length > _maxHolisticPromptChars) {
+      throw StateError(
+        'Workshop holistic validation exceeds bounded context; '
+        'cross-file safety was not verified.',
+      );
+    }
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_VALIDATION_PROMPT] '
-      'compact=$compact chars=${prompt.length} files=${changes.length} '
+      'compact=$compact holistic=$holistic chars=${prompt.length} files=${changes.length} '
       'plan_chars=${boundedPlan?.length ?? 0}',
     );
     return prompt;
+  }
+
+  // A global witness is bounded independently of the number of staged files.
+  static String? _crossFileExcerpt(String? raw) {
+    if (raw == null) return null;
+    if (raw.length <= 320) return raw;
+    return '${raw.substring(0, 160)}\n...[source omitted]...\n'
+        '${raw.substring(raw.length - 135)}';
+  }
+
+  static String _apiSurface(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    final signature = RegExp(
+      r'^(?:import |export |part |library |class |abstract class |'
+      r'enum |mixin |typedef |extension |(?:static )?(?:void |int |'
+      r'String |bool |Future<|Widget |double |final |const ))',
+    );
+    final result = <String>[];
+    for (final sourceLine in raw.split('\n')) {
+      final line = sourceLine.trim();
+      if (signature.hasMatch(line)) result.add(line);
+    }
+    final joined = result.join('\n');
+    return joined.length <= 480
+        ? joined
+        : '${joined.substring(0, 480)}...[API list truncated]';
   }
 
   static bool _isRetryableValidationFormatException(
