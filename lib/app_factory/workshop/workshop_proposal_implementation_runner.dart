@@ -601,6 +601,13 @@ final class WorkshopProposalImplementationRunner {
           !<String>{'=', ';', ')', ',', '?', '}', ']'}.contains(next)) continue;
 
       final enclosingParen = parenAt[i];
+      // A parameter declared in the signature of a Function *type* is
+      // not a binding in the enclosing function body. Do not extend its
+      // apparent scope to the next enclosing block or arrow expression.
+      if (enclosingParen != null &&
+          _isNestedFunctionTypeParameterList(tokens, enclosingParen)) {
+        continue;
+      }
       if (enclosingParen != null) {
         final endParen = parenEnds[enclosingParen];
         if (endParen != null) {
@@ -640,6 +647,36 @@ final class WorkshopProposalImplementationRunner {
       ));
     }
     return scopes;
+  }
+
+  static bool _isNestedFunctionTypeParameterList(
+    List<_WorkshopDartSourceToken> tokens,
+    int openParen,
+  ) {
+    var before = openParen - 1;
+    if (before < 0) return false;
+    // A generic function type may use Function<T>(...) parameters.
+    // Skip only balanced type arguments immediately before this list.
+    if (tokens[before].value == '>') {
+      var depth = 0;
+      while (before >= 0) {
+        final token = tokens[before].value;
+        if (token == '>') depth++;
+        if (token == '<') {
+          depth--;
+          if (depth == 0) {
+            before--;
+            break;
+          }
+        }
+        before--;
+      }
+      if (depth != 0) return false;
+    }
+    if (before >= 0 && tokens[before].value == '?') before--;
+    return before >= 0 &&
+        !tokens[before].isString &&
+        tokens[before].value == 'Function';
   }
 
   static bool _looksLikeNullableType(
