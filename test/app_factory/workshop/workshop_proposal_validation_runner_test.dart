@@ -108,6 +108,79 @@ void main() {
       expect(gateways[AppAiRole.engineer]!.calls, 0);
     });
 
+    test('validates every staged file across bounded batches', () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"valid":true,"summary":"Batch validated",'
+              '"checks":["batch checked"],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final session = await _validationSession(
+        additionalPaths: const <String>[
+          'lib/b.dart',
+          'lib/c.dart',
+          'lib/d.dart',
+          'lib/e.dart',
+        ],
+      );
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+
+      expect(verdict.valid, isTrue);
+      expect(reviewer.calls, 3);
+      expect(verdict.checks, hasLength(3));
+      expect(reviewer.sessionIdsSeen[0], contains('batch-1-of-3'));
+      expect(reviewer.sessionIdsSeen[2], contains('batch-3-of-3'));
+      final allPrompts = reviewer.promptsSeen.join(' ');
+      for (final path in <String>[
+        'lib/app.dart', 'lib/b.dart', 'lib/c.dart', 'lib/d.dart', 'lib/e.dart',
+      ]) {
+        expect(allPrompts.split('"path":"$path"').length - 1, 1,
+            reason: 'exactly one validation batch must contain $path');
+      }
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.isApplyApproved, isFalse);
+    });
+
+    test('a late invalid batch blocks without accepting earlier approvals',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"valid":true,"summary":"ok"}',
+          terminalState: InferenceTerminalState.success,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '{"valid":true,"summary":"first batch passed"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text: '{"valid":false,"summary":"late regression"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final session = await _validationSession(
+        additionalPaths: const <String>[
+          'lib/b.dart',
+          'lib/c.dart',
+          'lib/d.dart',
+          'lib/e.dart',
+        ],
+      );
+
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+      expect(verdict.valid, isFalse);
+      expect(verdict.summary, 'late regression');
+      expect(reviewer.calls, 2);
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.isApplyApproved, isFalse);
+    });
+
     test('rejected validation blocks without approving or applying', () async {
       final reviewer = _StaticGateway(
         result: const WorkshopInferenceResult(
@@ -337,9 +410,14 @@ Map<AppAiRole, _StaticGateway> _gateways(_StaticGateway reviewer) {
   };
 }
 
-Future<WorkspaceSession> _validationSession() async {
+Future<WorkspaceSession> _validationSession({
+  List<String> additionalPaths = const <String>[],
+}) async {
   final gateway = _RecordingWorkspaceGateway(
-    files: <String, String>{'lib/app.dart': 'old'},
+    files: <String, String>{
+      'lib/app.dart': 'old',
+      for (final path in additionalPaths) path: 'old',
+    },
   );
   final session = WorkspaceSession(
     request: const WorkshopRequest(
@@ -357,6 +435,9 @@ Future<WorkspaceSession> _validationSession() async {
 
   await session.initialize();
   session.workspace.write(path: 'lib/app.dart', content: 'new');
+  for (final path in additionalPaths) {
+    session.workspace.write(path: path, content: 'new');
+  }
   session.beginReview();
   session.beginValidation();
   return session;
