@@ -828,7 +828,11 @@ Do not return markdown fences or any text outside the JSON object.
       'Workshop request and staged workspace diff. Workshop input JSON is a '
       'transport envelope; before/after values carry source text and the JSON '
       'wrapper is not file content. Do not use or assume Assistant chat memory '
-      'or configuration. Return the required JSON verdict only.';
+      'or configuration. When rejecting a task that needs a plan '
+      'revision, add the EXACT standalone finding HANDOFF:ARCHITECT. '
+      'For an owner requirement conflict needing re-scoping, use '
+      'HANDOFF:ORCHESTRATOR. Never add these markers for ordinary '
+      'source-code errors. Return the required JSON verdict only.';
 
   static const String _retrySystemPrompt =
       'You are the Cantiere Reviewer retrying after a runtime or invalid-verdict failure. '
@@ -836,7 +840,9 @@ Do not return markdown fences or any text outside the JSON object.
       'is a transport envelope; before/after values carry source text and the '
       'JSON wrapper is not file content. Decide only whether this current '
       'increment is correct and safe. Return the required JSON verdict only; '
-      'do not use project-wide future requirements.';
+      'do not use project-wide future requirements. On rejection, '
+      'use standalone findings HANDOFF:ARCHITECT or HANDOFF:ORCHESTRATOR '
+      'only for plan or owner requirement conflicts, never ordinary errors.';
 }
 
 final class _WorkshopReviewCoverageManifest {
