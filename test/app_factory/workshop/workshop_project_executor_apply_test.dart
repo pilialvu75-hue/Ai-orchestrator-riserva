@@ -348,6 +348,75 @@ void main() {
       expect(session, isNotNull);
       expect(session!.context.request.operation, WorkshopOperation.fix);
     });
+    test('normal and resumed preparation preserve every indexed acceptance',
+        () async {
+      final longCriterion =
+          'Keep saved project content: ${'original drawing data ' * 28}TAIL_ACCEPTANCE';
+      final plan = WorkshopProjectPlan(
+        id: 'project:acceptance-ledger',
+        title: 'Interactive Star',
+        goal: 'Create a black screen with a tappable star.',
+        validationCriteria: <String>[
+          'Black background remains black.',
+          longCriterion,
+        ],
+        phases: <WorkshopProjectPhase>[
+          WorkshopProjectPhase(
+            id: 'phase:implementation',
+            title: 'Implementation',
+            description: 'Build the star',
+            taskIds: const <String>['task:star'],
+          ),
+        ],
+        tasks: <WorkshopProjectTask>[
+          WorkshopProjectTask(
+            id: 'task:star',
+            phaseId: 'phase:implementation',
+            title: 'Star touch behavior',
+            description: 'Tap the center star to change its color.',
+            affectedPaths: const <String>['lib/main.dart'],
+            validationCriteria: const <String>[
+              'The star, not its background, changes color on tap.',
+              'Center star remains visible after multiple taps.',
+            ],
+          ),
+        ],
+      );
+      const ownerRequest = WorkshopRequest(
+        id: 'owner:star',
+        title: 'Interactive Star',
+        instruction: 'Black background and tappable colored star.',
+        operation: WorkshopOperation.create,
+      );
+      final nextExecutor = WorkshopProjectExecutor(
+        gateway: _RecordingGateway(files: <String, String>{}),
+      );
+      final resumedExecutor = WorkshopProjectExecutor(
+        gateway: _RecordingGateway(files: <String, String>{}),
+      );
+      final next = await nextExecutor.prepareNextTask(
+        plan,
+        projectRequest: ownerRequest,
+      );
+      final resumed = await resumedExecutor.prepareTask(
+        plan, 'task:star', projectRequest: ownerRequest,
+      );
+      expect(next, isNotNull);
+      final nextConstraints = next!.context.request.constraints;
+      expect(resumed.context.request.constraints, nextConstraints);
+      expect(nextConstraints[0],
+          'Task acceptance [TASK-001]: The star, not its background, changes color on tap.');
+      expect(nextConstraints[1],
+          'Task acceptance [TASK-002]: Center star remains visible after multiple taps.');
+      expect(nextConstraints[2],
+          'Project acceptance [PROJECT-001]: Black background remains black.');
+      expect(nextConstraints[3],
+          'Project acceptance [PROJECT-002]: $longCriterion');
+      expect(nextConstraints[3], contains('TAIL_ACCEPTANCE'));
+      expect(next.context.request.targetFiles, contains('lib/main.dart'));
+      expect(next.context.request.id, resumed.context.request.id);
+    });
+
   });
 
   group('WorkshopProjectExecutor project isolation', () {

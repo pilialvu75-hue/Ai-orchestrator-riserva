@@ -47,8 +47,7 @@ void main() {
     final snapshot = WorkshopProjectSurfaceSnapshot.fromDashboardState(state);
 
     expect(snapshot.status, WorkshopProjectSurfaceStatus.active);
-    expect(snapshot.progressPercent, greaterThan(0));
-    expect(snapshot.progressPercent, lessThan(50));
+    expect(snapshot.progressPercent, 0);
     expect(snapshot.stage, WorkshopStage.implementation.name);
   });
 

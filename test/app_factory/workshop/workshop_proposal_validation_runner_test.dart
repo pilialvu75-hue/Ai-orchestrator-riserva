@@ -108,6 +108,206 @@ void main() {
       expect(gateways[AppAiRole.engineer]!.calls, 0);
     });
 
+    test('validates every staged file across bounded batches', () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"valid":true,"summary":"Batch validated",'
+              '"checks":["batch checked"],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final session = await _validationSession(
+        additionalPaths: const <String>[
+          'lib/b.dart',
+          'lib/c.dart',
+          'lib/d.dart',
+          'lib/e.dart',
+        ],
+      );
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+
+      expect(verdict.valid, isTrue);
+      // Three local batches and each of the three distinct group-pair checks.
+      expect(reviewer.calls, 6);
+      expect(verdict.checks, hasLength(6));
+      expect(reviewer.sessionIdsSeen.last, contains(':holistic-3-of-3'));
+      expect(
+        reviewer.promptsSeen.skip(3),
+        everyElement(contains('FINAL CROSS-FILE CONSISTENCY CHECK')),
+      );
+      expect(reviewer.sessionIdsSeen[0], contains('batch-1-of-3'));
+      expect(reviewer.sessionIdsSeen[2], contains('batch-3-of-3'));
+      final allPrompts = reviewer.promptsSeen.take(3).join(' ');
+      for (final path in <String>[
+        'lib/app.dart', 'lib/b.dart', 'lib/c.dart', 'lib/d.dart', 'lib/e.dart',
+      ]) {
+        expect(allPrompts.split('"path":"$path"').length - 1, 1,
+            reason: 'exactly one validation batch must contain $path');
+      }
+      final holisticPrompts = reviewer.promptsSeen.skip(3).toList();
+      for (final path in <String>[
+        'lib/app.dart', 'lib/b.dart', 'lib/c.dart', 'lib/d.dart', 'lib/e.dart',
+      ]) {
+        expect(holisticPrompts.any((p) => p.contains('"path":"$path"')), isTrue);
+      }
+      expect(
+        holisticPrompts.any(
+          (p) => p.contains('"path":"lib/b.dart"') &&
+              p.contains('"path":"lib/e.dart"'),
+        ),
+        isTrue,
+        reason: 'cross-batch dependencies must have a shared evidence window',
+      );
+      expect(session.status, WorkspaceSessionStatus.validation);
+      expect(session.isApplyApproved, isFalse);
+    });
+
+    test('final cross-file contradiction blocks despite green file batches',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"valid":true,"summary":"ok","checks":[],"warnings":[]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '{"valid":true,"summary":"Batch 1 valid"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text: '{"valid":true,"summary":"Batch 2 valid"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text: '{"valid":false,"summary":"Cross-file API mismatch"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final session = await _validationSession(
+        additionalPaths: const <String>['lib/b.dart', 'lib/c.dart'],
+      );
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+      expect(verdict.valid, isFalse);
+      expect(verdict.summary, 'Cross-file API mismatch');
+      expect(reviewer.calls, 3);
+      expect(reviewer.sessionIdsSeen.last, contains(':holistic'));
+      expect(reviewer.promptsSeen.last, contains('"path":"lib/app.dart"'));
+      expect(reviewer.promptsSeen.last, contains('"path":"lib/c.dart"'));
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.isApplyApproved, isFalse);
+    });
+
+    test('cross-file witness shows custom-type method and its late call site',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"valid":true,"summary":"all checks passed"}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final session = await _validationSession(
+        additionalPaths: const <String>['lib/service.dart', 'lib/caller.dart'],
+      );
+      session.workspace.write(
+        path: 'lib/service.dart',
+        content: [
+          'class Service {',
+          for (var i = 0; i < 50; i++) '  // filler definition $i',
+          '  CustomResult loadDetailedResult(int id) => CustomResult();',
+          for (var i = 0; i < 40; i++) '  // extra code $i',
+          '}',
+        ].join('\n'),
+      );
+      session.workspace.write(
+        path: 'lib/caller.dart',
+        content: [
+          "import 'service.dart';",
+          for (var i = 0; i < 45; i++) '// early work $i',
+          'final response = service.loadDetailedResult(7);',
+          for (var i = 0; i < 40; i++) '// later work $i',
+        ].join('\n'),
+      );
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+      expect(verdict.valid, isTrue);
+      expect(reviewer.calls, 3);
+      final crossPrompt = reviewer.promptsSeen.last;
+      expect(crossPrompt, contains('CustomResult loadDetailedResult(int id)'));
+      expect(crossPrompt, contains('service.loadDetailedResult(7)'));
+      expect(crossPrompt, contains('"path":"lib/service.dart"'));
+      expect(crossPrompt, contains('"path":"lib/caller.dart"'));
+    });
+
+    test('larger diffs use bounded cross-file windows instead of one long prompt',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"valid":true,"summary":"checked"}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final session = await _validationSession(
+        additionalPaths: const <String>[
+          'lib/b.dart', 'lib/c.dart', 'lib/d.dart', 'lib/e.dart', 'lib/f.dart',
+        ],
+      );
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+      expect(verdict.valid, isTrue);
+      expect(reviewer.calls, 6); // 3 local batches plus 3 group-pair checks
+      for (final prompt in reviewer.promptsSeen.skip(3)) {
+        expect(prompt, contains('FINAL CROSS-FILE CONSISTENCY CHECK'));
+        expect(prompt.length, lessThanOrEqualTo(7000));
+        final paths = RegExp(r'"path":"[^"]+"').allMatches(prompt);
+        expect(paths.length, lessThanOrEqualTo(4));
+      }
+      expect(reviewer.sessionIdsSeen.toSet().length, reviewer.calls);
+    });
+
+    test('a late invalid batch blocks without accepting earlier approvals',
+        () async {
+      final reviewer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"valid":true,"summary":"ok"}',
+          terminalState: InferenceTerminalState.success,
+        ),
+        sequence: const <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: '{"valid":true,"summary":"first batch passed"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+          WorkshopInferenceResult(
+            text: '{"valid":false,"summary":"late regression"}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ],
+      );
+      final session = await _validationSession(
+        additionalPaths: const <String>[
+          'lib/b.dart',
+          'lib/c.dart',
+          'lib/d.dart',
+          'lib/e.dart',
+        ],
+      );
+
+      final verdict = await WorkshopProposalValidationRunner(
+        inference: _stageInference(_gateways(reviewer)),
+      ).run(session: session);
+      expect(verdict.valid, isFalse);
+      expect(verdict.summary, 'late regression');
+      expect(reviewer.calls, 2);
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.isApplyApproved, isFalse);
+    });
+
     test('rejected validation blocks without approving or applying', () async {
       final reviewer = _StaticGateway(
         result: const WorkshopInferenceResult(
@@ -337,9 +537,14 @@ Map<AppAiRole, _StaticGateway> _gateways(_StaticGateway reviewer) {
   };
 }
 
-Future<WorkspaceSession> _validationSession() async {
+Future<WorkspaceSession> _validationSession({
+  List<String> additionalPaths = const <String>[],
+}) async {
   final gateway = _RecordingWorkspaceGateway(
-    files: <String, String>{'lib/app.dart': 'old'},
+    files: <String, String>{
+      'lib/app.dart': 'old',
+      for (final path in additionalPaths) path: 'old',
+    },
   );
   final session = WorkspaceSession(
     request: const WorkshopRequest(
@@ -357,6 +562,9 @@ Future<WorkspaceSession> _validationSession() async {
 
   await session.initialize();
   session.workspace.write(path: 'lib/app.dart', content: 'new');
+  for (final path in additionalPaths) {
+    session.workspace.write(path: path, content: 'new');
+  }
   session.beginReview();
   session.beginValidation();
   return session;

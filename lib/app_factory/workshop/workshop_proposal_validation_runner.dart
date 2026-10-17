@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
@@ -36,6 +37,8 @@ final class WorkshopProposalValidationRunner {
   static const int _retryFileChars = 1200;
   static const int _primaryContextChars = 320;
   static const int _retryContextChars = 160;
+  static const int _filesPerBatch = 2;
+  static const int _maxHolisticPromptChars = 7000;
 
   Future<WorkshopValidationVerdict> run({
     required WorkspaceSession session,
@@ -49,17 +52,170 @@ final class WorkshopProposalValidationRunner {
         'validation. Current status: ${session.status.name}.',
       );
     }
+    if (!session.hasChanges) {
+      throw StateError('Workshop validation requires staged workspace changes.');
+    }
+
+    // Each bounded batch covers two files, never silently ignoring the tail.
+    final changes = session.diff.files.toList(growable: false)
+      ..sort((left, right) => left.path.compareTo(right.path));
+    if (changes.isEmpty) {
+      throw StateError('Workshop validation requires a non-empty staged diff.');
+    }
+    final originals = session.workspace.originalSnapshot;
+    final staged = session.workspace.snapshot;
+    final before = <String, String?>{
+      for (final change in changes) change.path: originals[change.path],
+    };
+    final after = <String, String?>{
+      for (final change in changes) change.path: staged[change.path],
+    };
+    final batchCount = (changes.length + _filesPerBatch - 1) ~/ _filesPerBatch;
+    final summaries = <String>[];
+    final checks = <String>[];
+    final warnings = <String>[];
+    final covered = <String>{};
+    for (var batchIndex = 0; batchIndex < batchCount; batchIndex++) {
+      _assertUnchanged(session, changes, before, after);
+      final start = batchIndex * _filesPerBatch;
+      final end = start + _filesPerBatch < changes.length
+          ? start + _filesPerBatch
+          : changes.length;
+      final batch = changes.sublist(start, end);
+      final verdict = await _validateBatch(
+        session: session,
+        batch: batch,
+        batchIndex: batchIndex,
+        batchCount: batchCount,
+        implementationPlan: implementationPlan,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+      _assertUnchanged(session, changes, before, after);
+      covered.addAll(batch.map((change) => change.path));
+      if (!verdict.valid) return verdict;
+      summaries.add(verdict.summary);
+      checks.addAll(verdict.checks);
+      warnings.addAll(verdict.warnings);
+    }
+    if (covered.length != changes.length) {
+      throw StateError('Workshop validation file coverage is incomplete.');
+    }
+    // Every pair of per-file groups is checked together: pairwise complete
+    // across groups, while each local-model prompt contains at most four files.
+    if (batchCount > 1) {
+      final groups = <List<GitWorkspaceFileChange>>[
+        for (var start = 0; start < changes.length; start += _filesPerBatch)
+          changes.sublist(
+            start,
+            start + _filesPerBatch < changes.length
+                ? start + _filesPerBatch
+                : changes.length,
+          ),
+      ];
+      final pairCount = (groups.length * (groups.length - 1)) ~/ 2;
+      var pairIndex = 0;
+      for (var left = 0; left < groups.length; left++) {
+        for (var right = left + 1; right < groups.length; right++) {
+          _assertUnchanged(session, changes, before, after);
+          final window = <GitWorkspaceFileChange>[
+            ...groups[left],
+            ...groups[right],
+          ];
+          final combined = await _validateBatch(
+            session: session,
+            batch: window,
+            batchIndex: pairIndex,
+            batchCount: pairCount,
+            holistic: true,
+            implementationPlan: implementationPlan,
+            isOffline: isOffline,
+            cancellationToken: cancellationToken,
+          );
+          _assertUnchanged(session, changes, before, after);
+          if (!combined.valid) return combined;
+          summaries.add(combined.summary);
+          checks.addAll(combined.checks);
+          warnings.addAll(combined.warnings);
+          pairIndex++;
+        }
+      }
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_VALIDATION_CROSS_FILE] windows=$pairCount '
+        'groups=${groups.length} files=${changes.length}',
+      );
+    }
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_VALIDATION_COVERAGE] '
+      'files=${covered.length} batches=$batchCount',
+    );
+    return WorkshopValidationVerdict(
+      valid: true,
+      summary: summaries.length == 1
+          ? summaries.single
+          : 'All $batchCount validation batches passed: ${summaries.join(' | ')}',
+      checks: List<String>.unmodifiable(checks),
+      warnings: List<String>.unmodifiable(warnings),
+    );
+  }
+
+  void _assertUnchanged(
+    WorkspaceSession session,
+    List<GitWorkspaceFileChange> expected,
+    Map<String, String?> originals,
+    Map<String, String?> staged,
+  ) {
+    final current = session.diff.files.toList(growable: false)
+      ..sort((left, right) => left.path.compareTo(right.path));
+    if (current.length != expected.length) {
+      throw StateError('Workshop validation invalidated: staged diff changed.');
+    }
+    final before = session.workspace.originalSnapshot;
+    final after = session.workspace.snapshot;
+    for (var i = 0; i < expected.length; i++) {
+      final path = expected[i].path;
+      if (current[i].path != path ||
+          current[i].changeType != expected[i].changeType ||
+          before[path] != originals[path] ||
+          after[path] != staged[path]) {
+        throw StateError('Workshop validation invalidated: staged diff changed.');
+      }
+    }
+  }
+
+  Future<WorkshopValidationVerdict> _validateBatch({
+    required WorkspaceSession session,
+    required List<GitWorkspaceFileChange> batch,
+    required int batchIndex,
+    required int batchCount,
+    bool holistic = false,
+    String? implementationPlan,
+    required bool isOffline,
+    CancellationToken? cancellationToken,
+  }) async {
+    if (session.status != WorkspaceSessionStatus.validation) {
+      throw StateError(
+        'Workshop validation can only run while the workspace session is in '
+        'validation. Current status: ${session.status.name}.',
+      );
+    }
 
     if (!session.hasChanges) {
       throw StateError('Workshop validation requires staged workspace changes.');
     }
 
-    final sessionId = 'workshop:validation:${session.context.request.id}';
+    final sessionId = 'workshop:validation:${session.context.request.id}'
+        '${holistic ? ':holistic-${batchIndex + 1}-of-$batchCount' : batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount'}';
     var didRetry = false;
     var result = await _inference.complete(
       stage: WorkshopStage.validation,
       prompt: _buildPrompt(
         session,
+        batch: batch,
+        batchIndex: batchIndex,
+        batchCount: batchCount,
+
+        holistic: holistic,
         implementationPlan: implementationPlan,
       ),
       systemPrompt: _systemPrompt,
@@ -84,6 +240,11 @@ final class WorkshopProposalValidationRunner {
         stage: WorkshopStage.validation,
         prompt: _buildPrompt(
           session,
+          batch: batch,
+          batchIndex: batchIndex,
+          batchCount: batchCount,
+
+          holistic: holistic,
           implementationPlan: implementationPlan,
           compact: true,
         ),
@@ -132,6 +293,11 @@ final class WorkshopProposalValidationRunner {
         stage: WorkshopStage.validation,
         prompt: _buildPrompt(
           session,
+          batch: batch,
+          batchIndex: batchIndex,
+          batchCount: batchCount,
+
+          holistic: holistic,
           implementationPlan: implementationPlan,
           compact: true,
         ),
@@ -173,8 +339,12 @@ final class WorkshopProposalValidationRunner {
 
   String _buildPrompt(
     WorkspaceSession session, {
+    required List<GitWorkspaceFileChange> batch,
+    required int batchIndex,
+    required int batchCount,
     String? implementationPlan,
     bool compact = false,
+    bool holistic = false,
   }) {
     final request = session.context.request;
     final original = session.workspace.originalSnapshot;
@@ -182,12 +352,17 @@ final class WorkshopProposalValidationRunner {
 
     final fileChars = compact ? _retryFileChars : _primaryFileChars;
     final changes = <Map<String, Object?>>[
-      for (final change in session.diff.files.take(compact ? 2 : 4))
+      for (final change in batch)
         <String, Object?>{
           'path': change.path,
           'type': change.changeType.name,
-          'before': _boundedNullable(original[change.path], fileChars),
-          'after': _boundedNullable(current[change.path], fileChars),
+          'before': holistic
+              ? _crossFileExcerpt(original[change.path])
+              : _boundedNullable(original[change.path], fileChars),
+          'after': holistic
+              ? _crossFileExcerpt(current[change.path])
+              : _boundedNullable(current[change.path], fileChars),
+          if (holistic) 'apiSurface': _apiSurface(current[change.path]),
         },
     ];
 
@@ -220,10 +395,33 @@ final class WorkshopProposalValidationRunner {
           : 'explicit_scope',
       'constraints': request.constraints,
       'context': taskContext,
+      'validationBatch': <String, int>{
+        'index': batchIndex + 1,
+        'count': batchCount,
+        'filesInBatch': changes.length,
+      },
       'changes': changes,
     };
 
-    final prompt = '''
+    final prompt = holistic
+        ? '''
+FINAL CROSS-FILE CONSISTENCY CHECK — READ-ONLY.
+All per-file batches passed, but cross-file safety is not yet established.
+Examine EVERY staged path, imports/exports and apiSurface definitions together.
+Confirm producers and consumers expose compatible symbols and the original owner
+instruction/constraints remain satisfied. before/after may be SOURCE EXCERPTS,
+not full files. Reject if missing source prevents verifying cross-file uses;
+never assume an unseen definition exists. Baseline Flutter scaffold is provided.
+This is never permission to apply, merge or add unrelated future requirements.
+
+Workshop input JSON:
+${jsonEncode(payload)}
+
+Return JSON ONLY: {"valid":false,"summary":"reason","checks":[],"warnings":[]}
+Set valid to boolean based on evidence; always provide a nonempty summary.
+'''
+            .trim()
+        : '''
 Validate the staged Workshop change set below before apply approval.
 Check requirement compliance, internal consistency, regressions and whether
 all staged edits are safe to hand to the explicit approval/apply gate.
@@ -283,12 +481,60 @@ The "valid" field MUST be one JSON boolean: true or false. Never output a string
 Do not return markdown fences or any text outside the JSON object.
 '''.trim();
 
+    if (holistic && prompt.length > _maxHolisticPromptChars) {
+      throw StateError(
+        'Workshop holistic validation exceeds bounded context; '
+        'cross-file safety was not verified.',
+      );
+    }
     RuntimeEventLog.instance.emit(
       '[WORKSHOP_VALIDATION_PROMPT] '
-      'compact=$compact chars=${prompt.length} files=${changes.length} '
+      'compact=$compact holistic=$holistic chars=${prompt.length} files=${changes.length} '
       'plan_chars=${boundedPlan?.length ?? 0}',
     );
     return prompt;
+  }
+
+  // Cross-file witness includes callable declarations AND their call sites
+  // anywhere in the file, not just the beginning/end source excerpt.
+  // Missing detail is never silently promoted to a valid holistic verdict.
+  static String? _crossFileExcerpt(String? raw) {
+    if (raw == null) return null;
+    if (raw.length <= 320) return raw;
+    return '${raw.substring(0, 160)}\n...[source omitted]...\n'
+        '${raw.substring(raw.length - 135)}';
+  }
+
+  static String _apiSurface(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    final lines = <String>[];
+    // Any custom return type is allowed. Capture declaration and invocation
+    // lines from the full source, including code in the omitted middle.
+    final callable = RegExp(
+      r'^(?:[\w<>?,.\[\] ]+\s+)?[a-zA-Z_]\w*\s*\([^\n]*\)'
+      r'|\b[a-zA-Z_]\w*\.[a-zA-Z_]\w*\s*\(',
+    );
+    final directive = RegExp(
+      r'^(?:import |export |part |library |class |abstract class |'
+      r'enum |mixin |typedef |extension )',
+    );
+    for (final sourceLine in raw.split('\n')) {
+      final line = sourceLine.trim();
+      if (line.isEmpty || line.startsWith('//')) continue;
+      if (directive.hasMatch(line) || callable.hasMatch(line)) {
+        lines.add(line);
+      }
+    }
+    // Do not silently drop an API/call-site line; it could be the entire
+    // reason for incompatibility. A larger witness cannot receive PASS.
+    final joined = lines.join('\n');
+    if (joined.length > 1400) {
+      throw StateError(
+        'Workshop cross-file API witness exceeds bounded context; '
+        'cannot verify compatibility without additional evidence.',
+      );
+    }
+    return joined;
   }
 
   static bool _isRetryableValidationFormatException(
