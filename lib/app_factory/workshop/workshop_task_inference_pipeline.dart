@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inferenc
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_implementation_runner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_review_runner.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_role_handoff_policy.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_runner.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
@@ -57,7 +58,8 @@ final class WorkshopTaskInferenceResult {
 final class WorkshopTaskInferencePipeline {
   WorkshopTaskInferencePipeline({
     required WorkshopStageRoleInference inference,
-  })  : _implementationRunner = WorkshopProposalImplementationRunner(
+  })  : _inference = inference,
+        _implementationRunner = WorkshopProposalImplementationRunner(
           inference: inference,
         ),
         _reviewRunner = WorkshopProposalReviewRunner(
@@ -67,6 +69,7 @@ final class WorkshopTaskInferencePipeline {
           inference: inference,
         );
 
+  final WorkshopStageRoleInference _inference;
   final WorkshopProposalImplementationRunner _implementationRunner;
   final WorkshopProposalReviewRunner _reviewRunner;
   final WorkshopProposalValidationRunner _validationRunner;
@@ -224,9 +227,10 @@ final class WorkshopTaskInferencePipeline {
     CancellationToken? cancellationToken,
     void Function(WorkshopStage stage)? onStage,
   }) async {
-    final implementationPlan = preflight?.architecture?.text;
+    var implementationPlan = preflight?.architecture?.text;
     var currentProposal = proposal;
     var repairAttempts = 0;
+    var specialistHandoffUsed = false;
 
     while (true) {
       onStage?.call(WorkshopStage.review);
@@ -248,6 +252,44 @@ final class WorkshopTaskInferencePipeline {
           );
         }
 
+        final target = WorkshopRoleHandoffPolicy.forRejectedReview(review);
+        var specialistFeedback = '';
+        if (target != WorkshopRoleHandoffTarget.engineer) {
+          // Only one specialist round-trip per task. Repeated requests for a
+          // different owner remain blocked instead of looping or widening scope.
+          if (specialistHandoffUsed) {
+            return _rejectedGateResult(
+              session: session,
+              proposal: currentProposal,
+              review: review,
+              baseline: revisionBaseline,
+            );
+          }
+          specialistHandoffUsed = true;
+          final advice = await _requestSpecialistAdvice(
+            session: session,
+            review: review,
+            target: target,
+            attempt: repairAttempts + 1,
+            isOffline: isOffline,
+            cancellationToken: cancellationToken,
+            onStage: onStage,
+          );
+          if (advice == null) {
+            return _rejectedGateResult(
+              session: session,
+              proposal: currentProposal,
+              review: review,
+              baseline: revisionBaseline,
+            );
+          }
+          specialistFeedback = advice;
+          implementationPlan = <String>[
+            if (implementationPlan != null) implementationPlan,
+            'Specialist advisory within owner-authorized scope: $advice',
+          ].join('\n');
+        }
+
         repairAttempts += 1;
         _emitGateRepair(
           source: 'review',
@@ -265,7 +307,9 @@ final class WorkshopTaskInferencePipeline {
           session: session,
           preflight: preflight,
           resumeContext: resumeContext,
-          feedback: _reviewFeedback(review),
+          feedback: specialistFeedback.isEmpty
+              ? _reviewFeedback(review)
+              : '$specialistFeedback ${_reviewFeedback(review)}',
           attempt: repairAttempts,
           isOffline: isOffline,
           cancellationToken: cancellationToken,
@@ -322,6 +366,93 @@ final class WorkshopTaskInferencePipeline {
         cancellationToken: cancellationToken,
       );
     }
+  }
+
+  /// Read-only specialist handoff requested by an explicit Reviewer marker.
+  ///
+  /// Advisory inference never edits the task graph, owner requirements,
+  /// authorized paths, approval status or physical workspace.
+  Future<String?> _requestSpecialistAdvice({
+    required WorkspaceSession session,
+    required WorkshopReviewVerdict review,
+    required WorkshopRoleHandoffTarget target,
+    required int attempt,
+    required bool isOffline,
+    CancellationToken? cancellationToken,
+    void Function(WorkshopStage stage)? onStage,
+  }) async {
+    final request = session.context.request;
+    if (cancellationToken?.isCancelled == true) return null;
+
+    final stages = target == WorkshopRoleHandoffTarget.orchestrator
+        ? <WorkshopStage>[WorkshopStage.analysis, WorkshopStage.planning]
+        : <WorkshopStage>[WorkshopStage.planning];
+    var earlierAdvice = '';
+    final scope = request.targetFiles.isEmpty
+        ? 'No path preselected by current CREATE task; do not invent paths.'
+        : request.targetFiles.join(' | ');
+    try {
+      for (final stage in stages) {
+        if (cancellationToken?.isCancelled == true) return null;
+        onStage?.call(stage);
+        final reviewSummary = <String>[
+          review.summary,
+          ...review.findings.where((f) => !f.startsWith('HANDOFF:')),
+        ].join(' | ');
+        final prompt = <String>[
+          'CANTIERE SPECIALIST HANDOFF — READ ONLY',
+          'Current owner task: ${request.title}',
+          'Exact owner instruction: ${request.instruction}',
+          'Owner constraints: ${request.constraints.join(' | ')}',
+          'Authorized file scope: $scope',
+          'Reviewer rejection: ${_shortHandoffText(reviewSummary, 600)}',
+          if (earlierAdvice.isNotEmpty)
+            'Orchestrator analysis: $earlierAdvice',
+          'Give brief technical guidance for the CURRENT task only.',
+          'Do not add user requirements, expand file access, write files, '
+              'approve a gate or change project identity.',
+        ].join('\n');
+        final response = await _inference.complete(
+          stage: stage,
+          prompt: prompt,
+          systemPrompt:
+              'You are the Cantiere specialist called back to fix a rejected '
+              'bounded task. Provide read-only advisory reasoning, not new '
+              'owner requirements, new permissions or approval.',
+          sessionId: 'workshop:${request.id}:specialist-handoff:'
+              '${stage.name}:$attempt',
+          isOffline: isOffline,
+          maxTokens: 256,
+          temperature: 0.1,
+          cancellationToken: cancellationToken,
+        );
+        if (!response.isSuccessful || !response.hasText) {
+          RuntimeEventLog.instance.emit(
+            '[WORKSHOP_ROLE_HANDOFF] target=${target.name} '
+            'stage=${stage.name} status=failed',
+          );
+          return null;
+        }
+        earlierAdvice = _shortHandoffText(response.text, 420);
+      }
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_ROLE_HANDOFF] target=${target.name} status=advice_ready '
+        'stages=${stages.length}',
+      );
+      return 'Specialist ${target.name} guidance: $earlierAdvice. '
+          'Preserve exact owner instruction, constraints and permitted files.';
+    } catch (error) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_ROLE_HANDOFF] target=${target.name} '
+        'status=failed error_type=${error.runtimeType}',
+      );
+      return null;
+    }
+  }
+
+  static String _shortHandoffText(String raw, int chars) {
+    final text = raw.trim();
+    return text.length <= chars ? text : text.substring(0, chars);
   }
 
   static WorkshopTaskInferenceResult _rejectedGateResult({
