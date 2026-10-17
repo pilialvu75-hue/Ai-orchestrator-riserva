@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
+import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_validation_gate.dart';
@@ -36,6 +37,7 @@ final class WorkshopProposalValidationRunner {
   static const int _retryFileChars = 1200;
   static const int _primaryContextChars = 320;
   static const int _retryContextChars = 160;
+  static const int _filesPerBatch = 2;
 
   Future<WorkshopValidationVerdict> run({
     required WorkspaceSession session,
@@ -49,17 +51,123 @@ final class WorkshopProposalValidationRunner {
         'validation. Current status: ${session.status.name}.',
       );
     }
+    if (!session.hasChanges) {
+      throw StateError('Workshop validation requires staged workspace changes.');
+    }
+
+    // Each bounded batch covers two files, never silently ignoring the tail.
+    final changes = session.diff.files.toList(growable: false)
+      ..sort((left, right) => left.path.compareTo(right.path));
+    if (changes.isEmpty) {
+      throw StateError('Workshop validation requires a non-empty staged diff.');
+    }
+    final originals = session.workspace.originalSnapshot;
+    final staged = session.workspace.snapshot;
+    final before = <String, String?>{
+      for (final change in changes) change.path: originals[change.path],
+    };
+    final after = <String, String?>{
+      for (final change in changes) change.path: staged[change.path],
+    };
+    final batchCount = (changes.length + _filesPerBatch - 1) ~/ _filesPerBatch;
+    final summaries = <String>[];
+    final checks = <String>[];
+    final warnings = <String>[];
+    final covered = <String>{};
+    for (var batchIndex = 0; batchIndex < batchCount; batchIndex++) {
+      _assertUnchanged(session, changes, before, after);
+      final start = batchIndex * _filesPerBatch;
+      final end = start + _filesPerBatch < changes.length
+          ? start + _filesPerBatch
+          : changes.length;
+      final batch = changes.sublist(start, end);
+      final verdict = await _validateBatch(
+        session: session,
+        batch: batch,
+        batchIndex: batchIndex,
+        batchCount: batchCount,
+        implementationPlan: implementationPlan,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+      );
+      _assertUnchanged(session, changes, before, after);
+      covered.addAll(batch.map((change) => change.path));
+      if (!verdict.valid) return verdict;
+      summaries.add(verdict.summary);
+      checks.addAll(verdict.checks);
+      warnings.addAll(verdict.warnings);
+    }
+    if (covered.length != changes.length) {
+      throw StateError('Workshop validation file coverage is incomplete.');
+    }
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_VALIDATION_COVERAGE] '
+      'files=${covered.length} batches=$batchCount',
+    );
+    return WorkshopValidationVerdict(
+      valid: true,
+      summary: summaries.length == 1
+          ? summaries.single
+          : 'All $batchCount validation batches passed: ${summaries.join(' | ')}',
+      checks: List<String>.unmodifiable(checks),
+      warnings: List<String>.unmodifiable(warnings),
+    );
+  }
+
+  void _assertUnchanged(
+    WorkspaceSession session,
+    List<GitWorkspaceFileChange> expected,
+    Map<String, String?> originals,
+    Map<String, String?> staged,
+  ) {
+    final current = session.diff.files.toList(growable: false)
+      ..sort((left, right) => left.path.compareTo(right.path));
+    if (current.length != expected.length) {
+      throw StateError('Workshop validation invalidated: staged diff changed.');
+    }
+    final before = session.workspace.originalSnapshot;
+    final after = session.workspace.snapshot;
+    for (var i = 0; i < expected.length; i++) {
+      final path = expected[i].path;
+      if (current[i].path != path ||
+          current[i].changeType != expected[i].changeType ||
+          before[path] != originals[path] ||
+          after[path] != staged[path]) {
+        throw StateError('Workshop validation invalidated: staged diff changed.');
+      }
+    }
+  }
+
+  Future<WorkshopValidationVerdict> _validateBatch({
+    required WorkspaceSession session,
+    required List<GitWorkspaceFileChange> batch,
+    required int batchIndex,
+    required int batchCount,
+    String? implementationPlan,
+    required bool isOffline,
+    CancellationToken? cancellationToken,
+  }) async {
+    if (session.status != WorkspaceSessionStatus.validation) {
+      throw StateError(
+        'Workshop validation can only run while the workspace session is in '
+        'validation. Current status: ${session.status.name}.',
+      );
+    }
 
     if (!session.hasChanges) {
       throw StateError('Workshop validation requires staged workspace changes.');
     }
 
-    final sessionId = 'workshop:validation:${session.context.request.id}';
+    final sessionId = 'workshop:validation:${session.context.request.id}'
+        '${batchCount == 1 ? '' : ':batch-${batchIndex + 1}-of-$batchCount'}';
     var didRetry = false;
     var result = await _inference.complete(
       stage: WorkshopStage.validation,
       prompt: _buildPrompt(
         session,
+        batch: batch,
+        batchIndex: batchIndex,
+        batchCount: batchCount,
         implementationPlan: implementationPlan,
       ),
       systemPrompt: _systemPrompt,
@@ -84,6 +192,9 @@ final class WorkshopProposalValidationRunner {
         stage: WorkshopStage.validation,
         prompt: _buildPrompt(
           session,
+          batch: batch,
+          batchIndex: batchIndex,
+          batchCount: batchCount,
           implementationPlan: implementationPlan,
           compact: true,
         ),
@@ -132,6 +243,9 @@ final class WorkshopProposalValidationRunner {
         stage: WorkshopStage.validation,
         prompt: _buildPrompt(
           session,
+          batch: batch,
+          batchIndex: batchIndex,
+          batchCount: batchCount,
           implementationPlan: implementationPlan,
           compact: true,
         ),
@@ -173,6 +287,9 @@ final class WorkshopProposalValidationRunner {
 
   String _buildPrompt(
     WorkspaceSession session, {
+    required List<GitWorkspaceFileChange> batch,
+    required int batchIndex,
+    required int batchCount,
     String? implementationPlan,
     bool compact = false,
   }) {
@@ -182,7 +299,7 @@ final class WorkshopProposalValidationRunner {
 
     final fileChars = compact ? _retryFileChars : _primaryFileChars;
     final changes = <Map<String, Object?>>[
-      for (final change in session.diff.files.take(compact ? 2 : 4))
+      for (final change in batch)
         <String, Object?>{
           'path': change.path,
           'type': change.changeType.name,
@@ -220,6 +337,11 @@ final class WorkshopProposalValidationRunner {
           : 'explicit_scope',
       'constraints': request.constraints,
       'context': taskContext,
+      'validationBatch': <String, int>{
+        'index': batchIndex + 1,
+        'count': batchCount,
+        'filesInBatch': changes.length,
+      },
       'changes': changes,
     };
 
