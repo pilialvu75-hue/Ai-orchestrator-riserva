@@ -569,6 +569,78 @@ void main() {
         isNot(contains('EXTERNAL DESIGN REFERENCES')));
   });
 
+  test('initial Orchestrator brief reaches Architect without rewriting owner goal',
+      () async {
+    final provider = _ScriptedProvider(<String>[
+      '{"objective":"Color-change star","implementationGuidance":'
+      '"Use Flutter state for touch handling","verificationIdeas":'
+      '["Tap recolors star, not background"],"assumptions":[]}',
+      _singlePlan(),
+    ]);
+    final gateways = <AppAiRole, WorkshopInferenceGateway>{
+      for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+        role: WorkshopInferenceGateway(provider: provider),
+    };
+    final planner = WorkshopDynamicProjectPlanner(
+      enableOrchestratorBrief: true,
+      inference: WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(gateways: gateways),
+        ),
+      ),
+    );
+    final plan = await planner.plan(
+      request: const WorkshopRequest(
+        id: 'initial-brief',
+        title: 'Stella',
+        instruction: 'Sfondo nero, stella centrale che cambia colore al tocco.',
+        operation: WorkshopOperation.create,
+      ),
+      validationCriteria: const <String>['Touch recolors the star.'],
+    );
+    expect(plan.tasks, hasLength(1));
+    expect(provider.requests, hasLength(2));
+    expect(provider.requests.first.sessionId, contains('initial-orchestrator'));
+    expect(provider.requests.last.sessionId, contains(':project-plan'));
+    expect(provider.requests.last.prompt, contains('ORCHESTRATOR DESIGN BRIEF'));
+    expect(provider.requests.last.prompt, contains('Use Flutter state'));
+    expect(provider.requests.last.prompt, contains('Sfondo nero, stella centrale'));
+    expect(provider.requests.last.prompt, contains('Touch recolors the star.'));
+  });
+
+  test('malformed Orchestrator analysis cannot block first project plan',
+      () async {
+    final provider = _ScriptedProvider(<String>[
+      'broken summary',
+      _singlePlan(),
+    ]);
+    final gateways = <AppAiRole, WorkshopInferenceGateway>{
+      for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+        role: WorkshopInferenceGateway(provider: provider),
+    };
+    final planner = WorkshopDynamicProjectPlanner(
+      enableOrchestratorBrief: true,
+      inference: WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(gateways: gateways),
+        ),
+      ),
+    );
+    final plan = await planner.plan(
+      request: const WorkshopRequest(
+        id: 'failed-brief',
+        title: 'Stella',
+        instruction: 'Crea una stella interattiva.',
+        operation: WorkshopOperation.create,
+      ),
+    );
+    expect(plan.tasks, hasLength(1));
+    expect(provider.requests, hasLength(2));
+    expect(provider.requests.last.prompt,
+        isNot(contains('ORCHESTRATOR DESIGN BRIEF')));
+    expect(provider.requests.last.prompt, contains('Crea una stella interattiva.'));
+  });
+
   test('planner preserves explicit offline mode to Architect inference',
       () async {
     final provider = _ScriptedProvider(<String>[_singlePlan()]);
