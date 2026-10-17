@@ -359,6 +359,45 @@ void main() {
           retry: true,
         ),
         (
+          id: 'nested-function-type-named-parameter-not-shadowing-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(void Function({required CustomBundle rootBundle}) callback) {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'nested-function-type-positional-parameter-not-shadowing-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(void Function(CustomBundle rootBundle) callback) {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'nested-generic-function-type-parameter-not-shadowing-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(void Function<T>(CustomBundle rootBundle) callback) {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
           id: 'string-key-in-cascade-index',
           code: '''
 import 'package:flutter/services.dart' show rootBundle;
