@@ -126,6 +126,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         buildLab: buildLab,
         projectPlanner: WorkshopDynamicProjectPlanner(
           inference: stageInference,
+          enableOrchestratorBrief: true,
         ),
         webResearchService: resolvedWebResearchService,
       ),
