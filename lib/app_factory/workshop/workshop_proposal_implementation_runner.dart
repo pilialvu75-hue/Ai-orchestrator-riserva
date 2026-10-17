@@ -440,7 +440,9 @@ final class WorkshopProposalImplementationRunner {
                 !expressionKeywords.contains(preceding.value)) ||
                 preceding.value == ')' ||
                 preceding.value == ']' ||
-                preceding.value == '>' ||
+                (preceding.value == '>' &&
+                    // '=>' is an arrow body, not a generic method call.
+                    !(before >= 2 && tokens[before - 2].value == '=')) ||
                 preceding.value == '.')) {
           break;
         }
@@ -593,10 +595,10 @@ final class WorkshopProposalImplementationRunner {
       final genericType =
           prev == '>' && _looksLikeNullableType(tokens, i - 1);
       final hasType = nullableType || genericType ||
-          <String>{'var', 'final', 'late', 'dynamic'}.contains(prev) ||
+          <String>{'var', 'final', 'const', 'late', 'dynamic'}.contains(prev) ||
           RegExp(r'^[A-Z][A-Za-z0-9_]*$').hasMatch(prev);
       if (!hasType ||
-          !<String>{'=', ';', ')', ',', '?'}.contains(next)) continue;
+          !<String>{'=', ';', ')', ',', '?', '}', ']'}.contains(next)) continue;
 
       final enclosingParen = parenAt[i];
       if (enclosingParen != null) {
