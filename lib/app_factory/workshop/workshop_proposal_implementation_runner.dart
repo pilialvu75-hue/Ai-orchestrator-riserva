@@ -45,8 +45,10 @@ final class WorkshopProposalImplementationRunner {
   static const int _buildRepairTargetChars = 6400;
   static const int _primaryContextChars = 360;
   static const int _retryContextChars = 220;
-  static const int _primaryConstraintChars = 360;
-  static const int _retryConstraintChars = 220;
+  // Mandatory owner instructions/acceptance are never silently truncated.
+  // Reject a truly oversized task before invoking the local/cloud Engineer.
+  static const int _maxExactOwnerInstructionChars = 1400;
+  static const int _maxExactOwnerConstraintsChars = 1800;
   static const int _primaryRevisionFeedbackChars = 700;
   static const int _retryRevisionFeedbackChars = 420;
 
@@ -1068,15 +1070,31 @@ final class WorkshopProposalImplementationRunner {
       request.context,
       compact ? _retryContextChars : _primaryContextChars,
     );
-    final constraints = _boundedJoined(
-      request.constraints,
-      compact ? _retryConstraintChars : _primaryConstraintChars,
-    );
+    final boundedBuildRepair = _isBoundedBuildRepair(request);
+    final ownerInstruction = request.instruction.trim();
+    final constraints = request.constraints
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .join(' | ');
+    // TASK/PROJECT indexed acceptance and the owner's other constraints are
+    // all authoritative. Do not lose the final criterion due to prompt bounds.
+    if (constraints.length > _maxExactOwnerConstraintsChars) {
+      throw StateError(
+        'Workshop Engineer mandatory constraints exceed bounded context; '
+        'split the task before model inference.',
+      );
+    }
+    if (!boundedBuildRepair &&
+        ownerInstruction.length > _maxExactOwnerInstructionChars) {
+      throw StateError(
+        'Workshop Engineer owner instruction exceeds bounded context; '
+        'split the task before model inference.',
+      );
+    }
     final feedback = _boundedText(
       revisionFeedback ?? '',
       compact ? _retryRevisionFeedbackChars : _primaryRevisionFeedbackChars,
     );
-    final boundedBuildRepair = _isBoundedBuildRepair(request);
     final workspaceSelection = _selectWorkspaceFiles(
       snapshot: snapshot,
       targetFiles: request.targetFiles,
@@ -1094,7 +1112,9 @@ final class WorkshopProposalImplementationRunner {
         ? <String, Object?>{
             'request': <String, Object?>{
               'title': _boundedText(request.title, 120),
-              'instruction': _boundedText(request.instruction, 320),
+              'instruction': boundedBuildRepair
+                  ? _boundedText(ownerInstruction, 320)
+                  : ownerInstruction,
               'operation': request.operation.name,
               'targetFiles': request.targetFiles,
               'targetFilesPolicy': request.targetFiles.isEmpty
@@ -1114,7 +1134,9 @@ final class WorkshopProposalImplementationRunner {
             'request': <String, Object?>{
               'id': request.id,
               'title': _boundedText(request.title, 160),
-              'instruction': _boundedText(request.instruction, 560),
+              'instruction': boundedBuildRepair
+                  ? _boundedText(ownerInstruction, 560)
+                  : ownerInstruction,
               'operation': request.operation.name,
               'targetFiles': request.targetFiles,
               'targetFilesPolicy': request.targetFiles.isEmpty
