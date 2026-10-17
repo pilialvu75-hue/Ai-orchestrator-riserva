@@ -510,6 +510,89 @@ void main() {
         isTrue);
   });
 
+  test('oversized owner request never reaches initial Orchestrator inference',
+      () async {
+    final provider = _ScriptedProvider(<String>[]);
+    final gateways = <AppAiRole, WorkshopInferenceGateway>{
+      for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+        role: WorkshopInferenceGateway(provider: provider),
+    };
+    final planner = WorkshopDynamicProjectPlanner(
+      enableOrchestratorBrief: true,
+      inference: WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(gateways: gateways),
+        ),
+      ),
+    );
+    await expectLater(
+      planner.plan(
+        request: WorkshopRequest(
+          id: 'oversized-owner',
+          title: 'Offline app',
+          instruction: 'x' * 1801,
+          operation: WorkshopOperation.create,
+        ),
+      ),
+      throwsFormatException,
+    );
+    await expectLater(
+      planner.plan(
+        request: const WorkshopRequest(
+          id: 'oversized-rules',
+          title: 'Offline app',
+          instruction: 'Create an app',
+          operation: WorkshopOperation.create,
+        ),
+        requirements: <String>['mandatory rule ' * 190],
+      ),
+      throwsFormatException,
+    );
+    expect(provider.requests, isEmpty);
+  });
+
+  test('long untrusted source URLs are bounded in both Architect attempts',
+      () async {
+    final provider = _ScriptedProvider(<String>[
+      'bad',
+      _singlePlan(),
+    ]);
+    final longUrl = 'https://malicious.example/' + ('redirect=' * 5000);
+    final evidence = WorkshopWebEvidencePack(
+      attempted: true,
+      evidence: <WorkshopWebResearchEvidence>[
+        WorkshopWebResearchEvidence(
+          lane: WorkshopWebResearchLane.competitors,
+          query: 'similar apps',
+          output: 'Comparable app ideas',
+          success: true,
+          sources: <WorkshopWebResearchSource>[
+            WorkshopWebResearchSource(
+              title: 'Untrusted redirect',
+              url: longUrl,
+              snippet: 'Features',
+            ),
+          ],
+        ),
+      ],
+    );
+    await _planner(provider).plan(
+      request: const WorkshopRequest(
+        id: 'long-url',
+        title: 'Shopping list',
+        instruction: 'Build an offline shopping list.',
+        operation: WorkshopOperation.create,
+      ),
+      webEvidence: evidence,
+    );
+    expect(provider.requests, hasLength(2));
+    for (final request in provider.requests) {
+      expect(request.prompt.length, lessThan(5500));
+      expect(request.prompt, contains('https://malicious.example/'));
+      expect(request.prompt, isNot(contains(longUrl)));
+    }
+  });
+
   test('greenfield compares apps before the initial Architect plan', () async {
     final web = _RecordingProjectSearch();
     final provider = _ScriptedProvider(<String>[_singlePlan()]);
