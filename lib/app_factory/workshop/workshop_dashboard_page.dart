@@ -999,6 +999,11 @@ class _WorkshopProjectBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text('$progressPercent%', style: theme.textTheme.labelSmall),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${dashboardState!.completedTasks}/${dashboardState!.totalTasks} task',
+                    style: theme.textTheme.labelSmall,
+                  ),
                 ],
               ),
             ],
