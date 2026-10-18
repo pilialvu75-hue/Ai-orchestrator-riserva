@@ -956,6 +956,79 @@ void main() {
     controller.dispose();
   });
 
+  test('blocked Reviewer proposal is safely reopened before retry',
+      () async {
+    final handle = _handle();
+    await handle.session.initialize();
+    handle.session.beginImplementation();
+    handle.session.workspace.write(
+      path: 'lib/reused.dart',
+      content: 'certified prior reuse',
+    );
+    handle.session.workspace.write(
+      path: 'lib/app.dart',
+      content: 'rejected generated code',
+    );
+    const rejected = WorkshopTaskInferenceResult(
+      proposal: WorkshopChangeProposal(
+        requestId: 'request-1',
+        explanation: 'Unapproved source',
+        changes: <WorkspaceFileChange>[
+          WorkspaceFileChange(
+            path: 'lib/app.dart',
+            type: WorkspaceChangeType.addition,
+            beforeContent: null,
+            afterContent: 'rejected generated code',
+          ),
+        ],
+      ),
+      review: WorkshopReviewVerdict(
+        approved: false,
+        summary: 'Invalid generated code',
+      ),
+      gateEvidenceBaseline: <String, String>{},
+      gateEvidenceStaged: <String, String>{
+        'lib/app.dart': 'rejected generated code',
+      },
+    );
+    final runner = _ImmediateResultRunner(handle, rejected);
+    final controller = WorkshopProductionExecutionController(runner: runner);
+    final firstResult = await controller.start();
+    expect(firstResult.readyForApproval, isFalse);
+    handle.session.block('Reviewer rejected generated code');
+    expect(handle.session.status, WorkspaceSessionStatus.blocked);
+    expect(controller.state.canRetry, isTrue);
+    await controller.retry();
+
+    expect(handle.session.status, WorkspaceSessionStatus.working);
+    expect(
+      handle.session.workspace.read('lib/reused.dart'),
+      'certified prior reuse',
+    );
+    expect(
+      handle.session.workspace.snapshot.containsKey('lib/app.dart'),
+      isFalse,
+    );
+    expect(handle.session.isApplyApproved, isFalse);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
+    controller.dispose();
+  });
+
+  test('blocked rejection without captured baseline fails closed', () async {
+    final handle = _handle();
+    await handle.session.initialize();
+    final runner = _ImmediateRunner(handle);
+    final controller = WorkshopProductionExecutionController(runner: runner);
+    await controller.start();
+    handle.session.block('Reviewer rejected without proposal snapshot');
+    expect(controller.retry, throwsStateError);
+    expect(runner.runCount, 1);
+    expect(handle.session.status, WorkspaceSessionStatus.blocked);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
+    expect(handle.session.isApplyApproved, isFalse);
+    controller.dispose();
+  });
+
   test('retry is rejected when execution is not terminally retryable', () {
     final runner = _ControlledRunner(_handle());
     final controller = WorkshopProductionExecutionController(runner: runner);
