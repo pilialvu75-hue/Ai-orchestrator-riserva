@@ -11,6 +11,36 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pip
 abstract final class WorkshopGateEvidenceExport {
   static const int maxExportChars = 300000;
 
+  /// Privacy-safe reason to display when source export cannot be completed.
+  ///
+  /// Do not interpolate arbitrary exception messages here: they may contain
+  /// source snippets, local paths or task identifiers.
+  static String failureExplanation(Object error) {
+    if (error is StateError) {
+      switch (error.message) {
+        case 'Gate evidence does not match the active project task.':
+          return 'Evidenze non riferite al task attivo. Riapri il progetto '
+              'originale prima di riprovare la copia.';
+        case 'Gate evidence is available only for rejected gates.':
+          return 'Il task non ha un gate respinto da esportare.';
+        case 'Rejected gate source snapshot is not available.':
+          return 'Snapshot del codice respinto non disponibile. '
+              'Il report accettazione resta utilizzabile.';
+        case 'Rejected gate evidence contains unrelated file paths.':
+          return 'I file delle evidenze non corrispondono alla proposta: '
+              'esportazione bloccata per sicurezza.';
+        case 'Rejected gate source evidence has incomplete coverage.':
+          return 'Snapshot delle modifiche incompleto: esportazione '
+              'bloccata per evitare codice parziale.';
+        case 'Gate evidence exceeds the safe clipboard size; no partial source was copied.':
+          return 'Codice troppo grande per gli appunti: nessuna copia '
+              'parziale eseguita.';
+      }
+    }
+    return 'Esportazione non riuscita. Nessun codice sorgente copiato; '
+        'usa il report accettazione e segnala il problema.';
+  }
+
   static String encode({
     required String projectId,
     required String taskRequestId,
