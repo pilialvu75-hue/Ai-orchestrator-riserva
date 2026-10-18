@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
