@@ -39,10 +39,11 @@ void main() {
     runner.complete(result);
     await first;
 
-    expect(controller.state.status, WorkshopProductionExecutionStatus.succeeded);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
     expect(identical(controller.state.result, result), isTrue);
+    expect(controller.state.result?.review.approved, isFalse);
     expect(controller.state.finishedAt, isNotNull);
-    expect(controller.state.canRetry, isFalse);
+    expect(controller.state.canRetry, isTrue);
 
     controller.dispose();
   });
@@ -113,8 +114,8 @@ void main() {
     final result = await retried;
     expect(result.review.summary, 'Test verdict.');
     expect(runner.offlineModes, <bool>[true, true]);
-    expect(controller.state.status, WorkshopProductionExecutionStatus.succeeded);
-    expect(controller.state.canRetry, isFalse);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
+    expect(controller.state.canRetry, isTrue);
     expect(controller.state.isOffline, isTrue);
 
     controller.dispose();
@@ -280,8 +281,9 @@ void main() {
     final attempts = await store.loadAttempts(stableExecutionId);
     expect(secondCurrent.executionId, stableExecutionId);
     expect(secondCurrent.attemptId, isNot(firstAttemptId));
-    expect(secondCurrent.status, WorkshopExecutionStatus.checkpointed);
+    expect(secondCurrent.status, WorkshopExecutionStatus.failed);
     expect(secondCurrent.resumePhase, 'review');
+    expect(controller.state.canRetry, isTrue);
     expect(secondCurrent.checkpointId, isNotNull);
     final retryCheckpoint = WorkshopTaskCheckpoint.fromJson(
       Map<String, dynamic>.from(
@@ -564,7 +566,8 @@ void main() {
     final attempts = await store.loadAttempts(original.executionId);
     expect(current.executionId, original.executionId);
     expect(current.attemptId, isNot(original.attemptId));
-    expect(current.status, WorkshopExecutionStatus.checkpointed);
+    expect(current.status, WorkshopExecutionStatus.failed);
+    expect(current.resumePhase, 'review');
     expect(current.metadata['semanticResume'], isTrue);
     expect(current.metadata['processRestartResume'], isTrue);
     expect(current.metadata['previousStatus'], 'waitingApproval');
@@ -863,6 +866,169 @@ void main() {
     }
   });
 
+  test('rejected Reviewer verdict persists an explicit retry after restore',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final preferences = PreferencesService(
+      await SharedPreferences.getInstance(),
+    );
+    final store = WorkshopExecutionStore(preferences: preferences);
+    final handle = _handle();
+    final controller = WorkshopProductionExecutionController(
+      runner: _ImmediateRunner(handle),
+      executionStore: store,
+    );
+
+    final verdict = await controller.start(isOffline: true);
+    expect(verdict.readyForApproval, isFalse);
+    expect(verdict.review.approved, isFalse);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
+    expect(controller.state.result, same(verdict));
+    expect(controller.state.canRetry, isTrue);
+    expect(controller.state.isOffline, isTrue);
+
+    final rejected = (await store.loadAll()).single;
+    expect(rejected.status, WorkshopExecutionStatus.failed);
+    expect(rejected.resumePhase, 'review');
+    expect(rejected.metadata['reviewApproved'], isFalse);
+    expect(rejected.metadata['validationValid'], isNull);
+    final initialAttemptId = rejected.attemptId;
+    controller.dispose();
+
+    final restoredRunner = _ImmediateRunner(handle);
+    final restored = WorkshopProductionExecutionController(
+      runner: restoredRunner,
+      executionStore: store,
+    );
+    final recovery =
+        await restored.restorePersistentExecutionForPreparedTask();
+    expect(
+      recovery?.disposition,
+      WorkshopProductionExecutionRecoveryDisposition.retryAvailable,
+    );
+    expect(restored.state.status, WorkshopProductionExecutionStatus.failed);
+    expect(restored.state.canRetry, isTrue);
+    expect(restored.state.isOffline, isTrue);
+    expect(restoredRunner.runCount, 0);
+    expect(handle.session.isApplyApproved, isFalse);
+
+    await restored.retry();
+    final second = (await store.loadAll()).single;
+    expect(second.executionId, rejected.executionId);
+    expect(second.attemptId, isNot(initialAttemptId));
+    expect(second.status, WorkshopExecutionStatus.failed);
+    expect(restored.state.canRetry, isTrue);
+    expect(restored.state.isOffline, isTrue);
+    expect(restoredRunner.runCount, 1);
+    expect(handle.session.isApplyApproved, isFalse);
+    restored.dispose();
+  });
+
+  test('invalid Validation verdict is retryable but never auto-approved',
+      () async {
+    const invalid = WorkshopTaskInferenceResult(
+      proposal: WorkshopChangeProposal(
+        requestId: 'request-1',
+        explanation: 'Rejected by validation.',
+        changes: <WorkspaceFileChange>[],
+      ),
+      review: WorkshopReviewVerdict(
+        approved: true,
+        summary: 'Review passed.',
+      ),
+      validation: WorkshopValidationVerdict(
+        valid: false,
+        summary: 'Cross-file contract is invalid.',
+      ),
+    );
+    final handle = _handle();
+    final controller = WorkshopProductionExecutionController(
+      runner: _ImmediateResultRunner(handle, invalid),
+    );
+    final result = await controller.start();
+    expect(result.review.approved, isTrue);
+    expect(result.validation?.valid, isFalse);
+    expect(result.readyForApproval, isFalse);
+    expect(controller.state.result, same(result));
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
+    expect(controller.state.canRetry, isTrue);
+    expect(handle.session.isApplyApproved, isFalse);
+    controller.dispose();
+  });
+
+  test('blocked Reviewer proposal is safely reopened before retry',
+      () async {
+    final handle = _handle();
+    await handle.session.initialize();
+    handle.session.beginImplementation();
+    handle.session.workspace.write(
+      path: 'lib/reused.dart',
+      content: 'certified prior reuse',
+    );
+    handle.session.workspace.write(
+      path: 'lib/app.dart',
+      content: 'rejected generated code',
+    );
+    const rejected = WorkshopTaskInferenceResult(
+      proposal: WorkshopChangeProposal(
+        requestId: 'request-1',
+        explanation: 'Unapproved source',
+        changes: <WorkspaceFileChange>[
+          WorkspaceFileChange(
+            path: 'lib/app.dart',
+            type: WorkspaceChangeType.addition,
+            beforeContent: null,
+            afterContent: 'rejected generated code',
+          ),
+        ],
+      ),
+      review: WorkshopReviewVerdict(
+        approved: false,
+        summary: 'Invalid generated code',
+      ),
+      gateEvidenceBaseline: <String, String>{},
+      gateEvidenceStaged: <String, String>{
+        'lib/app.dart': 'rejected generated code',
+      },
+    );
+    final runner = _ImmediateResultRunner(handle, rejected);
+    final controller = WorkshopProductionExecutionController(runner: runner);
+    final firstResult = await controller.start();
+    expect(firstResult.readyForApproval, isFalse);
+    handle.session.block('Reviewer rejected generated code');
+    expect(handle.session.status, WorkspaceSessionStatus.blocked);
+    expect(controller.state.canRetry, isTrue);
+    await controller.retry();
+
+    expect(handle.session.status, WorkspaceSessionStatus.working);
+    expect(
+      handle.session.workspace.read('lib/reused.dart'),
+      'certified prior reuse',
+    );
+    expect(
+      handle.session.workspace.snapshot.containsKey('lib/app.dart'),
+      isFalse,
+    );
+    expect(handle.session.isApplyApproved, isFalse);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
+    controller.dispose();
+  });
+
+  test('blocked rejection without captured baseline fails closed', () async {
+    final handle = _handle();
+    await handle.session.initialize();
+    final runner = _ImmediateRunner(handle);
+    final controller = WorkshopProductionExecutionController(runner: runner);
+    await controller.start();
+    handle.session.block('Reviewer rejected without proposal snapshot');
+    expect(controller.retry, throwsStateError);
+    expect(runner.runCount, 1);
+    expect(handle.session.status, WorkspaceSessionStatus.blocked);
+    expect(controller.state.status, WorkshopProductionExecutionStatus.failed);
+    expect(handle.session.isApplyApproved, isFalse);
+    controller.dispose();
+  });
+
   test('retry is rejected when execution is not terminally retryable', () {
     final runner = _ControlledRunner(_handle());
     final controller = WorkshopProductionExecutionController(runner: runner);
@@ -1019,6 +1185,24 @@ final class _ImmediateRunner implements WorkshopProductionExecutionRunner {
     runCount += 1;
     return _result();
   }
+}
+
+final class _ImmediateResultRunner
+    implements WorkshopProductionExecutionRunner {
+  _ImmediateResultRunner(this.handle, this.result);
+
+  final WorkshopProductionTaskHandle handle;
+  final WorkshopTaskInferenceResult result;
+
+  @override
+  WorkshopProductionTaskHandle preparedHandle() => handle;
+
+  @override
+  Future<WorkshopTaskInferenceResult> runPrepared({
+    required WorkshopProductionTaskHandle handle,
+    required CancellationToken cancellationToken,
+    required bool isOffline,
+  }) async => result;
 }
 
 final class _SnapshotReadyRunner

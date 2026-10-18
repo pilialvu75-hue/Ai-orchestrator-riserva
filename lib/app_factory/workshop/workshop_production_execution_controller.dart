@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_execution.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_production_task_handle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_resume_context.dart';
@@ -513,6 +514,29 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         'Workshop production execution can only retry after failure or cancellation.',
       );
     }
+    // A gate rejection blocks its WorkspaceSession. Reopen ONLY the exact
+    // rejected Engineer proposal from its captured pre-proposal baseline,
+    // retaining any independently staged/certified files and the real
+    // workspace untouched. This must happen before resetting the result.
+    final previous = _state.result;
+    final session = _state.handle?.session;
+    if (previous != null &&
+        !previous.readyForApproval &&
+        session?.status == WorkspaceSessionStatus.blocked) {
+      final baseline = previous.gateEvidenceBaseline;
+      final proposalPaths = previous.proposal.affectedPaths;
+      if (baseline == null || proposalPaths.isEmpty) {
+        throw StateError(
+          'Cannot retry a blocked Workshop task without verified '
+          'rejection baseline and affected paths.',
+        );
+      }
+      session!.prepareRevisionAfterRejectedProposal(
+        baselineSnapshot: baseline,
+        proposalPaths: proposalPaths,
+      );
+    }
+
     final isOffline = _state.isOffline;
     _setState(WorkshopProductionExecutionState(isOffline: isOffline));
     return _start(isOffline: isOffline, isRetry: true);
@@ -692,9 +716,14 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
           handle: handle,
           result: result,
         );
+        // A completed inference attempt is not a completed *task* when
+        // Reviewer or Validation has rejected it. Keep the verdict available
+        // for feedback but expose an explicit, owner-controlled retry.
         _setState(
           _state.copyWith(
-            status: WorkshopProductionExecutionStatus.succeeded,
+            status: result.readyForApproval
+                ? WorkshopProductionExecutionStatus.succeeded
+                : WorkshopProductionExecutionStatus.failed,
             result: result,
             finishedAt: DateTime.now().toUtc(),
             clearError: true,
@@ -921,7 +950,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     await _persistJournalStatus(
       ready
           ? WorkshopExecutionStatus.waitingApproval
-          : WorkshopExecutionStatus.checkpointed,
+          : WorkshopExecutionStatus.failed,
       resumePhase: phase,
       checkpointId: taskCheckpoint?.id,
       metadata: <String, dynamic>{

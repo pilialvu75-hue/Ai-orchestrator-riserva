@@ -282,27 +282,34 @@ abstract final class WorkshopDeviceAcceptanceClassifier {
     required bool installerOpened,
     required bool? generatedAppOpened,
   }) {
-    if (executionStatus == WorkshopProductionExecutionStatus.failed) {
-      return WorkshopDeviceAcceptanceClassification(
-        status: WorkshopDeviceAcceptanceStatus.failed,
-        failureStage: executionError is FormatException
-            ? WorkshopDeviceAcceptanceFailureStage.parsing
-            : WorkshopDeviceAcceptanceFailureStage.modelRuntime,
-      );
-    }
-
-    if (inferenceResult != null && !inferenceResult.review.approved) {
+    // A rejected gate now leaves executionStatus=failed so that the owner
+    // can retry. Preserve the actual Reviewer/Validation failure stage in
+    // Diagnostics, rather than misreporting it as a model-runtime error.
+    // A real thrown execution error still takes precedence over old verdicts.
+    if (executionError == null &&
+        inferenceResult != null &&
+        !inferenceResult.review.approved) {
       return const WorkshopDeviceAcceptanceClassification(
         status: WorkshopDeviceAcceptanceStatus.failed,
         failureStage: WorkshopDeviceAcceptanceFailureStage.review,
       );
     }
 
-    if (inferenceResult?.review.approved == true &&
+    if (executionError == null &&
+        inferenceResult?.review.approved == true &&
         inferenceResult?.validation?.valid == false) {
       return const WorkshopDeviceAcceptanceClassification(
         status: WorkshopDeviceAcceptanceStatus.failed,
         failureStage: WorkshopDeviceAcceptanceFailureStage.validation,
+      );
+    }
+
+    if (executionStatus == WorkshopProductionExecutionStatus.failed) {
+      return WorkshopDeviceAcceptanceClassification(
+        status: WorkshopDeviceAcceptanceStatus.failed,
+        failureStage: executionError is FormatException
+            ? WorkshopDeviceAcceptanceFailureStage.parsing
+            : WorkshopDeviceAcceptanceFailureStage.modelRuntime,
       );
     }
 
