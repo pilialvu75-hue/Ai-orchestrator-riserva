@@ -68,6 +68,7 @@ class _WorkshopProductionDashboardPageState
   bool _mutationBusy = false;
   bool _autoAdvanceScheduled = false;
   String? _error;
+  String? _gateEvidenceCopyStatus;
 
   @override
   void initState() {
@@ -152,7 +153,10 @@ class _WorkshopProductionDashboardPageState
     final taskId = _activeTaskId;
     if (taskId == null || taskId.isEmpty) return;
 
-    setState(() => _error = null);
+    setState(() {
+      _error = null;
+      _gateEvidenceCopyStatus = null;
+    });
     try {
       final result = retry
           ? await widget.executionController.retry()
@@ -1074,10 +1078,22 @@ class _WorkshopProductionDashboardPageState
 
   /// Copies the rejected task's real source diff only after an explicit tap.
   /// Never sends raw source to public Diagnostics or another service.
+  /// Always show a durable, privacy-safe status beside the gate export button.
+  /// Android may reject a clipboard request without producing a Snackbar.
+  void _reportGateEvidenceCopyStatus(String message) {
+    if (!mounted) return;
+    setState(() => _gateEvidenceCopyStatus = message);
+  }
+
   Future<void> _copyGateEvidence() async {
     final handle = _currentHandle;
     final result = _currentInferenceResult;
-    if (handle == null || result == null) return;
+    if (handle == null || result == null) {
+      _reportGateEvidenceCopyStatus(
+        'Nessuna evidenza legata al task attivo. Riapri il progetto salvato.',
+      );
+      return;
+    }
 
     try {
       final evidence = WorkshopGateEvidenceExport.encode(
@@ -1086,14 +1102,34 @@ class _WorkshopProductionDashboardPageState
         result: result,
       );
       await Clipboard.setData(ClipboardData(text: evidence));
+      _reportGateEvidenceCopyStatus(
+        'Copia richiesta agli appunti Android (${evidence.length} caratteri). '
+        'Incolla in un editor per verificare il contenuto.',
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Evidenze del gate copiate.')),
+        const SnackBar(content: Text('Evidenze del gate inviate agli appunti.')),
       );
     } on StateError catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Evidenze non disponibili: $error')),
+      _reportGateEvidenceCopyStatus(
+        WorkshopGateEvidenceExport.failureExplanation(error),
+      );
+    } on PlatformException {
+      _reportGateEvidenceCopyStatus(
+        'Android non ha consentito la copia delle evidenze. '
+        'Nessun dato è stato inviato; usa il report accettazione.',
+      );
+    } on MissingPluginException {
+      _reportGateEvidenceCopyStatus(
+        'Appunti non disponibili su questa piattaforma. '
+        'Usa il report accettazione per la diagnosi.',
+      );
+    } catch (error) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_GATE_EXPORT_FAILED] error_type=${error.runtimeType}',
+      );
+      _reportGateEvidenceCopyStatus(
+        WorkshopGateEvidenceExport.failureExplanation(error),
       );
     }
   }
@@ -1238,6 +1274,14 @@ class _WorkshopProductionDashboardPageState
                   label: const Text('Copia evidenze del gate (codice)'),
                 ),
                 const SizedBox(height: 8),
+                if (_gateEvidenceCopyStatus != null) ...<Widget>[
+                  SelectableText(
+                    _gateEvidenceCopyStatus!,
+                    key: const Key('workshopGateEvidenceCopyStatus'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ],
               if (_hasVerifiedArtifact) ...<Widget>[
                 Text(
