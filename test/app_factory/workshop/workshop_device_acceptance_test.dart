@@ -47,9 +47,27 @@ void main() {
     );
   });
 
+  test('real thrown error outranks any stale Reviewer result', () {
+    final runtime = WorkshopDeviceAcceptanceClassifier.classify(
+      executionStatus: WorkshopProductionExecutionStatus.failed,
+      executionError: StateError('model crashed after earlier attempt'),
+      inferenceResult: _inference(reviewApproved: false),
+      buildResult: null,
+      buildVerified: false,
+      installAttempted: false,
+      installerOpened: false,
+      generatedAppOpened: null,
+    );
+    expect(runtime.status, WorkshopDeviceAcceptanceStatus.failed);
+    expect(
+      runtime.failureStage,
+      WorkshopDeviceAcceptanceFailureStage.modelRuntime,
+    );
+  });
+
   test('distinguishes review and validation rejection', () {
     final reviewFailure = WorkshopDeviceAcceptanceClassifier.classify(
-      executionStatus: WorkshopProductionExecutionStatus.succeeded,
+      executionStatus: WorkshopProductionExecutionStatus.failed,
       executionError: null,
       inferenceResult: _inference(reviewApproved: false),
       buildResult: null,
@@ -59,7 +77,7 @@ void main() {
       generatedAppOpened: null,
     );
     final validationFailure = WorkshopDeviceAcceptanceClassifier.classify(
-      executionStatus: WorkshopProductionExecutionStatus.succeeded,
+      executionStatus: WorkshopProductionExecutionStatus.failed,
       executionError: null,
       inferenceResult: _inference(
         reviewApproved: true,
