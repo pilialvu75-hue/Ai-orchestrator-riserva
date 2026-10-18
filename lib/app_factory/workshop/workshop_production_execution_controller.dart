@@ -692,9 +692,14 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
           handle: handle,
           result: result,
         );
+        // A completed inference attempt is not a completed *task* when
+        // Reviewer or Validation has rejected it. Keep the verdict available
+        // for feedback but expose an explicit, owner-controlled retry.
         _setState(
           _state.copyWith(
-            status: WorkshopProductionExecutionStatus.succeeded,
+            status: result.readyForApproval
+                ? WorkshopProductionExecutionStatus.succeeded
+                : WorkshopProductionExecutionStatus.failed,
             result: result,
             finishedAt: DateTime.now().toUtc(),
             clearError: true,
@@ -921,7 +926,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
     await _persistJournalStatus(
       ready
           ? WorkshopExecutionStatus.waitingApproval
-          : WorkshopExecutionStatus.checkpointed,
+          : WorkshopExecutionStatus.failed,
       resumePhase: phase,
       checkpointId: taskCheckpoint?.id,
       metadata: <String, dynamic>{
