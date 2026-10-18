@@ -1076,15 +1076,14 @@ class _WorkshopProductionDashboardPageState
     );
   }
 
-  /// Copies the rejected task's real source diff only after an explicit tap.
-  /// Never sends raw source to public Diagnostics or another service.
-  /// Always show a durable, privacy-safe status beside the gate export button.
-  /// Android may reject a clipboard request without producing a Snackbar.
+  /// Shows durable, privacy-safe feedback beside the gate export button.
   void _reportGateEvidenceCopyStatus(String message) {
     if (!mounted) return;
     setState(() => _gateEvidenceCopyStatus = message);
   }
 
+  /// Copies rejected source only after explicit owner action; never publishes
+  /// source to Diagnostics or a repository.
   Future<void> _copyGateEvidence() async {
     final handle = _currentHandle;
     final result = _currentInferenceResult;
@@ -1116,8 +1115,8 @@ class _WorkshopProductionDashboardPageState
       );
     } on PlatformException {
       _reportGateEvidenceCopyStatus(
-        'Android non ha consentito la copia delle evidenze. '
-        'Nessun dato è stato inviato; usa il report accettazione.',
+        'Android non ha confermato la copia delle evidenze. '
+        'Usa il report accettazione per la diagnosi.'
       );
     } on MissingPluginException {
       _reportGateEvidenceCopyStatus(
