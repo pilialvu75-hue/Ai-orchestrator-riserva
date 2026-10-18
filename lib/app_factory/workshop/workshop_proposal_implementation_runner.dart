@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal_decoder.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
@@ -44,8 +45,10 @@ final class WorkshopProposalImplementationRunner {
   static const int _buildRepairTargetChars = 6400;
   static const int _primaryContextChars = 360;
   static const int _retryContextChars = 220;
-  static const int _primaryConstraintChars = 360;
-  static const int _retryConstraintChars = 220;
+  // Mandatory owner instructions/acceptance are never silently truncated.
+  // Reject a truly oversized task before invoking the local/cloud Engineer.
+  static const int _maxExactOwnerInstructionChars = 1400;
+  static const int _maxExactOwnerConstraintsChars = 1800;
   static const int _primaryRevisionFeedbackChars = 700;
   static const int _retryRevisionFeedbackChars = 420;
 
@@ -331,10 +334,708 @@ final class WorkshopProposalImplementationRunner {
       throw StateError('Workshop Engineer returned no change proposal.');
     }
 
+    // Fail before staging: Android res/drawable is not a Flutter asset.
+    // A bounded malformed-proposal retry can then repair this concrete error.
+    _rejectInvalidFlutterResourceLookup(session, result.text);
     return _stager.stage(
       session: session,
       responseText: result.text,
     );
+  }
+
+  static void _rejectInvalidFlutterResourceLookup(
+    WorkspaceSession session,
+    String responseText,
+  ) {
+    // Decode through the same normalizer as the stager: local proposals may
+    // carry JSON fences, leading prose, file aliases or repaired strings.
+    // Check exactly the file contents that would otherwise be staged.
+    final proposal = WorkshopChangeProposalDecoder.decode(
+      requestId: session.context.request.id,
+      responseText: responseText,
+      existingPaths: session.workspace.paths.toSet(),
+    );
+    var pubspec = session.workspace.read('pubspec.yaml');
+    for (final change in proposal.changes) {
+      if (change.path == 'pubspec.yaml') {
+        pubspec = change.isDeletion ? null : change.afterContent;
+      }
+    }
+    for (final change in proposal.changes) {
+      if (change.isDeletion ||
+          !change.path.toLowerCase().endsWith('.dart')) {
+        continue;
+      }
+      final content = change.afterContent;
+      if (content == null) continue;
+      if (_usesNativeDrawableAsFlutterAsset(content, pubspec: pubspec)) {
+        throw FormatException(
+          'Flutter rootBundle cannot load Android res/drawable files as '
+          'Flutter assets. Use Dart widgets or a declared Flutter asset; '
+          'preserve only the behavior required by the current task.',
+          change.path,
+        );
+      }
+    }
+  }
+
+  // Lex source, rather than regexp matching the raw file: literal text in a
+  // comment, documentation or string is not an invocation. This is a bounded
+  // source-shape guard, not a substitute for analyzer, Reviewer or Validation.
+  static bool _usesNativeDrawableAsFlutterAsset(
+    String source, {
+    required String? pubspec,
+  }) {
+    final tokens = _dartSourceTokens(source);
+    const loadMethods = <String>{
+      'load',
+      'loadString',
+      'loadBuffer',
+      'loadStructuredData',
+      'loadStructuredBinaryData',
+    };
+    // Suppress only occurrences shadowed by a local/parameter binding.
+    // Other functions still use Flutter's imported global rootBundle.
+    final flutterPrefixes = _flutterServicesImportPrefixes(tokens);
+    final localScopes = _localBindingScopes(
+      tokens,
+      <String>{'rootBundle', ...flutterPrefixes},
+    );
+    // Match the rootBundle receiver, including every section of a Dart
+    // cascade. Never associate methods on unrelated receiver expressions.
+    for (var i = 0; i < tokens.length; i++) {
+      if (tokens[i].isString || tokens[i].value != 'rootBundle') continue;
+      final qualified = i >= 2 &&
+          tokens[i - 1].value == '.' &&
+          flutterPrefixes.contains(tokens[i - 2].value);
+      if (i > 0 && tokens[i - 1].value == '.' && !qualified) continue;
+      final shadowName = qualified ? tokens[i - 2].value : 'rootBundle';
+      final shadowOffset = qualified ? i - 2 : i;
+      if (localScopes.any((range) =>
+          range.identifier == shadowName &&
+          shadowOffset >= range.start &&
+          shadowOffset < range.end)) {
+        continue;
+      }
+      var offset = i + 1;
+      // Parenthesized receivers such as (rootBundle).loadString(...) or
+      // ((rootBundle)).load(...) still refer to the same imported bundle.
+      // Only unwrap when the expression contains exactly this receiver.
+      // Start before the full qualified receiver: (services.rootBundle).
+      // A parenthesis after a function name or generic invocation belongs
+      // to its argument list, not to a grouped bundle receiver.
+      var before = qualified ? i - 3 : i - 1;
+      while (before >= 0 &&
+          !tokens[before].isString &&
+          tokens[before].value == '(' &&
+          offset < tokens.length &&
+          !tokens[offset].isString &&
+          tokens[offset].value == ')') {
+        final preceding = before > 0 ? tokens[before - 1] : null;
+        // Expression-leading keywords are not callable receivers:
+        // return (rootBundle).loadString(...) remains a grouped call.
+        const expressionKeywords = <String>{
+          'return', 'await', 'throw', 'yield',
+        };
+        if (preceding != null && !preceding.isString &&
+            ((_isDartSourceIdentifierChar(preceding.value) &&
+                !expressionKeywords.contains(preceding.value)) ||
+                preceding.value == ')' ||
+                preceding.value == ']' ||
+                (preceding.value == '>' &&
+                    // '=>' is an arrow body, not a generic method call.
+                    !(before >= 2 && tokens[before - 2].value == '=')) ||
+                preceding.value == '.')) {
+          break;
+        }
+        before--;
+        offset++;
+      }
+      var inCascade = false;
+      while (offset < tokens.length) {
+        if (tokens[offset].value == '?') offset++;
+        if (inCascade && offset < tokens.length &&
+            tokens[offset].value == '[') {
+          var level = 0;
+          do {
+            if (!tokens[offset].isString) {
+              if (tokens[offset].value == '[') level++;
+              if (tokens[offset].value == ']') level--;
+            }
+            offset++;
+          } while (offset < tokens.length && level > 0);
+          if (level != 0) break;
+          continue;
+        }
+        if (offset >= tokens.length || tokens[offset].value != '.') break;
+        offset++;
+        final cascade = offset < tokens.length &&
+            tokens[offset].value == '.';
+        if (cascade) offset++;
+        // Selector tails (.then(...)) are not methods on rootBundle.
+        // Still consume them to reach later .. cascade sections.
+        final tailSelector = inCascade && !cascade;
+        if (offset >= tokens.length || tokens[offset].isString) break;
+        final method = tokens[offset].value;
+        offset++;
+        // Generic AssetBundle methods accept explicit <T>, potentially
+        // with nested generic arguments. Only skip balanced angle tokens.
+        if (offset < tokens.length && tokens[offset].value == '<') {
+          var depth = 0;
+          do {
+            final value = tokens[offset].value;
+            if (value == '<') depth++;
+            if (value == '>') depth--;
+            offset++;
+          } while (offset < tokens.length && depth > 0);
+          if (depth != 0) break;
+        }
+        if (offset >= tokens.length || tokens[offset].value != '(') {
+          // A getter (.first, .length) can appear between cascade
+          // sections. It does not change the cascade's original receiver.
+          if (tailSelector) continue;
+          break;
+        }
+        final open = offset;
+        final argument = open + 1;
+        if (!tailSelector && loadMethods.contains(method) &&
+            argument < tokens.length && tokens[argument].isString) {
+          // Consecutive Dart string literals are concatenated at compile time.
+          var path = tokens[argument].value;
+          var part = argument + 1;
+          while (part < tokens.length && tokens[part].isString) {
+            path += tokens[part].value;
+            part++;
+          }
+          if ((path.startsWith('drawable/') ||
+                  path.startsWith('res/drawable/') ||
+                  path.startsWith('android/app/src/main/res/')) &&
+              !_isDeclaredFlutterAsset(path, pubspec)) {
+            return true;
+          }
+        }
+        // Skip the entire call, including nested parentheses, before
+        // considering a subsequent cascade method on the same rootBundle.
+        var depth = 1;
+        offset = open + 1;
+        while (offset < tokens.length && depth > 0) {
+          if (!tokens[offset].isString) {
+            if (tokens[offset].value == '(') depth++;
+            if (tokens[offset].value == ')') depth--;
+          }
+          offset++;
+        }
+        if (depth != 0) break;
+        if (!cascade && !inCascade) break;
+        inCascade = true;
+      }
+    }
+    return false;
+  }
+
+  static Set<String> _flutterServicesImportPrefixes(
+    List<_WorkshopDartSourceToken> tokens,
+  ) {
+    final prefixes = <String>{};
+    for (var i = 0; i + 3 < tokens.length; i++) {
+      if (tokens[i].value != 'import' ||
+          !tokens[i + 1].isString ||
+          tokens[i + 1].value != 'package:flutter/services.dart') {
+        continue;
+      }
+      for (var j = i + 2; j + 1 < tokens.length; j++) {
+        if (tokens[j].value == ';') break;
+        if (tokens[j].value == 'as' && !tokens[j + 1].isString) {
+          prefixes.add(tokens[j + 1].value);
+          break;
+        }
+      }
+    }
+    return prefixes;
+  }
+
+  static List<({String identifier, int start, int end})> _localBindingScopes(
+    List<_WorkshopDartSourceToken> tokens,
+    Set<String> identifiers,
+  ) {
+    // Scope an obvious local/parameter binding to its enclosing block.
+    // Avoid the previous file-wide suppression: helper parameters may
+    // coexist with genuine global accesses in other functions.
+    final scopes = <({String identifier, int start, int end})>[];
+    final braces = <int>[];
+    final parens = <int>[];
+    final braceAt = List<int?>.filled(tokens.length, null);
+    final parenAt = List<int?>.filled(tokens.length, null);
+    final braceEnds = <int, int>{};
+    final parenEnds = <int, int>{};
+    for (var i = 0; i < tokens.length; i++) {
+      braceAt[i] = braces.isEmpty ? null : braces.last;
+      parenAt[i] = parens.isEmpty ? null : parens.last;
+      if (tokens[i].isString) continue;
+      if (tokens[i].value == '{') {
+        braces.add(i);
+      } else if (tokens[i].value == '}') {
+        if (braces.isNotEmpty) braceEnds[braces.removeLast()] = i;
+      } else if (tokens[i].value == '(') {
+        parens.add(i);
+      } else if (tokens[i].value == ')') {
+        if (parens.isNotEmpty) parenEnds[parens.removeLast()] = i;
+      }
+    }
+    for (var i = 1; i + 1 < tokens.length; i++) {
+      if (tokens[i].isString || !identifiers.contains(tokens[i].value)) {
+        continue;
+      }
+      final prev = tokens[i - 1].value;
+      final next = tokens[i + 1].value;
+      if (<String>{'show', 'hide', 'as', 'import', 'export'}
+          .contains(prev)) continue;
+      final nullableType =
+          prev == '?' && _looksLikeNullableType(tokens, i - 2);
+      // Non-nullable generic declarations end in '>' immediately before
+      // the parameter (e.g. CustomBundle<String> rootBundle).
+      final genericType =
+          prev == '>' && _looksLikeNullableType(tokens, i - 1);
+      final hasType = nullableType || genericType ||
+          <String>{'var', 'final', 'const', 'late', 'dynamic'}.contains(prev) ||
+          RegExp(r'^[A-Z][A-Za-z0-9_]*$').hasMatch(prev);
+      if (!hasType ||
+          !<String>{'=', ';', ')', ',', '?', '}', ']'}.contains(next)) continue;
+
+      final enclosingParen = parenAt[i];
+      // A parameter declared in the signature of a Function *type* is
+      // not a binding in the enclosing function body. Do not extend its
+      // apparent scope to the next enclosing block or arrow expression.
+      if (enclosingParen != null &&
+          _isNestedFunctionTypeParameterList(tokens, enclosingParen)) {
+        continue;
+      }
+      if (enclosingParen != null) {
+        final endParen = parenEnds[enclosingParen];
+        if (endParen != null) {
+          // Function parameter: resolve its following body, if any.
+          var cursor = endParen + 1;
+          while (cursor < tokens.length && cursor < endParen + 8 &&
+              !<String>{'{', ';', '='}.contains(tokens[cursor].value)) {
+            cursor++;
+          }
+          if (cursor < tokens.length && tokens[cursor].value == '{' &&
+              braceEnds.containsKey(cursor)) {
+            scopes.add((
+              identifier: tokens[i].value,
+              start: cursor,
+              end: braceEnds[cursor]! + 1,
+            ));
+            continue;
+          }
+          // The lightweight Dart lexer emits '=>' as '=' and '>'.
+          if (cursor + 1 < tokens.length &&
+              tokens[cursor].value == '=' &&
+              tokens[cursor + 1].value == '>') {
+            scopes.add((
+              identifier: tokens[i].value,
+              start: cursor + 2,
+              end: _arrowExpressionEnd(tokens, cursor + 2),
+            ));
+            continue;
+          }
+        }
+      }
+      final block = braceAt[i];
+      scopes.add((
+        identifier: tokens[i].value,
+        start: i,
+        end: block == null ? tokens.length : (braceEnds[block] ?? tokens.length),
+      ));
+    }
+    return scopes;
+  }
+
+  static bool _isNestedFunctionTypeParameterList(
+    List<_WorkshopDartSourceToken> tokens,
+    int openParen,
+  ) {
+    var before = openParen - 1;
+    if (before < 0) return false;
+    // A generic function type may use Function<T>(...) parameters.
+    // Skip only balanced type arguments immediately before this list.
+    if (tokens[before].value == '>') {
+      var depth = 0;
+      while (before >= 0) {
+        final token = tokens[before].value;
+        if (token == '>') depth++;
+        if (token == '<') {
+          depth--;
+          if (depth == 0) {
+            before--;
+            break;
+          }
+        }
+        before--;
+      }
+      if (depth != 0) return false;
+    }
+    if (before >= 0 && tokens[before].value == '?') before--;
+    return before >= 0 &&
+        !tokens[before].isString &&
+        tokens[before].value == 'Function';
+  }
+
+  static bool _looksLikeNullableType(
+    List<_WorkshopDartSourceToken> tokens,
+    int end,
+  ) {
+    if (end < 0 || tokens[end].isString) return false;
+    var index = end;
+    if (tokens[index].value == '>') {
+      var depth = 0;
+      var sawArgument = false;
+      while (index >= 0) {
+        final token = tokens[index].value;
+        if (tokens[index].isString) return false;
+        if (token == '>') {
+          depth++;
+        } else if (token == '<') {
+          depth--;
+          if (depth == 0) {
+            index--;
+            break;
+          }
+        } else if (depth > 0) {
+          // Reject relational expressions as generic type annotations.
+          if (token == ',' || token == '.' || token == '?' ||
+              token == '[' || token == ']') {
+            // Permitted type punctuation.
+          } else if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$')
+              .hasMatch(token)) {
+            return false;
+          } else if (!RegExp(
+            r'^(?:[A-Z][A-Za-z0-9_]*|int|double|num|bool|dynamic|void)$',
+          ).hasMatch(token)) {
+            // Lowercase type prefixes are allowed only for dotted names:
+            // models.Payload is a type, while Foo < x > is ambiguous.
+            final qualifiedPrefix = index + 2 < tokens.length &&
+                tokens[index + 1].value == '.' &&
+                !tokens[index + 2].isString &&
+                RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$')
+                    .hasMatch(tokens[index + 2].value);
+            if (!qualifiedPrefix ||
+                !RegExp(r'^[a-z_][A-Za-z0-9_]*$').hasMatch(token)) {
+              return false;
+            }
+          } else {
+            sawArgument = true;
+          }
+        }
+        index--;
+      }
+      if (depth != 0 || index < 0 || !sawArgument) return false;
+    }
+    return !tokens[index].isString &&
+        RegExp(r'^[A-Z][A-Za-z0-9_]*$').hasMatch(tokens[index].value);
+  }
+
+  static int _arrowExpressionEnd(
+    List<_WorkshopDartSourceToken> tokens,
+    int start,
+  ) {
+    var parentheses = 0;
+    var brackets = 0;
+    var braces = 0;
+    for (var i = start; i < tokens.length; i++) {
+      if (tokens[i].isString) continue;
+      final value = tokens[i].value;
+      if (value == '(') {
+        parentheses++;
+      } else if (value == ')') {
+        if (parentheses == 0) return i;
+        parentheses--;
+      } else if (value == '[') {
+        brackets++;
+      } else if (value == ']') {
+        if (brackets == 0) return i;
+        brackets--;
+      } else if (value == '{') {
+        braces++;
+      } else if (value == '}') {
+        if (braces == 0) return i;
+        braces--;
+      } else if ((value == ';' || value == ',') &&
+          parentheses == 0 && brackets == 0 && braces == 0) {
+        return i;
+      }
+    }
+    return tokens.length;
+  }
+
+  // Only actual flutter.assets entries authorize keys under drawable/.
+  // Supports individual files and Flutter asset-directory prefixes, but
+  // never treats Android's res/drawable folder as a Flutter declaration.
+  static bool _isDeclaredFlutterAsset(String path, String? pubspec) {
+    if (pubspec == null || pubspec.isEmpty) return false;
+    var inFlutter = false;
+    var inAssets = false;
+    int? flutterChildIndent;
+    int? assetEntryIndent;
+    for (final line in pubspec.split('\n')) {
+      final trimmed = _withoutYamlInlineComment(line.trim());
+      if (trimmed.isEmpty) continue;
+      final indent = line.length - line.trimLeft().length;
+      if (indent == 0) {
+        inFlutter = trimmed == 'flutter:';
+        inAssets = false;
+        flutterChildIndent = null;
+        assetEntryIndent = null;
+        continue;
+      }
+      if (!inFlutter) continue;
+      // YAML block indentation is relative to its parent, not a fixed
+      // number of spaces. Only direct children of flutter: are eligible
+      // for an assets: list, never nested unrelated keys.
+      flutterChildIndent ??= indent;
+      // YAML also permits an indentationless sequence: the '-' may align
+      // with the assets: key rather than being indented further.
+      final isListEntry = trimmed.startsWith('- ');
+      if (indent == flutterChildIndent && !(inAssets && isListEntry)) {
+        if (trimmed.startsWith('assets:')) {
+          final inlineValue = trimmed.substring('assets:'.length).trim();
+          if (inlineValue.startsWith('[') && inlineValue.endsWith(']')) {
+            final flow = inlineValue.substring(1, inlineValue.length - 1);
+            // This bounded YAML-flow representation supports the common
+            // comma-separated, quoted/unquoted asset paths. Ambiguous YAML
+            // remains fail-closed for later Flutter validation.
+            for (final value in _yamlFlowAssetEntries(flow)) {
+              if (_flutterAssetEntryMatches(value, path)) return true;
+            }
+            inAssets = false;
+            assetEntryIndent = null;
+            continue;
+          }
+          inAssets = trimmed == 'assets:';
+        } else {
+          inAssets = false;
+        }
+        assetEntryIndent = null;
+        continue;
+      }
+      if (!inAssets || indent < flutterChildIndent) continue;
+      if (!isListEntry) {
+        // A nested mapping or scalar under assets: is not a direct member
+        // of the Flutter asset list. Never treat later nested '-' entries as
+        // authorized Flutter asset keys.
+        inAssets = false;
+        assetEntryIndent = null;
+        continue;
+      }
+      assetEntryIndent ??= indent;
+      if (indent != assetEntryIndent) continue;
+      var entry = trimmed.substring(2).trim();
+      if (entry.length >= 2 &&
+          ((entry.startsWith("'") && entry.endsWith("'")) ||
+              (entry.startsWith('"') && entry.endsWith('"')))) {
+        entry = entry.substring(1, entry.length - 1);
+      }
+      if (_flutterAssetEntryMatches(entry, path)) return true;
+    }
+    return false;
+  }
+
+  static bool _flutterAssetEntryMatches(String entry, String path) {
+    // Flutter's directory asset entries include only immediate children.
+    final child = entry.endsWith('/') && path.startsWith(entry)
+        ? path.substring(entry.length)
+        : '';
+    return entry == path || (child.isNotEmpty && !child.contains('/'));
+  }
+
+  static Iterable<String> _yamlFlowAssetEntries(String flow) sync* {
+    final buf = StringBuffer();
+    String? quote;
+    for (var i = 0; i < flow.length; i++) {
+      final ch = flow[i];
+      if (ch.codeUnitAt(0) == 92 && quote == '"' &&
+          i + 1 < flow.length) {
+        buf.write(ch);
+        buf.write(flow[++i]);
+        continue;
+      }
+      if ((ch == '"' || ch == "'") &&
+          (quote == null || quote == ch)) {
+        if (quote == null) {
+          quote = ch;
+        } else {
+          quote = null;
+        }
+        buf.write(ch);
+        continue;
+      }
+      if (ch == ',' && quote == null) {
+        final entry = _unquoteYamlAssetEntry(buf.toString());
+        if (entry.isNotEmpty) yield entry;
+        buf.clear();
+        continue;
+      }
+      buf.write(ch);
+    }
+    if (quote != null) return;
+    final last = _unquoteYamlAssetEntry(buf.toString());
+    if (last.isNotEmpty) yield last;
+  }
+
+  static String _unquoteYamlAssetEntry(String text) {
+    var entry = text.trim();
+    if (entry.length >= 2 &&
+        ((entry.startsWith("'") && entry.endsWith("'")) ||
+            (entry.startsWith('"') && entry.endsWith('"')))) {
+      entry = entry.substring(1, entry.length - 1);
+    }
+    return entry;
+  }
+
+  static String _withoutYamlInlineComment(String text) {
+    String? quote;
+    for (var i = 0; i < text.length; i++) {
+      final ch = text[i];
+      if (ch.codeUnitAt(0) == 92 && quote == '"' && i + 1 < text.length) {
+        i++;
+        continue;
+      }
+      if (quote == "'" && ch == "'" && i + 1 < text.length &&
+          text[i + 1] == "'") {
+        i++;
+        continue;
+      }
+      if ((ch == "'" || ch == '"')) {
+        if (quote == null) {
+          quote = ch;
+        } else if (quote == ch) {
+          quote = null;
+        }
+        continue;
+      }
+      if (ch == '#' &&
+          quote == null &&
+          (i == 0 || RegExp(r'\s').hasMatch(text[i - 1]))) {
+        return text.substring(0, i).trimRight();
+      }
+    }
+    return text;
+  }
+
+  // Tokenize executable Dart including nested \${...} interpolation, without
+  // misclassifying documentation, strings or comments as live invocations.
+  // This bounded lexer is not an analyzer; later review/validation remain strict.
+  static List<_WorkshopDartSourceToken> _dartSourceTokens(String source) {
+    final result = <_WorkshopDartSourceToken>[];
+    late int Function(int, {required bool untilClosingBrace}) scan;
+    scan = (int start, {required bool untilClosingBrace}) {
+      var offset = start;
+      var braceDepth = 0;
+      while (offset < source.length) {
+        final ch = source[offset];
+        final next = offset + 1 < source.length ? source[offset + 1] : '';
+        if (RegExp(r'\s').hasMatch(ch)) {
+          offset++;
+          continue;
+        }
+        if (ch == '/' && next == '/') {
+          offset += 2;
+          while (offset < source.length &&
+              source[offset] != '\n' &&
+              source[offset] != '\r') {
+            offset++;
+          }
+          continue;
+        }
+        if (ch == '/' && next == '*') {
+          var depth = 1;
+          offset += 2;
+          while (offset < source.length && depth > 0) {
+            if (source.startsWith('/*', offset)) {
+              depth++;
+              offset += 2;
+            } else if (source.startsWith('*/', offset)) {
+              depth--;
+              offset += 2;
+            } else {
+              offset++;
+            }
+          }
+          continue;
+        }
+        if (ch == '}' && untilClosingBrace) {
+          if (braceDepth == 0) return offset + 1;
+          braceDepth--;
+        } else if (ch == '{' && untilClosingBrace) {
+          braceDepth++;
+        }
+        final raw = (ch == 'r' || ch == 'R') &&
+            (next == "'" || next == '"');
+        if (raw || ch == "'" || ch == '"') {
+          final quoteOffset = raw ? offset + 1 : offset;
+          final quote = source[quoteOffset];
+          final triple = source.startsWith('$quote$quote$quote', quoteOffset);
+          var cursor = quoteOffset + (triple ? 3 : 1);
+          var literalStart = cursor;
+          while (cursor < source.length) {
+            if (!raw && source.codeUnitAt(cursor) == 92) {
+              cursor += 2;
+              continue;
+            }
+            if (triple
+                ? source.startsWith('$quote$quote$quote', cursor)
+                : source[cursor] == quote) {
+              break;
+            }
+            if (!raw && source.startsWith(r'${', cursor)) {
+              // Keep the surrounding literal separate from executable code.
+              result.add(_WorkshopDartSourceToken(
+                source.substring(literalStart, cursor),
+                isString: true,
+              ));
+              cursor = scan(cursor + 2, untilClosingBrace: true);
+              literalStart = cursor;
+              continue;
+            }
+            cursor++;
+          }
+          result.add(_WorkshopDartSourceToken(
+            source.substring(literalStart,
+                cursor < source.length ? cursor : source.length),
+            isString: true,
+          ));
+          offset = cursor < source.length
+              ? cursor + (triple ? 3 : 1)
+              : source.length;
+          continue;
+        }
+        if (_isDartSourceIdentifierChar(ch)) {
+          final begin = offset;
+          while (offset < source.length &&
+              _isDartSourceIdentifierChar(source[offset])) {
+            offset++;
+          }
+          result.add(_WorkshopDartSourceToken(
+              source.substring(begin, offset)));
+          continue;
+        }
+        result.add(_WorkshopDartSourceToken(ch));
+        offset++;
+      }
+      return offset;
+    };
+    scan(0, untilClosingBrace: false);
+    return result;
+  }
+
+  static bool _isDartSourceIdentifierChar(String c) {
+    if (c.isEmpty) return false;
+    final unit = c.codeUnitAt(0);
+    return (unit >= 65 && unit <= 90) ||
+        (unit >= 97 && unit <= 122) ||
+        (unit >= 48 && unit <= 57) ||
+        c == '_' ||
+        c == r'$';
   }
 
   String _buildPrompt(
@@ -346,7 +1047,22 @@ final class WorkshopProposalImplementationRunner {
   }) {
     final request = session.context.request;
     final snapshot = session.workspace.snapshot;
-
+    final taskText = '${request.title} ${request.instruction}'.toLowerCase();
+    final mentionsStar = RegExp(r'\b(stella|stelle|star|stars)\b').hasMatch(taskText);
+    final requestsTouch =
+        RegExp(r'\b(tocc\w*|tap\w*|tapp\w*|clic\w*|click\w*|prem\w*)\b')
+            .hasMatch(taskText);
+    final requestsColorChange =
+        RegExp(r'\b(cambi\w*|modific\w*|altern\w*|chang\w*|switch\w*|cycl\w*|varia\w*)\b')
+                .hasMatch(taskText) &&
+            RegExp(r'\b(colou?r\w*|tint\w*)\b').hasMatch(taskText);
+    final starAcceptance = mentionsStar && requestsTouch && requestsColorChange
+        ? 'ACCEPTANCE: follow only the explicitly requested star interaction. '
+            'If the task requires tapping to change the STAR color, update '
+            'that star via Flutter state/setState, not unrelated background. '
+            'Preserve the specified layout, backdrop and initial colors; '
+            'do not add defaults or extra behavior.'
+        : '';
     final architectPlan = WorkshopTaskPlanProjection.project(
       preflight?.architecture?.text,
     );
@@ -354,15 +1070,31 @@ final class WorkshopProposalImplementationRunner {
       request.context,
       compact ? _retryContextChars : _primaryContextChars,
     );
-    final constraints = _boundedJoined(
-      request.constraints,
-      compact ? _retryConstraintChars : _primaryConstraintChars,
-    );
+    final boundedBuildRepair = _isBoundedBuildRepair(request);
+    final ownerInstruction = request.instruction.trim();
+    final constraints = request.constraints
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .join(' | ');
+    // TASK/PROJECT indexed acceptance and the owner's other constraints are
+    // all authoritative. Do not lose the final criterion due to prompt bounds.
+    if (constraints.length > _maxExactOwnerConstraintsChars) {
+      throw StateError(
+        'Workshop Engineer mandatory constraints exceed bounded context; '
+        'split the task before model inference.',
+      );
+    }
+    if (!boundedBuildRepair &&
+        ownerInstruction.length > _maxExactOwnerInstructionChars) {
+      throw StateError(
+        'Workshop Engineer owner instruction exceeds bounded context; '
+        'split the task before model inference.',
+      );
+    }
     final feedback = _boundedText(
       revisionFeedback ?? '',
       compact ? _retryRevisionFeedbackChars : _primaryRevisionFeedbackChars,
     );
-    final boundedBuildRepair = _isBoundedBuildRepair(request);
     final workspaceSelection = _selectWorkspaceFiles(
       snapshot: snapshot,
       targetFiles: request.targetFiles,
@@ -380,7 +1112,9 @@ final class WorkshopProposalImplementationRunner {
         ? <String, Object?>{
             'request': <String, Object?>{
               'title': _boundedText(request.title, 120),
-              'instruction': _boundedText(request.instruction, 320),
+              'instruction': boundedBuildRepair
+                  ? _boundedText(ownerInstruction, 320)
+                  : ownerInstruction,
               'operation': request.operation.name,
               'targetFiles': request.targetFiles,
               'targetFilesPolicy': request.targetFiles.isEmpty
@@ -400,7 +1134,9 @@ final class WorkshopProposalImplementationRunner {
             'request': <String, Object?>{
               'id': request.id,
               'title': _boundedText(request.title, 160),
-              'instruction': _boundedText(request.instruction, 560),
+              'instruction': boundedBuildRepair
+                  ? _boundedText(ownerInstruction, 560)
+                  : ownerInstruction,
               'operation': request.operation.name,
               'targetFiles': request.targetFiles,
               'targetFilesPolicy': request.targetFiles.isEmpty
@@ -437,7 +1173,8 @@ starter files omitted for operation "create": replace them only with complete
 resulting content; never infer or partially preserve omitted content.
 For "create", materialize the smallest runnable task increment even over a scaffold.
 The explicit task instruction and constraints are authoritative; architectPlan
-is guidance and must not override them. gateFeedback is authoritative feedback
+is guidance and must not override them. $starAcceptance
+gateFeedback is authoritative feedback
 on the rejected proposal, never approval. Correct the reported mismatch.
 UI LITERAL FIDELITY: preserve labels, titles, units and symbols verbatim; never
 "improve" "+" into "+1" or rename "Azzera" without an explicit request.
@@ -487,6 +1224,8 @@ the current task bounded. If the feedback says the Architect plan or target
 files do not match the explicit task, follow the explicit instruction and
 constraints rather than repeating the mismatched plan. Do not treat the
 previous proposal as approved.
+
+$starAcceptance
 
 INPUT:
 $encoded
@@ -803,4 +1542,11 @@ final class _WorkshopWorkspaceSelection {
 
   final Map<String, String> files;
   final List<String> replaceableTargets;
+}
+
+final class _WorkshopDartSourceToken {
+  const _WorkshopDartSourceToken(this.value, {this.isString = false});
+
+  final String value;
+  final bool isString;
 }

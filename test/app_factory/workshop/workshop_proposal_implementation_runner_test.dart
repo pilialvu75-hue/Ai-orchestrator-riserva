@@ -27,6 +27,1400 @@ void main() {
   // Execute the actual SDK/AAPT2 negative fixture in the first-app CI suite.
   star_negative.main();
   group('WorkshopProposalImplementationRunner', () {
+    test('scopes shadowed bundle parameters without masking global calls',
+        () async {
+      const inputs = <({String id, String code, bool retry})>[
+        (
+          id: 'local-parameter-in-other-function',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+void main() { rootBundle.loadString('res/drawable/star.xml'); }
+''',
+          retry: true,
+        ),
+        (
+          id: 'nonnullable-generic-local-parameter',
+          code: '''
+class CustomBundle<T> {
+  String loadString(String key) => key;
+}
+void helper(CustomBundle<String> rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'nonnullable-generic-parameter-then-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle<T> {
+  String loadString(String key) => key;
+}
+void helper(CustomBundle<String> rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+void main() { rootBundle.loadString('res/drawable/star.xml'); }
+''',
+          retry: true,
+        ),
+        (
+          id: 'nullable-local-parameter',
+          code: '''
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle? rootBundle) {
+  rootBundle?.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'prefixed-flutter-services',
+          code: '''
+import 'package:flutter/services.dart' as services;
+void main() {
+  services.rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'getter-between-cascade-sections',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+void main() {
+  rootBundle..loadString('assets/config').asStream().first.then(print)
+      ..loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'indexed-cascade-tail',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+void main() {
+  rootBundle..load('assets/config')[0]
+      ..loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'arrow-parameter-then-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+String helper(CustomBundle rootBundle) =>
+    rootBundle.loadString('drawable/help.txt');
+void main() { rootBundle.loadString('res/drawable/star.xml'); }
+''',
+          retry: true,
+        ),
+        (
+          id: 'nullable-generic-custom-bundle',
+          code: '''
+class CustomBundle<T> {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle<String>? rootBundle) {
+  rootBundle?.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'prefixed-local-services',
+          code: '''
+import 'package:flutter/services.dart' as services;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+class LocalServices {
+  final rootBundle = CustomBundle();
+}
+void helper(LocalServices services) {
+  services.rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'prefixed-local-then-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+class LocalServices {
+  final rootBundle = CustomBundle();
+}
+void helper(LocalServices services) {
+  services.rootBundle.loadString('drawable/help.txt');
+}
+void main() { services.rootBundle.loadString('res/drawable/star.xml'); }
+''',
+          retry: true,
+        ),
+        (
+          id: 'keyword-return-grouped-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+Future<String> helper() async {
+  return (rootBundle).loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'keyword-await-grouped-prefixed-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+Future<void> main() async {
+  await (services.rootBundle).loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'grouped-prefixed-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+void main() {
+  (services.rootBundle).loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'nested-grouped-prefixed-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+void main() {
+  ((services.rootBundle)).loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'call-argument-not-grouped-receiver',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+CustomBundle makeCustomBundle(Object value) => CustomBundle();
+void main() {
+  makeCustomBundle(rootBundle).loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'relational-expression-must-not-shadow-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+void main() {
+  dynamic Foo = 3;
+  dynamic x = 4;
+  print(Foo < x && x > rootBundle);
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'generic-call-argument-not-grouped-receiver',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+CustomBundle makeCustomBundle<T>(Object value) => CustomBundle();
+void main() {
+  makeCustomBundle<Object>(rootBundle).loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'qualified-generic-parameter-shadow',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:local/models.dart' as models;
+class CustomBundle<T> {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle<models.Payload> rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'qualified-generic-parameter-then-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:local/models.dart' as models;
+class CustomBundle<T> {
+  String loadString(String path) => path;
+}
+void helper(CustomBundle<models.Payload> rootBundle) {
+  rootBundle.loadString('drawable/help.txt');
+}
+void main() {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'arrow-grouped-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+Future<String> helper() =>
+    (rootBundle).loadString('res/drawable/star.xml');
+''',
+          retry: true,
+        ),
+        (
+          id: 'arrow-grouped-prefixed-global',
+          code: '''
+import 'package:flutter/services.dart' as services;
+Future<String> helper() async =>
+    await (services.rootBundle).loadString('res/drawable/star.xml');
+''',
+          retry: true,
+        ),
+        (
+          id: 'named-last-custom-parameter',
+          code: '''
+class CustomBundle {
+  String loadString(String value) => value;
+}
+void helper({required CustomBundle rootBundle}) {
+  rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'optional-last-custom-parameter',
+          code: '''
+class CustomBundle {
+  String loadString(String value) => value;
+}
+void helper([CustomBundle? rootBundle]) {
+  rootBundle?.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'const-inferred-custom-local',
+          code: '''
+class CustomBundle {
+  const CustomBundle();
+  String loadString(String value) => value;
+}
+void helper() {
+  const rootBundle = CustomBundle();
+  rootBundle.loadString('drawable/help.txt');
+}
+''',
+          retry: false,
+        ),
+        (
+          id: 'const-inferred-local-does-not-mask-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  const CustomBundle();
+  String loadString(String value) => value;
+}
+void helper() {
+  const rootBundle = CustomBundle();
+  rootBundle.loadString('drawable/help.txt');
+}
+void main() {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'nested-function-type-named-parameter-not-shadowing-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(void Function({required CustomBundle rootBundle}) callback) {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'nested-function-type-positional-parameter-not-shadowing-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(void Function(CustomBundle rootBundle) callback) {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'nested-generic-function-type-parameter-not-shadowing-global',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+class CustomBundle {
+  String loadString(String path) => path;
+}
+void helper(void Function<T>(CustomBundle rootBundle) callback) {
+  rootBundle.loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+        (
+          id: 'string-key-in-cascade-index',
+          code: '''
+import 'package:flutter/services.dart' show rootBundle;
+void main() {
+  rootBundle..loadString('assets/config')['[']
+      ..loadString('res/drawable/star.xml');
+}
+''',
+          retry: true,
+        ),
+      ];
+      for (final sample in inputs) {
+        final proposed = jsonEncode(<String, Object?>{
+          'explanation': 'Review tokenized bundle source',
+          'changes': <Map<String, String>>[
+            <String, String>{
+              'path': 'lib/main.dart',
+              'type': 'addition',
+              'content': sample.code,
+            },
+          ],
+        });
+        const repaired = '{"explanation":"Bounded Engineer repair",'
+            '"changes":[{"path":"lib/main.dart","type":"addition",'
+            '"content":"void main() {}"}]}';
+        final engineer = _StaticGateway(
+          results: <WorkshopInferenceResult>[
+            WorkshopInferenceResult(
+              text: proposed,
+              terminalState: InferenceTerminalState.success,
+            ),
+            if (sample.retry)
+              const WorkshopInferenceResult(
+                text: repaired,
+                terminalState: InferenceTerminalState.success,
+              ),
+          ],
+        );
+        final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'root-bundle-scope-${sample.id}',
+            title: 'Respect Dart bundle receiver',
+            instruction: 'Use the requested Flutter behavior.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, sample.retry ? 2 : 1, reason: sample.id);
+        expect(session.workspace.read('lib/main.dart'),
+            sample.retry ? 'void main() {}' : sample.code);
+        if (sample.retry) {
+          expect(engineer.prompts.last,
+              contains('rootBundle cannot load Android res/drawable'));
+        }
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      }
+    });
+
+    test('rejects undeclared nested asset files and alternate loaders',
+        () async {
+      const cases = <String>[
+        'rootBundle.loadStructuredData("res/drawable/star.xml", (s) => s)',
+        'rootBundle.loadStructuredBinaryData("res/drawable/star.xml", (s) => s)',
+        'rootBundle.loadStructuredData<String>("res/drawable/star.xml", (s) => s)',
+        'rootBundle.loadStructuredBinaryData<List<int>>("res/drawable/star.xml", (s) => s)',
+        'rootBundle..loadString("res/drawable/star.xml")',
+        'rootBundle..evict("drawable/star.xml")..loadString("drawable/star.xml")',
+        'rootBundle..evict("drawable/star.xml")..loadStructuredData<String>("res/drawable/star.xml", (s) => s)',
+        'rootBundle..loadString("assets/config").then(parse)..loadString("res/drawable/star.xml")',
+        "rootBundle.loadString('res/' 'drawable/star.xml')",
+        'rootBundle?..loadBuffer("drawable/star.xml")',
+        '(rootBundle).loadString("res/drawable/star.xml")',
+        '((rootBundle)).loadBuffer("drawable/star.xml")',
+        'rootBundle.loadString("drawable/config/help.txt")',
+      ];
+      for (var i = 0; i < cases.length; i++) {
+        final source = 'void main() { ' + cases[i] + '; }';
+        final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: jsonEncode(<String, Object?>{
+              'explanation': 'Resource call should be rejected',
+              'changes': <Map<String, String>>[
+                <String, String>{
+                  'path': 'lib/main.dart',
+                  'type': 'addition',
+                  'content': source,
+                },
+              ],
+            }),
+            terminalState: InferenceTerminalState.success,
+          ),
+          const WorkshopInferenceResult(
+            text: '{"explanation":"Use Flutter implementation",'
+                '"changes":[{"path":"lib/main.dart","type":"addition",'
+                '"content":"void main() {}"}]}',
+            terminalState: InferenceTerminalState.success,
+          ),
+        ]);
+        final workspaceGateway = _RecordingWorkspaceGateway(
+          files: <String, String>{
+            if (i == cases.length - 1)
+              'pubspec.yaml': 'name: example\nflutter:\n'
+                  '  assets:\n    - drawable/\n',
+          },
+        );
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'native-resource-method-$i',
+            title: 'Validate requested native resource usage',
+            instruction: 'Implement one Flutter screen.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: workspaceGateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, 2, reason: 'Unsafe resource case $i');
+        expect(engineer.prompts.last,
+            contains('rootBundle cannot load Android res/drawable'));
+        expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+        expect(session.isApplyApproved, isFalse);
+        expect(workspaceGateway.writeCalls, 0);
+      }
+    });
+
+    test('locally shadowed rootBundle is not treated as Flutter global',
+        () async {
+      const source = 'class CustomBundle { String loadString(String key) => key; } '
+          'void read(CustomBundle rootBundle) { '
+          'rootBundle.loadString("drawable/help.txt"); }';
+      final engineer = _StaticGateway(
+        result: WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Use a custom bundle parameter',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': source,
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'shadowed-root-bundle-parameter',
+          title: 'Custom bundle use',
+          instruction: 'Use a locally passed asset bundle.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 1);
+      expect(session.workspace.read('lib/main.dart'), source);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('accepts Flutter assets declared with comments and direct subfolders',
+        () async {
+      const source = 'void main() { '
+          'rootBundle.loadString("drawable/config/help.txt"); }';
+      const pubspecs = <String>[
+        'name: example\nflutter: # Flutter settings\n'
+            '  assets: # bundled files\n'
+            '    - drawable/config/ # include direct files\n',
+        'name: example\nflutter:\n'
+            '    assets: # assets\n'
+            '      - "drawable/config/help.txt" # declared file\n',
+        'name: example\nflutter:\n'
+            '  assets: [drawable/config/help.txt] # direct asset\n',
+        'name: example\nflutter:\n'
+            '    assets: ["drawable/config/", drawable/unused.txt]\n',
+      ];
+      for (var i = 0; i < pubspecs.length; i++) {
+        final engineer = _StaticGateway(
+          result: WorkshopInferenceResult(
+            text: jsonEncode(<String, Object?>{
+              'explanation': 'Use Flutter asset key',
+              'changes': <Map<String, String>>[
+                <String, String>{
+                  'path': 'lib/main.dart',
+                  'type': 'addition',
+                  'content': source,
+                },
+              ],
+            }),
+            terminalState: InferenceTerminalState.success,
+          ),
+        );
+        final workspaceGateway = _RecordingWorkspaceGateway(
+          files: <String, String>{
+            'pubspec.yaml': pubspecs[i],
+            'drawable/config/help.txt': 'Help text',
+          },
+        );
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'declared-subfolder-$i',
+            title: 'Read declared Flutter asset',
+            instruction: 'Load packaged Help text.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: workspaceGateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, 1, reason: 'Valid declared asset $i');
+        expect(session.workspace.read('lib/main.dart'), source);
+        expect(session.isApplyApproved, isFalse);
+        expect(workspaceGateway.writeCalls, 0);
+      }
+    });
+
+    test('rejects native resource invocation inside Dart string interpolation',
+        () async {
+      for (final source in <String>[
+        r'''import "package:flutter/services.dart" show rootBundle; void main() { print('${await rootBundle.loadString("drawable/star.xml")}'); }''',
+        r'''import "package:flutter/services.dart" show rootBundle; void main() { print('${({"v": rootBundle.load("res/drawable/star.xml")})}'); }''',
+      ]) {
+        final invalid = jsonEncode(<String, Object?>{
+          'explanation': 'Native resource invoked during interpolation',
+          'changes': <Map<String, String>>[
+            <String, String>{
+              'path': 'lib/main.dart',
+              'type': 'addition',
+              'content': source,
+            },
+          ],
+        });
+        const repaired = '{"explanation":"Flutter-only source",'
+            '"changes":[{"path":"lib/main.dart","type":"addition",'
+            '"content":"void main() {}"}]}';
+        final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+          WorkshopInferenceResult(
+            text: invalid,
+            terminalState: InferenceTerminalState.success,
+          ),
+          const WorkshopInferenceResult(
+            text: repaired,
+            terminalState: InferenceTerminalState.success,
+          ),
+        ]);
+        final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'native-resource-interpolation',
+            title: 'Repair native asset in interpolation',
+            instruction: 'Use Flutter asset keys.',
+            operation: WorkshopOperation.create,
+            targetFiles: <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, 2);
+        expect(engineer.prompts.last,
+            contains('rootBundle cannot load Android res/drawable'));
+        expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      }
+    });
+
+    test('accepts declared Flutter drawable asset without repair retry',
+        () async {
+      const pubspec =
+          'name: test_app\nflutter:\n  assets:\n    - drawable/help.txt\n';
+      const source = 'import "package:flutter/services.dart" show rootBundle; '
+          'void main() { rootBundle.loadString("drawable/help.txt"); }';
+      final engineer = _StaticGateway(
+        result: WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Use existing declared Flutter asset',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': source,
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+        'pubspec.yaml': pubspec,
+        'drawable/help.txt': 'Helpful instructions.',
+      });
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'flutter-drawable-declared',
+          title: 'Use packaged Flutter asset',
+          instruction: 'Display file content in a Flutter app.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 1);
+      expect(session.workspace.read('lib/main.dart'), source);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('accepts YAML-indented Flutter assets without a repair retry',
+        () async {
+      const source = 'import "package:flutter/services.dart" show rootBundle; '
+          'void main() { rootBundle.loadString("drawable/help.txt"); }';
+      const validPubspecs = <String>[
+        'name: test_app\nflutter:\n    assets:\n      - drawable/help.txt\n',
+        'name: test_app\nflutter:\n      uses-material-design: true\n'
+            '      assets:\n        - drawable/\n',
+        'name: test_app\nflutter:\n  assets:\n  - drawable/help.txt\n',
+      ];
+      for (var i = 0; i < validPubspecs.length; i++) {
+        final engineer = _StaticGateway(
+          result: WorkshopInferenceResult(
+            text: jsonEncode(<String, Object?>{
+              'explanation': 'Existing Flutter asset declared with valid indentation',
+              'changes': <Map<String, String>>[
+                <String, String>{
+                  'path': 'lib/main.dart',
+                  'type': 'addition',
+                  'content': source,
+                },
+              ],
+            }),
+            terminalState: InferenceTerminalState.success,
+          ),
+        );
+        final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+          'pubspec.yaml': validPubspecs[i],
+          'drawable/help.txt': 'Flutter asset content',
+        });
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'flutter-asset-indented-$i',
+            title: 'Use declared Flutter resource',
+            instruction: 'Load the declared Flutter asset.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, 1, reason: 'Valid indent sample $i');
+        expect(session.workspace.read('lib/main.dart'), source);
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      }
+    });
+
+    test('does not authorize nested mapping entries as Flutter assets',
+        () async {
+      const invalidPubspec =
+          'name: test_app\nflutter:\n  assets:\n'
+          '    configuration:\n      - drawable/help.txt\n';
+      const badSource =
+          'import "package:flutter/services.dart" show rootBundle; '
+          'void main() { rootBundle.loadString("drawable/help.txt"); }';
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Nested mapping is not a Flutter asset list',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': badSource,
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: '{"explanation":"Repair invalid resource lookup",'
+              '"changes":[{"path":"lib/main.dart","type":"addition",'
+              '"content":"void main() {}"}]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{
+        'pubspec.yaml': invalidPubspec,
+      });
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'invalid-nested-flutter-asset',
+          title: 'Validate Flutter resource access',
+          instruction: 'Avoid invalid native asset paths.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('loadBuffer native drawable access triggers bounded retry',
+        () async {
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Invalid buffer resource',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': 'import "package:flutter/services.dart" show rootBundle; '
+                    'void main() { rootBundle.loadBuffer("res/drawable/star.xml"); }',
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: '{"explanation":"Valid Flutter fallback",'
+              '"changes":[{"path":"lib/main.dart","type":"addition",'
+              '"content":"void main() {}"}]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'native-drawable-load-buffer',
+          title: 'Repair invalid Flutter loading',
+          instruction: 'Do not load an Android XML as Flutter bundle.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('accepts concurrently staged indented Flutter assets',
+        () async {
+      const source = 'import "package:flutter/services.dart" show rootBundle; '
+          'void main() { rootBundle.load("drawable/help.txt"); }';
+      const pubspec =
+          'name: test_app\nflutter:\n    assets:\n      - drawable/\n';
+      final engineer = _StaticGateway(
+        result: WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Stage valid indented Flutter asset declaration',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': source,
+              },
+              <String, String>{
+                'path': 'pubspec.yaml',
+                'type': 'addition',
+                'content': pubspec,
+              },
+              <String, String>{
+                'path': 'drawable/help.txt',
+                'type': 'addition',
+                'content': 'Hello',
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'indented-asset-in-same-proposal',
+          title: 'Flutter app with packaged asset',
+          instruction: 'Add a declared Flutter drawable asset.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>[
+            'lib/main.dart',
+            'pubspec.yaml',
+            'drawable/help.txt',
+          ],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 1);
+      expect(session.workspace.read('lib/main.dart'), source);
+      expect(session.workspace.read('pubspec.yaml'), pubspec);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('accepts drawable asset concurrently declared in pubspec',
+        () async {
+      const source = 'import "package:flutter/services.dart" show rootBundle; '
+          'void main() { rootBundle.load("drawable/help.txt"); }';
+      const pubspec =
+          'name: test_app\nflutter:\n  assets:\n    - drawable/\n';
+      final engineer = _StaticGateway(
+        result: WorkshopInferenceResult(
+          text: jsonEncode(<String, Object?>{
+            'explanation': 'Add asset and use it',
+            'changes': <Map<String, String>>[
+              <String, String>{
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': source,
+              },
+              <String, String>{
+                'path': 'pubspec.yaml',
+                'type': 'addition',
+                'content': pubspec,
+              },
+              <String, String>{
+                'path': 'drawable/help.txt',
+                'type': 'addition',
+                'content': 'Hello',
+              },
+            ],
+          }),
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'flutter-drawable-declared-concurrently',
+          title: 'Use bundled Flutter asset',
+          instruction: 'Create a Flutter project with asset declaration.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>[
+            'lib/main.dart',
+            'pubspec.yaml',
+            'drawable/help.txt',
+          ],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 1);
+      expect(session.workspace.read('lib/main.dart'), source);
+      expect(session.workspace.read('pubspec.yaml'), pubspec);
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('comments and strings containing drawable lookup do not trigger retry',
+        () async {
+      final validSources = <String>[
+        'void main() { // rootBundle.load("drawable/star.xml")\n}',
+        'void main() { /* rootBundle.load("drawable/star.xml") */ }',
+        'void main() { /* before /* rootBundle.load("drawable/star.xml") */ after */ }',
+        "void main() { final help = 'Avoid rootBundle.load(\"drawable/star.xml\")'; }",
+        "void main() { final help = r'rootBundle.load(\"drawable/star.xml\")'; }",
+        "void main() { final help = '''Avoid rootBundle.load(\"drawable/star.xml\")'''; }",
+        'import "package:flutter/services.dart" show rootBundle; '
+            'void main() { rootBundle.load("assets/models/logo.png"); }',
+      ];
+      for (var i = 0; i < validSources.length; i++) {
+        final source = validSources[i];
+        final engineer = _StaticGateway(
+          result: WorkshopInferenceResult(
+            text: jsonEncode(<String, Object?>{
+              'explanation': 'Source should remain reviewable',
+              'changes': <Map<String, String>>[
+                <String, String>{
+                  'path': 'lib/main.dart',
+                  'type': 'addition',
+                  'content': source,
+                },
+              ],
+            }),
+            terminalState: InferenceTerminalState.success,
+          ),
+        );
+        final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'drawable-lexical-safe-$i',
+            title: 'Safe source literal or comment',
+            instruction: 'Preserve existing code comments.',
+            operation: WorkshopOperation.create,
+            targetFiles: const <String>['lib/main.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(session: session);
+        expect(engineer.calls, 1, reason: 'Safe sample $i must not retry');
+        expect(session.workspace.read('lib/main.dart'), source);
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      }
+    });
+
+    test('tokenized native lookup separated by comments still rejects',
+        () async {
+      final bad = jsonEncode(<String, Object?>{
+        'explanation': 'Invalid native drawable dependency',
+        'changes': <Map<String, String>>[
+          <String, String>{
+            'path': 'lib/main.dart',
+            'type': 'addition',
+            'content': 'void main() { rootBundle /* comment */ . '
+                'loadString /* another */ (r"res/drawable/star.xml"); }',
+          },
+        ],
+      });
+      const fixed = '{"explanation":"Flutter-only implementation",'
+          '"changes":[{"path":"lib/main.dart","type":"addition",'
+          '"content":"void main() {}"}]}';
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: bad,
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: fixed,
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'native-resource-tokenized-comment-trivia',
+          title: 'Reject invalid native asset use',
+          instruction: 'Build Flutter app.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('normalizes fenced Engineer JSON before rejecting native resource lookup',
+        () async {
+      final bad = jsonEncode(<String, Object?>{
+        'explanation': 'Native drawable lookup',
+        'changes': <Map<String, String>>[
+          <String, String>{
+            'path': 'lib/main.dart',
+            'type': 'addition',
+            'content': 'import "package:flutter/services.dart" show rootBundle; '
+                'void main() { rootBundle.load("drawable/star.xml"); }',
+          },
+        ],
+      });
+      const recovered = '{"explanation":"Recovered Flutter source",'
+          '"changes":[{"path":"lib/main.dart","type":"addition",'
+          '"content":"void main() {}"}]}';
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: 'Here is the proposal:\n```json\n$bad\n```',
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: recovered,
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'native-drawable-fenced-3204',
+          title: 'Flutter drawable integrity',
+          instruction: 'Implement this application in Flutter.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('normalizes aliased files and code before native asset guard',
+        () async {
+      final bad = jsonEncode(<String, Object?>{
+        'summary': 'Native XML misuse',
+        'files': <Map<String, String>>[
+          <String, String>{
+            'file': 'lib/main.dart',
+            'code': 'import "package:flutter/services.dart" show rootBundle; '
+                'void main() { rootBundle.load("res/drawable/star.xml"); }',
+          },
+        ],
+      });
+      const recovered = '{"explanation":"Recovered Flutter source",'
+          '"changes":[{"path":"lib/main.dart","type":"addition",'
+          '"content":"void main() {}"}]}';
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: bad,
+          terminalState: InferenceTerminalState.success,
+        ),
+        const WorkshopInferenceResult(
+          text: recovered,
+          terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'native-drawable-alias-3204',
+          title: 'Native resource boundary',
+          instruction: 'Build Flutter view.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(engineer.calls, 2);
+      expect(engineer.prompts.last,
+          contains('rootBundle cannot load Android res/drawable'));
+      expect(session.workspace.read('lib/main.dart'), 'void main() {}');
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('static red star on white does not gain unrequested tap or black background',
+        () async {
+      final engineer = _StaticGateway(
+        result: const WorkshopInferenceResult(
+          text: '{"explanation":"Static star",'
+              '"changes":[{"path":"lib/main.dart","type":"addition",'
+              '"content":"void main() {}"}]}',
+          terminalState: InferenceTerminalState.success,
+        ),
+      );
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'static-star-no-extra-interaction',
+          title: 'Static red star',
+          instruction: 'Display a red star on a white background.',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>['lib/main.dart'],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(engineer.lastPrompt, isNot(contains('ACCEPTANCE: follow only')));
+      expect(engineer.lastPrompt, contains('Display a red star on a white background.'));
+      expect(engineer.calls, 1);
+    });
+
+    test('post +3204 star native asset misuse triggers bounded Engineer retry before staging', () async {
+      String response(List<Map<String, String>> changes) =>
+          jsonEncode(<String, Object?>{
+            'explanation': 'Implement the requested star screen',
+            'changes': changes,
+          });
+      final broken = response(<Map<String, String>>[
+        <String, String>{
+          'path': 'lib/main.dart',
+          'type': 'addition',
+          'content': 'import "package:flutter/services.dart" show rootBundle; '
+              'void main() { rootBundle.load("drawable/star.xml"); }',
+        },
+        <String, String>{
+          'path': 'android/app/src/main/res/drawable/star.xml',
+          'type': 'addition',
+          'content': '<shape/>',
+        },
+      ]);
+      final repairedSource = '''
+import 'package:flutter/material.dart';
+void main() => runApp(const MaterialApp(home: StarScreen()));
+class StarScreen extends StatefulWidget {
+  const StarScreen({super.key});
+  @override State<StarScreen> createState() => _StarScreenState();
+}
+class _StarScreenState extends State<StarScreen> {
+  Color starColor = Colors.yellow;
+  @override Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Colors.black,
+    body: Center(child: GestureDetector(
+      onTap: () => setState(() => starColor =
+          starColor == Colors.yellow ? Colors.blue : Colors.yellow),
+      child: Icon(Icons.star, color: starColor),
+    )),
+  );
+}
+''';
+      final repaired = response(<Map<String, String>>[
+        <String, String>{
+          'path': 'lib/main.dart',
+          'type': 'addition',
+          'content': repairedSource,
+        },
+      ]);
+      final engineer = _StaticGateway(results: <WorkshopInferenceResult>[
+        WorkshopInferenceResult(
+          text: broken, terminalState: InferenceTerminalState.success,
+        ),
+        WorkshopInferenceResult(
+          text: repaired, terminalState: InferenceTerminalState.success,
+        ),
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: <String, String>{});
+      final session = WorkspaceSession(
+        request: const WorkshopRequest(
+          id: 'first-star-post-3204',
+          title: 'Una stella',
+          instruction: 'Crea app Android con sfondo nero e stella che cambia colore al tocco',
+          operation: WorkshopOperation.create,
+          targetFiles: <String>[
+            'lib/main.dart',
+            'android/app/src/main/res/drawable/star.xml',
+          ],
+        ),
+        gateway: gateway,
+      );
+      await session.initialize();
+      final proposal = await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+      ).run(session: session);
+
+      expect(engineer.calls, 2);
+      expect(engineer.maxTokensValues, <int?>[640, 768]);
+      expect(engineer.prompts.first, contains('ACCEPTANCE: follow only the explicitly requested star interaction'));
+      expect(engineer.prompts.last, contains('rootBundle cannot load Android res/drawable'));
+      expect(proposal.affectedPaths, <String>['lib/main.dart']);
+      expect(session.workspace.read('lib/main.dart'), contains('Icon(Icons.star'));
+      expect(session.workspace.read('lib/main.dart'), contains('onTap:'));
+      expect(session.workspace.read('lib/main.dart'), contains('setState('));
+      expect(session.workspace.read('android/app/src/main/res/drawable/star.xml'), isNull);
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('full TASK and PROJECT acceptance reaches Engineer on every path',
+        () async {
+      final originalInstruction =
+          'Build the exact requested app behavior and preserve owner wording.';
+      final mandatory = <String>[
+        'Task acceptance [TASK-001]: tapping increments the visible counter.',
+        'Task acceptance [TASK-002]: the reset action restores exactly zero.',
+        'Task acceptance [TASK-003]: the controls remain accessible offline.',
+        'Project acceptance [PROJECT-001]: preserve the original black background.',
+        'Project acceptance [PROJECT-002]: Android output remains installable.',
+      ];
+      const successful = WorkshopInferenceResult(
+        text: '{"explanation":"Implements the requested task",'
+            '"changes":[{"path":"lib/app.dart","type":"modification",'
+            '"content":"new"}]}',
+        terminalState: InferenceTerminalState.success,
+      );
+      const runtimeFailure = WorkshopInferenceResult(
+        text: '',
+        terminalState: InferenceTerminalState.failed,
+        errorMessage: 'Local model stalled',
+      );
+      for (final mode in <String>['primary', 'revision', 'runtime-retry']) {
+        final engineer = _StaticGateway(
+          results: mode == 'runtime-retry'
+              ? <WorkshopInferenceResult>[runtimeFailure, successful]
+              : <WorkshopInferenceResult>[successful],
+        );
+        final gateway = _RecordingWorkspaceGateway(
+          files: <String, String>{'lib/app.dart': 'old'},
+        );
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'acceptance-fidelity-$mode',
+            title: 'Owner acceptance contract',
+            instruction: originalInstruction,
+            constraints: mandatory,
+            targetFiles: const <String>['lib/app.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await WorkshopProposalImplementationRunner(
+          inference: _stageInference(_gateways(engineer)),
+        ).run(
+          session: session,
+          revisionAttempt: mode == 'revision' ? 1 : 0,
+        );
+        expect(engineer.calls, mode == 'runtime-retry' ? 2 : 1);
+        for (final prompt in engineer.prompts) {
+          expect(prompt, contains(originalInstruction),
+              reason: 'The owner goal must reach the Engineer in $mode');
+          for (final criterion in mandatory) {
+            expect(prompt, contains(criterion),
+                reason: 'No TASK or PROJECT entry may be lost in $mode');
+          }
+          expect(prompt, contains(mandatory.last),
+              reason: 'Check the final project-wide acceptance entry.');
+        }
+        expect(session.workspace.read('lib/app.dart'), 'new');
+        expect(session.isApplyApproved, isFalse);
+        expect(gateway.writeCalls, 0);
+      }
+    });
+
+    test('unrepresentable owner acceptance fails before Engineer inference',
+        () async {
+      const successful = WorkshopInferenceResult(
+        text: '{"explanation":"Unused","changes":'
+            '[{"path":"lib/app.dart","type":"modification","content":"new"}]}',
+        terminalState: InferenceTerminalState.success,
+      );
+      for (final isLongInstruction in <bool>[false, true]) {
+        final engineer = _StaticGateway(result: successful);
+        final gateway = _RecordingWorkspaceGateway(
+          files: <String, String>{'lib/app.dart': 'old'},
+        );
+        final session = WorkspaceSession(
+          request: WorkshopRequest(
+            id: 'unrepresentable-owner-$isLongInstruction',
+            title: 'Never drop mandatory words',
+            instruction: isLongInstruction
+                ? 'original requirement ' * 90
+                : 'Build exactly the required UI',
+            constraints: isLongInstruction
+                ? const <String>['Preserve the layout']
+                : <String>['Project acceptance [PROJECT-001]: '
+                    '${'required behavior ' * 120}FINAL_CRITERION'],
+            targetFiles: const <String>['lib/app.dart'],
+          ),
+          gateway: gateway,
+        );
+        await session.initialize();
+        await expectLater(
+          WorkshopProposalImplementationRunner(
+            inference: _stageInference(_gateways(engineer)),
+          ).run(session: session),
+          throwsA(isA<StateError>().having(
+            (e) => e.message, 'message', contains('bounded context'),
+          )),
+        );
+        expect(engineer.calls, 0);
+        expect(gateway.writeCalls, 0);
+        expect(session.isApplyApproved, isFalse);
+      }
+    });
+
     test(
         'routes only to Engineer and stages proposal for review without writes',
         () async {
