@@ -513,6 +513,29 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
         'Workshop production execution can only retry after failure or cancellation.',
       );
     }
+    // A gate rejection blocks its WorkspaceSession. Reopen ONLY the exact
+    // rejected Engineer proposal from its captured pre-proposal baseline,
+    // retaining any independently staged/certified files and the real
+    // workspace untouched. This must happen before resetting the result.
+    final previous = _state.result;
+    final session = _state.handle?.session;
+    if (previous != null &&
+        !previous.readyForApproval &&
+        session?.status == WorkspaceSessionStatus.blocked) {
+      final baseline = previous.gateEvidenceBaseline;
+      final proposalPaths = previous.proposal.affectedPaths;
+      if (baseline == null || proposalPaths.isEmpty) {
+        throw StateError(
+          'Cannot retry a blocked Workshop task without verified '
+          'rejection baseline and affected paths.',
+        );
+      }
+      session!.prepareRevisionAfterRejectedProposal(
+        baselineSnapshot: baseline,
+        proposalPaths: proposalPaths,
+      );
+    }
+
     final isOffline = _state.isOffline;
     _setState(WorkshopProductionExecutionState(isOffline: isOffline));
     return _start(isOffline: isOffline, isRetry: true);
