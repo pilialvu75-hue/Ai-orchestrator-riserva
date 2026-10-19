@@ -1084,12 +1084,12 @@ class _WorkshopProductionDashboardPageState
   }
 
   /// Shows durable, privacy-safe feedback beside the gate export button.
-  void _reportGateEvidenceCopyStatus(
+  bool _reportGateEvidenceCopyStatus(
     String message, {
     required String? projectId,
     required String? taskId,
   }) {
-    if (!mounted) return;
+    if (!mounted) return false;
     final feedback = WorkshopGateEvidenceCopyFeedback(
       projectId: projectId?.trim() ?? '',
       taskId: taskId?.trim() ?? '',
@@ -1099,9 +1099,10 @@ class _WorkshopProductionDashboardPageState
       projectId: widget.bundle.dashboardController.state.projectId,
       taskId: _activeTaskId,
     )) {
-      return; // Async clipboard completion from a project no longer active.
+      return false; // Copy finished after the active project/task changed.
     }
     setState(() => _gateEvidenceCopyStatus = feedback);
+    return true;
   }
 
   /// Copies rejected source only after explicit owner action; never publishes
@@ -1109,7 +1110,7 @@ class _WorkshopProductionDashboardPageState
   Future<void> _copyGateEvidence() async {
     final projectId = widget.bundle.dashboardController.state.projectId;
     final taskId = _activeTaskId;
-    void report(String message) => _reportGateEvidenceCopyStatus(
+    bool report(String message) => _reportGateEvidenceCopyStatus(
       message,
       projectId: projectId,
       taskId: taskId,
@@ -1130,10 +1131,12 @@ class _WorkshopProductionDashboardPageState
         result: result,
       );
       await Clipboard.setData(ClipboardData(text: evidence));
-      report(
+      if (!report(
         'Copia richiesta agli appunti Android (${evidence.length} caratteri). '
         'Incolla in un editor per verificare il contenuto.',
-      );
+      )) {
+        return; // Do not show a stale Snackbar after a project switch.
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Evidenze del gate inviate agli appunti.')),
