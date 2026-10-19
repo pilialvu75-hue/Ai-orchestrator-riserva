@@ -2,7 +2,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 final class ModuleLibraryGitHubConfigStore {
   ModuleLibraryGitHubConfigStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ?? const FlutterSecureStorage(
+            aOptions: AndroidOptions(resetOnError: false),
+          );
 
   static const String _clientIdKey =
       'ai_orchestrator.module_library.github.client_id.v1';
