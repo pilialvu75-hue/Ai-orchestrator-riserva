@@ -6,6 +6,36 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const time = '[2026-09-06T02:57:18.238076]';
 
+  const resource = 'available_bytes=2000000000 rss_bytes=100000000 '
+      'native_heap_bytes=90000000 battery_temp_decic=300 '
+      'critical=false phase=streaming gpu_layers=33 decode_calls=12 '
+      'prefill_ms=250 total_bytes=7000000000 threshold_bytes=400000000 '
+      'pressure=normal low_memory=false trim_level=0 '
+      'n_ctx=1536 n_batch=64 n_ubatch=16';
+
+  test('old resource samples do not invent cache counters', () {
+    final value = jsonDecode(publicLogProjection(
+      '$time [RESOURCE_SAMPLE] $resource',
+    )!) as Map<String, dynamic>;
+    expect(value.containsKey('reused_tokens'), isFalse);
+    expect(value.containsKey('prefilled_tokens'), isFalse);
+    expect(value['n_ubatch'], 16);
+  });
+
+  test('cache counter grammar rejects incomplete or private payload', () {
+    for (final suffix in <String>[
+      'reused_tokens=1',
+      'reused_tokens=-2 prefilled_tokens=3',
+      'reused_tokens=1000000000000 prefilled_tokens=3',
+      'reused_tokens=1 prefilled_tokens=2 prompt=private',
+      'reused_tokens=secret prefilled_tokens=2',
+    ]) {
+      expect(publicLogProjection('$time [RESOURCE_SAMPLE] $resource $suffix'),
+          isNull, reason: suffix);
+    }
+  });
+
+
   test('exports platform diagnostics session without device identity', () {
     final line = publicLogProjection(
       '$time [DIAGNOSTICS_SESSION] '

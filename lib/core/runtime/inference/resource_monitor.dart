@@ -277,7 +277,9 @@ class ResourceMonitor extends ChangeNotifier {
           'total_bytes=${reading.totalBytes ?? -1} threshold_bytes=${reading.thresholdBytes ?? -1} '
           'pressure=${reading.pressure} low_memory=${reading.lowMemory} trim_level=${reading.trimLevel} '
           'n_ctx=${native['context'] ?? -1} n_batch=${native['batch'] ?? -1} '
-          'n_ubatch=${native['micro_batch'] ?? -1}',
+          'n_ubatch=${native['micro_batch'] ?? -1} '
+          'reused_tokens=${native['reused_tokens'] ?? -1} '
+          'prefilled_tokens=${native['prefilled_tokens'] ?? -1}',
         );
       } on Object {
         // Diagnostics must never disable the memory guard or sampling.
