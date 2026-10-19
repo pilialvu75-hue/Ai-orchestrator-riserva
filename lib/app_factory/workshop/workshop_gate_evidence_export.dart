@@ -4,6 +4,31 @@ import 'package:ai_orchestrator/app_factory/workspace/workspace_diff.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 
+/// The UI's copy feedback belongs to one saved Workshop project and task.
+/// Never reuse an old success/error message after switching projects.
+final class WorkshopGateEvidenceCopyFeedback {
+  const WorkshopGateEvidenceCopyFeedback({
+    required this.projectId,
+    required this.taskId,
+    required this.message,
+  });
+
+  final String projectId;
+  final String taskId;
+  final String message;
+
+  bool isFor({required String? projectId, required String? taskId}) {
+    if (projectId == null ||
+        projectId.trim().isEmpty ||
+        taskId == null ||
+        taskId.trim().isEmpty) {
+      return false;
+    }
+    return this.projectId == projectId.trim() &&
+        this.taskId == taskId.trim();
+  }
+}
+
 /// Explicit, local-only export of the rejected staged proposal.
 ///
 /// This never writes to Diagnostics or a repository. The owner chooses whether
