@@ -6,6 +6,7 @@ execution or credential migration is implied by a pass.
 from __future__ import annotations
 
 import unittest
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -23,6 +24,38 @@ PINNED_DEFAULT_FILES = frozenset({
 })
 
 
+# Fail closed if a dependency update silently changes the audited native
+# SharedPreferences filenames. Update only with a fresh source inventory.
+REVIEWED_VERSION = "10.3.4"
+REVIEWED_CONSTRAINT = "^10.3.1"
+REVIEWED_DIGEST = "fe638107c5f69119156ada2db5a57734385fac3f64430bd7252a00d3ead2ca4b"
+
+
+def check_secure_storage_resolution(pubspec: str, lock: str) -> None:
+    constraints = re.findall(r"(?m)^  flutter_secure_storage:\s*([^\s#]+)\s*$", pubspec)
+    if constraints != [REVIEWED_CONSTRAINT]:
+        raise ValueError("Secure Storage dependency declaration changed")
+
+    blocks = re.findall(
+        r"(?ms)^  flutter_secure_storage:\s*\n(.*?)(?=^  [A-Za-z0-9_]+:|\Z)",
+        lock,
+    )
+    if len(blocks) != 1:
+        raise ValueError("Secure Storage lockfile entry missing or duplicated")
+    block = blocks[0]
+    required_lines = {
+        '    dependency: "direct main"',
+        "      name: flutter_secure_storage",
+        f"      sha256: {REVIEWED_DIGEST}",
+        '      url: "https://pub.dev"',
+        "    source: hosted",
+        f'    version: "{REVIEWED_VERSION}"',
+    }
+    actual_lines = [line for line in block.splitlines() if line.strip()]
+    if set(actual_lines) != required_lines or len(actual_lines) != len(required_lines):
+        raise ValueError("Secure Storage version or provenance changed")
+
+
 def entries(root: ET.Element) -> set[tuple[str | None, str | None]]:
     return {
         (entry.attrib.get("domain"), entry.attrib.get("path"))
@@ -31,6 +64,43 @@ def entries(root: ET.Element) -> set[tuple[str | None, str | None]]:
 
 
 class AndroidSecretBackupPolicyTest(unittest.TestCase):
+    def test_secure_storage_resolved_package_is_reviewed(self) -> None:
+        check_secure_storage_resolution(
+            (ROOT / "pubspec.yaml").read_text(encoding="utf-8"),
+            (ROOT / "pubspec.lock").read_text(encoding="utf-8"),
+        )
+
+    def test_secure_storage_lock_guard_rejects_dependency_drift(self) -> None:
+        pubspec = (ROOT / "pubspec.yaml").read_text(encoding="utf-8")
+        lock = (ROOT / "pubspec.lock").read_text(encoding="utf-8")
+        start = lock.index("  flutter_secure_storage:\n")
+        end = lock.index("  flutter_secure_storage_darwin:\n", start)
+        entry = lock[start:end]
+        bad_entries = [
+            entry.replace('version: "10.3.4"', 'version: "11.2.0"'),
+            entry.replace("source: hosted", "source: git"),
+            entry.replace('url: "https://pub.dev"', 'url: "https://unknown.example"'),
+            entry.replace(REVIEWED_DIGEST, "0" * 64),
+            entry + "    version: \"10.3.4\"\n",
+            entry.replace('name: flutter_secure_storage', 'name: fake_storage'),
+            entry.replace('dependency: "direct main"', 'dependency: transitive'),
+            entry.replace("  flutter_secure_storage:\n", "  fake_storage:\n"),
+        ]
+        with self.assertRaises(ValueError):
+            check_secure_storage_resolution(
+                pubspec.replace(REVIEWED_CONSTRAINT, "^11.2.0"), lock
+            )
+        with self.assertRaises(ValueError):
+            check_secure_storage_resolution(
+                pubspec, lock[:end] + entry + lock[end:]
+            )
+        for candidate in bad_entries:
+            with self.subTest(index=bad_entries.index(candidate)):
+                with self.assertRaises(ValueError):
+                    check_secure_storage_resolution(
+                        pubspec, lock[:start] + candidate + lock[end:]
+                    )
+
     def test_main_manifest_refs_both_policies(self) -> None:
         root = ET.parse(ANDROID / "AndroidManifest.xml").getroot()
         app = root.find("application")
