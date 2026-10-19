@@ -77,6 +77,11 @@ final class CloudCredentialStore {
   final Map<String, _CloudCredentialRecord> _records =
       <String, _CloudCredentialRecord>{};
   final Map<String, String> _environmentFallbacks = <String, String>{};
+  // Only provider IDs are retained; never log/store exception contents or secrets.
+  final Set<String> _unreadableProviders = <String>{};
+
+  bool isCredentialUnreadable(String providerId) =>
+      _unreadableProviders.contains(providerId);
 
   bool _initialized = false;
 
@@ -96,9 +101,18 @@ final class CloudCredentialStore {
       );
 
     _records.clear();
+    _unreadableProviders.clear();
 
     for (final providerId in CloudProviderCatalog.supportedProviders) {
-      final encoded = await _storage.read(_storageKey(providerId));
+      String? encoded;
+      try {
+        encoded = await _storage.read(_storageKey(providerId));
+      } catch (_) {
+        // An old Android backup can contain data with an unavailable Keystore
+        // key. Preserve it for explicit recovery; do not retry by deleting it.
+        _unreadableProviders.add(providerId);
+        continue;
+      }
       if (encoded == null || encoded.trim().isEmpty) {
         continue;
       }
@@ -212,9 +226,10 @@ final class CloudCredentialStore {
 
   Future<void> remove(String providerId) async {
     _validateProvider(providerId);
+    await _storage.delete(_storageKey(providerId));
     _records.remove(providerId);
     _environmentFallbacks.remove(providerId);
-    await _storage.delete(_storageKey(providerId));
+    _unreadableProviders.remove(providerId);
   }
 
   Future<void> _save(_CloudCredentialRecord record) async {
@@ -223,6 +238,7 @@ final class CloudCredentialStore {
       record.encode(),
     );
     _records[record.providerId] = record;
+    _unreadableProviders.remove(record.providerId);
   }
 
   void _validateProvider(String providerId) {
