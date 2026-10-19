@@ -68,7 +68,7 @@ class _WorkshopProductionDashboardPageState
   bool _mutationBusy = false;
   bool _autoAdvanceScheduled = false;
   String? _error;
-  String? _gateEvidenceCopyStatus;
+  WorkshopGateEvidenceCopyFeedback? _gateEvidenceCopyStatus;
 
   @override
   void initState() {
@@ -95,6 +95,13 @@ class _WorkshopProductionDashboardPageState
     if (!mounted) return;
     setState(() {
       _buildResult = widget.bundle.dashboardController.state.lastBuildResult;
+      if (_gateEvidenceCopyStatus != null &&
+          !_gateEvidenceCopyStatus!.isFor(
+            projectId: widget.bundle.dashboardController.state.projectId,
+            taskId: _activeTaskId,
+          )) {
+        _gateEvidenceCopyStatus = null;
+      }
     });
     _scheduleAutoAdvance();
   }
@@ -1077,18 +1084,40 @@ class _WorkshopProductionDashboardPageState
   }
 
   /// Shows durable, privacy-safe feedback beside the gate export button.
-  void _reportGateEvidenceCopyStatus(String message) {
+  void _reportGateEvidenceCopyStatus(
+    String message, {
+    required String? projectId,
+    required String? taskId,
+  }) {
     if (!mounted) return;
-    setState(() => _gateEvidenceCopyStatus = message);
+    final feedback = WorkshopGateEvidenceCopyFeedback(
+      projectId: projectId?.trim() ?? '',
+      taskId: taskId?.trim() ?? '',
+      message: message,
+    );
+    if (!feedback.isFor(
+      projectId: widget.bundle.dashboardController.state.projectId,
+      taskId: _activeTaskId,
+    )) {
+      return; // Async clipboard completion from a project no longer active.
+    }
+    setState(() => _gateEvidenceCopyStatus = feedback);
   }
 
   /// Copies rejected source only after explicit owner action; never publishes
   /// source to Diagnostics or a repository.
   Future<void> _copyGateEvidence() async {
+    final projectId = widget.bundle.dashboardController.state.projectId;
+    final taskId = _activeTaskId;
+    void report(String message) => _reportGateEvidenceCopyStatus(
+      message,
+      projectId: projectId,
+      taskId: taskId,
+    );
     final handle = _currentHandle;
     final result = _currentInferenceResult;
     if (handle == null || result == null) {
-      _reportGateEvidenceCopyStatus(
+      report(
         'Nessuna evidenza legata al task attivo. Riapri il progetto salvato.',
       );
       return;
@@ -1101,7 +1130,7 @@ class _WorkshopProductionDashboardPageState
         result: result,
       );
       await Clipboard.setData(ClipboardData(text: evidence));
-      _reportGateEvidenceCopyStatus(
+      report(
         'Copia richiesta agli appunti Android (${evidence.length} caratteri). '
         'Incolla in un editor per verificare il contenuto.',
       );
@@ -1110,16 +1139,16 @@ class _WorkshopProductionDashboardPageState
         const SnackBar(content: Text('Evidenze del gate inviate agli appunti.')),
       );
     } on StateError catch (error) {
-      _reportGateEvidenceCopyStatus(
+      report(
         WorkshopGateEvidenceExport.failureExplanation(error),
       );
     } on PlatformException {
-      _reportGateEvidenceCopyStatus(
+      report(
         'Android non ha confermato la copia delle evidenze. '
         'Usa il report accettazione per la diagnosi.'
       );
     } on MissingPluginException {
-      _reportGateEvidenceCopyStatus(
+      report(
         'Appunti non disponibili su questa piattaforma. '
         'Usa il report accettazione per la diagnosi.',
       );
@@ -1127,7 +1156,7 @@ class _WorkshopProductionDashboardPageState
       RuntimeEventLog.instance.emit(
         '[WORKSHOP_GATE_EXPORT_FAILED] error_type=${error.runtimeType}',
       );
-      _reportGateEvidenceCopyStatus(
+      report(
         WorkshopGateEvidenceExport.failureExplanation(error),
       );
     }
@@ -1273,9 +1302,13 @@ class _WorkshopProductionDashboardPageState
                   label: const Text('Copia evidenze del gate (codice)'),
                 ),
                 const SizedBox(height: 8),
-                if (_gateEvidenceCopyStatus != null) ...<Widget>[
+                if (_gateEvidenceCopyStatus?.isFor(
+                      projectId: widget.bundle.dashboardController.state.projectId,
+                      taskId: _activeTaskId,
+                    ) ??
+                    false) ...<Widget>[
                   SelectableText(
-                    _gateEvidenceCopyStatus!,
+                    _gateEvidenceCopyStatus!.message,
                     key: const Key('workshopGateEvidenceCopyStatus'),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
