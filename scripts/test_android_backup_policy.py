@@ -65,6 +65,21 @@ def entries(root: ET.Element) -> set[tuple[str | None, str | None]]:
 
 
 class AndroidSecretBackupPolicyTest(unittest.TestCase):
+    def test_all_android_secret_clients_preserve_on_error(self) -> None:
+        # Check policy wiring at all known secret clients; device restore
+        # behavior still needs Android G5 acceptance.
+        clients = (
+            "lib/core/runtime/inference/cloud_credential_store.dart",
+            "lib/app_factory/workshop/workshop_library_github_auth.dart",
+            "lib/features/module_library/data/module_library_github_config.dart",
+            "lib/core/diagnostics/github_diagnostics.dart",
+        )
+        for filename in clients:
+            with self.subTest(client=filename):
+                text = (ROOT / filename).read_text(encoding="utf-8")
+                self.assertIn("AndroidOptions(resetOnError: false)", text)
+                self.assertNotIn("const FlutterSecureStorage()", text)
+
     def test_secure_storage_resolved_package_is_reviewed(self) -> None:
         check_secure_storage_resolution(
             (ROOT / "pubspec.yaml").read_text(encoding="utf-8"),
