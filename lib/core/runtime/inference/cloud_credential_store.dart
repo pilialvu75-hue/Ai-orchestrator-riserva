@@ -39,7 +39,9 @@ abstract interface class CloudSecretStorage {
 
 final class FlutterSecureCloudSecretStorage implements CloudSecretStorage {
   FlutterSecureCloudSecretStorage({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ?? const FlutterSecureStorage(
+            aOptions: AndroidOptions(resetOnError: false),
+          );
 
   final FlutterSecureStorage _storage;
 
