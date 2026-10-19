@@ -10,6 +10,10 @@ on:
       - 'android/app/src/main/res/xml/backup_rules.xml'
       - 'android/app/src/main/res/xml/data_extraction_rules.xml'
       - 'scripts/test_android_backup_policy.py'
+      - 'lib/core/runtime/inference/cloud_credential_store.dart'
+      - 'lib/app_factory/workshop/workshop_library_github_auth.dart'
+      - 'lib/features/module_library/data/module_library_github_config.dart'
+      - 'lib/core/diagnostics/github_diagnostics.dart'
   workflow_dispatch:
 
 permissions:
