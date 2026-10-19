@@ -45,6 +45,7 @@ def check_secure_storage_resolution(pubspec: str, lock: str) -> None:
     block = blocks[0]
     required_lines = {
         '    dependency: "direct main"',
+        "    description:",
         "      name: flutter_secure_storage",
         f"      sha256: {REVIEWED_DIGEST}",
         '      url: "https://pub.dev"',
