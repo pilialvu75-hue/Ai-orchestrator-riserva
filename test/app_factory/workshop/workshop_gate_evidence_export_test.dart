@@ -204,6 +204,34 @@ void main() {
     expect(stateMessage, contains('Esportazione non riuscita'));
   });
 
+  test('copy feedback is visible only on its originating project and task', () {
+    const feedback = WorkshopGateEvidenceCopyFeedback(
+      projectId: 'project-alpha',
+      taskId: 'task-star',
+      message: 'Copia richiesta agli appunti Android',
+    );
+    expect(
+      feedback.isFor(projectId: 'project-alpha', taskId: 'task-star'),
+      isTrue,
+    );
+    expect(
+      feedback.isFor(projectId: 'project-beta', taskId: 'task-star'),
+      isFalse,
+    );
+    expect(
+      feedback.isFor(projectId: 'project-alpha', taskId: 'task-new'),
+      isFalse,
+    );
+    expect(
+      feedback.isFor(projectId: null, taskId: 'task-star'),
+      isFalse,
+    );
+    expect(
+      feedback.isFor(projectId: 'project-alpha', taskId: null),
+      isFalse,
+    );
+  });
+
   test('fails closed when rejected proposal has no staged changes', () {
     expect(
       () => evidence(rejected(after: original)),
