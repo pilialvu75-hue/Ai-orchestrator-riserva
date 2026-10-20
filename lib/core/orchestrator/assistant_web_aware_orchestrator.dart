@@ -12,15 +12,15 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_device_clock.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 
-/// Adds Assistant-owned web enrichment to Hybrid requests that Hannibal is
-/// about to route to Cloud.
+/// Adds Assistant-owned web enrichment before Local generation and before
+/// Hybrid requests routed to Cloud.
 ///
 /// Explicit Cloud chat is handled by the chat repository's Cloud web decorator.
-/// Local keeps its existing model/tool-interceptor flow. This class fills the
-/// gap in between without changing the proven routing semantics inside
-/// [Orchestrator].
+/// Local freshness checks do not depend on the model emitting a tool command.
+/// Routing semantics inside [Orchestrator] remain unchanged.
 ///
 /// Web lookup is best-effort: network/search failure never blocks inference.
 final class AssistantWebAwareOrchestrator extends Orchestrator {
@@ -59,6 +59,11 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     String? systemPrompt,
     bool isOffline = false,
   }) async {
+    final clock = AssistantDeviceClock.answer(input, DateTime.now());
+    if (clock != null) {
+      return InferenceResponse.finalChunk(text: clock, tokensGenerated: 0,
+          providerId: 'device_clock');
+    }
     final effectiveSystemPrompt = await _enrichIfNeeded(
       input: input,
       sessionId: 'default',
@@ -66,6 +71,9 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       systemPrompt: systemPrompt,
       isOffline: isOffline,
     );
+
+    final unavailable = _unverifiedFreshFact(input, effectiveSystemPrompt, isOffline);
+    if (unavailable != null) return unavailable;
 
     return super.handle(
       input,
@@ -84,6 +92,12 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     int? maxTokens,
     double? temperature,
   }) async* {
+    final clock = AssistantDeviceClock.answer(input, DateTime.now());
+    if (clock != null) {
+      yield InferenceResponse.finalChunk(text: clock, tokensGenerated: 0,
+          providerId: 'device_clock');
+      return;
+    }
     final effectiveSystemPrompt = await _enrichIfNeeded(
       input: input,
       sessionId: sessionId,
@@ -93,6 +107,12 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       maxTokens: maxTokens,
       temperature: temperature,
     );
+
+    final unavailable = _unverifiedFreshFact(input, effectiveSystemPrompt, isOffline);
+    if (unavailable != null) {
+      yield unavailable;
+      return;
+    }
 
     yield* super.handleStream(
       input,
@@ -114,8 +134,10 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     int? maxTokens,
     double? temperature,
   }) async {
+    final local = _runtimeSettingsService.runtimeMode == AiRuntimeMode.local;
     if (isOffline ||
-        _runtimeSettingsService.runtimeMode != AiRuntimeMode.hybrid ||
+        (!local && _runtimeSettingsService.runtimeMode != AiRuntimeMode.hybrid) ||
+        AssistantWebSearchPolicy.hasInjectedContext(prompt: input, systemPrompt: systemPrompt) ||
         !AssistantWebSearchPolicy.shouldSearch(input)) {
       return systemPrompt;
     }
@@ -141,12 +163,12 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       temperature: temperature ?? InferenceRequest.defaultTemperature,
     );
 
-    if (!_cloudRuntimeProvider.shouldPreferCloudFor(probe) ||
+    if (!local && (!_cloudRuntimeProvider.shouldPreferCloudFor(probe) ||
         _cloudRuntimeProvider.recommendProviderFor(
               probe,
               enforceAutomaticPolicy: true,
             ) ==
-            null) {
+            null)) {
       // Hannibal is expected to stay Local. Preserve the existing Local
       // tool-interceptor flow rather than performing a duplicate lookup here.
       return systemPrompt;
@@ -154,7 +176,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
 
     final query = AssistantWebSearchPolicy.extractQuery(input);
     RuntimeEventLog.instance.emit(
-      '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=hybrid '
+      '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=${local ? 'local' : 'hybrid'} '
       'action=search query_chars=${query.length}',
     );
 
@@ -166,26 +188,26 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
 
       if (!result.success || result.output.trim().isEmpty) {
         RuntimeEventLog.instance.emit(
-          '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=hybrid '
+          '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=${local ? 'local' : 'hybrid'} '
           'status=unavailable reason=tool_unavailable '
           'action=continue_without_web',
         );
-        return systemPrompt;
+        return local ? '${systemPrompt ?? ''}\n\n[WEB SEARCH UNAVAILABLE]\nLive verification failed. Do not invent current facts.' : systemPrompt;
       }
 
       RuntimeEventLog.instance.emit(
-        '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=hybrid '
+        '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=${local ? 'local' : 'hybrid'} '
         'status=success result_chars=${result.output.length}',
       );
 
       return _mergeSystemPrompt(systemPrompt, result.output);
     } catch (error) {
       RuntimeEventLog.instance.emit(
-        '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=hybrid '
+        '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=${local ? 'local' : 'hybrid'} '
         'status=failed error_type=${error.runtimeType} '
         'action=continue_without_web',
       );
-      return systemPrompt;
+      return local ? '${systemPrompt ?? ''}\n\n[WEB SEARCH UNAVAILABLE]\nLive verification failed. Do not invent current facts.' : systemPrompt;
     }
   }
 
@@ -208,5 +230,20 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     sections.add('[WEB SEARCH RESULTS]\n${searchOutput.trim()}');
 
     return sections.join('\n\n');
+  }
+
+  InferenceResponse? _unverifiedFreshFact(String input, String? systemPrompt, bool offline) {
+    if (_runtimeSettingsService.runtimeMode != AiRuntimeMode.local ||
+        (!offline && !(systemPrompt?.contains('[WEB SEARCH UNAVAILABLE]') ?? false)) ||
+        !(AssistantWebSearchPolicy.isPresentOfficeHolderQuery(input) ||
+          AssistantWebSearchPolicy.isSportsResultQuery(input))) return null;
+    final italian = RegExp(r'\b(?:chi|quale|qual|vinto|presidente|mondiali)\b', caseSensitive: false).hasMatch(input);
+    return InferenceResponse.finalChunk(
+      text: italian
+          ? 'Non posso verificare questo dato con fonti aggiornate: la ricerca Internet non è disponibile. Riprova quando la connessione è disponibile.'
+          : 'I cannot verify this with current sources because web search is unavailable. Please try again when a connection is available.',
+      tokensGenerated: 0,
+      providerId: 'web_verification_unavailable',
+    );
   }
 }
