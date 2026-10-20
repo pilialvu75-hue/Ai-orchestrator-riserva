@@ -168,7 +168,7 @@ void main() {
     when(() => webSearch.execute(any())).thenAnswer(
       (_) async => const ToolResult(toolId: 'web_search', output: '', success: false),
     );
-    final chunks = await build().handleStream('chi é il presidente degli Stati Uniti?', sessionId: 'current').toList();
+    final chunks = await build().handleStream("chi é l'attualepresidente degli stati uniti?", sessionId: 'current').toList();
     expect(chunks.single.providerId, 'web_verification_unavailable');
     verify(() => webSearch.execute(any())).called(1);
     verifyNever(() => inference.stream(any()));

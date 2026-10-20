@@ -41,7 +41,8 @@ abstract final class AssistantWebSearchPolicy {
   /// Present-tense identity questions need fresh evidence even without "today".
   /// Explicit historical dates/ordinals remain ordinary knowledge questions.
   static bool isPresentOfficeHolderQuery(String prompt) {
-    final value = prompt.toLowerCase().replaceAll('’', "'").replaceAll('é', 'è');
+    final value = prompt.toLowerCase().replaceAll('’', "'").replaceAll('é', 'è')
+        .replaceAll('attualepresidente', 'attuale presidente');
     if (RegExp(r'\b(?:1[0-9]{3}|20[0-9]{2})\b').hasMatch(value) ||
         RegExp(r'\b(?:primo(?! ministro)|prima|first|premier(?! ministre)|première|primer|primero|primera|former|ex|era|stato|stata|was|était|fue)\b')
             .hasMatch(value)) {
