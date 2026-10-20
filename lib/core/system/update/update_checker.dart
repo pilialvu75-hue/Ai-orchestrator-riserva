@@ -309,8 +309,8 @@ class UpdateChecker {
       _logVersionRemote('tag=$tagName normalized=$version');
 
       final apkAsset = _extractApkAsset(release);
-      if (apkAsset == null) continue;
-      _logApkFound(
+      if (apkAsset == null && targetPlatform == UpdateTargetPlatform.android) continue;
+      if (apkAsset != null) _logApkFound(
         'tag=$tagName file=${apkAsset.name} size_bytes=${apkAsset.sizeBytes}',
       );
 
@@ -362,9 +362,9 @@ class UpdateChecker {
         versionCode: null,
         channel: channel,
         minSupported: UpdateManifest.defaultMinSupportedVersion,
-        apkUrl: apkAsset.url,
-        apkFileName: apkAsset.name,
-        apkSizeBytes: apkAsset.sizeBytes,
+        apkUrl: apkAsset?.url ?? '',
+        apkFileName: apkAsset?.name,
+        apkSizeBytes: apkAsset?.sizeBytes,
         windowsUrl: windowsAsset?.url,
         windowsFileName: windowsAsset?.name,
         windowsSizeBytes: windowsAsset?.sizeBytes,

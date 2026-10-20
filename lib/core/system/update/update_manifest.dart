@@ -115,7 +115,7 @@ class UpdateManifest {
   }
 
   UpdateArtifact? artifactFor(UpdateTargetPlatform target) => switch (target) {
-        UpdateTargetPlatform.android => androidArtifact,
+        UpdateTargetPlatform.android => apkUrl.isEmpty ? null : androidArtifact,
         UpdateTargetPlatform.windows => windowsArtifact,
         UpdateTargetPlatform.macos => macosArtifact,
         UpdateTargetPlatform.linux => linuxArtifact,
@@ -160,7 +160,7 @@ class UpdateManifest {
     // Support both the internal manifest format (version/apk_url/min_supported)
     // and the simplified version.json format (versionName/apkUrl/versionCode).
     final rawVersion = ((json['version'] ?? json['versionName']) as String?)?.trim();
-    final rawApkUrl = ((json['apk_url'] ?? json['apkUrl']) as String?)?.trim();
+    final rawApkUrl = ((json['apk_url'] ?? json['apkUrl']) as String?)?.trim() ?? '';
     final rawMinSupported = (json['min_supported'] as String?)?.trim();
     final rawVersionCode = json['versionCode'];
     final rawApkFileName =
@@ -194,7 +194,7 @@ class UpdateManifest {
     if (rawVersion == null || rawVersion.isEmpty) {
       throw const FormatException('Invalid manifest: missing version');
     }
-    if (rawApkUrl == null || rawApkUrl.isEmpty) {
+    if (rawApkUrl.isEmpty && rawWindowsUrl == null && rawMacosUrl == null && rawLinuxUrl == null) {
       throw const FormatException('Invalid manifest: missing apk_url');
     }
 
@@ -203,14 +203,14 @@ class UpdateManifest {
       throw FormatException('Invalid manifest: malformed version "$rawVersion"');
     }
 
-    final apkUri = _validateHttpUrl(rawApkUrl, fieldName: 'apk_url');
+    final apkUri = rawApkUrl.isEmpty ? null : _validateHttpUrl(rawApkUrl, fieldName: 'apk_url');
 
     final derivedApkFileName =
         rawApkFileName ??
-        (apkUri.pathSegments.isNotEmpty ? apkUri.pathSegments.last.trim() : '');
-    if (derivedApkFileName.isEmpty ||
+        (apkUri != null && apkUri.pathSegments.isNotEmpty ? apkUri.pathSegments.last.trim() : '');
+    if (rawApkUrl.isNotEmpty && (derivedApkFileName.isEmpty ||
         derivedApkFileName.contains('/') ||
-        !derivedApkFileName.toLowerCase().endsWith('.apk')) {
+        !derivedApkFileName.toLowerCase().endsWith('.apk'))) {
       throw FormatException(
         'Invalid manifest: apk filename must be a non-empty .apk name, got: $derivedApkFileName',
       );
