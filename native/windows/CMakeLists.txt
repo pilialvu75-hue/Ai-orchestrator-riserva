@@ -25,5 +25,21 @@ set(LLAMA_TOOLS_INSTALL OFF CACHE BOOL "" FORCE)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_compile_definitions(_WIN32_WINNT=0x0601 WINVER=0x0601)
 add_subdirectory("../../third_party/llama.cpp" "${CMAKE_CURRENT_BINARY_DIR}/llama" EXCLUDE_FROM_ALL)
+
+# Upstream's downloader unconditionally links a Win10-only HTTP library, even
+# with OpenSSL disabled. The app already owns model downloads. Replace only
+# this Windows helper's remote/cache implementation with an explicit offline
+# boundary; do not lower a dependency's declared minimum Windows version.
+get_target_property(common_sources llama-common SOURCES)
+list(FILTER common_sources EXCLUDE REGEX "(^|/)(download|hf-cache)\\.cpp$")
+set_property(TARGET llama-common PROPERTY SOURCES "${common_sources}")
+target_sources(llama-common PRIVATE "${CMAKE_CURRENT_LIST_DIR}/offline_download.cpp")
+get_target_property(common_links llama-common LINK_LIBRARIES)
+list(REMOVE_ITEM common_links cpp-httplib)
+set_property(TARGET llama-common PROPERTY LINK_LIBRARIES "${common_links}")
+get_target_property(common_interface_links llama-common INTERFACE_LINK_LIBRARIES)
+list(FILTER common_interface_links EXCLUDE REGEX "cpp-httplib")
+set_property(TARGET llama-common PROPERTY INTERFACE_LINK_LIBRARIES "${common_interface_links}")
+set_target_properties(cpp-httplib PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_target_properties(llama-completion PROPERTIES WIN32_EXECUTABLE FALSE)
 target_link_options(llama-completion PRIVATE /SUBSYSTEM:CONSOLE,6.01)
