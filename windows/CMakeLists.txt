@@ -1,11 +1,11 @@
 # Project-level configuration.
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.15)
 project(ai_orchestrator LANGUAGES CXX)
 
 # The on-disk executable name.
 set(BINARY_NAME "ai_orchestrator")
 
-cmake_policy(VERSION 3.14...3.25)
+cmake_policy(VERSION 3.15...3.25)
 
 get_property(IS_MULTICONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(IS_MULTICONFIG)
@@ -42,6 +42,9 @@ add_subdirectory("runner")
 # Generated plugin build rules.
 include(flutter/generated_plugins.cmake)
 
+add_subdirectory("../native/windows" "${CMAKE_BINARY_DIR}/native-runtime")
+add_dependencies(${BINARY_NAME} llama-completion)
+
 # === Installation ===
 # Keep all support files next to the executable so the Release directory is
 # directly runnable and can be zipped as a portable bundle.
@@ -53,6 +56,14 @@ endif()
 
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
+
+install(TARGETS llama-completion
+  RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/llama.cpp/LICENSE"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/licenses"
+  RENAME "llama.cpp-LICENSE.txt"
+  COMPONENT Runtime)
 
 install(TARGETS ${BINARY_NAME}
   RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
