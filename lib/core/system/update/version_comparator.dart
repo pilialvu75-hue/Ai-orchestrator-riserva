@@ -25,10 +25,10 @@ class VersionComparator {
     if (a == null) return -1;
     if (b == null) return 1;
 
-    final maxSegments = a.numericSegments.length > b.numericSegments.length
-        ? a.numericSegments.length
-        : b.numericSegments.length;
-    for (var index = 0; index < maxSegments; index += 1) {
+    // Compare the application version before channel and beta sequence.
+    // Windows package_info adds the file build as a fourth numeric segment;
+    // that build must not make beta.4 newer than beta.5 or than stable.
+    for (var index = 0; index < 3; index += 1) {
       final leftSegment = index < a.numericSegments.length
           ? a.numericSegments[index]
           : 0;
@@ -42,7 +42,7 @@ class VersionComparator {
     }
 
     if (!a.isPreRelease && !b.isPreRelease) {
-      return 0;
+      return _compareBuildRevisions(a, b);
     }
     if (!a.isPreRelease) {
       return 1;
@@ -57,7 +57,20 @@ class VersionComparator {
       return channelCmp;
     }
 
-    return _comparePreReleaseParts(a.preReleaseParts, b.preReleaseParts);
+    final prerelease = _comparePreReleaseParts(a.preReleaseParts, b.preReleaseParts);
+    return prerelease != 0 ? prerelease : _compareBuildRevisions(a, b);
+  }
+
+  int _compareBuildRevisions(VersionInfo a, VersionInfo b) {
+    final length = a.numericSegments.length > b.numericSegments.length
+        ? a.numericSegments.length : b.numericSegments.length;
+    for (var index = 3; index < length; index++) {
+      final left = index < a.numericSegments.length ? a.numericSegments[index] : 0;
+      final right = index < b.numericSegments.length ? b.numericSegments[index] : 0;
+      final compared = left.compareTo(right);
+      if (compared != 0) return compared;
+    }
+    return 0;
   }
 
   bool isNewer({required String latest, required String current}) =>

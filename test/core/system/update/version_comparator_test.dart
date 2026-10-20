@@ -4,6 +4,15 @@ import 'package:ai_orchestrator/core/system/update/version_comparator.dart';
 void main() {
   const comparator = VersionComparator();
 
+  test('Windows file build cannot hide a newer beta or stable release', () {
+    expect(comparator.compare('v1.0.13-beta.5', 'v1.0.13.3501-beta.4'), greaterThan(0));
+    expect(comparator.compare('v1.0.13.3501-beta.6', 'v1.0.13.3501-beta.4'), greaterThan(0));
+    expect(comparator.compare('v1.0.13-beta.6+3501', 'v1.0.13-beta.5+9999'), greaterThan(0));
+    expect(comparator.compare('v1.0.13', 'v1.0.13.3501-beta.6'), greaterThan(0));
+    expect(comparator.compare('v1.0.13.1-beta.4', 'v1.0.13-beta.4'), greaterThan(0));
+    expect(comparator.compare('v1.0.14-beta.1', 'v1.0.13.9999-beta.99'), greaterThan(0));
+  });
+
   test('compares all numeric segments including build revisions', () {
     expect(
       comparator.compare('v1.0.12.106', 'v1.0.12.105'),
