@@ -615,6 +615,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       return WindowsLlamaRuntime.resolveExecutable(
         appExecutable: Platform.resolvedExecutable,
         environment: Platform.environment,
+        windowsVersion: Platform.operatingSystemVersion,
       );
     }
     final envPath =

@@ -2,6 +2,15 @@ import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dar
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('modern runtime is selected only on modern Windows with a complete bundle', () {
+    for (final version in ['Windows 11 Home 10.0 (Build 22621)', 'Windows 10', 'Windows Server 2022 10.0']) {
+      expect(WindowsLlamaRuntime.resolveExecutable(appExecutable: r'C:\app\app.exe', environment: const {}, windowsVersion: version, fileExists: (_) => true), r'C:\app\runtime-modern\llama-completion.exe');
+    }
+    for (final version in ['Windows 8.1 6.3', 'Windows 7 6.1', 'unknown', '']) {
+      expect(WindowsLlamaRuntime.resolveExecutable(appExecutable: r'C:\app\app.exe', environment: const {}, windowsVersion: version, fileExists: (_) => true), r'C:\app\llama-completion.exe');
+    }
+    expect(WindowsLlamaRuntime.resolveExecutable(appExecutable: r'C:\app\app.exe', environment: const {}, windowsVersion: 'Windows 11', fileExists: (file) => file == r'C:\app\llama-completion.exe'), r'C:\app\llama-completion.exe');
+  });
   test('bundle is independent of working directory and stale user overrides', () {
     expect(
       WindowsLlamaRuntime.resolveExecutable(
