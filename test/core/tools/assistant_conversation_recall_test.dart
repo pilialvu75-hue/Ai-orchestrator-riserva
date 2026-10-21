@@ -8,6 +8,7 @@ void main() {
       ChatTurn(role: ChatRole.assistant, content: 'Ti chiami Bruna.'),
       ChatTurn(role: ChatRole.user, content: 'Parliamo di computer.')];
     expect(AssistantConversationRecall.answer('quale è il mio nome?', history), 'Ti chiami Aurora.');
+    expect(AssistantConversationRecall.answer("Qual'é il mio nome?", history), 'Ti chiami Aurora.');
     expect(AssistantConversationRecall.answer('Mi ricordi i presidenti?', history), isNull);
     expect(AssistantConversationRecall.answer('Come mi chiamo?', history.sublist(1)), isNull);
     expect(AssistantConversationRecall.answer('Come mi chiamo?', [...history,

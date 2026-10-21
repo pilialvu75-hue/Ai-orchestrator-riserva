@@ -64,6 +64,26 @@ void main() {
     );
   }
 
+  test('local shopping and link follow-up return source URLs without slow model inference', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer((_) async => const ToolResult(
+      toolId: 'web_search', output: 'Search results', metadata: {'results': [
+        {'title': 'Catalogo esempio', 'url': 'https://example.test/notebook'}
+      ]},
+    ));
+    final orchestrator = build();
+    const query = 'trova un offerta per un pc asus Vivobook interessante';
+    final first = await orchestrator.handleStream(query, sessionId: 'shopping').toList();
+    final follow = await orchestrator.handleStream('link al sito?', sessionId: 'shopping', context: [
+      const ChatTurn(role: ChatRole.user, content: query),
+      ChatTurn(role: ChatRole.assistant, content: first.single.text),
+    ]).toList();
+    expect(first.single.text, contains('https://example.test/notebook'));
+    expect(follow.single.text, contains('https://example.test/notebook'));
+    verify(() => webSearch.execute(any())).called(2);
+    verifyNever(() => inference.stream(any()));
+  });
+
   test('enriches time-sensitive Hybrid chat when Hannibal will use Cloud',
       () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
