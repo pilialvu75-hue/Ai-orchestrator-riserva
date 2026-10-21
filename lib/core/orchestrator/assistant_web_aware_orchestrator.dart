@@ -115,7 +115,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
         'query': AssistantWebSearchPolicy.extractQuery(shoppingQuery), 'limit': 3,
       });
       yield InferenceResponse.finalChunk(
-        text: AssistantShoppingResults.render(result, followUp: shoppingQuery != input),
+        text: await AssistantShoppingResults.answer(result, followUp: shoppingQuery != input),
         tokensGenerated: 0, providerId: 'web_search_sources');
       return;
     }
