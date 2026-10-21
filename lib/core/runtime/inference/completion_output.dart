@@ -1,0 +1,39 @@
+/// CLI transport markers are not model answers. Keep literal, non-terminal
+/// occurrences intact and never retain ordinary text waiting for a fixed tail.
+abstract final class CompletionOutput {
+  static const marker = '[end of text]';
+  static final _terminal = RegExp(r'(?:[ \t]*\[end of text\]\s*)+$');
+
+  static String cleanTrailingMarkers(String text) =>
+      text.replaceFirst(_terminal, '');
+
+  static Stream<String> visible(Stream<String> chunks) async* {
+    var pending = '';
+    await for (final chunk in chunks) {
+      pending += chunk;
+      var retainAt = pending.length;
+      final complete = _terminal.firstMatch(pending);
+      if (complete != null) {
+        retainAt = complete.start;
+      } else {
+        final gap = RegExp(r'[ \t]+$').firstMatch(pending);
+        if (gap != null) retainAt = gap.start;
+        for (var size = marker.length - 1; size > 0; size--) {
+          if (!pending.endsWith(marker.substring(0, size))) continue;
+          retainAt = pending.length - size;
+          while (retainAt > 0 &&
+              (pending[retainAt - 1] == ' ' || pending[retainAt - 1] == '\t')) {
+            retainAt--;
+          }
+          final previous = _terminal.firstMatch(pending.substring(0, retainAt));
+          if (previous != null) retainAt = previous.start;
+          break;
+        }
+      }
+      if (retainAt > 0) yield pending.substring(0, retainAt);
+      pending = pending.substring(retainAt);
+    }
+    final tail = cleanTrailingMarkers(pending);
+    if (tail.isNotEmpty) yield tail;
+  }
+}

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:ai_orchestrator/core/runtime/inference/completion_output.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,8 +19,13 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provide
 import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:flutter/foundation.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dart';
 
 class LocalRuntimeProvider implements RuntimeInferenceProvider {
+  @protected
+  Future<Process> startRuntimeProcess(String executable, List<String> arguments) =>
+      Process.start(executable, arguments);
+
   LocalRuntimeProvider({
     bool Function()? developerModeProvider,
   }) : _developerModeProvider =
@@ -348,17 +354,20 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
         StreamSubscription<String>? stdoutSub;
         StreamSubscription<String>? stderrSub;
+        final stdoutDone = Completer<void>();
+        final stderrDone = Completer<void>();
+        Object? outputReadError;
 
         var estimatedTokenCount = 0;
 
         try {
-          process = await Process.start(
+          process = await startRuntimeProcess(
             executable,
             args,
           );
         } on ProcessException catch (e) {
           clearRuntimeVerification();
-          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=ffi_binding_failed detail=${e.message}');
+          RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=${Platform.isWindows ? 'process_start_failed' : 'ffi_binding_failed'} detail=${e.message}');
 
           controller.add(
             InferenceResponse.error(
@@ -374,15 +383,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           process?.kill(ProcessSignal.sigterm);
         });
 
-        stdoutSub = process.stdout
-           .transform(utf8.decoder)
-           .listen(
+        final decodedOutput = process.stdout.transform(utf8.decoder);
+        stdoutSub = CompletionOutput.visible(decodedOutput).listen(
           (chunk) {
             if (chunk.isEmpty) return;
 
-            final visibleChunk = Platform.isMacOS
-                ? chunk.replaceAll(' [end of text]\n', '')
-                : chunk;
+            final visibleChunk = chunk;
             if (visibleChunk.isEmpty) return;
 
             fullText.write(visibleChunk);
@@ -398,10 +404,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
             );
           },
           onError: (Object error) {
+            outputReadError = error;
             debugPrint(
               '[$_localProviderTag] stdout error: $error',
             );
           },
+          onDone: () => stdoutDone.complete(),
           cancelOnError: false,
         );
 
@@ -420,10 +428,16 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
               '[$_localProviderTag] stderr error: $error',
             );
           },
+          onDone: () => stderrDone.complete(),
           cancelOnError: false,
         );
 
         final exitCode = await process.exitCode;
+
+        if (Platform.isWindows) {
+          // Process exit can precede the final buffered stdout event.
+          await Future.wait(<Future<void>>[stdoutDone.future, stderrDone.future]);
+        }
 
         await stdoutSub.cancel();
         await stderrSub.cancel();
@@ -448,8 +462,9 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           return;
         }
 
-        if (exitCode != 0 &&
-            fullText.isEmpty) {
+        if (Platform.isWindows
+            ? exitCode != 0 || fullText.toString().trim().isEmpty || outputReadError != null
+            : exitCode != 0 && fullText.isEmpty) {
           clearRuntimeVerification();
           RuntimeEventLog.instance.emit('[INFERENCE_ERROR] session=${request.sessionId} reason=process_exit_code exitCode=$exitCode');
 
@@ -458,7 +473,9 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
           controller.add(
             InferenceResponse.error(
-              stderr.isEmpty
+              exitCode == 0 && stderr.isEmpty
+                  ? 'llama.cpp returned no generated text.'
+                  : stderr.isEmpty
                  ? 'llama.cpp failed with exit code $exitCode'
                   : stderr,
             ),
@@ -591,6 +608,13 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   String _resolveLlamaExecutable() {
+    if (Platform.isWindows) {
+      return WindowsLlamaRuntime.resolveExecutable(
+        appExecutable: Platform.resolvedExecutable,
+        environment: Platform.environment,
+        windowsVersion: Platform.operatingSystemVersion,
+      );
+    }
     final envPath =
         Platform.environment[
             'LLAMA_CPP_EXECUTABLE'];
@@ -644,8 +668,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         '--verbosity',
         '0',
       ],
+      if (Platform.isWindows)
+        ...WindowsLlamaRuntime.arguments(processors: Platform.numberOfProcessors),
       '--no-display-prompt',
-      if (!Platform.isMacOS) '--log-disable',
+      if (!Platform.isMacOS && !Platform.isWindows) '--log-disable',
     ];
   }
 

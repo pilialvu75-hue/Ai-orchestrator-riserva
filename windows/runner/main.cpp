@@ -55,7 +55,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   startup_trace::Mark("12 before window.Create");
-  if (!window.Create(L"ai_orchestrator", origin, size)) {
+  if (!window.Create(L"AI Orchestrator - BETA DI PROVA", origin, size)) {
     startup_trace::Mark("13 window.Create returned false");
     return EXIT_FAILURE;
   }

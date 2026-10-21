@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_journal.dart';
 import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/assistant_web_continuation_local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/assistant_resident_local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -91,7 +92,7 @@ abstract final class CloudRoutingBootstrap {
     // and the rest of the application.
     final assistantLocalRuntimeProvider =
         AssistantWebContinuationLocalRuntimeProvider(
-      delegate: sl<LocalRuntimeProvider>(),
+      delegate: AssistantResidentLocalRuntimeProvider(delegate: sl<LocalRuntimeProvider>()),
     );
 
     sl.registerLazySingleton<CloudBackgroundExecutionJournal>(

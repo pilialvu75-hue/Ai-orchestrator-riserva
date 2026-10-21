@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:ai_orchestrator/core/runtime/inference/completion_output.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
@@ -107,7 +108,9 @@ class LocalPromptTemplates {
         )
         .map(
           (turn) => turn.copyWith(
-            content: turn.content.trim(),
+            content: turn.role == ChatRole.assistant
+                ? CompletionOutput.cleanTrailingMarkers(turn.content).trim()
+                : turn.content.trim(),
           ),
         )
         .toList(growable: false);

@@ -58,6 +58,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
+          submodules: recursive
 
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -107,6 +108,16 @@ jobs:
       - name: Build coordinated Windows release
         shell: pwsh
         run: flutter build windows --release
+
+      - name: Verify bundled Windows GGUF inference
+        shell: pwsh
+        run: |
+          & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
+
+      - name: Validate Windows compatibility bundle
+        shell: pwsh
+        run: |
+          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
 
       - name: Prepare Windows release payload
         id: payload

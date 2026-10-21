@@ -443,7 +443,9 @@ class Orchestrator {
     const prompt = 'You are AI Orchestrator. Answer the user using the web search '
         'results in the conversation context as primary evidence. Cite the '
         'most relevant source URLs when possible. If the search results do '
-        'not contain enough evidence, say so explicitly.';
+        'not contain enough evidence, say so explicitly. Previous assistant '
+        'replies are history, not verified facts: reassess repeated questions '
+        'against fresh sources instead of copying an old answer.';
     _logForensic('[WEBSEARCH_PROMPT_FINALIZED] chars=${prompt.length}');
     return prompt;
   }

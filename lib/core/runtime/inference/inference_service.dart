@@ -70,13 +70,9 @@ class InferenceService {
     final temporalContext =
         'Device system time (local): $localTime; UTC offset: $offsetText; '
         'timezone label: ${now.timeZoneName}. '
-        'This is the current device clock, not independently verified. '
-        'For questions about the current date, day, time, or timezone, '
-        'answer directly using this device clock. Do not claim that the '
-        'current time is unavailable, invent a location, or output a '
-        'placeholder for the time. This clock is not independently '
-        'verified; verify unrelated external facts with reliable '
-        'current sources when available.';
+        'For current date/time, answer directly using this device clock '
+        '(not independently verified). Do not invent a location. '
+        'Verify changing external facts with current sources.';
     final priorSystemPrompt = request.systemPrompt?.trim();
     final isolatedRequest = request.copyWith(
       systemPrompt: priorSystemPrompt == null || priorSystemPrompt.isEmpty
