@@ -11,7 +11,7 @@ class ResidentRuntimeBusy implements Exception {}
 /// One local, authenticated process and one cache slot. Nothing is persisted.
 /// A different model or conversation always starts a fresh process.
 class ResidentCompletionRuntime {
-  ResidentCompletionRuntime({this.idleTimeout = const Duration(minutes: 2)});
+  ResidentCompletionRuntime({this.idleTimeout = const Duration(minutes: 5)});
 
   final Duration idleTimeout;
   Process? _process;
@@ -117,7 +117,8 @@ class ResidentCompletionRuntime {
     final process = await Process.start(executable, [
       '-m', model, '--host', '127.0.0.1', '--port', '$_port', '--api-key', _key!,
       '-c', '4096', '-t', '${threads.clamp(1, 8)}', '-ngl', '0', '--parallel', '1',
-      '--no-slots', '--sleep-idle-seconds', '120',
+      '--threads-batch', '${threads.clamp(1, 8)}',
+      '--no-slots', '--sleep-idle-seconds', '${idleTimeout.inSeconds.clamp(1, 86400)}',
     ]);
     _process = process;
     _lease = ResidentProcessLease.attach(process.pid);

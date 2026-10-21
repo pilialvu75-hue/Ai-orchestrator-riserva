@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_device_clock.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_conversation_recall.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 
 /// Adds Assistant-owned web enrichment before Local generation and before
@@ -92,6 +93,12 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     int? maxTokens,
     double? temperature,
   }) async* {
+    final recalledName = AssistantConversationRecall.answer(input, context);
+    if (recalledName != null) {
+      yield InferenceResponse.finalChunk(text: recalledName, tokensGenerated: 0,
+          providerId: 'conversation_recall');
+      return;
+    }
     final clock = AssistantDeviceClock.answer(input, DateTime.now());
     if (clock != null) {
       yield InferenceResponse.finalChunk(text: clock, tokensGenerated: 0,
