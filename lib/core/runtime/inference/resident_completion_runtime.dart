@@ -125,7 +125,9 @@ class ResidentCompletionRuntime {
     final process = await Process.start(executable, [
       '-m', model, '--host', '127.0.0.1', '--port', '$_port', '--api-key', _key!,
       '-c', '4096', '-t', '${threads.clamp(1, 8)}', '-ngl', device == null ? '0' : '99', '--parallel', '1',
-      if (device != null) ...['--device', device],
+      // Avoid an extra synthetic generation before the first real request.
+      // Measured with this pinned Vulkan package; CPU/legacy paths unchanged.
+      if (device != null) ...['--device', device, '--no-warmup'],
       '--threads-batch', '${threads.clamp(1, 8)}',
       // Bound recurrent-state rollback only for an explicitly measured profile.
       if (batchSize != null) ...['--batch-size', '$batchSize'],
