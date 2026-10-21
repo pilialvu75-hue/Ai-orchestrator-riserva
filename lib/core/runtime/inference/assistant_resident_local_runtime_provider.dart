@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
@@ -19,6 +20,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_vulkan_device.dart';
 
 /// Assistant-only warm desktop runtime. Workshop and diagnostics retain their
 /// canonical provider. Unsupported platforms and startup failures use the CLI.
@@ -33,6 +35,24 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   final String? Function() _executable;
   AppLifecycleListener? _lifecycle;
   bool _unavailable = false;
+  bool _gpuUnavailable = false;
+  Future<String?>? _gpuDevices;
+
+  Future<String?> _listGpuDevices(String executable) async {
+    Process? probe;
+    try {
+      probe = await Process.start(executable, ['--list-devices']);
+      final stdout = probe.stdout.transform(utf8.decoder).join();
+      final stderr = probe.stderr.drain<void>();
+      final code = await probe.exitCode.timeout(const Duration(seconds: 15));
+      await stderr;
+      return code == 0 ? await stdout : null;
+    } catch (_) {
+      return null;
+    } finally {
+      probe?.kill();
+    }
+  }
 
   static String? _bundledServer() {
     final appDir = p.dirname(Platform.resolvedExecutable);
@@ -98,6 +118,22 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         return;
       }
     } finally { await bytes.close(); }
+    String? gpuExecutable;
+    String? gpuDevice;
+    if (Platform.isWindows && !_gpuUnavailable &&
+        WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion) &&
+        LocalInferenceModelIds.resolveTemplate(request.modelId!) == LocalInferenceModelIds.templateNemotron) {
+      final candidate = p.join(p.dirname(executable), '..', 'runtime-vulkan', 'llama-server.exe');
+      if (File(candidate).existsSync()) {
+        final listing = await (_gpuDevices ??= _listGpuDevices(candidate));
+        if (cancellationToken.isCancelled) {
+          yield InferenceResponse.error('Inference cancelled.', state: InferenceTerminalState.cancelled);
+          return;
+        }
+        gpuDevice = WindowsVulkanDevice.select(listing ?? '', modelBytes: await file.length());
+        if (gpuDevice != null) gpuExecutable = candidate;
+      }
+    }
     final prompt = LocalPromptTemplates.compose(modelId: request.modelId!,
         prompt: request.prompt, systemPrompt: request.systemPrompt, context: request.context,
         preserveHistoryPrefix: Platform.isWindows);
@@ -105,13 +141,15 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     final text = StringBuffer();
     var chunks = 0;
     try {
-      final output = _runtime.generate(executable: executable, modelPath: model,
+      RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] backend=${gpuDevice ?? 'cpu'}');
+      final output = _runtime.generate(executable: gpuExecutable ?? executable, modelPath: model,
         sessionId: request.sessionId, prompt: metadata.stripFrom(prompt),
         maxTokens: request.maxTokens, temperature: metadata.temperature ?? request.temperature,
         topP: metadata.topP ?? request.topP,
         repeatPenalty: metadata.repeatPenalty ?? request.repeatPenalty,
         threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8), cancellation: cancellationToken,
-        batchSize: Platform.isWindows && LocalInferenceModelIds.resolveTemplate(request.modelId!) ==
+        device: gpuDevice,
+        batchSize: gpuDevice == null && Platform.isWindows && LocalInferenceModelIds.resolveTemplate(request.modelId!) ==
             LocalInferenceModelIds.templateNemotron ? 128 : null,
         onPromptUsage: (cached, evaluated) => RuntimeEventLog.instance.emit(
           '[ASSISTANT_LOCAL_CACHE] cached_tokens=$cached evaluated_tokens=$evaluated'),
@@ -134,6 +172,12 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       } else if (error is ResidentRuntimeBusy) {
         yield InferenceResponse.error('Local inference is already running.');
       } else if (chunks == 0) {
+        if (gpuExecutable != null) {
+          _gpuUnavailable = true;
+          RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] status=unavailable action=resident_cpu_fallback');
+          yield* streamInference(request: request, cancellationToken: cancellationToken);
+          return;
+        }
         _unavailable = true;
         RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_CACHE] status=unavailable action=cli_fallback');
         yield* _delegate.streamInference(request: request, cancellationToken: cancellationToken);

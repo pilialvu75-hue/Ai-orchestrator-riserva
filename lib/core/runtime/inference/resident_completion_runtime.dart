@@ -35,6 +35,7 @@ class ResidentCompletionRuntime {
     required double repeatPenalty,
     required int threads,
     int? batchSize,
+    String? device,
     required CancellationToken cancellation,
     void Function(int cached, int evaluated)? onPromptUsage,
   }) async* {
@@ -50,7 +51,10 @@ class ResidentCompletionRuntime {
       if (batchSize != null && (batchSize < 1 || batchSize > 2048)) {
         throw ArgumentError.value(batchSize, 'batchSize');
       }
-      await _ensureStarted(executable, modelPath, sessionId, threads, cancellation, batchSize);
+      if (device != null && !RegExp(r'^Vulkan\d+$').hasMatch(device)) {
+        throw ArgumentError.value(device, 'device');
+      }
+      await _ensureStarted(executable, modelPath, sessionId, threads, cancellation, batchSize, device);
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       final request = await _request('POST', '/completion');
       request.headers.contentType = ContentType.json;
@@ -107,8 +111,8 @@ class ResidentCompletionRuntime {
   }
 
   Future<void> _ensureStarted(String executable, String model, String session,
-      int threads, CancellationToken cancellation, int? batchSize) async {
-    final identity = '$executable\u0000$model\u0000$session\u0000$batchSize';
+      int threads, CancellationToken cancellation, int? batchSize, String? device) async {
+    final identity = '$executable\u0000$model\u0000$session\u0000$batchSize\u0000$device';
     if (_process != null && _identity == identity) return;
     await close();
     if (cancellation.isCancelled) throw StateError('Inference cancelled.');
@@ -120,7 +124,8 @@ class ResidentCompletionRuntime {
     _client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
     final process = await Process.start(executable, [
       '-m', model, '--host', '127.0.0.1', '--port', '$_port', '--api-key', _key!,
-      '-c', '4096', '-t', '${threads.clamp(1, 8)}', '-ngl', '0', '--parallel', '1',
+      '-c', '4096', '-t', '${threads.clamp(1, 8)}', '-ngl', device == null ? '0' : '99', '--parallel', '1',
+      if (device != null) ...['--device', device],
       '--threads-batch', '${threads.clamp(1, 8)}',
       // Bound recurrent-state rollback only for an explicitly measured profile.
       if (batchSize != null) ...['--batch-size', '$batchSize'],

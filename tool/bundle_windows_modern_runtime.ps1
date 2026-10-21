@@ -19,3 +19,21 @@ foreach ($requiredModern in @('llama-completion.exe','llama-completion-impl.dll'
   if (!(Test-Path -LiteralPath (Join-Path $modernTarget $requiredModern))) { throw "Missing modern runtime dependency: $requiredModern" }
 }
 Write-Output 'Verified official b11753 CPU runtime bundled for Windows 10/11; legacy helper unchanged.'
+
+$vulkanArchive = Join-Path $modernWork 'vulkan.zip'
+Invoke-WebRequest 'https://github.com/ggml-org/llama.cpp/releases/download/b11753/llama-b11753-bin-win-vulkan-x64.zip' -OutFile $vulkanArchive
+if ((Get-FileHash -LiteralPath $vulkanArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd994930aa5739c77d14f34599e0b905ea86c04e53a6ba7ec94a317bbc5e0effd') { throw 'Official Vulkan runtime SHA256 mismatch' }
+$vulkanExpanded = Join-Path $modernWork 'vulkan-expanded'
+Expand-Archive -LiteralPath $vulkanArchive -DestinationPath $vulkanExpanded -Force
+$vulkanServer = @(Get-ChildItem -LiteralPath $vulkanExpanded -Recurse -File -Filter 'llama-server.exe')
+if ($vulkanServer.Count -ne 1) { throw 'Missing or ambiguous Vulkan server' }
+$vulkanTarget = Join-Path $ReleaseDir 'runtime-vulkan'
+New-Item -ItemType Directory -Path $vulkanTarget -Force | Out-Null
+Get-ChildItem -LiteralPath $vulkanServer[0].DirectoryName -File | Where-Object {
+  $_.Name -eq 'llama-server.exe' -or $_.Name -like 'ggml*.dll' -or
+  $_.Name -in @('llama.dll','llama-common.dll','llama-server-impl.dll','mtmd.dll','libomp.dll','LICENSE-LLVM-OpenMP')
+} | Copy-Item -Destination $vulkanTarget -Force
+foreach ($required in @('llama-server.exe','llama-server-impl.dll','ggml-vulkan.dll','ggml.dll','ggml-base.dll','llama.dll','llama-common.dll','mtmd.dll','libomp.dll')) {
+  if (!(Test-Path -LiteralPath (Join-Path $vulkanTarget $required))) { throw "Missing Vulkan dependency: $required" }
+}
+Write-Output 'Verified Vulkan server bundled separately; runtime selection retains CPU fallback.'
