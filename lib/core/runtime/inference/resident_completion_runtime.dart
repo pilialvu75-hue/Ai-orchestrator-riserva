@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resident_process_lease.dart';
 
 class ResidentRuntimeBusy implements Exception {}
 
@@ -14,6 +15,7 @@ class ResidentCompletionRuntime {
 
   final Duration idleTimeout;
   Process? _process;
+  ResidentProcessLease? _lease;
   HttpClient? _client;
   int? _port;
   String? _key;
@@ -115,6 +117,7 @@ class ResidentCompletionRuntime {
       '--no-slots', '--sleep-idle-seconds', '120',
     ]);
     _process = process;
+    _lease = ResidentProcessLease.attach(process.pid);
     _identity = identity;
     // Drain both pipes. Neither prompts, process arguments nor credentials go
     // to diagnostics. The API returns only bounded error status to callers.
@@ -158,6 +161,8 @@ class ResidentCompletionRuntime {
     _client = null;
     _key = null;
     _port = null;
+    _lease?.close();
+    _lease = null;
     if (process != null) {
       process.kill();
       try { await process.exitCode.timeout(const Duration(seconds: 3)); }

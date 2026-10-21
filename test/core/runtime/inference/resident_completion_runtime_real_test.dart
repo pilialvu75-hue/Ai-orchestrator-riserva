@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resident_completion_runtime.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resident_process_lease.dart';
 
 class _NoCliProvider extends LocalRuntimeProvider {
   @override
@@ -19,6 +20,20 @@ void main() {
   final model = Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODEL'];
   final server = helper == null ? null : p.join(p.dirname(helper), 'runtime-modern', 'llama-server.exe');
   final skip = !Platform.isWindows || server == null || model == null || !File(server).existsSync();
+
+  test('closing the Windows lifetime lease terminates only its child process', () async {
+    final child = await Process.start('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Start-Sleep -Seconds 60']);
+    ResidentProcessLease? lease;
+    try {
+      lease = ResidentProcessLease.attach(child.pid);
+      expect(lease, isNotNull);
+      lease!.close();
+      await child.exitCode.timeout(const Duration(seconds: 5));
+    } finally {
+      lease?.close();
+      child.kill();
+    }
+  }, skip: !Platform.isWindows);
 
   test('real resident cache is reused only within one conversation', () async {
     final runtime = ResidentCompletionRuntime();
