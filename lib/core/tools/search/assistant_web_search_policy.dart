@@ -21,6 +21,7 @@ abstract final class AssistantWebSearchPolicy {
 
     return _explicitWebIntent(value) ||
         _timeSensitiveIntent(value) ||
+        _shoppingIntent(value) ||
         isPresentOfficeHolderQuery(value) ||
         isSportsResultQuery(value) ||
         _evidenceDrivenIntent(value);
@@ -52,9 +53,15 @@ abstract final class AssistantWebSearchPolicy {
       r"(?:\bchi\s+(?:è|é|e'|e)|\bqual\s+(?:è|é|e'|e)|\bwho\s+is|\bqui\s+est|\bquién\s+es|\bquien\s+es)\s+",
     );
     final office = RegExp(
-      r'\b(?:presidente|president|président|présidente|sindaco|sindaca|mayor|maire|alcalde|alcaldesa|ceo|cancelliere|chancellor|primo ministro|prime minister|premier ministre)\b',
+      r'\b(?:presidente|presidenti|presidents?|présidents?|présidente|sindaco|sindaca|mayor|maire|alcalde|alcaldesa|ceo|cancelliere|chancellor|primo ministro|prime minister|premier ministre)\b',
     );
-    return identity.hasMatch(value) && office.hasMatch(value);
+    final recentList = RegExp(r'\b(?:ultim[ioae]|latest|last|current|recent|derniers?)\b').hasMatch(value);
+    return (identity.hasMatch(value) || recentList) && office.hasMatch(value);
+  }
+
+  static bool _shoppingIntent(String value) {
+    return RegExp(r'\b(?:cerca|cercami|cerco|trova|trovami|consigliami|find|search|cherche|busca)\b').hasMatch(value) &&
+        RegExp(r'\b(?:offert[ae]|offera|scont[oi]|promozion[ei]|deals?|offers?)\b').hasMatch(value);
   }
 
   /// Returns true when a previous Assistant layer already supplied either live

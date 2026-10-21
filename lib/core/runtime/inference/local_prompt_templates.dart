@@ -62,9 +62,19 @@ class LocalPromptTemplates {
         },
       );
     }
-    final cleanedSystemPrompt = _clean(systemPrompt);
-
-    final userPrompt = prompt.trim();
+    var cleanedSystemPrompt = _clean(systemPrompt);
+    var userPrompt = prompt.trim();
+    // A changing minute in the system prefix invalidates the cached history.
+    // Keep the current clock intact, next to the current question instead.
+    final clockPattern = RegExp(
+      r'Device system time \(local\): [^\n]+?Verify changing external facts with current sources\.',
+    );
+    final clock = clockPattern.firstMatch(cleanedSystemPrompt ?? '');
+    if (clock != null) {
+      final currentClock = clock.group(0)!;
+      cleanedSystemPrompt = _clean(cleanedSystemPrompt!.replaceFirst(clockPattern, ''));
+      userPrompt = '[CURRENT DEVICE CONTEXT]\n$currentClock\n\n$userPrompt';
+    }
 
     /*
      * IMPORTANT:
@@ -81,7 +91,7 @@ class LocalPromptTemplates {
           prompt: userPrompt,
           systemPrompt: cleanedSystemPrompt,
         ) &&
-        AssistantWebSearchPolicy.shouldSearch(userPrompt);
+        AssistantWebSearchPolicy.shouldSearch(prompt);
 
     final baseSystemPrompt =
         cleanedSystemPrompt ?? _completeSystemPrompt;

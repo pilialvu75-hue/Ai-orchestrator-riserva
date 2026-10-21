@@ -3,6 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('AssistantWebSearchPolicy.shouldSearch', () {
+    test('real shopping request and recent office list require fresh sources', () {
+      for (final prompt in ['trova un offera per un pc asus Vivobook interessante',
+          'Trova una offerta per un notebook', 'gli ultimi 6 presidenti degli USA']) {
+        expect(AssistantWebSearchPolicy.shouldSearch(prompt), isTrue, reason: prompt);
+      }
+      expect(AssistantWebSearchPolicy.isPresentOfficeHolderQuery('gli ultimi 6 presidenti degli USA'), isTrue);
+      expect(AssistantWebSearchPolicy.shouldSearch('Spiega il concetto di offerta e domanda'), isFalse);
+      expect(AssistantWebSearchPolicy.shouldSearch('Senza internet trova una offerta per un pc'), isFalse);
+    });
     test('sports results request evidence, sports rules stay local', () {
       for (final prompt in ['Chi ha vinto il mondiale del 2026?',
           'Who won the 2026 World Cup?', 'Risultati delle olimpiadi']) {
