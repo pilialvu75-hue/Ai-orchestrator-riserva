@@ -14,8 +14,15 @@ class _NoCliProvider extends LocalRuntimeProvider {
       throw StateError('Resident smoke test must not fall back to CLI.');
 }
 
+// This is a real loopback integration test. The default widget-test binding
+// replaces HttpClient with an HTTP-400 fake, including localhost requests.
+class _RealRuntimeBinding extends AutomatedTestWidgetsFlutterBinding {
+  @override
+  bool get overrideHttpClient => false;
+}
+
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  _RealRuntimeBinding();
   final helper = Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_HELPER'];
   final model = Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODEL'];
   final server = helper == null ? null : p.join(p.dirname(helper), 'runtime-modern', 'llama-server.exe');
