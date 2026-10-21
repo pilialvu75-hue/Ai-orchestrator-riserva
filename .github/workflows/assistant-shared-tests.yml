@@ -1,0 +1,55 @@
+name: Assistant Shared Tests
+
+on:
+  push:
+    branches: [main, codex/assistant-local-reliability]
+    paths:
+      - 'lib/core/**'
+      - 'lib/native/runtime/windows/**'
+      - 'test/core/**'
+      - 'pubspec.*'
+      - '.github/workflows/assistant-shared-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/core/**'
+      - 'lib/native/runtime/windows/**'
+      - 'test/core/**'
+      - 'pubspec.*'
+      - '.github/workflows/assistant-shared-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assistant-shared-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Verify shared Assistant behavior
+        run: >-
+          flutter test
+          test/core/tools/assistant_device_clock_test.dart
+          test/core/tools/assistant_web_search_policy_test.dart
+          test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
+          test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart
+          test/core/runtime/inference/completion_output_test.dart
+          test/core/runtime/inference/local_prompt_templates_test.dart
+          test/core/runtime/inference/inference_service_test.dart
+          test/core/system/update
