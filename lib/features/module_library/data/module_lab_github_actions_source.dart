@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
 import 'package:http/http.dart' as http;
 
 final class ModuleLabRunStatus {
@@ -25,9 +26,13 @@ final class ModuleLabGitHubActionsSource {
   ModuleLabGitHubActionsSource({
     WorkshopLibraryGitHubCredentialStore? credentialStore,
     http.Client? client,
+    ModuleLibraryGitHubConfigStore? configStore,
+    WorkshopLibraryGitHubAuthClient? authClient,
     ModuleLabAccessTokenProvider? accessTokenProvider,
   })  : _credentialStore = credentialStore ?? WorkshopLibraryGitHubCredentialStore(),
         _client = client ?? http.Client(),
+        _configStore = configStore ?? ModuleLibraryGitHubConfigStore(),
+        _authClient = authClient ?? WorkshopLibraryGitHubAuthClient(),
         _accessTokenProvider = accessTokenProvider;
 
   static const _researcherRepository =
@@ -36,6 +41,8 @@ final class ModuleLabGitHubActionsSource {
 
   final WorkshopLibraryGitHubCredentialStore _credentialStore;
   final http.Client _client;
+  final ModuleLibraryGitHubConfigStore _configStore;
+  final WorkshopLibraryGitHubAuthClient _authClient;
   final ModuleLabAccessTokenProvider? _accessTokenProvider;
 
   Future<String> _token() async {
@@ -45,11 +52,26 @@ final class ModuleLabGitHubActionsSource {
       if (token.isEmpty) throw StateError('Autorizzazione GitHub assente.');
       return token;
     }
-    final credential = await _credentialStore.load();
-    if (credential == null || credential.isExpired) {
+    var credential = await _credentialStore.load();
+    if (credential == null) {
       throw StateError('Autorizzazione GitHub assente o scaduta.');
     }
-    return credential.accessToken;
+    if (!credential.isExpired) return credential.accessToken;
+    final refreshToken = credential.refreshToken?.trim();
+    final clientId = await _configStore.loadClientId();
+    if (refreshToken == null || refreshToken.isEmpty || clientId == null) {
+      throw StateError('Autorizzazione GitHub assente o scaduta.');
+    }
+    try {
+      credential = await _authClient.refresh(
+        clientId: clientId,
+        refreshToken: refreshToken,
+      );
+      await _credentialStore.save(credential);
+      return credential.accessToken;
+    } catch (_) {
+      throw StateError('Autorizzazione GitHub assente o scaduta.');
+    }
   }
 
   Map<String, String> _headers(String token) => <String, String>{
