@@ -94,6 +94,18 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     int? maxTokens,
     double? temperature,
   }) async* {
+    final recalledName = AssistantConversationRecall.answer(input, context);
+    if (recalledName != null) {
+      yield InferenceResponse.finalChunk(text: recalledName, tokensGenerated: 0,
+          providerId: 'conversation_recall');
+      return;
+    }
+    final clock = AssistantDeviceClock.answer(input, DateTime.now());
+    if (clock != null) {
+      yield InferenceResponse.finalChunk(text: clock, tokensGenerated: 0,
+          providerId: 'device_clock');
+      return;
+    }
     final shoppingQuery = !isOffline &&
         !AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) &&
         _runtimeSettingsService.runtimeMode == AiRuntimeMode.local
@@ -105,18 +117,6 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       yield InferenceResponse.finalChunk(
         text: AssistantShoppingResults.render(result, followUp: shoppingQuery != input),
         tokensGenerated: 0, providerId: 'web_search_sources');
-      return;
-    }
-    final recalledName = AssistantConversationRecall.answer(input, context);
-    if (recalledName != null) {
-      yield InferenceResponse.finalChunk(text: recalledName, tokensGenerated: 0,
-          providerId: 'conversation_recall');
-      return;
-    }
-    final clock = AssistantDeviceClock.answer(input, DateTime.now());
-    if (clock != null) {
-      yield InferenceResponse.finalChunk(text: clock, tokensGenerated: 0,
-          providerId: 'device_clock');
       return;
     }
     final effectiveSystemPrompt = await _enrichIfNeeded(
