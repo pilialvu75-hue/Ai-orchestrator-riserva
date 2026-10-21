@@ -95,6 +95,9 @@ class ResidentCompletionRuntime {
   Future<HttpClientRequest> _request(String method, String endpoint) async {
     final request = await _client!.openUrl(method,
         Uri(scheme: 'http', host: '127.0.0.1', port: _port, path: endpoint));
+    // Model startup and shutdown can close a server-side keep-alive socket.
+    // A fresh loopback connection avoids reusing it for the next generation.
+    request.persistentConnection = false;
     request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_key');
     return request;
   }

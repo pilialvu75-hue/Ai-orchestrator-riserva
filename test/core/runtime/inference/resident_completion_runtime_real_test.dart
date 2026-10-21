@@ -51,11 +51,14 @@ void main() {
       cancellation: CancellationToken(), onPromptUsage: (cache, evaluated) => cached.add(cache),
     ).join();
     try {
+      print('Resident cache check: first request');
       final first = await generate('one', 'Once upon a time');
       expect(first.trim(), isNotEmpty);
+      print('Resident cache check: warm request');
       final second = await generate('one', 'Once upon a time$first');
       expect(second.trim(), isNotEmpty);
       expect(cached[1], greaterThan(0));
+      print('Resident cache check: new conversation');
       await generate('two', 'Once upon a time');
       expect(cached[2], 0, reason: 'A different conversation must not inherit KV state.');
     } finally { await runtime.close(); }
