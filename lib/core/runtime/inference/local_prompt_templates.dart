@@ -46,6 +46,7 @@ class LocalPromptTemplates {
     List<ChatTurn> context = const [],
     bool enforceLegacyContextBound = true,
     bool emitDiagnostics = true,
+    bool preserveHistoryPrefix = false,
   }) {
     if (!emitDiagnostics) {
       return runZoned(
@@ -56,6 +57,7 @@ class LocalPromptTemplates {
           context: context,
           enforceLegacyContextBound: enforceLegacyContextBound,
           emitDiagnostics: true,
+          preserveHistoryPrefix: preserveHistoryPrefix,
         ),
         zoneValues: const <Object?, Object?>{
           #suppressLocalPromptDiagnostics: true,
@@ -74,6 +76,20 @@ class LocalPromptTemplates {
       final currentClock = clock.group(0)!;
       cleanedSystemPrompt = _clean(cleanedSystemPrompt!.replaceFirst(clockPattern, ''));
       userPrompt = '[CURRENT DEVICE CONTEXT]\n$currentClock\n\n$userPrompt';
+    }
+
+    // Fresh evidence varies per request. Desktop Assistant can keep it after
+    // history so a changed source does not invalidate the historical KV prefix.
+    // The trusted evidence policy remains in the system turn; source text is
+    // still untrusted data and is preserved verbatim with its URLs.
+    if (preserveHistoryPrefix) {
+      const marker = '[WEB SEARCH RESULTS]\n';
+      final sourceStart = cleanedSystemPrompt?.indexOf(marker) ?? -1;
+      if (sourceStart >= 0) {
+        final evidence = cleanedSystemPrompt!.substring(sourceStart);
+        cleanedSystemPrompt = _clean(cleanedSystemPrompt.substring(0, sourceStart));
+        userPrompt = '$evidence\n\n$userPrompt';
+      }
     }
 
     /*

@@ -34,6 +34,7 @@ class ResidentCompletionRuntime {
     required double topP,
     required double repeatPenalty,
     required int threads,
+    int? batchSize,
     required CancellationToken cancellation,
     void Function(int cached, int evaluated)? onPromptUsage,
   }) async* {
@@ -46,7 +47,10 @@ class ResidentCompletionRuntime {
       if (identical(_activeCancellation, cancellation)) unawaited(close());
     });
     try {
-      await _ensureStarted(executable, modelPath, sessionId, threads, cancellation);
+      if (batchSize != null && (batchSize < 1 || batchSize > 2048)) {
+        throw ArgumentError.value(batchSize, 'batchSize');
+      }
+      await _ensureStarted(executable, modelPath, sessionId, threads, cancellation, batchSize);
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       final request = await _request('POST', '/completion');
       request.headers.contentType = ContentType.json;
@@ -103,8 +107,8 @@ class ResidentCompletionRuntime {
   }
 
   Future<void> _ensureStarted(String executable, String model, String session,
-      int threads, CancellationToken cancellation) async {
-    final identity = '$executable\u0000$model\u0000$session';
+      int threads, CancellationToken cancellation, int? batchSize) async {
+    final identity = '$executable\u0000$model\u0000$session\u0000$batchSize';
     if (_process != null && _identity == identity) return;
     await close();
     if (cancellation.isCancelled) throw StateError('Inference cancelled.');
@@ -118,6 +122,8 @@ class ResidentCompletionRuntime {
       '-m', model, '--host', '127.0.0.1', '--port', '$_port', '--api-key', _key!,
       '-c', '4096', '-t', '${threads.clamp(1, 8)}', '-ngl', '0', '--parallel', '1',
       '--threads-batch', '${threads.clamp(1, 8)}',
+      // Bound recurrent-state rollback only for an explicitly measured profile.
+      if (batchSize != null) ...['--batch-size', '$batchSize'],
       '--no-slots', '--sleep-idle-seconds', '${idleTimeout.inSeconds.clamp(1, 86400)}',
     ]);
     _process = process;

@@ -47,7 +47,7 @@ void main() {
     final cached = <int>[];
     Future<String> generate(String session, String prompt) => runtime.generate(
       executable: server!, modelPath: model!, sessionId: session, prompt: prompt,
-      maxTokens: 8, temperature: 0, topP: 0.9, repeatPenalty: 1.1, threads: 2,
+      maxTokens: 8, temperature: 0, topP: 0.9, repeatPenalty: 1.1, threads: 2, batchSize: 128,
       cancellation: CancellationToken(), onPromptUsage: (cache, evaluated) => cached.add(cache),
     ).join();
     try {

@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/runtime/inference/completion_output.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resident_completion_runtime.dart';
@@ -98,7 +99,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       }
     } finally { await bytes.close(); }
     final prompt = LocalPromptTemplates.compose(modelId: request.modelId!,
-        prompt: request.prompt, systemPrompt: request.systemPrompt, context: request.context);
+        prompt: request.prompt, systemPrompt: request.systemPrompt, context: request.context,
+        preserveHistoryPrefix: Platform.isWindows);
     final metadata = SamplingMetadata.fromPrompt(prompt);
     final text = StringBuffer();
     var chunks = 0;
@@ -109,6 +111,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         topP: metadata.topP ?? request.topP,
         repeatPenalty: metadata.repeatPenalty ?? request.repeatPenalty,
         threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8), cancellation: cancellationToken,
+        batchSize: Platform.isWindows && LocalInferenceModelIds.resolveTemplate(request.modelId!) ==
+            LocalInferenceModelIds.templateNemotron ? 128 : null,
         onPromptUsage: (cached, evaluated) => RuntimeEventLog.instance.emit(
           '[ASSISTANT_LOCAL_CACHE] cached_tokens=$cached evaluated_tokens=$evaluated'),
       );
