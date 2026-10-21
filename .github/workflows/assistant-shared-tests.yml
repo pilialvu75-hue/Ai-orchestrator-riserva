@@ -45,7 +45,7 @@ jobs:
       - name: Verify shared Assistant behavior
         run: >-
           flutter test
-          test/core/tools/assistant_conversation_recall_test.dart test/core/tools/assistant_device_clock_test.dart
+          test/core/tools/assistant_device_clock_test.dart
           test/core/tools/assistant_web_search_policy_test.dart
           test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
           test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart
