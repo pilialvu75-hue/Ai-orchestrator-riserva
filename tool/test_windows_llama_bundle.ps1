@@ -38,6 +38,10 @@ $env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODEL = $model
 try {
   flutter test test/core/runtime/inference/windows_bundle_real_inference_test.dart --reporter expanded
   if ($LASTEXITCODE -ne 0) { throw 'Real bundled GGUF inference failed' }
+  if ($env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN -eq '1') {
+    flutter test test/core/runtime/inference/resident_completion_runtime_real_test.dart --reporter expanded
+    if ($LASTEXITCODE -ne 0) { throw 'Resident GGUF cache, session isolation or cancellation test failed' }
+  }
 } finally {
   Remove-Item Env:AI_ORCHESTRATOR_WINDOWS_SMOKE_HELPER -ErrorAction SilentlyContinue
   Remove-Item Env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODEL -ErrorAction SilentlyContinue

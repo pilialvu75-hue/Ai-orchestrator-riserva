@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:ai_orchestrator/core/runtime/inference/completion_output.dart';
 
 import 'package:path/path.dart' as path;
 
@@ -50,17 +51,6 @@ abstract final class WindowsLlamaRuntime {
       ];
 
   /// Keep the terminal sentinel out of the response, even across pipe chunks.
-  static Stream<String> visibleOutput(Stream<String> chunks) async* {
-    const retained = 18;
-    var pending = '';
-    await for (final chunk in chunks) {
-      pending += chunk;
-      if (pending.length > retained) {
-        yield pending.substring(0, pending.length - retained);
-        pending = pending.substring(pending.length - retained);
-      }
-    }
-    pending = pending.replaceFirst(RegExp(r' \[end of text\]\r?\n?$'), '');
-    if (pending.isNotEmpty) yield pending;
-  }
+  static Stream<String> visibleOutput(Stream<String> chunks) =>
+      CompletionOutput.visible(chunks);
 }

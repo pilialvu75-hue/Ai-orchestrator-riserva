@@ -7,6 +7,21 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('LocalPromptTemplates', () {
+    test('history is preserved while terminal CLI markers do not become model context', () {
+      const history = [
+        ChatTurn(role: ChatRole.user, content: 'Il progetto Aurora ha budget 750 euro.'),
+        ChatTurn(role: ChatRole.assistant, content: 'Ricordo il budget di 750 euro. [end of text]\n\n'),
+        ChatTurn(role: ChatRole.user, content: 'Ora il budget è 900 euro.'),
+      ];
+      for (final id in ['phi3_5_mini', 'nemotron3_nano_4b']) {
+        final prompt = LocalPromptTemplates.compose(modelId: id, prompt: 'Qual è il budget?', context: history);
+        expect(prompt, contains('Il progetto Aurora ha budget 750 euro.'));
+        expect(prompt, contains('Ricordo il budget di 750 euro.'));
+        expect(prompt, contains('Ora il budget è 900 euro.'));
+        expect(prompt, isNot(contains('[end of text]')));
+        expect(history[1].content, contains('[end of text]'));
+      }
+    });
     test('sports result lookup is available for both local models', () {
       for (final id in ['phi3_5_mini', 'nemotron3_nano_4b']) {
         expect(LocalPromptTemplates.compose(modelId: id,

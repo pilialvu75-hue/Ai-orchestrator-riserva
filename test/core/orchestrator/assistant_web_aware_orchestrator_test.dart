@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/tools/tool.dart';
@@ -161,6 +162,24 @@ void main() {
     expect(chunks.single.text, contains('orologio del dispositivo'));
     verifyNever(() => webSearch.execute(any()));
     verifyNever(() => inference.stream(any()));
+  });
+
+  test('repeated current question preserves history but supplies fresh evidence priority', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(toolId: 'web_search', output: 'Aurora: Bruna è la presidente dal 1 ottobre 2026. URL: https://example.test/nomina'),
+    );
+    const history = [
+      ChatTurn(role: ChatRole.user, content: 'Chi è il presidente di Aurora?'),
+      ChatTurn(role: ChatRole.assistant, content: 'Alice è la presidente.'),
+    ];
+    await build().handleStream('Chi è il presidente di Aurora?', sessionId: 'fresh', context: history).drain<void>();
+    verify(() => webSearch.execute(any())).called(1);
+    final request = verify(() => inference.stream(captureAny())).captured.single as InferenceRequest;
+    expect(request.context, history);
+    expect(request.prompt, 'Chi è il presidente di Aurora?');
+    expect(request.systemPrompt, contains('Bruna'));
+    expect(request.systemPrompt, contains('not verified facts'));
   });
 
   test('failed Local search does not fabricate a current office holder', () async {

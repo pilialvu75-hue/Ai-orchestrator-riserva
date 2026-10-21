@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:ai_orchestrator/core/runtime/inference/completion_output.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -383,15 +384,11 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         });
 
         final decodedOutput = process.stdout.transform(utf8.decoder);
-        stdoutSub = (Platform.isWindows
-                ? WindowsLlamaRuntime.visibleOutput(decodedOutput)
-                : decodedOutput).listen(
+        stdoutSub = CompletionOutput.visible(decodedOutput).listen(
           (chunk) {
             if (chunk.isEmpty) return;
 
-            final visibleChunk = Platform.isMacOS
-                ? chunk.replaceAll(' [end of text]\n', '')
-                : chunk;
+            final visibleChunk = chunk;
             if (visibleChunk.isEmpty) return;
 
             fullText.write(visibleChunk);

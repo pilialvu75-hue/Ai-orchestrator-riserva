@@ -106,9 +106,9 @@ void main() {
     expect(captured!.systemPrompt,
         contains('answer directly using this device clock'));
     expect(captured!.systemPrompt,
-        contains('Do not claim that the current time is unavailable'));
+        contains('not independently verified'));
     expect(captured!.systemPrompt,
-        contains('placeholder for the time'));
+        contains('Verify changing external facts with current sources'));
     expect(captured!.prompt, 'Che giorno e oggi?');
   });
 
