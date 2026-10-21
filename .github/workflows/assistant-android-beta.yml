@@ -1,0 +1,564 @@
+name: Assistant Android Beta
+
+on:
+  push:
+    branches:
+      - codex/assistant-android-beta
+  workflow_dispatch:
+
+# MODIFICA 1: Ampliati i permessi per permettere a CodeQL di scrivere i report nella scheda Security
+permissions:
+  contents: write
+  security-events: write
+  actions: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: assistant-android-beta-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    env:
+      TERM: dumb
+      JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
+      GRADLE_OPTS: -Dorg.gradle.console=plain -Dorg.gradle.logging.level=info -Dfile.encoding=UTF-8
+      SIGNING_DIR: /tmp/android-signing
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Ensure llama.cpp submodule
+        run: |
+          if [ ! -f third_party/llama.cpp/CMakeLists.txt ]; then
+            git submodule update --init --recursive
+          fi
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Cache native build (CMake/Ninja objects + FetchContent)
+        uses: actions/cache@v5
+        with:
+          path: |
+            android/app/.cxx
+            ~/.cache/ccache
+          key: native-${{ runner.os }}-${{ hashFiles('android/app/build.gradle', 'android/settings.gradle', 'android/gradle.properties', 'pubspec.lock', '.gitmodules', 'native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h', 'third_party/llama.cpp/CMakeLists.txt') }}
+
+      - name: Install Android SDK cmdline-tools 16.0
+        run: |
+          set -euo pipefail
+          export ANDROID_CUSTOM_CMDLINE="${ANDROID_SDK_ROOT}/cmdline-tools"
+          curl -fsS https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip -o /tmp/tools.zip
+          mkdir -p "$ANDROID_CUSTOM_CMDLINE"
+          rm -rf "$ANDROID_CUSTOM_CMDLINE/latest" /tmp/cmdline-extract
+          unzip -q /tmp/tools.zip -d /tmp/cmdline-extract
+          mv /tmp/cmdline-extract/cmdline-tools "$ANDROID_CUSTOM_CMDLINE/latest"
+          rm -rf /tmp/tools.zip /tmp/cmdline-extract
+
+          SDKMANAGER="$ANDROID_CUSTOM_CMDLINE/latest/bin/sdkmanager"
+          SOURCE_PROPERTIES="$ANDROID_CUSTOM_CMDLINE/latest/source.properties"
+          test -x "$SDKMANAGER"
+          test -f "$SOURCE_PROPERTIES"
+          if ! grep -Eq '^Pkg\.Revision[[:space:]]*=[[:space:]]*16\.0([[:space:]]*)$' "$SOURCE_PROPERTIES"; then
+            echo "::error::Expected Android command-line tools 16.0"
+            cat "$SOURCE_PROPERTIES"
+            exit 1
+          fi
+          echo "sdkmanager_package_revision=16.0"
+
+      - name: Install Android NDK
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+
+      - name: Install glslc (required to compile ggml Vulkan shaders)
+        run: |
+          set -euo pipefail
+          # The hosted runner ships a Chrome apt source that is unrelated to
+          # this build. If that external index is mid-publish, apt can fail
+          # with Hash Sum mismatch before reaching Ubuntu's glslc/ccache.
+          sudo rm -f \
+            /etc/apt/sources.list.d/google-chrome.list \
+            /etc/apt/sources.list.d/google-chrome.sources
+          sudo apt-get update -y
+          sudo apt-get install -y glslc ccache
+          glslc --version
+          ccache --version
+
+      # MODIFICA 2: Inizializzazione di CodeQL subito dopo l'installazione dell'NDK
+      # Traccia sia il C++ che il codice Java/Kotlin di Android prima che partano le build di Flutter
+      - name: Initialize CodeQL (C++ & Android Native)
+        uses: github/codeql-action/init@v4
+        with:
+          languages: 'cpp, java-kotlin'
+          queries: security-and-quality
+
+      - name: Reset Android debug keystore
+        run: |
+          mkdir -p ~/.android
+          rm -f ~/.android/debug.keystore
+
+          keytool -genkeypair \
+            -keystore ~/.android/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Validate Android signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "HAS_RELEASE_KEYSTORE=true" >> "$GITHUB_ENV"
+            echo "ANDROID_KEYSTORE_BASE64 is configured"
+
+          elif [ -n "${KEYSTORE_BASE64:-}" ]; then
+            echo "HAS_RELEASE_KEYSTORE=true" >> "$GITHUB_ENV"
+            echo "::warning::Using legacy KEYSTORE_BASE64 secret; migrate to ANDROID_KEYSTORE_BASE64."
+
+          else
+            echo "HAS_RELEASE_KEYSTORE=false" >> "$GITHUB_ENV"
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+
+            echo "::warning::No release keystore configured. Falling back to debug signing."
+          fi
+
+          if [ -z "${KEYSTORE_PASSWORD:-}" ]; then
+            echo "::warning::KEYSTORE_PASSWORD missing"
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+          fi
+
+          if [ -z "${KEY_ALIAS:-}" ]; then
+            echo "::warning::KEY_ALIAS missing"
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+          fi
+
+          if [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "::warning::KEY_PASSWORD missing"
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Prepare runtime Android signing files
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+
+          umask 077
+
+          rm -rf "$SIGNING_DIR"
+          mkdir -p "$SIGNING_DIR"
+
+          KEYSTORE_PATH="$SIGNING_DIR/release-keystore.jks"
+
+          export KEYSTORE_PATH
+
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            export EFFECTIVE_KEYSTORE_BASE64="$ANDROID_KEYSTORE_BASE64"
+          else
+            export EFFECTIVE_KEYSTORE_BASE64="$KEYSTORE_BASE64"
+          fi
+
+          python3 - <<'PY'
+          import base64
+          import os
+          import pathlib
+          import sys
+
+          raw = os.environ["EFFECTIVE_KEYSTORE_BASE64"]
+          path = pathlib.Path(os.environ["KEYSTORE_PATH"])
+
+          try:
+              path.write_bytes(base64.b64decode(raw))
+          except Exception as exc:
+              print(f"::error::Invalid keystore base64: {exc}", file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+          if [ ! -s "$KEYSTORE_PATH" ]; then
+            echo "::warning::Decoded keystore empty"
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+            rm -f "$KEYSTORE_PATH"
+            exit 0
+          fi
+
+          echo "decoded_keystore_size_bytes=$(wc -c < "$KEYSTORE_PATH")" | tee keystore_decode.log
+
+          echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Audit runtime release keystore
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          : > keystore_validation.log
+
+          if [ -z "${KEYSTORE_FILE:-}" ] || [ ! -s "${KEYSTORE_FILE:-}" ]; then
+            echo "Release keystore unavailable" | tee -a keystore_validation.log
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "::add-mask::$KEYSTORE_PASSWORD"
+          echo "::add-mask::$KEY_PASSWORD"
+
+          if keytool -list -v \
+            -keystore "$KEYSTORE_FILE" \
+            -storepass:env KEYSTORE_PASSWORD \
+            -alias "$KEY_ALIAS" \
+            -keypass:env KEY_PASSWORD | tee -a keystore_validation.log; then
+
+            echo "FORCE_DEBUG_RELEASE_SIGNING=false" >> "$GITHUB_ENV"
+
+          else
+            echo "FORCE_DEBUG_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
+
+            echo "::warning::Release keystore validation failed"
+          fi
+
+      - name: Flutter pub get
+        run: flutter pub get --enforce-lockfile
+
+      - name: Ensure Android local.properties
+        run: |
+          set -euo pipefail
+
+          {
+            echo "flutter.sdk=$FLUTTER_ROOT"
+            echo "sdk.dir=$ANDROID_SDK_ROOT"
+          } > android/local.properties
+
+      - name: Validate Gradle wrapper
+        run: |
+          chmod +x android/gradlew
+
+          (
+            cd android
+            ./gradlew --version --console=plain
+          )
+
+      - name: Flutter analyze
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Run Flutter tests
+        run: flutter test
+
+      - name: Determine version metadata
+        id: version
+        run: |
+          set -euo pipefail
+
+          APP_VERSION=$(awk -F': *' '$1 == "version" { print $2; exit }' pubspec.yaml)
+
+          if [ -z "$APP_VERSION" ]; then
+            echo "::error::version not found in pubspec.yaml"
+            exit 1
+          fi
+
+          VERSION_NAME="1.0.13-beta.${GITHUB_RUN_NUMBER}"
+
+          VERSION_CODE="$((3501 + GITHUB_RUN_NUMBER))"
+
+          export VERSION_NAME
+          export VERSION_CODE
+
+          python3 - <<PY
+          from pathlib import Path
+          import re
+          import os
+
+          version_name = os.environ["VERSION_NAME"]
+          version_code = os.environ["VERSION_CODE"]
+
+          path = Path("pubspec.yaml")
+
+          content = path.read_text()
+
+          content = re.sub(
+              r"^version:\s*.*$",
+              f"version: {version_name}+{version_code}",
+              content,
+              flags=re.MULTILINE,
+          )
+
+          path.write_text(content)
+          PY
+
+          TAG="v1.0.13.${VERSION_CODE}-beta.${GITHUB_RUN_NUMBER}"
+
+          {
+            echo "version_name=$VERSION_NAME"
+            echo "version_code=$VERSION_CODE"
+            echo "tag=$TAG"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate build README/manual (IT)
+        run: |
+          set -euo pipefail
+
+          python3 scripts/generate_build_readme_it.py \
+            --output BUILD_README_IT.md \
+            --version "${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}"
+
+      - name: Clean transient Android build outputs (preserve validated native cache)
+        run: |
+          set -euo pipefail
+
+          rm -rf android/build
+          rm -rf build
+          rm -rf android/app/build/intermediates
+
+      - name: Require existing release signing identity
+        run: |
+          test "$HAS_RELEASE_KEYSTORE" = true
+          test "${FORCE_DEBUG_RELEASE_SIGNING:-false}" != true
+
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          flutter build apk \
+            --release \
+            --target-platform=android-arm64 \
+            --build-name="${{ steps.version.outputs.version_name }}" \
+            --build-number="${{ steps.version.outputs.version_code }}" \
+            --dart-define=AI_ORCHESTRATOR_COMMIT_SHA="${GITHUB_SHA}" \
+            2>&1 | tee release_apk_build.log
+
+      - name: Build signed release AAB
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          flutter build appbundle \
+            --release \
+            --target-platform=android-arm64 \
+            --build-name="${{ steps.version.outputs.version_name }}" \
+            --build-number="${{ steps.version.outputs.version_code }}" \
+            --dart-define=AI_ORCHESTRATOR_COMMIT_SHA="${GITHUB_SHA}" \
+            2>&1 | tee release_aab_build.log
+
+      # MODIFICA 3: Analisi finale eseguita subito DOPO il completamento delle build.
+      # A questo punto CodeQL ha catturato la compilazione di llama.cpp e dei servizi Java.
+      - name: Perform CodeQL Final Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:multi"
+
+      - name: Discover release outputs
+        run: |
+          set -euo pipefail
+
+          find build/app/outputs -type f \( -name '*.apk' -o -name '*.aab' \) | sort | tee release_outputs.log
+
+      - name: Resolve release asset paths
+        id: release_assets
+        run: |
+          set -euo pipefail
+
+          RELEASE_APK_PATH=""
+
+          for candidate in \
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            build/app/outputs/flutter-apk/app-release.apk \
+            build/app/outputs/flutter-apk/app-universal-release.apk; do
+
+            if [ -f "$candidate" ]; then
+              RELEASE_APK_PATH="$candidate"
+              break
+            fi
+          done
+
+          RELEASE_AAB_PATH=$(find build/app/outputs -type f -name '*release*.aab' | sort | head -n 1 || true)
+
+          if [ -z "$RELEASE_APK_PATH" ] || [ ! -f "$RELEASE_APK_PATH" ]; then
+            echo "::error::Release APK not found"
+            exit 1
+          fi
+
+          if [ -z "$RELEASE_AAB_PATH" ] || [ ! -f "$RELEASE_AAB_PATH" ]; then
+            echo "::error::Release AAB not found"
+            exit 1
+          fi
+
+          {
+            echo "release_apk_path=$RELEASE_APK_PATH"
+            echo "release_aab_path=$RELEASE_AAB_PATH"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify packaged RuntimeSession bridge ABI in APK
+        run: |
+          set -euo pipefail
+
+          RELEASE_APK_PATH="${{ steps.release_assets.outputs.release_apk_path }}"
+          EXTRACT_DIR="/tmp/apk-lib-verify"
+          rm -rf "$EXTRACT_DIR"
+          mkdir -p "$EXTRACT_DIR"
+
+          unzip -o "$RELEASE_APK_PATH" "lib/*/libllama_bridge.so" -d "$EXTRACT_DIR" >/dev/null
+
+          SO_PATH=$(find "$EXTRACT_DIR" -type f -name "libllama_bridge.so" | sort | head -n 1 || true)
+          if [ -z "$SO_PATH" ] || [ ! -f "$SO_PATH" ]; then
+            echo "::error::libllama_bridge.so not found in packaged APK"
+            exit 1
+          fi
+
+          REQUIRED_SYMBOLS_PATTERN="llb_init_backend|llb_gpu_backend_name|llb_gpu_backend_reason|llb_create_session|llb_create_session_ex|llb_session_metric|llb_session_token_count|llb_session_start_gen|llb_session_start_gen_scoped|llb_session_poll_token|llb_session_cancel|llb_release_session|llb_session_last_error|llb_session_is_active|llb_session_is_generating"
+          LEGACY_SYMBOLS_PATTERN="llb_load_model|llb_start_gen|llb_poll_token|llb_cancel|llb_free_model|llb_is_loaded"
+
+          echo "inspected_so=$SO_PATH" | tee runtime_bridge_package_summary.log
+
+          # Verify native RuntimeSession lifecycle tags emitted by native/android/llama_bridge.cpp.
+          strings "$SO_PATH" | grep -nE "SESSION_CREATE_BEGIN|THREAD_START|THREAD_FIRST_TOKEN" | tee runtime_bridge_package_tags.log || true
+          if [ ! -s runtime_bridge_package_tags.log ]; then
+            echo "::error::required RuntimeSession log tags not found in packaged libllama_bridge.so"
+            exit 1
+          fi
+
+          readelf -Ws "$SO_PATH" | grep -nE "$REQUIRED_SYMBOLS_PATTERN" | tee runtime_bridge_exports_required.log || true
+          # Check defined dynamic exports exactly; a suffix or an undefined
+          # reference must not satisfy a Dart FFI lookup.
+          nm -D --defined-only "$SO_PATH" | awk '{print $NF}' > runtime_bridge_defined_symbols.log
+          for symbol in llb_init_backend llb_gpu_backend_name llb_gpu_backend_reason llb_create_session llb_create_session_ex llb_session_metric llb_session_token_count llb_session_start_gen llb_session_start_gen_scoped llb_session_poll_token llb_session_cancel llb_release_session llb_session_last_error llb_session_is_active llb_session_is_generating; do
+            if ! grep -Fxq "$symbol" runtime_bridge_defined_symbols.log; then
+              echo "::error::required RuntimeSession symbol missing from packaged libllama_bridge.so: $symbol"
+              exit 1
+            fi
+          done
+
+          LEGACY_EXPORTS=""
+          for symbol in llb_load_model llb_start_gen llb_poll_token llb_cancel llb_free_model llb_is_loaded; do
+            MATCH=$(readelf -Ws "$SO_PATH" | grep -n -w "$symbol" || true)
+            if [ -n "$MATCH" ]; then
+              LEGACY_EXPORTS="${LEGACY_EXPORTS}${MATCH}"$'\n'
+            fi
+          done
+
+          printf '%s\n' "$LEGACY_EXPORTS" | tee runtime_bridge_exports_legacy.log >/dev/null
+
+          if [ -n "$LEGACY_EXPORTS" ]; then
+            echo "::error::legacy global bridge exports found in packaged APK"
+            exit 1
+          fi
+
+          # Diagnostic-only logs for artifact inspection after validation has passed.
+          nm -D --defined-only "$SO_PATH" | grep -nE "$REQUIRED_SYMBOLS_PATTERN|$LEGACY_SYMBOLS_PATTERN" | tee runtime_bridge_nm_exports.log || true
+
+      - name: Upload release diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            release_apk_build.log
+            release_aab_build.log
+            release_outputs.log
+            keystore_decode.log
+            keystore_validation.log
+            BUILD_README_IT.md
+            runtime_bridge_package_summary.log
+            runtime_bridge_package_tags.log
+            runtime_bridge_exports_required.log
+            runtime_bridge_exports_legacy.log
+            runtime_bridge_nm_exports.log
+
+      - name: Upload signed release artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: AI-Orchestrator-android-release-${{ steps.version.outputs.version_name }}-${{ steps.version.outputs.version_code }}
+          path: |
+            ${{ steps.release_assets.outputs.release_apk_path }}
+            ${{ steps.release_assets.outputs.release_aab_path }}
+            BUILD_README_IT.md
+
+      - name: Generate release notes
+        run: |
+          {
+            echo "## Android beta — S24 FE first test"
+            echo "Shared Assistant fixes only. Windows resident-runtime timings do not apply to Android."
+            echo "Physical S24 FE inference and update-signature compatibility remain to be tested."
+            echo
+            echo "- Version: ${{ steps.version.outputs.version_name }}"
+            echo "- Build number: ${{ steps.version.outputs.version_code }}"
+            echo
+            echo "### Recent commits"
+            echo
+            git log --pretty=format:'- %s (%h)' -n 20
+          } > RELEASE_NOTES.md
+
+      - name: Check APK signature and checksum
+        run: |
+          APK_PATH="${{ steps.release_assets.outputs.release_apk_path }}"
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$APKSIGNER" verify --verbose "$APK_PATH"
+          sha256sum "$APK_PATH" > app-release.apk.sha256
+
+      - name: Create GitHub Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v3
+        with:
+          prerelease: true
+          make_latest: false
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: AI-Orchestrator Android beta S24 FE ${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            ${{ steps.release_assets.outputs.release_apk_path }}
+            ${{ steps.release_assets.outputs.release_aab_path }}
+            BUILD_README_IT.md
+            app-release.apk.sha256
+
+      - name: Cleanup signing files
+        if: always()
+        run: |
+          rm -rf "$SIGNING_DIR"
+          rm -f android/key.properties android/release-keystore.jks
