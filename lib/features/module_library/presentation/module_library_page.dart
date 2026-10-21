@@ -75,7 +75,7 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
           configStore: _configStore,
           authClient: _authClient,
         );
-    _labSource = ModuleLabGitHubActionsSource(credentialStore: _credentialStore);
+    _labSource = ModuleLabGitHubActionsSource(credentialStore: _credentialStore, configStore: _configStore, authClient: _authClient);
     _curatorRunner = widget.curatorRunner ??
         ModuleCuratorGitHubActionsSource(
           credentialStore: _credentialStore,
@@ -481,6 +481,8 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
                     builder: (_) => ModuleLabPage(
                       source: ModuleLabGitHubActionsSource(
                         credentialStore: _credentialStore,
+                        configStore: _configStore,
+                        authClient: _authClient,
                       ),
                     ),
                   ),

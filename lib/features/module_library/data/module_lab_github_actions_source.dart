@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
 import 'package:http/http.dart' as http;
 
 final class ModuleLabRunStatus {
@@ -25,9 +26,13 @@ final class ModuleLabGitHubActionsSource {
   ModuleLabGitHubActionsSource({
     WorkshopLibraryGitHubCredentialStore? credentialStore,
     http.Client? client,
+    ModuleLibraryGitHubConfigStore? configStore,
+    WorkshopLibraryGitHubAuthClient? authClient,
     ModuleLabAccessTokenProvider? accessTokenProvider,
   })  : _credentialStore = credentialStore ?? WorkshopLibraryGitHubCredentialStore(),
         _client = client ?? http.Client(),
+        _configStore = configStore ?? ModuleLibraryGitHubConfigStore(),
+        _authClient = authClient ?? WorkshopLibraryGitHubAuthClient(),
         _accessTokenProvider = accessTokenProvider;
 
   static const _researcherRepository =
@@ -36,7 +41,13 @@ final class ModuleLabGitHubActionsSource {
 
   final WorkshopLibraryGitHubCredentialStore _credentialStore;
   final http.Client _client;
+  final ModuleLibraryGitHubConfigStore _configStore;
+  final WorkshopLibraryGitHubAuthClient _authClient;
   final ModuleLabAccessTokenProvider? _accessTokenProvider;
+
+  // Shared by Lab source instances in this isolate to prevent rotating the
+  // same GitHub App refresh token more than once concurrently.
+  static Future<WorkshopGitHubUserCredential>? _pendingRefresh;
 
   Future<String> _token() async {
     final injected = _accessTokenProvider;
@@ -46,10 +57,53 @@ final class ModuleLabGitHubActionsSource {
       return token;
     }
     final credential = await _credentialStore.load();
-    if (credential == null || credential.isExpired) {
+    if (credential == null) {
       throw StateError('Autorizzazione GitHub assente o scaduta.');
     }
-    return credential.accessToken;
+    if (!credential.isExpired) return credential.accessToken;
+    final refreshToken = credential.refreshToken?.trim();
+    final clientId = await _configStore.loadClientId();
+    if (refreshToken == null || refreshToken.isEmpty || clientId == null) {
+      throw StateError('Autorizzazione GitHub assente o scaduta.');
+    }
+    try {
+      final pending = _pendingRefresh;
+      if (pending != null) {
+        final refreshed = await pending;
+        return refreshed.accessToken;
+      }
+      final operation = _refreshAndSave(
+        clientId: clientId,
+        refreshToken: refreshToken,
+      );
+      _pendingRefresh = operation;
+      try {
+        return (await operation).accessToken;
+      } finally {
+        if (identical(_pendingRefresh, operation)) _pendingRefresh = null;
+      }
+    } catch (_) {
+      // A separate source may have completed the rotation already.
+      final current = await _credentialStore.load();
+      if (current != null &&
+          !current.isExpired &&
+          current.accessToken != credential.accessToken) {
+        return current.accessToken;
+      }
+      throw StateError('Autorizzazione GitHub assente o scaduta.');
+    }
+  }
+
+  Future<WorkshopGitHubUserCredential> _refreshAndSave({
+    required String clientId,
+    required String refreshToken,
+  }) async {
+    final refreshed = await _authClient.refresh(
+      clientId: clientId,
+      refreshToken: refreshToken,
+    );
+    await _credentialStore.save(refreshed);
+    return refreshed;
   }
 
   Map<String, String> _headers(String token) => <String, String>{
