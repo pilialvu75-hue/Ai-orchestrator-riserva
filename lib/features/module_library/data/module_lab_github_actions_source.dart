@@ -73,7 +73,7 @@ final class ModuleLabGitHubActionsSource {
       // A concurrent caller may have already rotated and stored the token.
       final current = await _credentialStore.load();
       if (current != null && !current.isExpired &&
-          current.accessToken != credential.accessToken) {
+          current.accessToken != credential?.accessToken) {
         return current.accessToken;
       }
       throw StateError('Autorizzazione GitHub assente o scaduta.');
