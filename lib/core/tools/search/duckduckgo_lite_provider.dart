@@ -134,13 +134,10 @@ final class DuckDuckGoLiteProvider implements SearchProvider {
     String html, {
     required int limit,
   }) {
-    final snippets = RegExp(
+    final snippetPattern = RegExp(
       r'''<td\b[^>]*class\s*=\s*["'][^"']*\bresult-snippet\b[^"']*["'][^>]*>([\s\S]*?)</td>''',
       caseSensitive: false,
-    )
-        .allMatches(html)
-        .map((match) => _cleanHtml(match.group(1) ?? ''))
-        .toList(growable: false);
+    );
 
     final results = <SearchResult>[];
     final anchorPattern = RegExp(
@@ -148,25 +145,27 @@ final class DuckDuckGoLiteProvider implements SearchProvider {
       caseSensitive: false,
     );
 
-    for (final match in anchorPattern.allMatches(html)) {
-      if (results.length >= limit) break;
-
+    final links = anchorPattern.allMatches(html).where((match) {
       final attributes = match.group(1) ?? '';
       final className = _attribute(attributes, 'class');
-      if (className == null ||
-          !className.toLowerCase().split(RegExp(r'\s+')).contains('result-link')) {
-        continue;
-      }
+      return className != null &&
+          className.toLowerCase().split(RegExp(r'\s+')).contains('result-link');
+    }).toList(growable: false);
+    final seen = <String>{};
+    for (var index = 0; index < links.length && results.length < limit; index++) {
+      final match = links[index];
+      final attributes = match.group(1) ?? '';
 
       final rawHref = _attribute(attributes, 'href');
       final title = _cleanHtml(match.group(2) ?? '');
       final url = _destinationUrl(rawHref);
-      if (title.isEmpty || url == null) continue;
+      if (title.isEmpty || url == null || !seen.add(url)) continue;
 
-      final snippetIndex = results.length;
-      final snippet = snippetIndex < snippets.length
-          ? snippets[snippetIndex]
-          : title;
+      // Filtering ads changes result indexes. Read only this result's block,
+      // rather than pairing its title with an unrelated global snippet index.
+      final end = index + 1 < links.length ? links[index + 1].start : html.length;
+      final snippetMatch = snippetPattern.firstMatch(html.substring(match.end, end));
+      final snippet = snippetMatch == null ? title : _cleanHtml(snippetMatch.group(1) ?? '');
 
       results.add(
         SearchResult(
@@ -212,19 +211,29 @@ final class DuckDuckGoLiteProvider implements SearchProvider {
       uri = Uri.parse('https://lite.duckduckgo.com').resolveUri(uri);
     }
 
-    final redirectTarget = uri.queryParameters['uddg'];
+    final searchHost = uri.host.toLowerCase() == 'duckduckgo.com' ||
+        uri.host.toLowerCase().endsWith('.duckduckgo.com');
+    if (searchHost && uri.path.toLowerCase() == '/y.js') return null;
+    final redirectTarget = searchHost ? uri.queryParameters['uddg'] : null;
     if (redirectTarget != null && redirectTarget.trim().isNotEmpty) {
       final target = Uri.tryParse(redirectTarget.trim());
-      if (target != null && _isHttp(target)) {
+      if (target != null && _isSourceUrl(target)) {
         return target.toString();
       }
     }
 
-    return _isHttp(uri) ? uri.toString() : null;
+    return _isSourceUrl(uri) ? uri.toString() : null;
   }
 
-  static bool _isHttp(Uri uri) =>
-      uri.scheme.toLowerCase() == 'https' || uri.scheme.toLowerCase() == 'http';
+  static bool _isSourceUrl(Uri uri) {
+    if (!['https', 'http'].contains(uri.scheme.toLowerCase()) ||
+        uri.host.isEmpty || uri.userInfo.isNotEmpty) return false;
+    final host = uri.host.toLowerCase();
+    if (host == 'duckduckgo.com' || host.endsWith('.duckduckgo.com')) return false;
+    if ((host == 'bing.com' || host.endsWith('.bing.com')) &&
+        uri.path.toLowerCase().startsWith('/aclick')) return false;
+    return true;
+  }
 
   static bool _looksBlocked(String body) {
     final lower = body.toLowerCase();

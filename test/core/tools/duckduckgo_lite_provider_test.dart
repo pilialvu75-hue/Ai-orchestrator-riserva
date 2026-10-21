@@ -51,6 +51,22 @@ class _FakeProvider implements SearchProvider {
 
 void main() {
   group('DuckDuckGoLiteProvider', () {
+    test('rejects advertising and help links without mixing organic snippets', () async {
+      final client = _FakeClient((_) async => http.Response('''
+<a class="result-link" href="https://duckduckgo.com/y.js?ad_domain=amazon.it&amp;u3=tracking">Advertisement</a>
+<td class="result-snippet">Unrelated sponsored text</td>
+<a class="result-link" href="https://duckduckgo.com/duckduckgo-help-pages/company/ads-by-microsoft-on-duckduckgo-private-search/">more info</a>
+<a class="result-link" href="https://www.bing.com/aclick?u=tracking">Another ad</a>
+<td class="result-snippet">Other ad snippet</td>
+<a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.test%2Fproduct">Actual product</a>
+<td class="result-snippet">Matching product description</td>
+<a class="result-link" href="https://example.test/product">Duplicate</a>
+''', 200));
+      final results = await DuckDuckGoLiteProvider(client: client).search('notebook', limit: 3);
+      expect(results, hasLength(1));
+      expect(results.single.url, 'https://example.test/product');
+      expect(results.single.snippet, 'Matching product description');
+    });
     test('submits browser-like POST and parses ranked Lite results', () async {
       final client = _FakeClient((request) async {
         expect(request.method, 'POST');
