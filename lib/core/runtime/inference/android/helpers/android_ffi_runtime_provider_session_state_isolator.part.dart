@@ -32,6 +32,7 @@ class _AndroidFfiSessionStateIsolator {
       context: contextOverride ?? request.context,
       enforceLegacyContextBound: enforceLegacyContextBound,
       emitDiagnostics: emitDiagnostics,
+      preserveHistoryPrefix: true,
     );
   }
 

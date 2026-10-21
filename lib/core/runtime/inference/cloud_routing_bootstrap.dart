@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:http/http.dart' as http;
@@ -90,10 +91,25 @@ abstract final class CloudRoutingBootstrap {
     // Assistant-only runtime decorator. The globally registered Local runtime
     // remains the canonical FFI/desktop provider used by diagnostics, Workshop
     // and the rest of the application.
+    final residentAssistantRuntime = AssistantResidentLocalRuntimeProvider(delegate: sl<LocalRuntimeProvider>());
     final assistantLocalRuntimeProvider =
         AssistantWebContinuationLocalRuntimeProvider(
-      delegate: AssistantResidentLocalRuntimeProvider(delegate: sl<LocalRuntimeProvider>()),
+      delegate: residentAssistantRuntime,
     );
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      // Start the measured GPU model while the UI opens, without a synthetic
+      // answer. A request arriving during preparation awaits the same future.
+      unawaited(() async {
+        try {
+          if (await sl<AiRuntimeSettingsService>().loadRuntimeMode() != AiRuntimeMode.local) return;
+          final selected = await sl<LocalAiRepository>().getSelectedModel();
+          final model = selected.fold((_) => null, (model) => model);
+          if (model != null) await residentAssistantRuntime.prepareSelectedModel(model);
+        } catch (_) {
+          // Optional preparation never blocks app startup or ordinary routing.
+        }
+      }());
+    }
 
     sl.registerLazySingleton<CloudBackgroundExecutionJournal>(
       () => CloudBackgroundExecutionJournal(
