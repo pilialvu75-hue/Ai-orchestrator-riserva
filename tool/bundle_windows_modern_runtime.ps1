@@ -13,9 +13,9 @@ $modernTarget = Join-Path $ReleaseDir 'runtime-modern'
 New-Item -ItemType Directory -Path $modernTarget -Force | Out-Null
 Get-ChildItem -LiteralPath $modernHelper[0].DirectoryName -File | Where-Object {
   $_.Name -in @('llama-completion.exe','llama-server.exe') -or $_.Name -like 'ggml*.dll' -or
-  $_.Name -in @('llama.dll','llama-common.dll','llama-completion-impl.dll','llama-server-impl.dll','libomp.dll','LICENSE-LLVM-OpenMP')
+  $_.Name -in @('llama.dll','llama-common.dll','llama-completion-impl.dll','llama-server-impl.dll','mtmd.dll','libomp.dll','LICENSE-LLVM-OpenMP')
 } | Copy-Item -Destination $modernTarget -Force
-foreach ($requiredModern in @('llama-completion.exe','llama-completion-impl.dll','llama-server.exe','llama-server-impl.dll','llama-common.dll','llama.dll','ggml.dll','ggml-base.dll','ggml-cpu-x64.dll','libomp.dll')) {
+foreach ($requiredModern in @('llama-completion.exe','llama-completion-impl.dll','llama-server.exe','llama-server-impl.dll','mtmd.dll','llama-common.dll','llama.dll','ggml.dll','ggml-base.dll','ggml-cpu-x64.dll','libomp.dll')) {
   if (!(Test-Path -LiteralPath (Join-Path $modernTarget $requiredModern))) { throw "Missing modern runtime dependency: $requiredModern" }
 }
 Write-Output 'Verified official b11753 CPU runtime bundled for Windows 10/11; legacy helper unchanged.'
