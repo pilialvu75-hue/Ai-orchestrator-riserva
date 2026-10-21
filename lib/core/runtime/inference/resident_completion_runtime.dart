@@ -23,6 +23,25 @@ class ResidentCompletionRuntime {
   Timer? _idle;
   bool _busy = false;
   CancellationToken? _activeCancellation;
+  int? get processId => _process?.pid;
+
+  /// Load the engine without generating or adding any conversation tokens.
+  Future<void> prepare({required String executable, required String modelPath,
+      required String sessionId, required int threads, String? device, int? batchSize}) async {
+    if (_busy) throw ResidentRuntimeBusy();
+    _busy = true;
+    _idle?.cancel();
+    try {
+      await _ensureStarted(executable, modelPath, sessionId, threads,
+          CancellationToken(), batchSize, device);
+    } catch (_) {
+      await close();
+      rethrow;
+    } finally {
+      _busy = false;
+      if (_process != null) _idle = Timer(idleTimeout, () => unawaited(close()));
+    }
+  }
 
   Stream<String> generate({
     required String executable,

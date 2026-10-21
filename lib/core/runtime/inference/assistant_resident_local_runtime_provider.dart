@@ -37,6 +37,35 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   bool _unavailable = false;
   bool _gpuUnavailable = false;
   Future<String?>? _gpuDevices;
+  Future<void>? _preparation;
+
+  /// Prepare only the measured Windows GPU route while the app opens.
+  /// This does not verify inference or populate the conversation cache.
+  Future<void> prepareSelectedModel(AiModel model) {
+    return _preparation ??= _prepareSelectedModel(model);
+  }
+
+  Future<void> _prepareSelectedModel(AiModel model) async {
+    if (!Platform.isWindows || _gpuUnavailable ||
+        LocalInferenceModelIds.resolveTemplate(model.effectiveRuntimeModelId) !=
+            LocalInferenceModelIds.templateNemotron) return;
+    final cpuExecutable = _executable();
+    final modelPath = model.localPath;
+    if (cpuExecutable == null || modelPath == null || !File(modelPath).existsSync()) return;
+    final candidate = p.join(p.dirname(cpuExecutable), '..', 'runtime-vulkan', 'llama-server.exe');
+    if (!File(candidate).existsSync()) return;
+    final watch = Stopwatch()..start();
+    try {
+      final listing = await (_gpuDevices ??= _listGpuDevices(candidate));
+      final device = WindowsVulkanDevice.select(listing ?? '', modelBytes: await File(modelPath).length());
+      if (device == null) return;
+      await _runtime.prepare(executable: candidate, modelPath: modelPath,
+          sessionId: 'default', threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8), device: device);
+      RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_PREPARE] status=ready elapsed_ms=${watch.elapsedMilliseconds}');
+    } catch (_) {
+      RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_PREPARE] status=failed action=normal_request_startup');
+    }
+  }
 
   Future<String?> _listGpuDevices(String executable) async {
     Process? probe;
@@ -96,6 +125,18 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     final executable = _unavailable ? null : _executable();
     if (executable == null) {
       yield* _delegate.streamInference(request: request, cancellationToken: cancellationToken);
+      return;
+    }
+    final preparing = _preparation;
+    if (preparing != null) {
+      final cancelled = Completer<void>();
+      cancellationToken.onCancel(() {
+        if (!cancelled.isCompleted) cancelled.complete();
+      });
+      await Future.any<void>([preparing, cancelled.future]);
+    }
+    if (cancellationToken.isCancelled) {
+      yield InferenceResponse.error('Inference cancelled.', state: InferenceTerminalState.cancelled);
       return;
     }
     _lifecycle ??= AppLifecycleListener(

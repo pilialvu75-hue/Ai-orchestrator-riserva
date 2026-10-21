@@ -52,8 +52,14 @@ void main() {
     ).join();
     try {
       print('Resident cache check: first request');
+      await runtime.prepare(executable: server!, modelPath: model!,
+          sessionId: 'one', threads: 2, batchSize: 128);
+      final preparedProcess = runtime.processId;
+      expect(preparedProcess, isNotNull);
       final first = await generate('one', 'Once upon a time');
+      expect(runtime.processId, preparedProcess, reason: 'The first real request must reuse the prepared engine.');
       expect(first.trim(), isNotEmpty);
+      expect(cached.first, 0, reason: 'Preparation must not add synthetic conversation tokens.');
       print('Resident cache check: warm request');
       final second = await generate('one', 'Once upon a time$first');
       expect(second.trim(), isNotEmpty);
