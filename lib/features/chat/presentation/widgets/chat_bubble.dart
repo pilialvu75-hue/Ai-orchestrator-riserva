@@ -283,7 +283,9 @@ class _Avatar extends StatelessWidget {
       ),
       child: Center(
         child: Text(
-          provider?.isNotEmpty == true ? provider![0].toUpperCase() : 'AI',
+          // Local model names and internal route labels are not user initials.
+          // Keep a stable assistant badge; cloud providers retain their label.
+          _cloudProviderDisplayName(provider)?.substring(0, 1).toUpperCase() ?? 'AI',
           style: const TextStyle(
             color: Color(0xFF8AB4F8),
             fontSize: 11,

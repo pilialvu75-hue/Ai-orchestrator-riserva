@@ -7,6 +7,25 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('LocalPromptTemplates', () {
+    test('changing clock keeps historical prefix reusable without losing current time', () {
+      const history = [ChatTurn(role: ChatRole.user, content: 'Mi chiamo Aurora.'),
+        ChatTurn(role: ChatRole.assistant, content: 'Ciao Aurora.')];
+      String clock(String minute) => 'Device system time (local): 2026-10-21T18:$minute; UTC offset: +02:00; '
+          'timezone label: CEST. For current date/time, answer directly using this device clock '
+          '(not independently verified). Do not invent a location. Verify changing external facts with current sources.';
+      for (final model in ['nemotron3_nano_4b', 'phi3_5_mini']) {
+        String compose(String minute) => LocalPromptTemplates.compose(modelId: model,
+            prompt: 'Come mi chiamo?', systemPrompt: 'You are a helpful assistant.\n\n${clock(minute)}', context: history);
+        final first = compose('20');
+        final second = compose('21');
+        final beforeClock = first.indexOf('[CURRENT DEVICE CONTEXT]');
+        expect(beforeClock, greaterThan(first.indexOf('Ciao Aurora.')));
+        expect(second.substring(0, beforeClock), first.substring(0, beforeClock));
+        expect(second, contains('18:21'));
+        expect(second, contains('Come mi chiamo?'));
+        expect(second, isNot(contains('<search>query</search>')));
+      }
+    });
     test('history is preserved while terminal CLI markers do not become model context', () {
       const history = [
         ChatTurn(role: ChatRole.user, content: 'Il progetto Aurora ha budget 750 euro.'),
