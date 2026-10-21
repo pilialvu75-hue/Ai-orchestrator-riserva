@@ -4,7 +4,8 @@ import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 /// guess or a global profile. Other questions retain normal inference.
 abstract final class AssistantConversationRecall {
   static String? answer(String prompt, List<ChatTurn> context) {
-    final question = prompt.toLowerCase().replaceAll(RegExp(r'[?!.,]'), '').trim()
+    final question = prompt.toLowerCase().replaceAll(RegExp(r"qual['’]\s*"), 'qual ')
+        .replaceAll(RegExp(r'[?!.,]'), '').trim()
         .replaceAll(RegExp(r'\s+'), ' ');
     if (!RegExp(r'^(?:come mi chiamo|qual(?:e)? [èée] il mio nome|ricordi il mio nome)$').hasMatch(question)) {
       return null;

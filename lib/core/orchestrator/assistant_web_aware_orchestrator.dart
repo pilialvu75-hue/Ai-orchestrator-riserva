@@ -14,6 +14,7 @@ import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_device_clock.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_conversation_recall.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_shopping_results.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 
 /// Adds Assistant-owned web enrichment before Local generation and before
@@ -103,6 +104,19 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     if (clock != null) {
       yield InferenceResponse.finalChunk(text: clock, tokensGenerated: 0,
           providerId: 'device_clock');
+      return;
+    }
+    final shoppingQuery = !isOffline &&
+        !AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) &&
+        _runtimeSettingsService.runtimeMode == AiRuntimeMode.local
+        ? AssistantShoppingResults.query(input, context) : null;
+    if (shoppingQuery != null) {
+      final result = await _webSearchTool.execute(<String, dynamic>{
+        'query': AssistantWebSearchPolicy.extractQuery(shoppingQuery), 'limit': 3,
+      });
+      yield InferenceResponse.finalChunk(
+        text: AssistantShoppingResults.render(result, followUp: shoppingQuery != input),
+        tokensGenerated: 0, providerId: 'web_search_sources');
       return;
     }
     final effectiveSystemPrompt = await _enrichIfNeeded(
