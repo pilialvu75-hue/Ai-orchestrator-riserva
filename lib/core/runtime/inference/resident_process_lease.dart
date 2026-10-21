@@ -13,12 +13,12 @@ class ResidentProcessLease {
     if (!Platform.isWindows) return null;
     final job = CreateJobObject(nullptr, nullptr);
     if (job == 0) throw StateError('Cannot contain the local runtime process.');
-    final info = calloc<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>();
+    final info = calloc<_ExtendedJobLimits>();
     var process = 0;
     try {
-      info.ref.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      info.ref.basic.limitFlags = 0x00002000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
       if (SetInformationJobObject(job, JobObjectExtendedLimitInformation,
-          info.cast(), sizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()) == 0) {
+          info.cast(), sizeOf<_ExtendedJobLimits>()) == 0) {
         throw StateError('Cannot configure local runtime lifetime.');
       }
       process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, processId);
@@ -40,4 +40,41 @@ class ResidentProcessLease {
     CloseHandle(_job);
     _job = 0;
   }
+}
+
+// Win32 5.15 exposes job APIs but not these structures. Layout follows winnt.h:
+// https://learn.microsoft.com/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information
+final class _BasicJobLimits extends Struct {
+  @Int64()
+  external int processTime;
+  @Int64()
+  external int jobTime;
+  @Uint32()
+  external int limitFlags;
+  @UintPtr()
+  external int minimumWorkingSet;
+  @UintPtr()
+  external int maximumWorkingSet;
+  @Uint32()
+  external int activeProcessLimit;
+  @UintPtr()
+  external int affinity;
+  @Uint32()
+  external int priorityClass;
+  @Uint32()
+  external int schedulingClass;
+}
+
+final class _ExtendedJobLimits extends Struct {
+  external _BasicJobLimits basic;
+  @Array(6)
+  external Array<Uint64> ioCounters;
+  @UintPtr()
+  external int processMemoryLimit;
+  @UintPtr()
+  external int jobMemoryLimit;
+  @UintPtr()
+  external int peakProcessMemory;
+  @UintPtr()
+  external int peakJobMemory;
 }
