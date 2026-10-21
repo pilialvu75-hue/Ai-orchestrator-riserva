@@ -68,6 +68,7 @@ class _WorkshopProductionDashboardPageState
   bool _mutationBusy = false;
   bool _autoAdvanceScheduled = false;
   String? _error;
+  WorkshopGateEvidenceCopyFeedback? _gateEvidenceCopyStatus;
 
   @override
   void initState() {
@@ -94,6 +95,13 @@ class _WorkshopProductionDashboardPageState
     if (!mounted) return;
     setState(() {
       _buildResult = widget.bundle.dashboardController.state.lastBuildResult;
+      if (_gateEvidenceCopyStatus != null &&
+          !_gateEvidenceCopyStatus!.isFor(
+            projectId: widget.bundle.dashboardController.state.projectId,
+            taskId: _activeTaskId,
+          )) {
+        _gateEvidenceCopyStatus = null;
+      }
     });
     _scheduleAutoAdvance();
   }
@@ -152,7 +160,10 @@ class _WorkshopProductionDashboardPageState
     final taskId = _activeTaskId;
     if (taskId == null || taskId.isEmpty) return;
 
-    setState(() => _error = null);
+    setState(() {
+      _error = null;
+      _gateEvidenceCopyStatus = null;
+    });
     try {
       final result = retry
           ? await widget.executionController.retry()
@@ -1072,12 +1083,46 @@ class _WorkshopProductionDashboardPageState
     );
   }
 
-  /// Copies the rejected task's real source diff only after an explicit tap.
-  /// Never sends raw source to public Diagnostics or another service.
+  /// Shows durable, privacy-safe feedback beside the gate export button.
+  bool _reportGateEvidenceCopyStatus(
+    String message, {
+    required String? projectId,
+    required String? taskId,
+  }) {
+    if (!mounted) return false;
+    final feedback = WorkshopGateEvidenceCopyFeedback(
+      projectId: projectId?.trim() ?? '',
+      taskId: taskId?.trim() ?? '',
+      message: message,
+    );
+    if (!feedback.isFor(
+      projectId: widget.bundle.dashboardController.state.projectId,
+      taskId: _activeTaskId,
+    )) {
+      return false; // Copy finished after the active project/task changed.
+    }
+    setState(() => _gateEvidenceCopyStatus = feedback);
+    return true;
+  }
+
+  /// Copies rejected source only after explicit owner action; never publishes
+  /// source to Diagnostics or a repository.
   Future<void> _copyGateEvidence() async {
+    final projectId = widget.bundle.dashboardController.state.projectId;
+    final taskId = _activeTaskId;
+    bool report(String message) => _reportGateEvidenceCopyStatus(
+      message,
+      projectId: projectId,
+      taskId: taskId,
+    );
     final handle = _currentHandle;
     final result = _currentInferenceResult;
-    if (handle == null || result == null) return;
+    if (handle == null || result == null) {
+      report(
+        'Nessuna evidenza legata al task attivo. Riapri il progetto salvato.',
+      );
+      return;
+    }
 
     try {
       final evidence = WorkshopGateEvidenceExport.encode(
@@ -1086,14 +1131,36 @@ class _WorkshopProductionDashboardPageState
         result: result,
       );
       await Clipboard.setData(ClipboardData(text: evidence));
+      if (!report(
+        'Copia richiesta agli appunti Android (${evidence.length} caratteri). '
+        'Incolla in un editor per verificare il contenuto.',
+      )) {
+        return; // Do not show a stale Snackbar after a project switch.
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Evidenze del gate copiate.')),
+        const SnackBar(content: Text('Evidenze del gate inviate agli appunti.')),
       );
     } on StateError catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Evidenze non disponibili: $error')),
+      report(
+        WorkshopGateEvidenceExport.failureExplanation(error),
+      );
+    } on PlatformException {
+      report(
+        'Android non ha confermato la copia delle evidenze. '
+        'Usa il report accettazione per la diagnosi.'
+      );
+    } on MissingPluginException {
+      report(
+        'Appunti non disponibili su questa piattaforma. '
+        'Usa il report accettazione per la diagnosi.',
+      );
+    } catch (error) {
+      RuntimeEventLog.instance.emit(
+        '[WORKSHOP_GATE_EXPORT_FAILED] error_type=${error.runtimeType}',
+      );
+      report(
+        WorkshopGateEvidenceExport.failureExplanation(error),
       );
     }
   }
@@ -1238,6 +1305,18 @@ class _WorkshopProductionDashboardPageState
                   label: const Text('Copia evidenze del gate (codice)'),
                 ),
                 const SizedBox(height: 8),
+                if (_gateEvidenceCopyStatus?.isFor(
+                      projectId: widget.bundle.dashboardController.state.projectId,
+                      taskId: _activeTaskId,
+                    ) ??
+                    false) ...<Widget>[
+                  SelectableText(
+                    _gateEvidenceCopyStatus!.message,
+                    key: const Key('workshopGateEvidenceCopyStatus'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ],
               if (_hasVerifiedArtifact) ...<Widget>[
                 Text(

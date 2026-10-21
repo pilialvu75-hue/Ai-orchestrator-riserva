@@ -165,6 +165,73 @@ void main() {
     );
   });
 
+  test('reports missing rejected source snapshot without leaking source', () {
+    final message = WorkshopGateEvidenceExport.failureExplanation(
+      StateError('Rejected gate source snapshot is not available.'),
+    );
+    expect(message, contains('Snapshot del codice respinto non disponibile'));
+    expect(message, isNot(contains('project-1')));
+  });
+
+  test('reports incomplete rejected source without relaxing coverage', () {
+    final message = WorkshopGateEvidenceExport.failureExplanation(
+      StateError('Rejected gate source evidence has incomplete coverage.'),
+    );
+    expect(message, contains('Snapshot delle modifiche incompleto'));
+    expect(message, contains('bloccata'));
+  });
+
+  test('reports size limit without promising partial clipboard export', () {
+    final message = WorkshopGateEvidenceExport.failureExplanation(
+      StateError(
+        'Gate evidence exceeds the safe clipboard size; no partial source was copied.',
+      ),
+    );
+    expect(message, contains('Codice troppo grande'));
+    expect(message, contains('nessuna copia'));
+  });
+
+  test('never displays unknown exception details from model source', () {
+    const sensitive = 'private path /data/user/0/secret/ source snippet';
+    final stateMessage = WorkshopGateEvidenceExport.failureExplanation(
+      StateError(sensitive),
+    );
+    final genericMessage = WorkshopGateEvidenceExport.failureExplanation(
+      Exception(sensitive),
+    );
+    expect(stateMessage, isNot(contains(sensitive)));
+    expect(genericMessage, isNot(contains(sensitive)));
+    expect(stateMessage, contains('Esportazione non riuscita'));
+  });
+
+  test('copy feedback is visible only on its originating project and task', () {
+    const feedback = WorkshopGateEvidenceCopyFeedback(
+      projectId: 'project-alpha',
+      taskId: 'task-star',
+      message: 'Copia richiesta agli appunti Android',
+    );
+    expect(
+      feedback.isFor(projectId: 'project-alpha', taskId: 'task-star'),
+      isTrue,
+    );
+    expect(
+      feedback.isFor(projectId: 'project-beta', taskId: 'task-star'),
+      isFalse,
+    );
+    expect(
+      feedback.isFor(projectId: 'project-alpha', taskId: 'task-new'),
+      isFalse,
+    );
+    expect(
+      feedback.isFor(projectId: null, taskId: 'task-star'),
+      isFalse,
+    );
+    expect(
+      feedback.isFor(projectId: 'project-alpha', taskId: null),
+      isFalse,
+    );
+  });
+
   test('fails closed when rejected proposal has no staged changes', () {
     expect(
       () => evidence(rejected(after: original)),

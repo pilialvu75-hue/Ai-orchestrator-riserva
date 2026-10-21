@@ -4,12 +4,67 @@ import 'package:ai_orchestrator/app_factory/workspace/workspace_diff.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 
+/// The UI's copy feedback belongs to one saved Workshop project and task.
+/// Never reuse an old success/error message after switching projects.
+final class WorkshopGateEvidenceCopyFeedback {
+  const WorkshopGateEvidenceCopyFeedback({
+    required this.projectId,
+    required this.taskId,
+    required this.message,
+  });
+
+  final String projectId;
+  final String taskId;
+  final String message;
+
+  bool isFor({required String? projectId, required String? taskId}) {
+    if (projectId == null ||
+        projectId.trim().isEmpty ||
+        taskId == null ||
+        taskId.trim().isEmpty) {
+      return false;
+    }
+    return this.projectId == projectId.trim() &&
+        this.taskId == taskId.trim();
+  }
+}
+
 /// Explicit, local-only export of the rejected staged proposal.
 ///
 /// This never writes to Diagnostics or a repository. The owner chooses whether
 /// to copy or share the source evidence. Content is never silently truncated.
 abstract final class WorkshopGateEvidenceExport {
   static const int maxExportChars = 300000;
+
+  /// Privacy-safe reason to display when source export cannot be completed.
+  ///
+  /// Do not interpolate arbitrary exception messages here: they may contain
+  /// source snippets, local paths or task identifiers.
+  static String failureExplanation(Object error) {
+    if (error is StateError) {
+      switch (error.message) {
+        case 'Gate evidence does not match the active project task.':
+          return 'Evidenze non riferite al task attivo. Riapri il progetto '
+              'originale prima di riprovare la copia.';
+        case 'Gate evidence is available only for rejected gates.':
+          return 'Il task non ha un gate respinto da esportare.';
+        case 'Rejected gate source snapshot is not available.':
+          return 'Snapshot del codice respinto non disponibile. '
+              'Il report accettazione resta utilizzabile.';
+        case 'Rejected gate evidence contains unrelated file paths.':
+          return 'I file delle evidenze non corrispondono alla proposta: '
+              'esportazione bloccata per sicurezza.';
+        case 'Rejected gate source evidence has incomplete coverage.':
+          return 'Snapshot delle modifiche incompleto: esportazione '
+              'bloccata per evitare codice parziale.';
+        case 'Gate evidence exceeds the safe clipboard size; no partial source was copied.':
+          return 'Codice troppo grande per gli appunti: nessuna copia '
+              'parziale eseguita.';
+      }
+    }
+    return 'Esportazione non riuscita. Nessun codice sorgente copiato; '
+        'usa il report accettazione e segnala il problema.';
+  }
 
   static String encode({
     required String projectId,
