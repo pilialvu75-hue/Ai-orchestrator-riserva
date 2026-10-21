@@ -8,6 +8,16 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      release_channel:
+        description: 'Release channel (manual runs only)'
+        type: choice
+        required: true
+        default: beta
+        options:
+          - beta
+          - nightly
+          - dev
 
 # MODIFICA 1: Ampliati i permessi per permettere a CodeQL di scrivere i report nella scheda Security
 permissions:
@@ -328,12 +338,17 @@ jobs:
           path.write_text(content)
           PY
 
+          CHANNEL="${{ github.event_name == 'workflow_dispatch' && inputs.release_channel || 'stable' }}"
           TAG="v${VERSION_NAME}+${VERSION_CODE}"
+          if [ "$CHANNEL" != "stable" ]; then
+            TAG="${TAG}-${CHANNEL}"
+          fi
 
           {
             echo "version_name=$VERSION_NAME"
             echo "version_code=$VERSION_CODE"
             echo "tag=$TAG"
+            echo "channel=$CHANNEL"
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate build README/manual (IT)
@@ -536,7 +551,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: AI-Orchestrator Android ${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}
+          name: AI-Orchestrator Android ${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }} (${{ steps.version.outputs.channel }})
+          prerelease: ${{ steps.version.outputs.channel != 'stable' }}
           body_path: RELEASE_NOTES.md
           files: |
             ${{ steps.release_assets.outputs.release_apk_path }}
