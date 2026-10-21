@@ -176,18 +176,12 @@ extension AndroidFfiRuntimeGenerationStartupExtension on AndroidFfiRuntimeProvid
       return null;
     }
     AndroidFfiRuntimeProvider._log('[GGUF] validation=ok path=$resolvedModelPath');
-    if (!isForensicSelfTest) {
-      AndroidFfiRuntimeProvider._log('[FORENSIC_BEFORE_WARMUP]');
-      AndroidFfiRuntimeProvider._log( '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 689 | Function: streamInference() | BEFORE calling _ensureWarmup()', );
-      final warmupReady = await _ensureWarmup( sessionId: sessionId, modelPath: resolvedModelPath, );
-      AndroidFfiRuntimeProvider._log('[FORENSIC_AFTER_WARMUP]');
-      AndroidFfiRuntimeProvider._log( '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 696 | Function: streamInference() | AFTER calling _ensureWarmup()', );
-      if (!warmupReady) {
-        AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=warmup_failed_non_blocking_continue');
-      }
-    } else {
-      AndroidFfiRuntimeProvider._log('[WARMUP] skip session=$sessionId reason=self-test owns first token contract');
-    }
+    // The first real generation already loads and validates the native session.
+    // Do not run and tear down a synthetic generation before the user's request.
+    // Explicit runtime self-tests continue through streamVerificationInference.
+    AndroidFfiRuntimeProvider._log(
+      '[WARMUP] skip session=$sessionId reason=real_request_owns_first_generation',
+    );
     if (!_ensureLibraryLoaded()) {
       _classifyFirstTokenTermination( flowState: flowState, reason: 'library_load_failed', boundary: 'library_load', );
       AndroidFfiRuntimeProvider._log('[FFI_BRANCH] session=$sessionId name=library_load_failed');
