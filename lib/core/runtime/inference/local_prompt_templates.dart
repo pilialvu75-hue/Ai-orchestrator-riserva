@@ -47,6 +47,7 @@ class LocalPromptTemplates {
     bool enforceLegacyContextBound = true,
     bool emitDiagnostics = true,
     bool preserveHistoryPrefix = false,
+    bool assistantModelCompatibility = false,
   }) {
     if (!emitDiagnostics) {
       return runZoned(
@@ -58,6 +59,7 @@ class LocalPromptTemplates {
           enforceLegacyContextBound: enforceLegacyContextBound,
           emitDiagnostics: true,
           preserveHistoryPrefix: preserveHistoryPrefix,
+          assistantModelCompatibility: assistantModelCompatibility,
         ),
         zoneValues: const <Object?, Object?>{
           #suppressLocalPromptDiagnostics: true,
@@ -203,6 +205,13 @@ class LocalPromptTemplates {
       'reason=${enableWebSearch ? 'dynamic_or_explicit_query' : 'ordinary_conversation'}',
     );
 
+    if (assistantModelCompatibility &&
+        (modelId.toLowerCase().contains('spark_x2_5') || modelId.toLowerCase().contains('spark-x2.5'))) {
+      final composed = _buildSparkAssistantPrompt(finalSystemPrompt, boundedContext, userPrompt);
+      _logFinalPromptMetrics(composed, userPrompt.length);
+      return composed;
+    }
+
     switch (template) {
       case LocalInferenceModelIds.templateNemotron:
         return _buildNemotronPrompt(
@@ -216,6 +225,7 @@ class LocalPromptTemplates {
           systemPrompt: finalSystemPrompt,
           context: boundedContext,
           userPrompt: userPrompt,
+          includeBos: !assistantModelCompatibility,
         );
 
       case LocalInferenceModelIds.templateQwen:
@@ -233,9 +243,15 @@ class LocalPromptTemplates {
           systemPrompt: finalSystemPrompt,
           context: boundedContext,
           userPrompt: userPrompt,
+          includeBos: !assistantModelCompatibility,
         );
 
       case 'gemma':
+        if (assistantModelCompatibility) {
+          final composed = _buildGemmaAssistantPrompt(finalSystemPrompt, boundedContext, userPrompt);
+          _logFinalPromptMetrics(composed, userPrompt.length);
+          return composed;
+        }
         return _buildGemmaPrompt(
           systemPrompt: finalSystemPrompt,
           context: boundedContext,
@@ -416,11 +432,14 @@ class LocalPromptTemplates {
     required String systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
+    bool includeBos = true,
   }) {
     final buffer = StringBuffer();
 
-    buffer.writeln('');
-    buffer.write('<|begin_of_text|>');
+    if (includeBos) {
+      buffer.writeln('');
+      buffer.write('<|begin_of_text|>');
+    }
     buffer.write(
       '<|start_header_id|>system<|end_header_id|>\n\n',
     );
@@ -528,6 +547,7 @@ class LocalPromptTemplates {
     required String systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
+    bool includeBos = true,
   }) {
     const bos = '<｜begin▁of▁sentence｜>';
     const userTag = '<｜User｜>';
@@ -536,7 +556,7 @@ class LocalPromptTemplates {
 
     final buffer = StringBuffer();
 
-    buffer.write(bos);
+    if (includeBos) buffer.write(bos);
 
     if (systemPrompt.trim().isNotEmpty) {
       buffer.write(systemPrompt.trim());
@@ -585,7 +605,7 @@ class LocalPromptTemplates {
 
     _emit(
       '[PROMPT_TEMPLATE_DEEPSEEK] '
-      'bos=true '
+      'bos=$includeBos '
       'reasoning_prompt=true '
       'context_turns=${context.length}',
     );
@@ -747,6 +767,70 @@ class LocalPromptTemplates {
     );
 
     return composed;
+  }
+
+
+  // Assistant-only text templates, verified against the installed GGUF
+  // /apply-template output. The canonical Workshop composer stays unchanged.
+  static String _buildGemmaAssistantPrompt(
+      String system, List<ChatTurn> context, String user) {
+    final turns = <MapEntry<String, String>>[];
+    var instructions = system.trim();
+    for (final turn in context) {
+      if (turn.role == ChatRole.system) {
+        instructions += '\n\n${turn.content.trim()}';
+      } else {
+        turns.add(MapEntry(
+            turn.role == ChatRole.assistant ? 'model' : 'user', turn.content.trim()));
+      }
+    }
+    turns.add(MapEntry('user', user));
+    // Gemma has no system role. Put trusted instructions in the first user
+    // turn. A history window may start with an assistant answer; retain that
+    // answer after an instruction-only user turn rather than losing it.
+    if (turns.first.key != 'user') {
+      turns.insert(0, MapEntry('user', instructions));
+    } else {
+      turns[0] = MapEntry('user', '$instructions\n${turns.first.value}');
+    }
+    final normalized = <MapEntry<String, String>>[];
+    for (final turn in turns) {
+      if (normalized.isNotEmpty && normalized.last.key == turn.key) {
+        final previous = normalized.removeLast();
+        normalized.add(MapEntry(turn.key, '${previous.value}\n\n${turn.value}'));
+      } else {
+        normalized.add(turn);
+      }
+    }
+    final out = StringBuffer();
+    for (final turn in normalized) {
+      out.write('<start_of_turn>${turn.key}\n${turn.value}<end_of_turn>\n');
+    }
+    out.write('<start_of_turn>model\n');
+    return out.toString();
+  }
+
+  static String _buildSparkAssistantPrompt(
+      String system, List<ChatTurn> context, String user) {
+    const start = '<｜start▁of▁sentence｜>';
+    const end = '<｜end▁of▁sentence｜>';
+    final out = StringBuffer();
+    out.write('$start<|System|>\nyou are a helpful assistant.');
+    if (system.trim().isNotEmpty) out.write('\n\n${system.trim()}');
+    out.write(end);
+    for (final turn in context) {
+      if (turn.role == ChatRole.assistant) {
+        var content = turn.content.trim();
+        final closing = content.lastIndexOf('</think>');
+        if (closing >= 0) content = content.substring(closing + '</think>'.length).trimLeft();
+        out.write('$start<|Bot|></think>$content$end');
+      } else {
+        final role = turn.role == ChatRole.system ? 'System' : 'User';
+        out.write('$start<|$role|>${turn.role == ChatRole.system ? '\n' : ''}${turn.content}$end');
+      }
+    }
+    out.write('$start<|User|>$user$end$start<|Bot|></think>');
+    return out.toString();
   }
 
   static String _buildGemmaPrompt({
