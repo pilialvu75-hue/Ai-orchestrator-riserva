@@ -85,6 +85,13 @@ void main() {
       );
     });
 
+    test('real requests do not load a throwaway synthetic generation first', () {
+      final source = readSource(startupPath);
+      expect(source, isNot(contains('await _ensureWarmup(')));
+      expect(source, contains('if (!_ensureLibraryLoaded())'));
+      expect(source, contains('_validateModelFileForRuntime(resolvedModelPath)'));
+    });
+
     test('warmup also awaits the same asynchronous session boundary', () {
       final source = readSource(warmupPath);
 

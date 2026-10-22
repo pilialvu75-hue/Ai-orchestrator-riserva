@@ -1,0 +1,127 @@
+name: Assistant Android Source Validation
+on:
+  push:
+    branches: [codex/assistant-speed-integration]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/core/**'
+      - 'lib/native/**'
+      - 'native/android/**'
+      - 'android/**'
+      - 'test/**'
+      - 'pubspec.*'
+      - '.github/workflows/assistant-android-source-validation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: assistant-android-source-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Ensure llama.cpp submodule
+        run: |
+          if [ ! -f third_party/llama.cpp/CMakeLists.txt ]; then
+            git submodule update --init --recursive
+          fi
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Cache native build (CMake/Ninja objects + FetchContent)
+        uses: actions/cache@v5
+        with:
+          path: |
+            android/app/.cxx
+            ~/.cache/ccache
+          key: native-${{ runner.os }}-${{ hashFiles('android/app/build.gradle', 'android/settings.gradle', 'android/gradle.properties', 'pubspec.lock', '.gitmodules', 'native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h', 'third_party/llama.cpp/CMakeLists.txt') }}
+
+      - name: Install Android SDK cmdline-tools 16.0
+        run: |
+          set -euo pipefail
+          export ANDROID_CUSTOM_CMDLINE="${ANDROID_SDK_ROOT}/cmdline-tools"
+          curl -fsS https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip -o /tmp/tools.zip
+          mkdir -p "$ANDROID_CUSTOM_CMDLINE"
+          rm -rf "$ANDROID_CUSTOM_CMDLINE/latest" /tmp/cmdline-extract
+          unzip -q /tmp/tools.zip -d /tmp/cmdline-extract
+          mv /tmp/cmdline-extract/cmdline-tools "$ANDROID_CUSTOM_CMDLINE/latest"
+          rm -rf /tmp/tools.zip /tmp/cmdline-extract
+
+          SDKMANAGER="$ANDROID_CUSTOM_CMDLINE/latest/bin/sdkmanager"
+          SOURCE_PROPERTIES="$ANDROID_CUSTOM_CMDLINE/latest/source.properties"
+          test -x "$SDKMANAGER"
+          test -f "$SOURCE_PROPERTIES"
+          if ! grep -Eq '^Pkg\.Revision[[:space:]]*=[[:space:]]*16\.0([[:space:]]*)$' "$SOURCE_PROPERTIES"; then
+            echo "::error::Expected Android command-line tools 16.0"
+            cat "$SOURCE_PROPERTIES"
+            exit 1
+          fi
+          echo "sdkmanager_package_revision=16.0"
+
+      - name: Install Android NDK
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865"
+
+      - name: Install glslc (required to compile ggml Vulkan shaders)
+        run: |
+          set -euo pipefail
+          # The hosted runner ships a Chrome apt source that is unrelated to
+          # this build. If that external index is mid-publish, apt can fail
+          # with Hash Sum mismatch before reaching Ubuntu's glslc/ccache.
+          sudo rm -f \
+            /etc/apt/sources.list.d/google-chrome.list \
+            /etc/apt/sources.list.d/google-chrome.sources
+          sudo apt-get update -y
+          sudo apt-get install -y glslc ccache
+          glslc --version
+          ccache --version
+
+
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Test Assistant resource policy and runtime
+        run: flutter test test/core/runtime/inference test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
+      - name: Create ephemeral debug signing identity for CI only
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+      - name: Compile ARM64 debug APK for validation only
+        run: flutter build apk --debug --target-platform android-arm64
+      - name: Verify packaged ARM64 bridge exports
+        run: |
+          set -euo pipefail
+          unzip -p build/app/outputs/flutter-apk/app-debug.apk lib/arm64-v8a/libllama_bridge.so > /tmp/assistant-source-bridge.so
+          test -s /tmp/assistant-source-bridge.so
+          nm -D --defined-only /tmp/assistant-source-bridge.so | awk '{print $NF}' > /tmp/assistant-source-exports.txt
+          for symbol in llb_init_backend llb_gpu_backend_name llb_gpu_backend_reason llb_create_session llb_create_session_ex llb_session_metric llb_session_token_count llb_session_start_gen llb_session_start_gen_scoped llb_session_poll_token llb_session_cancel llb_release_session llb_session_last_error llb_session_is_active llb_session_is_generating; do
+            grep -Fxq "$symbol" /tmp/assistant-source-exports.txt || { echo "::error::Missing bridge export $symbol"; exit 1; }
+          done
+          sha256sum build/app/outputs/flutter-apk/app-debug.apk
