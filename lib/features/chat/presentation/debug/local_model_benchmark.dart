@@ -15,6 +15,13 @@ import 'package:flutter/foundation.dart';
 
 typedef LocalModelBenchmarkProgress = void Function(String message);
 
+String get _thermalSourceReportLine =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+        ? 'thermal_source=Android battery temperature proxy '
+            '(not SoC junction temperature)'
+        : 'thermal_source=unavailable on this platform '
+            '(no temperature measurement; not a thermal validation)';
+
 class _BenchmarkThermalGateFailure {
   const _BenchmarkThermalGateFailure({
     required this.code,
@@ -930,8 +937,7 @@ class LocalModelThermalReport {
       ..writeln('LOCAL MODEL THERMAL STRESS')
       ..writeln('created_at=${createdAt.toIso8601String()}')
       ..writeln(
-        'thermal_source=Android battery temperature proxy '
-        '(not SoC junction temperature)',
+        _thermalSourceReportLine,
       )
       ..writeln();
 
@@ -1047,7 +1053,7 @@ class VulkanLayerSweepReport {
       ..writeln('profiles=0 -> 10 -> 99')
       ..writeln('production_default=${LlamaNativeDefaults.nGpuLayers}')
       ..writeln(
-        'thermal_source=Android battery temperature proxy (not SoC junction temperature)',
+        _thermalSourceReportLine,
       )
       ..writeln('stopped_early=$stoppedEarly')
       ..writeln('stop_reason=${stopReason ?? 'none'}')
