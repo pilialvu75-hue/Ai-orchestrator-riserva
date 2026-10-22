@@ -213,6 +213,18 @@ void main() {
     verifyNever(() => inference.stream(any()));
   });
 
+  test('failed plural presidents search stays Italian without diagnosing connectivity', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(toolId: 'web_search', output: '', success: false),
+    );
+    final chunks = await build().handleStream('Elenca gli ultimi sei presidenti degli Stati Uniti', sessionId: 'plural').toList();
+    expect(chunks.single.providerId, 'web_verification_unavailable');
+    expect(chunks.single.text, startsWith('La ricerca non ha fornito'));
+    expect(chunks.single.text, isNot(contains('connessione')));
+    verifyNever(() => inference.stream(any()));
+  });
+
   test('offline sports question neither searches nor fabricates a winner', () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
     final chunks = await build().handleStream('chi ha vinto i mondiali del 2026', sessionId: 'sport', isOffline: true).toList();

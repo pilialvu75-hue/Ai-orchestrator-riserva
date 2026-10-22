@@ -2,7 +2,7 @@ name: Assistant Shared Tests
 
 on:
   push:
-    branches: [main, codex/assistant-local-reliability]
+    branches: [main, codex/assistant-local-reliability, codex/assistant-freshness-followup]
     paths:
       - 'lib/core/**'
       - 'lib/native/runtime/windows/**'
