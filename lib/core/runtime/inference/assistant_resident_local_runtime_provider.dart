@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/completion_output.dart';
+import 'package:ai_orchestrator/core/runtime/inference/assistant_reasoning_output.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
@@ -209,7 +210,11 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         onPromptUsage: (cached, evaluated) => RuntimeEventLog.instance.emit(
           '[ASSISTANT_LOCAL_CACHE] cached_tokens=$cached evaluated_tokens=$evaluated'),
       );
-      await for (final chunk in CompletionOutput.visible(output)) {
+      final answer = Platform.isWindows &&
+              LocalInferenceModelIds.resolveTemplate(request.modelId!) == LocalInferenceModelIds.templateDeepSeek
+          ? AssistantReasoningOutput.answerAfterInitialReasoning(output)
+          : output;
+      await for (final chunk in CompletionOutput.visible(answer)) {
         if (chunk.isEmpty) continue;
         text.write(chunk);
         chunks++;
@@ -226,6 +231,10 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         yield InferenceResponse.error('Inference cancelled.', state: InferenceTerminalState.cancelled);
       } else if (error is ResidentRuntimeBusy) {
         yield InferenceResponse.error('Local inference is already running.');
+      } else if (error is AssistantReasoningIncomplete) {
+        // A reasoning budget/format failure is not an unavailable GPU/model.
+        // Do not silently retry another backend or rank thoughts as an answer.
+        yield InferenceResponse.error('The response ended before a final answer. The reasoning budget may be insufficient.');
       } else if (chunks == 0) {
         if (gpuExecutable != null) {
           _gpuUnavailable = true;
