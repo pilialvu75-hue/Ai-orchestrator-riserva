@@ -190,7 +190,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     }
     final prompt = LocalPromptTemplates.compose(modelId: request.modelId!,
         prompt: request.prompt, systemPrompt: request.systemPrompt, context: request.context,
-        preserveHistoryPrefix: Platform.isWindows);
+        preserveHistoryPrefix: Platform.isWindows,
+        assistantModelCompatibility: Platform.isWindows);
     final metadata = SamplingMetadata.fromPrompt(prompt);
     final text = StringBuffer();
     var chunks = 0;
