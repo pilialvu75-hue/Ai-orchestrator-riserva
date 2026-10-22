@@ -1,3 +1,6 @@
+import 'dart:ui' show AppExitType, AppExitResponse;
+import 'package:flutter/services.dart';
+import 'package:ai_orchestrator/core/system/update/assistant_update_gate.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -29,12 +32,16 @@ class WindowsUpdateManager extends UpdateManager {
     required AndroidIntentHandler intentHandler,
     required String currentVersion,
     WindowsUpdateInstallerPort? windowsInstaller,
+    AssistantUpdateGate? updateGate,
+    Future<bool> Function()? requestAppExit,
     Dio? dio,
   })  : _windowsComparator = comparator,
         _windowsPreferences = preferences,
         _windowsCurrentVersion =
             comparator.normalize(currentVersion) ?? currentVersion,
         _windowsInstaller = windowsInstaller ?? WindowsUpdateInstaller(dio: dio),
+        _updateGate = updateGate ?? AssistantUpdateGate.instance,
+        _requestAppExit = requestAppExit ?? _requestCancelableExit,
         super(
           updateChecker: updateChecker,
           comparator: comparator,
@@ -56,6 +63,14 @@ class WindowsUpdateManager extends UpdateManager {
   final SharedPreferences _windowsPreferences;
   final WindowsUpdateInstallerPort _windowsInstaller;
   final String _windowsCurrentVersion;
+  final AssistantUpdateGate _updateGate;
+  final Future<bool> Function() _requestAppExit;
+
+  static Future<bool> _requestCancelableExit() async {
+    if (!Platform.isWindows) return false;
+    final response = await ServicesBinding.instance.exitApplication(AppExitType.cancelable);
+    return response == AppExitResponse.exit;
+  }
 
   Timer? _windowsPeriodicTimer;
   bool _windowsDownloadInProgress = false;
@@ -231,6 +246,7 @@ class WindowsUpdateManager extends UpdateManager {
       return false;
     }
     _windowsInstallInProgress = true;
+    void Function()? finishUpdate;
     try {
       final pending = await _readPendingInstaller();
       if (pending == null) {
@@ -252,6 +268,11 @@ class WindowsUpdateManager extends UpdateManager {
         return false;
       }
 
+      finishUpdate = _updateGate.tryBeginUpdate();
+      if (finishUpdate == null) {
+        _setError('Wait for the current response to finish saving before updating.');
+        return false;
+      }
       final launched = await _windowsInstaller.launch(pending.path);
       if (!launched) {
         _setError('Windows installer could not be launched.');
@@ -271,11 +292,16 @@ class WindowsUpdateManager extends UpdateManager {
           clearLastException: true,
         ),
       );
+      if (!await _requestAppExit()) {
+        _setError('Application close was cancelled. Close the app before continuing the installer.');
+        return false;
+      }
       return true;
     } catch (error) {
       _setError('Windows installer launch failed: $error');
       return false;
     } finally {
+      finishUpdate?.call();
       _windowsInstallInProgress = false;
     }
   }
