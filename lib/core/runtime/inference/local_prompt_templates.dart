@@ -225,6 +225,7 @@ class LocalPromptTemplates {
           systemPrompt: finalSystemPrompt,
           context: boundedContext,
           userPrompt: userPrompt,
+          includeBos: !assistantModelCompatibility,
         );
 
       case LocalInferenceModelIds.templateQwen:
@@ -242,6 +243,7 @@ class LocalPromptTemplates {
           systemPrompt: finalSystemPrompt,
           context: boundedContext,
           userPrompt: userPrompt,
+          includeBos: !assistantModelCompatibility,
         );
 
       case 'gemma':
@@ -430,11 +432,14 @@ class LocalPromptTemplates {
     required String systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
+    bool includeBos = true,
   }) {
     final buffer = StringBuffer();
 
-    buffer.writeln('');
-    buffer.write('<|begin_of_text|>');
+    if (includeBos) {
+      buffer.writeln('');
+      buffer.write('<|begin_of_text|>');
+    }
     buffer.write(
       '<|start_header_id|>system<|end_header_id|>\n\n',
     );
@@ -542,6 +547,7 @@ class LocalPromptTemplates {
     required String systemPrompt,
     required List<ChatTurn> context,
     required String userPrompt,
+    bool includeBos = true,
   }) {
     const bos = '<｜begin▁of▁sentence｜>';
     const userTag = '<｜User｜>';
@@ -550,7 +556,7 @@ class LocalPromptTemplates {
 
     final buffer = StringBuffer();
 
-    buffer.write(bos);
+    if (includeBos) buffer.write(bos);
 
     if (systemPrompt.trim().isNotEmpty) {
       buffer.write(systemPrompt.trim());
@@ -599,7 +605,7 @@ class LocalPromptTemplates {
 
     _emit(
       '[PROMPT_TEMPLATE_DEEPSEEK] '
-      'bos=true '
+      'bos=$includeBos '
       'reasoning_prompt=true '
       'context_turns=${context.length}',
     );

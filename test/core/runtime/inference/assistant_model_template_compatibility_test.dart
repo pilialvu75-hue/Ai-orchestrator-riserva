@@ -59,9 +59,21 @@ void main() {
     expect(result, contains('<|User|>Which budget?'));
   });
 
+  test('Native tokenizer owns BOS for Assistant Llama and DeepSeek', () {
+    final llama = compose('llama-3.2-1b');
+    expect(llama, startsWith('<|start_header_id|>system'));
+    expect(llama, isNot(contains('<|begin_of_text|>')));
+    expect(compose('llama-3.2-1b', assistant: false), contains('<|begin_of_text|>'));
+    final deepseek = compose('deepseek_r1_1_5b');
+    expect(deepseek, startsWith('Answer concisely.<｜User｜>'));
+    expect(deepseek, isNot(contains('<｜begin▁of▁sentence｜>')));
+    expect(deepseek, endsWith('<｜Assistant｜><think>\n'));
+    expect(compose('deepseek_r1_1_5b', assistant: false), startsWith('<｜begin▁of▁sentence｜>'));
+  });
+
   test('Other Assistant families remain unchanged by compatibility opt-in', () {
     for (final id in ['nemotron3_nano_4b', 'qwen3_1_7b',
-        'phi3_5_mini', 'deepseek_r1_1_5b', 'llama-3.2-3b', 'llama_1b']) {
+        'phi3_5_mini', 'llama_1b']) {
       expect(compose(id), compose(id, assistant: false));
     }
   });
