@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resident_process_lease.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 class ResidentRuntimeBusy implements Exception {}
 
@@ -73,6 +74,8 @@ class ResidentCompletionRuntime {
       if (device != null && !RegExp(r'^Vulkan\d+$').hasMatch(device)) {
         throw ArgumentError.value(device, 'device');
       }
+      final firstContentWatch = Stopwatch()..start();
+      var sawContent = false;
       await _ensureStarted(executable, modelPath, sessionId, threads, cancellation, batchSize, device);
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       final request = await _request('POST', '/completion');
@@ -97,7 +100,13 @@ class ResidentCompletionRuntime {
         final value = jsonDecode(raw) as Map<String, dynamic>;
         if (value.containsKey('error')) throw StateError('Local generation failed.');
         final content = value['content'] as String? ?? '';
-        if (content.isNotEmpty) yield content;
+        if (content.isNotEmpty) {
+          if (!sawContent) {
+            sawContent = true;
+            RuntimeEventLog.instance.emit('[ASSISTANT_RESIDENT_PHASE] phase=first_content elapsed_ms=${firstContentWatch.elapsedMilliseconds}');
+          }
+          yield content;
+        }
         if (value['stop'] == true) {
           stopped = true;
           final timings = value['timings'];
@@ -133,6 +142,7 @@ class ResidentCompletionRuntime {
       int threads, CancellationToken cancellation, int? batchSize, String? device) async {
     final identity = '$executable\u0000$model\u0000$session\u0000$batchSize\u0000$device';
     if (_process != null && _identity == identity) return;
+    final startupWatch = Stopwatch()..start();
     await close();
     if (cancellation.isCancelled) throw StateError('Inference cancelled.');
     final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -152,6 +162,7 @@ class ResidentCompletionRuntime {
       if (batchSize != null) ...['--batch-size', '$batchSize'],
       '--no-slots', '--sleep-idle-seconds', '${idleTimeout.inSeconds.clamp(1, 86400)}',
     ]);
+    RuntimeEventLog.instance.emit('[ASSISTANT_RESIDENT_PHASE] phase=process_started elapsed_ms=${startupWatch.elapsedMilliseconds}');
     _process = process;
     _lease = ResidentProcessLease.attach(process.pid);
     _identity = identity;
@@ -176,7 +187,10 @@ class ResidentCompletionRuntime {
         final response = await request.close().timeout(const Duration(seconds: 2));
         final ready = response.statusCode == HttpStatus.ok;
         await response.drain<void>();
-        if (ready) return;
+        if (ready) {
+          RuntimeEventLog.instance.emit('[ASSISTANT_RESIDENT_PHASE] phase=health_ready elapsed_ms=${startupWatch.elapsedMilliseconds}');
+          return;
+        }
       } on IOException {
         // The socket is unavailable until model startup reaches the HTTP loop.
       } on TimeoutException {
@@ -206,3 +220,5 @@ class ResidentCompletionRuntime {
     }
   }
 }
+
+
