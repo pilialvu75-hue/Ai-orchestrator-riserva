@@ -122,6 +122,26 @@ void main() {
     );
   });
 
+  test('load preflight keeps the minimum observed headroom in either order', () {
+    final high = ResourceSample({'availableBytes': 3828871168});
+    final low = ResourceSample({'availableBytes': 3770101760});
+    expect(LocalModelBenchmarkRunner.conservativeBenchmarkLoadSample(
+        [high, null, low]), same(low));
+    expect(LocalModelBenchmarkRunner.conservativeBenchmarkLoadSample(
+        [low, high]), same(low));
+    expect(LocalModelBenchmarkRunner.conservativeBenchmarkLoadSample(
+        [null, ResourceSample({})]), isNull);
+  });
+
+  test('load preflight never hides a critical sample behind more free RAM', () {
+    final normal = ResourceSample({'availableBytes': 4000000000});
+    final critical = ResourceSample({'availableBytes': 4500000000,
+        'lowMemory': true});
+    expect(critical.critical, isTrue);
+    expect(LocalModelBenchmarkRunner.conservativeBenchmarkLoadSample(
+        [normal, critical, normal]), same(critical));
+  });
+
   test('benchmark load preflight rejects a 6.7B GGUF without RAM headroom', () {
     const large = AiModel(
       id: 'deepseek_coder_6_7b_instruct',

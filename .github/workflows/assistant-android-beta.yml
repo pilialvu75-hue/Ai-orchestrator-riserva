@@ -523,7 +523,8 @@ jobs:
       - name: Generate release notes
         run: |
           {
-            echo "## Android beta — S24 FE first test"
+            echo "## Android beta — conservative cold-load memory guard"
+            echo "On phones with at most 8 GiB RAM, large cold GPU loads can now be refused before native allocation. This can make 4B models unavailable; select an already installed smaller model explicitly. This beta does not prove that Android low-memory kills are resolved."
             echo "Shared Assistant fixes only. Windows resident-runtime timings do not apply to Android."
             echo "Physical S24 FE inference and update-signature compatibility remain to be tested."
             echo

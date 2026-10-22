@@ -97,6 +97,21 @@ class ResourceSample {
   }
 }
 
+/// Conservative admission budget for cold large-model GPU loads on 8 GiB
+/// Android devices. Mapped weights, staging and a system reserve can coexist.
+/// This is an admission guard, not a promise about Android's process killer.
+int? minimumAndroidGpuColdLoadBytes(ResourceSample? sample,
+    {required int modelBytes, required int gpuLayers}) {
+  if (modelBytes < 2 * 1024 * 1024 * 1024 || gpuLayers < 32 ||
+      sample?.totalBytes == null || sample!.totalBytes! <= 0 ||
+      sample.totalBytes! > 8 * 1024 * 1024 * 1024) return null;
+  final staging = modelBytes ~/ 3;
+  final reserve = (sample.thresholdBytes ?? 0) + 768 * 1024 * 1024;
+  const minimumReserve = 1280 * 1024 * 1024;
+  return modelBytes + staging +
+      (reserve > minimumReserve ? reserve : minimumReserve);
+}
+
 int minResourceGenerationLimit(int context) => (context ~/ 2).clamp(1, 2048);
 
 class ResourceProfile {
