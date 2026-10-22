@@ -523,7 +523,8 @@ jobs:
       - name: Generate release notes
         run: |
           {
-            echo "## Android beta — conservative cold-load memory guard"
+            echo "## Android beta — memory diagnostics visibility"
+            echo "This update only corrects Diagnostics visibility for low-headroom Qwen releases and cold-load memory refusals. Runtime behavior is unchanged from beta9, which still has confirmed low-memory kills. This is a diagnostic test build, not a crash fix."
             echo "On small-RAM GPU devices, low-headroom residency is now released after completed responses for Qwen and other models as well as Phi. This leaves room for subsequent voice use but can add model reload time to the next question. The observed post-audio low-memory kill is not yet proven resolved."
             echo "On phones with at most 8 GiB RAM, large cold GPU loads can now be refused before native allocation. This can make 4B models unavailable; select an already installed smaller model explicitly. This beta does not prove that Android low-memory kills are resolved."
             echo "Shared Assistant fixes only. Windows resident-runtime timings do not apply to Android."

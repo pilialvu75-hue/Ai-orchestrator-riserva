@@ -780,6 +780,23 @@ String? publicLogProjection(String line) {
     });
   }
   if (event == 'RESOURCE_GUARD') {
+    final cold = RegExp(
+      r'^action=defer reason=cold_gpu_load_headroom '
+      r'model_bytes=(\d{1,15}) required_bytes=(-?\d{1,15}) '
+      r'available_bytes=(-?\d{1,15})$',
+    ).firstMatch(rest);
+    if (cold != null) {
+      return jsonEncode(<String, Object>{
+        'time': timestamp[1]!,
+        'event': event,
+        'action': 'defer',
+        'reason': 'cold_gpu_load_headroom',
+        'model_bytes': int.parse(cold[1]!),
+        'required_bytes': int.parse(cold[2]!),
+        'available_bytes': int.parse(cold[3]!),
+      });
+    }
+
     final m = RegExp(r'^action=(defer|cancel) reason=critical_memory$')
         .firstMatch(rest);
     if (m == null) return null;
