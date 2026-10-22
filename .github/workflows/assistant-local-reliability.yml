@@ -4,6 +4,15 @@ on:
   push:
     branches:
       - codex/assistant-local-reliability
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/core/runtime/inference/**'
+      - 'lib/native/runtime/windows/**'
+      - 'tool/bundle_windows_modern_runtime.ps1'
+      - 'test/core/runtime/inference/**'
+      - 'test/native/runtime/windows/**'
+      - '.github/workflows/assistant-local-reliability.yml'
   workflow_dispatch:
 
 permissions:
@@ -56,7 +65,7 @@ jobs:
         id: flutter-tests
         shell: pwsh
         run: |
-          flutter test test/native/runtime/windows/windows_llama_runtime_test.dart test/core/runtime/inference/local_runtime_provider_windows_test.dart test/core/tools/assistant_device_clock_test.dart test/core/tools/assistant_web_search_policy_test.dart test/core/orchestrator/assistant_web_aware_orchestrator_test.dart test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart test/core/system/update test/core/runtime/inference/completion_output_test.dart test/core/runtime/inference/local_prompt_templates_test.dart test/core/runtime/inference/inference_service_test.dart --machine 2>&1 | Tee-Object -FilePath flutter-test-results.jsonl
+          flutter test test/native/runtime/windows/windows_llama_runtime_test.dart test/native/runtime/windows/windows_vulkan_device_test.dart test/core/runtime/inference/local_runtime_provider_windows_test.dart test/core/tools/assistant_device_clock_test.dart test/core/tools/assistant_web_search_policy_test.dart test/core/orchestrator/assistant_web_aware_orchestrator_test.dart test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart test/core/system/update test/core/runtime/inference/completion_output_test.dart test/core/runtime/inference/local_prompt_templates_test.dart test/core/runtime/inference/nemotron_prompt_template_test.dart test/core/runtime/inference/inference_service_test.dart --machine 2>&1 | Tee-Object -FilePath flutter-test-results.jsonl
           $testExit = $LASTEXITCODE
           Write-Host "Flutter test exit code: $testExit"
           exit $testExit
@@ -306,6 +315,7 @@ jobs:
           retention-days: 14
 
   publish-candidate:
+    if: github.event_name != 'pull_request'
     needs: [test-windows, build-windows]
     runs-on: ubuntu-24.04
     permissions:

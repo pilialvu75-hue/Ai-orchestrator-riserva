@@ -1,5 +1,7 @@
 name: Assistant Android Source Validation
 on:
+  push:
+    branches: [codex/assistant-speed-integration]
   pull_request:
     branches: [main]
     paths:

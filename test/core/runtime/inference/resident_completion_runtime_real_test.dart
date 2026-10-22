@@ -47,13 +47,19 @@ void main() {
     final cached = <int>[];
     Future<String> generate(String session, String prompt) => runtime.generate(
       executable: server!, modelPath: model!, sessionId: session, prompt: prompt,
-      maxTokens: 8, temperature: 0, topP: 0.9, repeatPenalty: 1.1, threads: 2,
+      maxTokens: 8, temperature: 0, topP: 0.9, repeatPenalty: 1.1, threads: 2, batchSize: 128,
       cancellation: CancellationToken(), onPromptUsage: (cache, evaluated) => cached.add(cache),
     ).join();
     try {
       print('Resident cache check: first request');
+      await runtime.prepare(executable: server!, modelPath: model!,
+          sessionId: 'one', threads: 2, batchSize: 128);
+      final preparedProcess = runtime.processId;
+      expect(preparedProcess, isNotNull);
       final first = await generate('one', 'Once upon a time');
+      expect(runtime.processId, preparedProcess, reason: 'The first real request must reuse the prepared engine.');
       expect(first.trim(), isNotEmpty);
+      expect(cached.first, 0, reason: 'Preparation must not add synthetic conversation tokens.');
       print('Resident cache check: warm request');
       final second = await generate('one', 'Once upon a time$first');
       expect(second.trim(), isNotEmpty);

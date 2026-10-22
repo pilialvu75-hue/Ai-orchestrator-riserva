@@ -2,7 +2,7 @@ name: Assistant Shared Tests
 
 on:
   push:
-    branches: [main, codex/assistant-local-reliability]
+    branches: [main, codex/assistant-local-reliability, codex/assistant-freshness-followup]
     paths:
       - 'lib/core/**'
       - 'lib/native/runtime/windows/**'
@@ -50,6 +50,9 @@ jobs:
           test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
           test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart
           test/core/runtime/inference/completion_output_test.dart
+          test/native/runtime/windows/windows_vulkan_device_test.dart
+          test/native/runtime/windows/windows_gpu_probe_cache_test.dart
+          test/core/runtime/inference/nemotron_prompt_template_test.dart
           test/core/runtime/inference/local_prompt_templates_test.dart
           test/core/runtime/inference/inference_service_test.dart
           test/core/system/update

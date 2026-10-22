@@ -23,6 +23,25 @@ class ResidentCompletionRuntime {
   Timer? _idle;
   bool _busy = false;
   CancellationToken? _activeCancellation;
+  int? get processId => _process?.pid;
+
+  /// Load the engine without generating or adding any conversation tokens.
+  Future<void> prepare({required String executable, required String modelPath,
+      required String sessionId, required int threads, String? device, int? batchSize}) async {
+    if (_busy) throw ResidentRuntimeBusy();
+    _busy = true;
+    _idle?.cancel();
+    try {
+      await _ensureStarted(executable, modelPath, sessionId, threads,
+          CancellationToken(), batchSize, device);
+    } catch (_) {
+      await close();
+      rethrow;
+    } finally {
+      _busy = false;
+      if (_process != null) _idle = Timer(idleTimeout, () => unawaited(close()));
+    }
+  }
 
   Stream<String> generate({
     required String executable,
@@ -34,6 +53,8 @@ class ResidentCompletionRuntime {
     required double topP,
     required double repeatPenalty,
     required int threads,
+    int? batchSize,
+    String? device,
     required CancellationToken cancellation,
     void Function(int cached, int evaluated)? onPromptUsage,
   }) async* {
@@ -46,7 +67,13 @@ class ResidentCompletionRuntime {
       if (identical(_activeCancellation, cancellation)) unawaited(close());
     });
     try {
-      await _ensureStarted(executable, modelPath, sessionId, threads, cancellation);
+      if (batchSize != null && (batchSize < 1 || batchSize > 2048)) {
+        throw ArgumentError.value(batchSize, 'batchSize');
+      }
+      if (device != null && !RegExp(r'^Vulkan\d+$').hasMatch(device)) {
+        throw ArgumentError.value(device, 'device');
+      }
+      await _ensureStarted(executable, modelPath, sessionId, threads, cancellation, batchSize, device);
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       final request = await _request('POST', '/completion');
       request.headers.contentType = ContentType.json;
@@ -103,8 +130,8 @@ class ResidentCompletionRuntime {
   }
 
   Future<void> _ensureStarted(String executable, String model, String session,
-      int threads, CancellationToken cancellation) async {
-    final identity = '$executable\u0000$model\u0000$session';
+      int threads, CancellationToken cancellation, int? batchSize, String? device) async {
+    final identity = '$executable\u0000$model\u0000$session\u0000$batchSize\u0000$device';
     if (_process != null && _identity == identity) return;
     await close();
     if (cancellation.isCancelled) throw StateError('Inference cancelled.');
@@ -116,8 +143,13 @@ class ResidentCompletionRuntime {
     _client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
     final process = await Process.start(executable, [
       '-m', model, '--host', '127.0.0.1', '--port', '$_port', '--api-key', _key!,
-      '-c', '4096', '-t', '${threads.clamp(1, 8)}', '-ngl', '0', '--parallel', '1',
+      '-c', '4096', '-t', '${threads.clamp(1, 8)}', '-ngl', device == null ? '0' : '99', '--parallel', '1',
+      // Avoid an extra synthetic generation before the first real request.
+      // Measured with this pinned Vulkan package; CPU/legacy paths unchanged.
+      if (device != null) ...['--device', device, '--no-warmup'],
       '--threads-batch', '${threads.clamp(1, 8)}',
+      // Bound recurrent-state rollback only for an explicitly measured profile.
+      if (batchSize != null) ...['--batch-size', '$batchSize'],
       '--no-slots', '--sleep-idle-seconds', '${idleTimeout.inSeconds.clamp(1, 86400)}',
     ]);
     _process = process;

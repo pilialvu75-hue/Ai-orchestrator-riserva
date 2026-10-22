@@ -261,11 +261,15 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
         (!offline && !(systemPrompt?.contains('[WEB SEARCH UNAVAILABLE]') ?? false)) ||
         !(AssistantWebSearchPolicy.isPresentOfficeHolderQuery(input) ||
           AssistantWebSearchPolicy.isSportsResultQuery(input))) return null;
-    final italian = RegExp(r'\b(?:chi|quale|qual|vinto|presidente|mondiali)\b', caseSensitive: false).hasMatch(input);
+    final italian = RegExp(r'\b(?:chi|quale|qual|vinto|president[ei]|mondiali)\b', caseSensitive: false).hasMatch(input);
     return InferenceResponse.finalChunk(
       text: italian
-          ? 'Non posso verificare questo dato con fonti aggiornate: la ricerca Internet non è disponibile. Riprova quando la connessione è disponibile.'
-          : 'I cannot verify this with current sources because web search is unavailable. Please try again when a connection is available.',
+          ? (offline
+              ? 'La verifica web è disattivata per questa richiesta. Non posso confermare il dato attuale.'
+              : 'La ricerca non ha fornito fonti aggiornate utilizzabili per verificare questo dato. Riprova tra poco.')
+          : (offline
+              ? 'Web verification is disabled for this request. I cannot confirm the current fact.'
+              : 'Search did not provide usable current sources to verify this fact. Please try again shortly.'),
       tokensGenerated: 0,
       providerId: 'web_verification_unavailable',
     );
