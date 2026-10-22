@@ -106,8 +106,20 @@ void main() {
       context: history, isOffline: true).drain<void>();
     await build().handleStream('Verify your answer', sessionId: 'hidden',
       context: const [
+        ChatTurn(role: ChatRole.user, content: 'Older unrelated landmark question'),
         ChatTurn(role: ChatRole.user, content: 'Private omitted topic',
           excludeFromContext: true),
+      ]).drain<void>();
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+
+  test('answer verification does not send preceding code tasks to web search', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    await build().handleStream('Verify your answer', sessionId: 'code-verification',
+      context: const [
+        ChatTurn(role: ChatRole.user, content: 'Implement a sorting function'),
+        ChatTurn(role: ChatRole.assistant, content: 'Example code'),
       ]).drain<void>();
     verifyNever(() => webSearch.execute(any()));
   });

@@ -159,11 +159,18 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     String? previousUserPrompt;
     if (AssistantWebSearchPolicy.isAnswerVerification(input)) {
       for (final turn in context.reversed) {
-        if (turn.role != ChatRole.user || turn.excludeFromContext) continue;
+        if (turn.role != ChatRole.user) continue;
+        // An excluded latest topic is a boundary, not permission to reuse an older one.
+        if (turn.excludeFromContext) break;
         if (turn.content.trim() == input.trim()) continue;
         previousUserPrompt = turn.content;
         break;
       }
+    }
+    if (previousUserPrompt != null) {
+      final previousType = _intentAnalyzer.analyze(previousUserPrompt);
+      if (previousType == TaskType.coding || previousType == TaskType.command ||
+          previousType == TaskType.plan) previousUserPrompt = null;
     }
     final verificationQuery = AssistantWebSearchPolicy.answerVerificationQuery(
       input, previousUserPrompt,
