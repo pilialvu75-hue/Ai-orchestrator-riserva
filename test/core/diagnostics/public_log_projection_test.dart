@@ -34,6 +34,17 @@ void main() {
       '$body personal_text=secret'), isNull);
   });
 
+
+  test('projects exact cold-load guard numbers without free-form fields', () {
+    const body = 'action=defer reason=cold_gpu_load_headroom '
+        'model_bytes=2837072864 required_bytes=5120000000 available_bytes=3000000000';
+    final line = publicLogProjection('$time [RESOURCE_GUARD] $body');
+    final data = jsonDecode(line!) as Map<String, dynamic>;
+    expect(data['reason'], 'cold_gpu_load_headroom');
+    expect(data['available_bytes'], 3000000000);
+    expect(publicLogProjection('$time [RESOURCE_GUARD] $body path=private'), isNull);
+  });
+
   test('exports platform diagnostics session without device identity', () {
     final line = publicLogProjection(
       '$time [DIAGNOSTICS_SESSION] '
