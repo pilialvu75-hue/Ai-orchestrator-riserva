@@ -106,6 +106,13 @@ jobs:
         run: flutter pub get --enforce-lockfile
       - name: Test Assistant resource policy and runtime
         run: flutter test test/core/runtime/inference test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
+      - name: Create ephemeral debug signing identity for CI only
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
       - name: Compile ARM64 debug APK for validation only
         run: flutter build apk --debug --target-platform android-arm64
       - name: Verify packaged ARM64 bridge exports
