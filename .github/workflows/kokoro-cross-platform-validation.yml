@@ -1,0 +1,33 @@
+name: Kokoro Cross-platform Validation
+on:
+  push:
+    branches: [codex/kokoro-cross-platform-validation]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  extract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Download pinned official archive
+        shell: pwsh
+        run: |
+          $archivePath = Join-Path $env:RUNNER_TEMP 'kokoro-multi-lang-v1_0.tar.bz2'
+          Invoke-WebRequest 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2' -OutFile $archivePath
+          $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298') { throw 'Official Kokoro archive hash mismatch' }
+          "AI_ORCHESTRATOR_KOKORO_ARCHIVE=$archivePath" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Exercise actual staging and payload verification
+        run: flutter test test/core/voice/kokoro_assets_test.dart test/core/voice/kokoro_live_archive_test.dart --reporter expanded

@@ -107,10 +107,11 @@ class KokoroAssets {
 
   // Keep the isolate closure outside the scope holding Dio and UI callbacks.
   static Future<void> _extractInBackground(String archivePath, String payload) {
-    return Isolate.run(() => _extractVerifiedArchive(archivePath, payload));
+    return Isolate.run(() => extractVerifiedArchive(archivePath, payload));
   }
 
-  static Future<void> _extractVerifiedArchive(String archivePath, String payload) async {
+  /// Validate and stage an official archive without activating an installation.
+  static Future<void> extractVerifiedArchive(String archivePath, String payload) async {
     final archive = File(archivePath);
     if (await archive.length() != archiveBytes ||
         (await sha256.bind(archive.openRead()).first).toString() != archiveSha256) {
