@@ -550,6 +550,7 @@ jobs:
           prerelease: true
           make_latest: false
           tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: AI-Orchestrator Android beta S24 FE ${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }}
           body_path: RELEASE_NOTES.md
           files: |
