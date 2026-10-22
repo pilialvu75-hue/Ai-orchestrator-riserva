@@ -27,6 +27,33 @@ abstract final class AssistantWebSearchPolicy {
         _evidenceDrivenIntent(value);
   }
 
+
+  /// Explicit verification of the preceding answer; not generic proofreading.
+  static bool isAnswerVerification(String prompt) {
+    final value = prompt.trim().toLowerCase().replaceAll('’', "'")
+        .replaceAll(RegExp(r'[.!?]+$'), '').trim();
+    return const <String>{
+      'verifica la tua risposta', 'verifica questa risposta',
+      'controlla le fonti della tua risposta',
+      'verify your answer', 'fact check your answer',
+      'check the sources for your answer',
+      'vérifie ta réponse', 'verifie ta reponse',
+      'vérifie les sources de ta réponse',
+      'verifica tu respuesta', 'verifica las fuentes de tu respuesta',
+    }.contains(value);
+  }
+
+  /// Use the user's topic, never an assistant assertion as search evidence.
+  static String? answerVerificationQuery(String prompt, String? previousUserPrompt) {
+    if (!isAnswerVerification(prompt)) return null;
+    final topic = previousUserPrompt?.trim();
+    if (topic == null || topic.isEmpty || topic.length > 500 ||
+        isAnswerVerification(topic) || _explicitNoWebIntent(topic.toLowerCase())) {
+      return null;
+    }
+    return extractQuery(topic);
+  }
+
   /// Competition results need evidence even when a year is supplied.
   static bool isSportsResultQuery(String prompt) {
     final value = prompt.toLowerCase();

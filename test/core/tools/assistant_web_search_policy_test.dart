@@ -2,6 +2,26 @@ import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.da
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('verification follow-up resolves user topic without broadening local checks', () {
+    for (final request in ['Vérifie ta réponse.', 'Verifica la tua risposta',
+        'Verify your answer', 'Verifica tu respuesta']) {
+      expect(AssistantWebSearchPolicy.answerVerificationQuery(
+        request, 'Where is the origin of the national road network?'),
+        'Where is the origin of the national road network?');
+    }
+    for (final request in ['Check my code', 'Verifica questo calcolo',
+        'Explique-le maintenant en français', 'Check the grammar']) {
+      expect(AssistantWebSearchPolicy.answerVerificationQuery(
+        request, 'An unrelated question'), isNull);
+    }
+    expect(AssistantWebSearchPolicy.answerVerificationQuery(
+      'Verify your answer', null), isNull);
+    expect(AssistantWebSearchPolicy.answerVerificationQuery(
+      'Verify your answer', 'Verifica la tua risposta'), isNull);
+    expect(AssistantWebSearchPolicy.answerVerificationQuery(
+      'Verify your answer', 'Senza internet spiega la fotosintesi'), isNull);
+  });
+
   group('AssistantWebSearchPolicy.shouldSearch', () {
     test('real shopping request and recent office list require fresh sources', () {
       for (final prompt in ['trova un offera per un pc asus Vivobook interessante',

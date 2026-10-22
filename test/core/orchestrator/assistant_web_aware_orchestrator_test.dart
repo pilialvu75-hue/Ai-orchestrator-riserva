@@ -64,6 +64,66 @@ void main() {
     );
   }
 
+
+  test('verification uses user topic, preserves history and cites fresh evidence', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(toolId: 'web_search',
+        output: 'Public evidence URL: https://example.test/official'),
+    );
+    const history = [
+      ChatTurn(role: ChatRole.user, content: 'Where does the national road network begin?'),
+      ChatTurn(role: ChatRole.assistant, content: 'Invented city and imaginary authority.'),
+    ];
+    await build().handleStream('Vérifie ta réponse', sessionId: 'verify',
+      context: history).drain<void>();
+    final args = verify(() => webSearch.execute(captureAny())).captured.single
+        as Map<String, dynamic>;
+    expect(args['query'], history.first.content);
+    expect(args['query'], isNot(contains('Invented')));
+    final request = verify(() => inference.stream(captureAny())).captured.single
+        as InferenceRequest;
+    expect(request.context, history);
+    expect(request.systemPrompt, contains('https://example.test/official'));
+    expect(request.systemPrompt, contains('not verified facts'));
+  });
+
+  test('verification without a user topic never searches assistant assertions', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    await build().handleStream('Verify your answer', sessionId: 'no-topic',
+      context: const [
+        ChatTurn(role: ChatRole.assistant, content: 'An unsupported assertion'),
+      ]).drain<void>();
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('verification respects offline mode and excludes hidden topics', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    const history = [
+      ChatTurn(role: ChatRole.user, content: 'Explain a public landmark'),
+    ];
+    await build().handleStream('Verify your answer', sessionId: 'offline',
+      context: history, isOffline: true).drain<void>();
+    await build().handleStream('Verify your answer', sessionId: 'hidden',
+      context: const [
+        ChatTurn(role: ChatRole.user, content: 'Older unrelated landmark question'),
+        ChatTurn(role: ChatRole.user, content: 'Private omitted topic',
+          excludeFromContext: true),
+      ]).drain<void>();
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+
+  test('answer verification does not send preceding code tasks to web search', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    await build().handleStream('Verify your answer', sessionId: 'code-verification',
+      context: const [
+        ChatTurn(role: ChatRole.user, content: 'Implement a sorting function'),
+        ChatTurn(role: ChatRole.assistant, content: 'Example code'),
+      ]).drain<void>();
+    verifyNever(() => webSearch.execute(any()));
+  });
+
   test('local shopping and link follow-up return source URLs without slow model inference', () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
     when(() => webSearch.execute(any())).thenAnswer((_) async => const ToolResult(
