@@ -127,9 +127,26 @@ void main() {
       requestedGpuLayers: 50,
     );
     expect(aggressive.context, 2048);
-    expect(aggressive.batch, 128);
-    expect(aggressive.microBatch, 32);
-    expect(aggressive.reason, 'phi_gpu_conservative');
+    expect(aggressive.batch, 64);
+    expect(aggressive.microBatch, 16);
+    expect(aggressive.reason, 'phi_gpu_small_ram_headroom');
+    final larger = ResourceProfile.select(ResourceSample({'totalBytes': 12 << 30}),
+        phi: true, requestedGpuLayers: 50);
+    expect(larger.context, 2048);
+    expect(larger.microBatch, 32);
+  });
+
+  test('resident Phi GPU is released before lowMemory on small RAM devices', () {
+    final afterAnswer = ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 982175744, 'thresholdBytes': 408944640});
+    expect(afterAnswer.critical, isFalse);
+    expect(afterAnswer.pressured, isFalse);
+    expect(afterAnswer.shouldReleaseResidentModel(phi: true, gpuLayers: 33), isTrue);
+    expect(afterAnswer.shouldReleaseResidentModel(phi: false, gpuLayers: 33), isFalse);
+    expect(afterAnswer.shouldReleaseResidentModel(phi: true, gpuLayers: 0), isFalse);
+    expect(ResourceSample({'totalBytes': 7575261184, 'availableBytes': 2 << 30,
+      'thresholdBytes': 408944640}).shouldReleaseResidentModel(phi: true, gpuLayers: 33), isFalse);
+    expect(ResourceSample({}).shouldReleaseResidentModel(phi: true, gpuLayers: 33), isFalse);
   });
 
   test('logging and listener errors cannot prevent remaining RAM guards',

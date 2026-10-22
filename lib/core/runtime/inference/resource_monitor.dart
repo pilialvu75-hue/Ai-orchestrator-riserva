@@ -83,6 +83,18 @@ class ResourceSample {
           : availableBytes != null && thresholdBytes != null
               ? 'normal'
               : 'unknown';
+
+  /// Vulkan allocations may leave little headroom even before Android raises
+  /// lowMemory. This only decides residency AFTER a completed generation.
+  bool shouldReleaseResidentModel({required bool phi, required int gpuLayers}) {
+    if (pressured) return true;
+    if (!phi || gpuLayers < 32 || totalBytes == null || totalBytes! <= 0 ||
+        totalBytes! > 8 * 1024 * 1024 * 1024 || availableBytes == null) return false;
+    const minimumHeadroom = 1280 * 1024 * 1024;
+    final thresholdHeadroom = (thresholdBytes ?? 0) + 768 * 1024 * 1024;
+    final headroom = thresholdHeadroom > minimumHeadroom ? thresholdHeadroom : minimumHeadroom;
+    return availableBytes! < headroom;
+  }
 }
 
 int minResourceGenerationLimit(int context) => (context ~/ 2).clamp(1, 2048);
@@ -101,6 +113,12 @@ class ResourceProfile {
     // Phi has a large KV cache: shrink it without disabling GPU offload.
     if (phi && memoryConstrained) {
       return const ResourceProfile(1536, 64, 16, 'phi_memory_recovery');
+    }
+    // Keep the context and GPU layer request. Smaller compute batches reduce
+    // transient Vulkan allocations on the 8 GiB class before an LMK can occur.
+    if (phi && requestedGpuLayers >= 32 && sample?.totalBytes != null &&
+        sample!.totalBytes! > 0 && sample.totalBytes! <= 8 * 1024 * 1024 * 1024) {
+      return const ResourceProfile(2048, 64, 16, 'phi_gpu_small_ram_headroom');
     }
     if (sample?.pressured == true) {
       return const ResourceProfile(2048, 128, 32, 'pressure');
