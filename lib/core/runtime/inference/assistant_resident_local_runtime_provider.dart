@@ -21,6 +21,7 @@ import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dart';
 import 'package:ai_orchestrator/native/runtime/windows/windows_vulkan_device.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_gpu_probe_cache.dart';
 
 /// Assistant-only warm desktop runtime. Workshop and diagnostics retain their
 /// canonical provider. Unsupported platforms and startup failures use the CLI.
@@ -36,7 +37,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   AppLifecycleListener? _lifecycle;
   bool _unavailable = false;
   bool _gpuUnavailable = false;
-  Future<String?>? _gpuDevices;
+  final _gpuDevices = WindowsGpuProbeCache();
   Future<void>? _preparation;
 
   /// Prepare only the measured Windows GPU route while the app opens.
@@ -56,9 +57,13 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     if (!File(candidate).existsSync()) return;
     final watch = Stopwatch()..start();
     try {
-      final listing = await (_gpuDevices ??= _listGpuDevices(candidate));
+      final listing = await _gpuDevices.get(() => _listGpuDevices(candidate),
+          usable: (value) => WindowsVulkanDevice.select(value, modelBytes: File(modelPath).lengthSync()) != null);
       final device = WindowsVulkanDevice.select(listing ?? '', modelBytes: await File(modelPath).length());
-      if (device == null) return;
+      if (device == null) {
+        RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] stage=prepare reason=no_eligible_device_or_headroom');
+        return;
+      }
       await _runtime.prepare(executable: candidate, modelPath: modelPath,
           sessionId: 'default', threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8), device: device);
       RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_PREPARE] status=ready elapsed_ms=${watch.elapsedMilliseconds}');
@@ -75,8 +80,11 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       final stderr = probe.stderr.drain<void>();
       final code = await probe.exitCode.timeout(const Duration(seconds: 15));
       await stderr;
-      return code == 0 ? await stdout : null;
-    } catch (_) {
+      final listing = await stdout;
+      RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU_PROBE] exit_code=$code output_chars=${listing.length}');
+      return code == 0 ? listing : null;
+    } catch (error) {
+      RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU_PROBE] error_type=${error.runtimeType}');
       return null;
     } finally {
       probe?.kill();
@@ -166,13 +174,18 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         LocalInferenceModelIds.resolveTemplate(request.modelId!) == LocalInferenceModelIds.templateNemotron) {
       final candidate = p.join(p.dirname(executable), '..', 'runtime-vulkan', 'llama-server.exe');
       if (File(candidate).existsSync()) {
-        final listing = await (_gpuDevices ??= _listGpuDevices(candidate));
+        final listing = await _gpuDevices.get(() => _listGpuDevices(candidate),
+            usable: (value) => WindowsVulkanDevice.select(value, modelBytes: file.lengthSync()) != null);
         if (cancellationToken.isCancelled) {
           yield InferenceResponse.error('Inference cancelled.', state: InferenceTerminalState.cancelled);
           return;
         }
         gpuDevice = WindowsVulkanDevice.select(listing ?? '', modelBytes: await file.length());
-        if (gpuDevice != null) gpuExecutable = candidate;
+        if (gpuDevice != null) {
+          gpuExecutable = candidate;
+        } else {
+          RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] stage=request reason=no_eligible_device_or_headroom retry_after_s=30');
+        }
       }
     }
     final prompt = LocalPromptTemplates.compose(modelId: request.modelId!,
