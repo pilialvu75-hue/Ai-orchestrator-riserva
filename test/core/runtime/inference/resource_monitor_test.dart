@@ -162,17 +162,32 @@ void main() {
     expect(larger.microBatch, 32);
   });
 
-  test('resident Phi GPU is released before lowMemory on small RAM devices', () {
+  test('resident GPU is released before lowMemory on small RAM devices', () {
     final afterAnswer = ResourceSample({'totalBytes': 7575261184,
       'availableBytes': 982175744, 'thresholdBytes': 408944640});
     expect(afterAnswer.critical, isFalse);
     expect(afterAnswer.pressured, isFalse);
     expect(afterAnswer.shouldReleaseResidentModel(phi: true, gpuLayers: 33), isTrue);
-    expect(afterAnswer.shouldReleaseResidentModel(phi: false, gpuLayers: 33), isFalse);
+    expect(afterAnswer.shouldReleaseResidentModel(phi: false, gpuLayers: 33), isTrue);
     expect(afterAnswer.shouldReleaseResidentModel(phi: true, gpuLayers: 0), isFalse);
     expect(ResourceSample({'totalBytes': 7575261184, 'availableBytes': 2 << 30,
       'thresholdBytes': 408944640}).shouldReleaseResidentModel(phi: true, gpuLayers: 33), isFalse);
     expect(ResourceSample({}).shouldReleaseResidentModel(phi: true, gpuLayers: 33), isFalse);
+  });
+
+  test('observed Qwen completion releases residency before later voice use', () {
+    final qwen = ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 1161732096, 'thresholdBytes': 408944640,
+      'lowMemory': false});
+    expect(qwen.pressured, isFalse);
+    expect(qwen.shouldReleaseResidentModel(phi: false, gpuLayers: 37), isTrue);
+    expect(qwen.shouldReleaseResidentModel(phi: false, gpuLayers: 0), isFalse);
+    expect(ResourceSample({'totalBytes': 12 << 30,
+      'availableBytes': 1161732096, 'thresholdBytes': 408944640})
+      .shouldReleaseResidentModel(phi: false, gpuLayers: 37), isFalse);
+    expect(ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 2 << 30, 'thresholdBytes': 408944640})
+      .shouldReleaseResidentModel(phi: false, gpuLayers: 37), isFalse);
   });
 
   test('logging and listener errors cannot prevent remaining RAM guards',
