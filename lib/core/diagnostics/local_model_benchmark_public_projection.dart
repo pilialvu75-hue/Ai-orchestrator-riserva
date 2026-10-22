@@ -453,22 +453,7 @@ String? localModelBenchmarkPublicProjection({
       r'modelId=(phi3_5_mini|nemotron3_nano_4b|qwen2_5_3b_instruct|'
       r'qwen3_1_7b|qwen3_4b|llama3_2_3b|gemma_2b_it|deepseek_r1_1_5b) '
       r'available_bytes=(-?\d{1,15}) threshold_bytes=(-?\d{1,15}) '
-      r'pressure=(unknown|normal|high|critical),
-    ).firstMatch(rest);
-    if (m == null) return null;
-    return jsonEncode(<String, Object>{
-      'time': time,
-      'event': event,
-      'model': m[1]!,
-      'available_bytes': int.parse(m[2]!),
-      'threshold_bytes': int.parse(m[3]!),
-      'pressure': m[4]!,
-    });
-  }
-
-  return null;
-}
-,
+      r'pressure=(unknown|normal|high|critical)$',
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode(<String, Object>{
