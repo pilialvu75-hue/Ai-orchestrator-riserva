@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/verified_directory_cache.dart';
 
 import 'package:ai_orchestrator/core/system/background_download.dart';
@@ -59,12 +60,25 @@ class KokoroAssets {
     }
   }
 
+  // Diagnostics must never change installation behavior or expose local paths.
+  static void _stage(String stage, Stopwatch watch, {Object? error}) {
+    try {
+      RuntimeEventLog.instance.emit('[KOKORO_INSTALL] stage=$stage '
+          'elapsed_ms=${watch.elapsedMilliseconds}'
+          '${error == null ? '' : ' error_type=${error.runtimeType}'}'
+          '${error is FileSystemException ? ' os_error=${error.osError?.errorCode ?? -1}' : ''}');
+    } catch (_) {}
+  }
+
   static Future<void> _install(void Function(double) onProgress) async {
     final destination = await directory();
     await destination.parent.create(recursive: true);
     final staging = await destination.parent.createTemp('.kokoro-install-');
     final archive = File(p.join(staging.path, archiveName));
     final dio = Dio();
+    final watch = Stopwatch()..start();
+    var stage = 'download';
+    _stage(stage, watch);
     try {
       if (Platform.isAndroid) {
         await BackgroundDownload.transfer(
@@ -80,9 +94,14 @@ class KokoroAssets {
         onProgress((received / archiveBytes * 0.8).clamp(0.0, 0.8).toDouble());
       });
       }
+      stage = 'verify_extract';
+      _stage(stage, watch);
       final payload = p.join(staging.path, 'payload');
       await _extractInBackground(archive.path, payload);
+      _stage('verify_extract_complete', watch);
       onProgress(0.95);
+      stage = 'activate';
+      _stage(stage, watch);
       // Preserve the previous package until a complete replacement is ready.
       _verification.clear();
       final backup = Directory(p.join(staging.path, 'previous'));
@@ -94,9 +113,14 @@ class KokoroAssets {
         rethrow;
       }
       if (Platform.isAndroid) await BackgroundDownload.release(archiveUrl);
+      _stage('complete', watch);
       onProgress(1);
-    } on FormatException {
+    } on FormatException catch (error) {
+      _stage('${stage}_failed', watch, error: error);
       if (Platform.isAndroid) await BackgroundDownload.release(archiveUrl);
+      rethrow;
+    } catch (error) {
+      _stage('${stage}_failed', watch, error: error);
       rethrow;
     } finally {
       _verification.clear();
