@@ -6,6 +6,34 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const time = '[2026-09-06T02:57:18.238076]';
 
+
+  test('exports low-headroom Qwen release without session or native pointer', () {
+    final projected = publicLogProjection(
+      '$time [POST_GENERATION_MEMORY_RELEASE] '
+      'session=private-session native_session=123456789012345 '
+      'modelId=qwen2_5_3b_instruct available_bytes=1231593472 '
+      'threshold_bytes=408944640 pressure=normal',
+    );
+    expect(projected, isNotNull);
+    final data = jsonDecode(projected!) as Map<String, dynamic>;
+    expect(data['model'], 'qwen2_5_3b_instruct');
+    expect(data['pressure'], 'normal');
+    expect(data['available_bytes'], 1231593472);
+    expect(data.containsKey('session'), isFalse);
+    expect(projected, isNot(contains('private-session')));
+    expect(projected, isNot(contains('123456789012345')));
+  });
+
+  test('memory release projection rejects unknown identifiers and trailing text', () {
+    const body = 'session=private-session native_session=123 '
+        'modelId=qwen2_5_3b_instruct available_bytes=1231593472 '
+        'threshold_bytes=408944640 pressure=normal';
+    expect(publicLogProjection('$time [POST_GENERATION_MEMORY_RELEASE] '
+      '${body.replaceFirst('qwen2_5_3b_instruct', 'private-custom-model')}'), isNull);
+    expect(publicLogProjection('$time [POST_GENERATION_MEMORY_RELEASE] '
+      '$body personal_text=secret'), isNull);
+  });
+
   test('exports platform diagnostics session without device identity', () {
     final line = publicLogProjection(
       '$time [DIAGNOSTICS_SESSION] '
