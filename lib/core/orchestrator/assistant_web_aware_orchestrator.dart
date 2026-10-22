@@ -156,10 +156,22 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     double? temperature,
   }) async {
     final local = _runtimeSettingsService.runtimeMode == AiRuntimeMode.local;
-    if (isOffline ||
+    String? previousUserPrompt;
+    if (AssistantWebSearchPolicy.isAnswerVerification(input)) {
+      for (final turn in context.reversed) {
+        if (turn.role != ChatRole.user || turn.excludeFromContext) continue;
+        if (turn.content.trim() == input.trim()) continue;
+        previousUserPrompt = turn.content;
+        break;
+      }
+    }
+    final verificationQuery = AssistantWebSearchPolicy.answerVerificationQuery(
+      input, previousUserPrompt,
+    );
+    if (isOffline || AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) ||
         (!local && _runtimeSettingsService.runtimeMode != AiRuntimeMode.hybrid) ||
         AssistantWebSearchPolicy.hasInjectedContext(prompt: input, systemPrompt: systemPrompt) ||
-        !AssistantWebSearchPolicy.shouldSearch(input)) {
+        (!AssistantWebSearchPolicy.shouldSearch(input) && verificationQuery == null)) {
       return systemPrompt;
     }
 
@@ -195,7 +207,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       return systemPrompt;
     }
 
-    final query = AssistantWebSearchPolicy.extractQuery(input);
+    final query = verificationQuery ?? AssistantWebSearchPolicy.extractQuery(input);
     RuntimeEventLog.instance.emit(
       '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=${local ? 'local' : 'hybrid'} '
       'action=search query_chars=${query.length}',
