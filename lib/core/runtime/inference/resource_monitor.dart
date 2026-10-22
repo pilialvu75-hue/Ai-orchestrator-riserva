@@ -86,9 +86,11 @@ class ResourceSample {
 
   /// Vulkan allocations may leave little headroom even before Android raises
   /// lowMemory. This only decides residency AFTER a completed generation.
+  /// Keep room for a subsequent voice model or other foreground activity;
+  /// GPU residency on unified-memory phones is not specific to Phi.
   bool shouldReleaseResidentModel({required bool phi, required int gpuLayers}) {
     if (pressured) return true;
-    if (!phi || gpuLayers < 32 || totalBytes == null || totalBytes! <= 0 ||
+    if (gpuLayers < 32 || totalBytes == null || totalBytes! <= 0 ||
         totalBytes! > 8 * 1024 * 1024 * 1024 || availableBytes == null) return false;
     const minimumHeadroom = 1280 * 1024 * 1024;
     final thresholdHeadroom = (thresholdBytes ?? 0) + 768 * 1024 * 1024;
