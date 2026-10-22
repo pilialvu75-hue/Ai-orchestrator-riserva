@@ -5,6 +5,32 @@ import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('cold GPU admission rejects observed Phi and Nemotron low headroom', () {
+    final small = ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 3828871168, 'thresholdBytes': 408944640});
+    final phi = minimumAndroidGpuColdLoadBytes(small,
+        modelBytes: 2390000000, gpuLayers: 33)!;
+    final nemotron = minimumAndroidGpuColdLoadBytes(small,
+        modelBytes: 2837072864, gpuLayers: 43)!;
+    expect(phi, greaterThan(small.availableBytes!));
+    expect(nemotron, greaterThan(phi));
+    final enough = ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 6 << 30, 'thresholdBytes': 408944640});
+    expect(minimumAndroidGpuColdLoadBytes(enough,
+        modelBytes: 2390000000, gpuLayers: 33), lessThan(enough.availableBytes!));
+  });
+  test('cold GPU guard leaves small models CPU and larger RAM profiles unchanged', () {
+    final small = ResourceSample({'totalBytes': 7575261184});
+    expect(minimumAndroidGpuColdLoadBytes(small,
+        modelBytes: 1800000000, gpuLayers: 37), isNull);
+    expect(minimumAndroidGpuColdLoadBytes(small,
+        modelBytes: 2390000000, gpuLayers: 0), isNull);
+    expect(minimumAndroidGpuColdLoadBytes(ResourceSample({'totalBytes': 12 << 30}),
+        modelBytes: 2390000000, gpuLayers: 33), isNull);
+    expect(minimumAndroidGpuColdLoadBytes(null,
+        modelBytes: 2390000000, gpuLayers: 33), isNull);
+  });
+
   test('Phi remembers pressure after unloading and uses a smaller next session',
       () async {
     var data = <Object?, Object?>{
