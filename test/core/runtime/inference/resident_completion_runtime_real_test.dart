@@ -70,20 +70,44 @@ void main() {
     } finally { await runtime.close(); }
   }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
 
-  test('real Assistant wrapper returns success without CLI markers', () async {
+  test('real Assistant wrapper reports a token cap without CLI fallback', () async {
     final delegate = _NoCliProvider();
     final provider = AssistantResidentLocalRuntimeProvider(delegate: delegate, executable: () => server);
     try {
       final chunks = await provider.streamInference(request: InferenceRequest(
         sessionId: 'wrapper', prompt: 'Once upon a time', modelId: 'tinyllama',
-        modelPath: model, maxTokens: 8, temperature: 0,
+        modelPath: model, maxTokens: 1, temperature: 0,
       ), cancellationToken: CancellationToken()).toList();
-      expect(chunks.last.isFinal, isTrue);
-      expect(chunks.last.isError, isFalse, reason: chunks.last.errorMessage);
-      expect(chunks.last.text.trim(), isNotEmpty);
-      expect(chunks.last.text, isNot(contains('[end of text]')));
-      expect(delegate.isRuntimeVerified(modelPath: model), isTrue);
+      expect(chunks.last.isError, isTrue);
+      expect(chunks.last.errorMessage, contains('generation limit'));
+      expect(chunks.where((chunk) => chunk.isFinal && !chunk.isError), isEmpty);
+      expect(delegate.isRuntimeVerified(modelPath: model), isFalse);
     } finally { await provider.dispose(); }
+  }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
+
+
+  test('opted-in token cap preserves the engine for a subsequent request', () async {
+    final runtime = ResidentCompletionRuntime();
+    try {
+      await runtime.prepare(executable: server!, modelPath: model!,
+          sessionId: 'limit', threads: 2);
+      final process = runtime.processId;
+      await expectLater(runtime.generate(
+        executable: server!, modelPath: model!, sessionId: 'limit',
+        prompt: 'Once upon a time', maxTokens: 1, temperature: 0,
+        topP: 0.9, repeatPenalty: 1.1, threads: 2,
+        rejectTokenLimit: true, cancellation: CancellationToken(),
+      ).join(), throwsA(isA<ResidentGenerationLimitReached>()));
+      expect(runtime.processId, process);
+      final following = await runtime.generate(
+        executable: server!, modelPath: model!, sessionId: 'limit',
+        prompt: 'Once upon a time', maxTokens: 8, temperature: 0,
+        topP: 0.9, repeatPenalty: 1.1, threads: 2,
+        cancellation: CancellationToken(),
+      ).join();
+      expect(following.trim(), isNotEmpty);
+      expect(runtime.processId, process);
+    } finally { await runtime.close(); }
   }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
 
   test('real resident request cancellation closes the active generation', () async {
@@ -98,3 +122,4 @@ void main() {
     } finally { await runtime.close(); }
   }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
 }
+

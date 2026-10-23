@@ -205,6 +205,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         repeatPenalty: metadata.repeatPenalty ?? request.repeatPenalty,
         threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8), cancellation: cancellationToken,
         device: gpuDevice,
+        rejectTokenLimit: Platform.isWindows,
         batchSize: gpuDevice == null && Platform.isWindows && LocalInferenceModelIds.resolveTemplate(request.modelId!) ==
             LocalInferenceModelIds.templateNemotron ? 128 : null,
         onPromptUsage: (cached, evaluated) => RuntimeEventLog.instance.emit(
@@ -231,6 +232,9 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         yield InferenceResponse.error('Inference cancelled.', state: InferenceTerminalState.cancelled);
       } else if (error is ResidentRuntimeBusy) {
         yield InferenceResponse.error('Local inference is already running.');
+      } else if (error is ResidentGenerationLimitReached) {
+        // A token cap is not an unavailable model or GPU. Preserve the backend.
+        yield InferenceResponse.error('The response reached its generation limit before completion.');
       } else if (error is AssistantReasoningIncomplete) {
         // A reasoning budget/format failure is not an unavailable GPU/model.
         // Do not silently retry another backend or rank thoughts as an answer.
@@ -251,3 +255,4 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     }
   }
 }
+
