@@ -212,7 +212,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           '[ASSISTANT_LOCAL_CACHE] cached_tokens=$cached evaluated_tokens=$evaluated'),
       );
       final answer = Platform.isWindows &&
-              LocalInferenceModelIds.resolveTemplate(request.modelId!) == LocalInferenceModelIds.templateDeepSeek
+              LocalPromptTemplates.usesDeepSeekR1AssistantOutput(request.modelId!)
           ? AssistantReasoningOutput.answerAfterInitialReasoning(output)
           : output;
       await for (final chunk in CompletionOutput.visible(answer)) {
