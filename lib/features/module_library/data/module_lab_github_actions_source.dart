@@ -29,11 +29,13 @@ final class ModuleLabGitHubActionsSource {
     ModuleLibraryGitHubConfigStore? configStore,
     WorkshopLibraryGitHubAuthClient? authClient,
     ModuleLabAccessTokenProvider? accessTokenProvider,
+    Duration requestTimeout = const Duration(seconds: 20),
   })  : _credentialStore = credentialStore ?? WorkshopLibraryGitHubCredentialStore(),
         _client = client ?? http.Client(),
         _configStore = configStore ?? ModuleLibraryGitHubConfigStore(),
         _authClient = authClient ?? WorkshopLibraryGitHubAuthClient(),
-        _accessTokenProvider = accessTokenProvider;
+        _accessTokenProvider = accessTokenProvider,
+        _requestTimeout = requestTimeout;
 
   static const _researcherRepository =
       'pilialvu75-hue/AI-Orchestrator-Module-Researcher';
@@ -44,6 +46,7 @@ final class ModuleLabGitHubActionsSource {
   final ModuleLibraryGitHubConfigStore _configStore;
   final WorkshopLibraryGitHubAuthClient _authClient;
   final ModuleLabAccessTokenProvider? _accessTokenProvider;
+  final Duration _requestTimeout;
 
   // Shared by Lab source instances in this isolate to prevent rotating the
   // same GitHub App refresh token more than once concurrently.
@@ -127,7 +130,9 @@ final class ModuleLabGitHubActionsSource {
         <String, String>{'per_page': '1'},
       ),
       headers: _headers(token),
-    );
+    ).timeout(_requestTimeout, onTimeout: () =>
+        throw StateError('GitHub non risponde alla lettura del Lab entro 20 secondi. Riprova.'));
+
     if (response.statusCode != 200) {
       _throwGitHubError(response.statusCode, 'lettura stato Researcher');
     }
@@ -164,7 +169,9 @@ final class ModuleLabGitHubActionsSource {
         'Content-Type': 'application/json',
       },
       body: jsonEncode(<String, Object?>{'ref': 'main'}),
-    );
+    ).timeout(_requestTimeout, onTimeout: () =>
+        throw StateError('Avvio Researcher senza risposta GitHub entro 20 secondi. Controlla lo stato prima di riprovare.'));
+
     if (response.statusCode != 204) {
       _throwGitHubError(response.statusCode, 'avvio manuale Researcher');
     }

@@ -6,7 +6,6 @@ import 'package:ai_orchestrator/features/module_library/data/module_curator_gith
 import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_lab_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_status_repository.dart';
-import 'package:ai_orchestrator/features/module_library/data/module_lab_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/domain/module_capability_status.dart';
 import 'package:ai_orchestrator/features/module_library/domain/module_curator_advice.dart';
 import 'package:ai_orchestrator/features/module_library/presentation/module_curator_advice_dialog.dart';
@@ -137,7 +136,7 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
     } finally {
       if (mounted) setState(() => _labLoading = false);
     }
-    await _refreshLab();
+    unawaited(_refreshLab());
   }
 
   Future<void> _refresh() async {
