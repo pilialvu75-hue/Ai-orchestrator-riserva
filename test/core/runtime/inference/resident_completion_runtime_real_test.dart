@@ -14,6 +14,23 @@ class _NoCliProvider extends LocalRuntimeProvider {
       throw StateError('Resident smoke test must not fall back to CLI.');
 }
 
+
+class _CompletedRuntime extends ResidentCompletionRuntime {
+  @override
+  Stream<String> generate({
+    required String executable, required String modelPath,
+    required String sessionId, required String prompt, required int maxTokens,
+    required double temperature, required double topP,
+    required double repeatPenalty, required int threads,
+    int? batchSize, String? device, required CancellationToken cancellation,
+    void Function(int cached, int evaluated)? onPromptUsage,
+    bool rejectTokenLimit = false,
+  }) async* {
+    expect(rejectTokenLimit, isTrue);
+    yield 'OK';
+  }
+}
+
 // This is a real loopback integration test. The default widget-test binding
 // replaces HttpClient with an HTTP-400 fake, including localhost requests.
 class _RealRuntimeBinding extends AutomatedTestWidgetsFlutterBinding {
@@ -86,6 +103,23 @@ void main() {
   }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
 
 
+
+  test('Assistant still verifies and completes an uncapped answer', () async {
+    final delegate = _NoCliProvider();
+    final provider = AssistantResidentLocalRuntimeProvider(
+        delegate: delegate, runtime: _CompletedRuntime(), executable: () => server);
+    try {
+      final chunks = await provider.streamInference(request: InferenceRequest(
+        sessionId: 'complete', prompt: 'Reply OK', modelId: 'tinyllama',
+        modelPath: model, maxTokens: 128, temperature: 0,
+      ), cancellationToken: CancellationToken()).toList();
+      expect(chunks.last.isFinal, isTrue);
+      expect(chunks.last.isError, isFalse);
+      expect(chunks.last.text, 'OK');
+      expect(delegate.isRuntimeVerified(modelPath: model), isTrue);
+    } finally { await provider.dispose(); }
+  }, skip: skip);
+
   test('opted-in token cap preserves the engine for a subsequent request', () async {
     final runtime = ResidentCompletionRuntime();
     try {
@@ -122,4 +156,3 @@ void main() {
     } finally { await runtime.close(); }
   }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
 }
-
