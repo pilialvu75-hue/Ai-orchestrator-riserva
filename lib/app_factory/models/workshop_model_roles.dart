@@ -213,8 +213,8 @@ abstract final class WorkshopModelCatalogue {
     displayName: 'DeepSeek Coder V2 Lite Instruct',
     repository: 'tensorblock/DeepSeek-Coder-V2-Lite-Instruct-GGUF',
     filename: 'DeepSeek-Coder-V2-Lite-Instruct-Q3_K_M.gguf',
-    quantization: 'Q4_K_M',
-    sizeBytes: 9653000000,
+    quantization: 'Q3_K_M',
+    sizeBytes: 8126607168,
     source: AiModelSource.local,
     roles: <AppAiRole>{
       AppAiRole.workshopOrchestrator,
