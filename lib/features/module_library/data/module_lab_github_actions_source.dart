@@ -127,7 +127,9 @@ final class ModuleLabGitHubActionsSource {
         <String, String>{'per_page': '1'},
       ),
       headers: _headers(token),
-    );
+    ).timeout(const Duration(seconds: 20), onTimeout: () =>
+        throw StateError('GitHub non risponde alla lettura del Lab entro 20 secondi. Riprova.'));
+
     if (response.statusCode != 200) {
       _throwGitHubError(response.statusCode, 'lettura stato Researcher');
     }
@@ -164,7 +166,9 @@ final class ModuleLabGitHubActionsSource {
         'Content-Type': 'application/json',
       },
       body: jsonEncode(<String, Object?>{'ref': 'main'}),
-    );
+    ).timeout(const Duration(seconds: 20), onTimeout: () =>
+        throw StateError('Avvio Researcher senza risposta GitHub entro 20 secondi. Controlla lo stato prima di riprovare.'));
+
     if (response.statusCode != 204) {
       _throwGitHubError(response.statusCode, 'avvio manuale Researcher');
     }
