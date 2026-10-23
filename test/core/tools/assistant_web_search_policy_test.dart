@@ -187,4 +187,20 @@ void main() {
       'i migliori browser per Windows 7',
     );
   });
+  test('short source follow-ups require a prior user topic, not literal search', () {
+    for (final prompt in ['fonti', 'Fonti?', 'le fonti', 'sources?', 'your sources',
+      'tes sources ?', 'fuentes', 'las fuentes']) {
+      expect(AssistantWebSearchPolicy.isAnswerVerification(prompt), isTrue, reason: prompt);
+      expect(AssistantWebSearchPolicy.answerVerificationQuery(prompt, 'meteo Roma'),
+          'meteo Roma', reason: prompt);
+      expect(AssistantWebSearchPolicy.answerVerificationQuery(prompt, null), isNull);
+      expect(AssistantWebSearchPolicy.shouldSearch(prompt), isFalse,
+          reason: 'Do not search the literal source-request word without a topic.');
+    }
+    for (final prompt in ['fonti del diritto', 'source code', 'fuentes de energia',
+      'sources of light', 'non cercare online: fonti']) {
+      expect(AssistantWebSearchPolicy.isAnswerVerification(prompt), isFalse, reason: prompt);
+    }
+  });
+
 }

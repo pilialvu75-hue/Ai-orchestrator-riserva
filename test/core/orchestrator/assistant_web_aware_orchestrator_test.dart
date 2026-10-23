@@ -313,4 +313,29 @@ void main() {
     expect(chunks.single.text, 'ok');
     verifyNever(() => webSearch.execute(any()));
   });
+  for (final followUp in ['fonti', 'sources?', 'tes sources ?', 'fuentes']) {
+    test('short sources request uses preceding user topic: $followUp', () async {
+      when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+      when(() => webSearch.execute(any())).thenAnswer(
+        (_) async => const ToolResult(toolId: 'web_search',
+          output: 'Fresh public forecast https://example.test/forecast'),
+      );
+      const history = [
+        ChatTurn(role: ChatRole.user, content: 'meteo Roma'),
+        ChatTurn(role: ChatRole.assistant, content: 'Invented weather statement.'),
+      ];
+      await build().handleStream(followUp, sessionId: 'sources',
+          context: history).drain<void>();
+      final arguments = verify(() => webSearch.execute(captureAny())).captured.single
+          as Map<String, dynamic>;
+      expect(arguments['query'], 'meteo Roma');
+      final request = verify(() => inference.stream(captureAny())).captured.single
+          as InferenceRequest;
+      expect(request.prompt, followUp);
+      expect(request.context, history);
+      expect(request.systemPrompt, contains('https://example.test/forecast'));
+      expect(request.systemPrompt, isNot(contains('Invented weather statement.')));
+    });
+  }
+
 }

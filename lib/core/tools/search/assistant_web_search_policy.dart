@@ -35,6 +35,9 @@ abstract final class AssistantWebSearchPolicy {
     return const <String>{
       'verifica la tua risposta', 'verifica questa risposta',
       'controlla le fonti della tua risposta',
+      'fonti', 'le fonti',
+      'sources', 'your sources', 'tes sources',
+      'fuentes', 'las fuentes',
       'verify your answer', 'fact check your answer',
       'check the sources for your answer',
       'vérifie ta réponse', 'verifie ta reponse',
