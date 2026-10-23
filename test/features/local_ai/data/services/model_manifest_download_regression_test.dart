@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ai_orchestrator/features/local_ai/data/services/download_integrity.dart';
 
 void main() {
   group('bundled model manifest download regressions', () {
@@ -46,6 +47,24 @@ void main() {
         'https://huggingface.co/second-state/Deepseek-Coder-6.7B-Instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct-Q4_K_M.gguf',
       );
       expect(entry['sizeBytes'], 4083016640);
+    });
+
+    test('complete DeepSeek V2 Q3 download is not rejected as truncated', () {
+      final entry =
+          manifest['deepseek_coder_v2_lite_instruct'] as Map<String, dynamic>;
+      // Published Hugging Face LFS object size; the former 9.653 GB estimate
+      // rejected this complete download at catalogue refresh.
+      const downloadedBytes = 8126607168;
+      expect(entry['fileName'], 'DeepSeek-Coder-V2-Lite-Instruct-Q3_K_M.gguf');
+      expect(entry['sizeBytes'], downloadedBytes);
+      expect(
+        isClearlyTruncatedModel(downloadedBytes, entry['sizeBytes'] as int),
+        isFalse,
+      );
+      expect(
+        isClearlyTruncatedModel(downloadedBytes ~/ 2, entry['sizeBytes'] as int),
+        isTrue,
+      );
     });
 
     test('StarCoder2 points to a live Q4_K_M mirror', () {
