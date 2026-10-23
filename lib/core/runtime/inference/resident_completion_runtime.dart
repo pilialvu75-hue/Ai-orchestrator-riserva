@@ -9,6 +9,9 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 class ResidentRuntimeBusy implements Exception {}
 
+/// The engine completed transport but exhausted the requested output budget.
+class ResidentGenerationLimitReached implements Exception {}
+
 /// One local, authenticated process and one cache slot. Nothing is persisted.
 /// A different model or conversation always starts a fresh process.
 class ResidentCompletionRuntime {
@@ -58,6 +61,7 @@ class ResidentCompletionRuntime {
     String? device,
     required CancellationToken cancellation,
     void Function(int cached, int evaluated)? onPromptUsage,
+    bool rejectTokenLimit = false,
   }) async* {
     if (_busy) throw ResidentRuntimeBusy();
     if (cancellation.isCancelled) throw StateError('Inference cancelled.');
@@ -91,6 +95,7 @@ class ResidentCompletionRuntime {
         throw HttpException('Local inference returned HTTP ${response.statusCode}.');
       }
       var stopped = false;
+      var tokenLimitReached = false;
       await for (final line in response.transform(utf8.decoder)
           .transform(const LineSplitter()).timeout(const Duration(minutes: 4))) {
         if (cancellation.isCancelled) throw StateError('Inference cancelled.');
@@ -109,6 +114,7 @@ class ResidentCompletionRuntime {
         }
         if (value['stop'] == true) {
           stopped = true;
+          tokenLimitReached = value['stop_type'] == 'limit';
           final timings = value['timings'];
           if (timings is Map) {
             onPromptUsage?.call((timings['cache_n'] as num?)?.toInt() ?? 0,
@@ -118,8 +124,9 @@ class ResidentCompletionRuntime {
       }
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       if (!stopped) throw StateError('Local inference ended without completion.');
-    } catch (_) {
-      await close();
+      if (rejectTokenLimit && tokenLimitReached) throw ResidentGenerationLimitReached();
+    } catch (error) {
+      if (error is! ResidentGenerationLimitReached) await close();
       rethrow;
     } finally {
       _activeCancellation = null;
@@ -220,5 +227,6 @@ class ResidentCompletionRuntime {
     }
   }
 }
+
 
 
