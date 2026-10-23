@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/completion_output.dart';
 import 'package:ai_orchestrator/core/runtime/inference/assistant_reasoning_output.dart';
+import 'package:ai_orchestrator/core/runtime/inference/assistant_windows_gpu_policy.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
@@ -49,8 +50,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
 
   Future<void> _prepareSelectedModel(AiModel model) async {
     if (!Platform.isWindows || _gpuUnavailable ||
-        LocalInferenceModelIds.resolveTemplate(model.effectiveRuntimeModelId) !=
-            LocalInferenceModelIds.templateNemotron) return;
+        !AssistantWindowsGpuPolicy.supports(model.effectiveRuntimeModelId)) return;
     final cpuExecutable = _executable();
     final modelPath = model.localPath;
     if (cpuExecutable == null || modelPath == null || !File(modelPath).existsSync()) return;
@@ -172,7 +172,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     String? gpuDevice;
     if (Platform.isWindows && !_gpuUnavailable &&
         WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion) &&
-        LocalInferenceModelIds.resolveTemplate(request.modelId!) == LocalInferenceModelIds.templateNemotron) {
+        AssistantWindowsGpuPolicy.supports(request.modelId!)) {
       final candidate = p.join(p.dirname(executable), '..', 'runtime-vulkan', 'llama-server.exe');
       if (File(candidate).existsSync()) {
         final listing = await _gpuDevices.get(() => _listGpuDevices(candidate),
