@@ -135,6 +135,8 @@ class ChatRepositoryImpl implements ChatRepository {
               userPrompt: normalizedPrompt,
               systemPrompt: systemPrompt,
               excludedMessageId: userMsg.id,
+              usePortableRecallEnvelope:
+                  runtimeSettingsService?.runtimeMode != AiRuntimeMode.local,
             );
             _log(
               'memory retrieval session=$sessionId history_count=${sessionMessages.length} context_injected=${context.length}',

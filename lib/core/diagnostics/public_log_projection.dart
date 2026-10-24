@@ -99,6 +99,9 @@ String? publicLogProjection(String line) {
     'LOCAL_VULKAN_SWEEP_CASE',
     'LOCAL_VULKAN_SWEEP_END',
     'POST_GENERATION_MEMORY_RELEASE',
+    'CONTEXT_REBUILD',
+    'PROMPT_CONTEXT_SIZE',
+    'TOKEN_CONTEXT_BUDGET',
   };
   // Only contiguous leading tags are eligible; a prompt may contain [TTS_FAIL].
   var rest = line.substring(timestamp.end).trimLeft();
@@ -110,6 +113,71 @@ String? publicLogProjection(String line) {
     rest = rest.substring(tag.end).trimLeft();
   }
   if (event == null) return null;
+
+  // Conversation receipts expose stage counts, never text, identifiers or
+  // hashes of personal facts. Reject the whole payload if any field is added,
+  // repeated, malformed or outside the bounded numeric/enum grammar.
+  if (event == 'CONTEXT_REBUILD') {
+    final m = RegExp(
+      r'^history_turns=([0-9]{1,6}) recent_turns=([0-9]{1,6}) '
+      r'context_turns=([0-9]{1,6}) trimmed_turns=([0-9]{1,6}) '
+      r'recall_turns=([0-9]{1,6}) '
+      r'recall_mode=(recent_only|chronological_conditional) '
+      r'recall_intent=(true|false) recall_requested=(true|false)$',
+    ).firstMatch(rest);
+    if (m == null || m.end != rest.length) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'history_turns': int.parse(m[1]!),
+      'recent_turns': int.parse(m[2]!),
+      'context_turns': int.parse(m[3]!),
+      'trimmed_turns': int.parse(m[4]!),
+      'recall_turns': int.parse(m[5]!),
+      'recall_mode': m[6]!,
+      'recall_intent': m[7] == 'true',
+      'recall_requested': m[8] == 'true',
+    });
+  }
+
+  if (event == 'PROMPT_CONTEXT_SIZE') {
+    final m = RegExp(
+      r'^turns=([0-9]{1,6}) chars=([0-9]{1,9}) '
+      r'original_turns=([0-9]{1,6}) original_chars=([0-9]{1,9})$',
+    ).firstMatch(rest);
+    if (m == null || m.end != rest.length) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'turns': int.parse(m[1]!),
+      'chars': int.parse(m[2]!),
+      'original_turns': int.parse(m[3]!),
+      'original_chars': int.parse(m[4]!),
+    });
+  }
+
+  if (event == 'TOKEN_CONTEXT_BUDGET') {
+    final m = RegExp(
+      r'^session=[A-Za-z0-9._:-]{1,80} '
+      r'prompt_tokens=([0-9]{1,9}) max_prompt_tokens=([0-9]{1,9}) '
+      r'original_turns=([0-9]{1,6}) selected_turns=([0-9]{1,6}) '
+      r'trimmed_turns=([0-9]{1,6}) generation_reserve=([0-9]{1,9}) '
+      r'safety_margin=([0-9]{1,9}) fits=(true|false)$',
+    ).firstMatch(rest);
+    if (m == null || m.end != rest.length) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'prompt_tokens': int.parse(m[1]!),
+      'max_prompt_tokens': int.parse(m[2]!),
+      'original_turns': int.parse(m[3]!),
+      'selected_turns': int.parse(m[4]!),
+      'trimmed_turns': int.parse(m[5]!),
+      'generation_reserve': int.parse(m[6]!),
+      'safety_margin': int.parse(m[7]!),
+      'fits': m[8] == 'true',
+    });
+  }
 
   if (event.startsWith('LOCAL_MODEL_BENCH_') ||
       event.startsWith('LOCAL_VULKAN_SWEEP_') ||

@@ -6,6 +6,77 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const time = '[2026-09-06T02:57:18.238076]';
 
+  const contextReceipt = '[CONTEXT_REBUILD] history_turns=32 recent_turns=24 '
+      'context_turns=24 trimmed_turns=8 recall_turns=4 '
+      'recall_mode=chronological_conditional recall_intent=true recall_requested=true';
+  const promptReceipt = '[PROMPT_CONTEXT_SIZE] turns=4 chars=120 '
+      'original_turns=4 original_chars=120';
+  const tokenReceipt = '[TOKEN_CONTEXT_BUDGET] session=private-session-123 '
+      'prompt_tokens=900 max_prompt_tokens=928 original_turns=24 '
+      'selected_turns=4 trimmed_turns=20 generation_reserve=512 '
+      'safety_margin=96 fits=true';
+
+  test('exports only typed counts and recall flags for the history rebuild', () {
+    expect(jsonDecode(publicLogProjection('$time $contextReceipt')!), {
+      'time': '2026-09-06T02:57:18.238076', 'event': 'CONTEXT_REBUILD',
+      'history_turns': 32, 'recent_turns': 24, 'context_turns': 24,
+      'trimmed_turns': 8, 'recall_turns': 4,
+      'recall_mode': 'chronological_conditional',
+      'recall_intent': true, 'recall_requested': true,
+    });
+  });
+
+  test('exports composed prompt counts and native budget without session identity', () {
+    expect(jsonDecode(publicLogProjection('$time $promptReceipt')!), {
+      'time': '2026-09-06T02:57:18.238076', 'event': 'PROMPT_CONTEXT_SIZE',
+      'turns': 4, 'chars': 120, 'original_turns': 4, 'original_chars': 120,
+    });
+    final projected = publicLogProjection('$time $tokenReceipt')!;
+    expect(jsonDecode(projected), {
+      'time': '2026-09-06T02:57:18.238076', 'event': 'TOKEN_CONTEXT_BUDGET',
+      'prompt_tokens': 900, 'max_prompt_tokens': 928, 'original_turns': 24,
+      'selected_turns': 4, 'trimmed_turns': 20, 'generation_reserve': 512,
+      'safety_margin': 96, 'fits': true,
+    });
+    expect(projected, isNot(contains('private-session')));
+    expect(jsonDecode(publicLogProjection('$time ${tokenReceipt.replaceFirst(
+      'fits=true', 'fits=false')}')!)['fits'], isFalse);
+  });
+
+  test('rejects extra private fields, duplicate keys, text and tag injection in context receipts', () {
+    for (final receipt in [contextReceipt, promptReceipt, tokenReceipt]) {
+      for (final suffix in [
+        ' prompt=My-name-is-Neris', ' name=Neris', ' user=123',
+        ' hash=0123456789abcdef', ' context_turns=3', ' fits=true',
+        '\n', '\nprivate-content', ' [CONTEXT_REBUILD] history_turns=0',
+      ]) {
+        expect(publicLogProjection('$time $receipt$suffix'), isNull,
+            reason: suffix);
+      }
+      expect(publicLogProjection('$time private prompt $receipt'), isNull);
+      expect(publicLogProjection('$time $receipt text="secret"'), isNull);
+    }
+  });
+
+  test('rejects malformed, unbounded and arbitrary context receipt values', () {
+    for (final malformed in [
+      contextReceipt.replaceFirst('history_turns=32', 'history_turns=-1'),
+      contextReceipt.replaceFirst('history_turns=32', 'history_turns=1000000'),
+      contextReceipt.replaceFirst('chronological_conditional', 'private-fact'),
+      contextReceipt.replaceFirst('recall_intent=true', 'recall_intent=1'),
+      promptReceipt.replaceFirst('chars=120', 'chars=NaN'),
+      promptReceipt.replaceFirst('chars=120', 'chars=1e9'),
+      promptReceipt.replaceFirst('chars=120', 'chars=1000000000'),
+      tokenReceipt.replaceFirst('prompt_tokens=900', 'prompt_tokens=private'),
+      tokenReceipt.replaceFirst('fits=true', 'fits=unknown'),
+      tokenReceipt.replaceFirst('session=private-session-123', 'session=secret value'),
+      '[CONTEXT_REBUILD] session=old context_turns=2 recall_turns=0 '
+        'recall_mode=recent_only recall_requested=false',
+    ]) {
+      expect(publicLogProjection('$time $malformed'), isNull, reason: malformed);
+    }
+  });
+
   test('exports platform diagnostics session without device identity', () {
     final line = publicLogProjection(
       '$time [DIAGNOSTICS_SESSION] '
