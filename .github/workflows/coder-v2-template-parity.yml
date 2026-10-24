@@ -1,0 +1,34 @@
+name: Coder V2 native template parity
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/coder-v2-template-parity.yml'
+      - 'tool/template_parity/**'
+      - 'lib/core/runtime/inference/local_prompt_templates.dart'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-template-parity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: d8d92973c8c21bb4dd5d592f0fec26fe2cd1e654
+          path: upstream-llama
+          persist-credentials: false
+      - name: Compile exact Jinja renderer without loading a model
+        run: |
+          cmake -S tool/template_parity -B parity-build -DLLAMA_SOURCE_DIR="$GITHUB_WORKSPACE/upstream-llama" -DCMAKE_BUILD_TYPE=Release
+          cmake --build parity-build --target v2-template-parity -j2
+      - name: Render three synthetic fixtures
+        run: |
+          parity-build/v2-template-parity < tool/template_parity/v2-jinja-fixtures.jsonl > v2-jinja-results.jsonl
+          cat v2-jinja-results.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v2-native-jinja-parity
+          path: v2-jinja-results.jsonl
