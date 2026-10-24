@@ -22,6 +22,43 @@ const String _webSearchInstruction =
 class LocalPromptTemplates {
   LocalPromptTemplates._();
 
+  /// Explicit identities only: Coder V2 does not use the R1 protocol.
+  /// Used solely by the opt-in Windows Assistant compatibility path.
+  static bool isDeepSeekCoderV2(String modelId) {
+    final id = modelId.trim().toLowerCase();
+    return id == 'deepseek_coder_v2_lite_instruct' ||
+        id == 'deepseek-coder-v2-lite-instruct-q3_k_m.gguf';
+  }
+
+  static bool usesDeepSeekR1AssistantOutput(String modelId) =>
+      !isDeepSeekCoderV2(modelId) &&
+      LocalInferenceModelIds.resolveTemplate(modelId) ==
+          LocalInferenceModelIds.templateDeepSeek;
+
+  // The installed completion transport tokenizes with add_special=true.
+  // Let its GGUF BOS policy insert BOS once, rather than duplicating it here.
+  static String _buildDeepSeekCoderV2Prompt(
+      String system, List<ChatTurn> context, String user) {
+    final out = StringBuffer();
+    if (system.isNotEmpty) out.write('$system\n\n');
+    for (final turn in context) {
+      switch (turn.role) {
+        case ChatRole.system:
+          out.write('${turn.content}\n\n');
+          break;
+        case ChatRole.user:
+          out.write('User: ${turn.content}\n\n');
+          break;
+        case ChatRole.assistant:
+          out.write('Assistant: ${turn.content}<｜end▁of▁sentence｜>');
+          break;
+      }
+    }
+    out.write('User: $user\n\nAssistant:');
+    return out.toString();
+  }
+
+
   // ===========================================================================
   // CONTEXT BUDGET
   // ===========================================================================
@@ -239,6 +276,12 @@ class LocalPromptTemplates {
         );
 
       case 'deepseek':
+        if (assistantModelCompatibility && isDeepSeekCoderV2(modelId)) {
+          final composed = _buildDeepSeekCoderV2Prompt(
+              finalSystemPrompt, boundedContext, userPrompt);
+          _logFinalPromptMetrics(composed, userPrompt.length);
+          return composed;
+        }
         return _buildDeepSeekR1Prompt(
           systemPrompt: finalSystemPrompt,
           context: boundedContext,
