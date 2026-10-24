@@ -423,7 +423,7 @@ class ModelDownloadService {
           // A 416 can mean the .part already contains the complete object.
           // Validate it before promoting it.
           if (statusCode == 416 && existingBytes > 0) {
-            var remoteSize = int.tryParse(RegExp(r'^bytes\s+\*/(\d+)
+            var remoteSize = int.tryParse(RegExp(r'^bytes\s+\*/(\d+)$',
                     caseSensitive: false)
                 .firstMatch(response.headers.value('content-range') ?? '')
                 ?.group(1) ?? '');
