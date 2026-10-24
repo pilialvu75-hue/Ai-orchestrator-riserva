@@ -16,6 +16,9 @@ class _ModuleLabPageState extends State<ModuleLabPage> {
   String? _error;
   bool _loading = true;
   bool _dispatching = false;
+  bool _awaitingRun = false;
+  int? _runBeforeDispatch;
+  String? _dispatchMessage;
   DateTime _now = DateTime.now();
 
   @override
@@ -24,7 +27,7 @@ class _ModuleLabPageState extends State<ModuleLabPage> {
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
       setState(() => _now = DateTime.now());
-      if (_run?.running ?? false) unawaited(_refresh());
+      if ((_run?.running ?? false) || _awaitingRun) unawaited(_refresh());
     });
     unawaited(_refresh());
   }
@@ -36,7 +39,16 @@ class _ModuleLabPageState extends State<ModuleLabPage> {
     try {
       final run = await widget.source.latestResearcherRun();
       if (!mounted) return;
-      setState(() { _run = run; _error = null; _loading = false; _now = DateTime.now(); });
+      setState(() {
+        _run = run;
+        _error = null;
+        _loading = false;
+        _now = DateTime.now();
+        if (_awaitingRun && run != null && run.id != _runBeforeDispatch) {
+          _awaitingRun = false;
+          _dispatchMessage = 'Nuovo ciclo Researcher #${run.id}: ${run.status}';
+        }
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() { _error = error.toString(); _loading = false; });
@@ -45,13 +57,22 @@ class _ModuleLabPageState extends State<ModuleLabPage> {
 
   Future<void> _dispatch() async {
     if (_dispatching) return;
-    setState(() { _dispatching = true; _error = null; });
+    setState(() {
+      _dispatching = true;
+      _error = null;
+      _runBeforeDispatch = _run?.id;
+      _dispatchMessage = null;
+    });
     try {
       await widget.source.dispatchResearcher();
-      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      setState(() {
+        _awaitingRun = true;
+        _dispatchMessage = 'Comando accettato da GitHub. Attendo il nuovo ciclo Researcher…';
+      });
       await _refresh();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() { _awaitingRun = false; _error = error.toString(); });
     } finally {
       if (mounted) setState(() => _dispatching = false);
     }
@@ -106,10 +127,14 @@ class _ModuleLabPageState extends State<ModuleLabPage> {
               if (_loading) const LinearProgressIndicator() else Text(runLabel),
               const SizedBox(height: 16),
               SizedBox(width: double.infinity, child: FilledButton.icon(
-                onPressed: _dispatching || (_run?.running ?? false) ? null : () => unawaited(_dispatch()),
+                onPressed: _dispatching || _awaitingRun || (_run?.running ?? false) ? null : () => unawaited(_dispatch()),
                 icon: _dispatching ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.play_arrow),
-                label: Text((_run?.running ?? false) ? 'Researcher in esecuzione' : 'Avvia Researcher ora'),
+                label: Text((_run?.running ?? false) ? 'Researcher in esecuzione' : (_awaitingRun ? 'Avvio in verifica' : 'Avvia Researcher ora')),
               )),
+              if (_dispatchMessage != null) ...[
+                const SizedBox(height: 8),
+                Text(_dispatchMessage!),
+              ],
             ]),
           )),
           const SizedBox(height: 12),
