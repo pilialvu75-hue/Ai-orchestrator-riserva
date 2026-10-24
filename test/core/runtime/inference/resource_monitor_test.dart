@@ -3,8 +3,74 @@ import 'dart:async';
 import 'package:ai_orchestrator/core/runtime/inference/android/native_generation_budget.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:convert';
+import 'package:ai_orchestrator/core/diagnostics/public_log_projection.dart';
 
 void main() {
+
+  test('exports measured cache counters and clears unavailable samples', () async {
+    final logs = <String>[];
+    final monitor = ResourceMonitor(
+      sampler: () async => <Object?, Object?>{'availableBytes': 2000000000},
+      logger: logs.add,
+    );
+    addTearDown(monitor.dispose);
+    monitor.phase = 'streaming';
+    monitor.readNative = () => <String, int>{
+      'reused_tokens': 128, 'prefilled_tokens': 32, 'prefill_ms': 250,
+    };
+    await monitor.sample();
+    Map<String, dynamic> projected() => jsonDecode(publicLogProjection(
+      '[2026-10-19T12:00:00.000000] ${logs.last}',
+    )!) as Map<String, dynamic>;
+    expect(projected()['reused_tokens'], 128);
+    expect(projected()['prefilled_tokens'], 32);
+    expect(projected()['prefill_ms'], 250);
+    monitor.readNative = () => <String, int>{};
+    await monitor.sample();
+    expect(projected()['reused_tokens'], -1);
+    expect(projected()['prefilled_tokens'], -1);
+    monitor.readNative = () => <String, int>{
+      'reused_tokens': 0, 'prefilled_tokens': 64, 'prefill_ms': 100,
+    };
+    await monitor.sample();
+    expect(projected()['reused_tokens'], 0);
+    expect(projected()['prefilled_tokens'], 64);
+  });
+
+  test('does not export stale or incomplete prefill tuples', () async {
+    final logs = <String>[];
+    final monitor = ResourceMonitor(
+      sampler: () async => <Object?, Object?>{'availableBytes': 2000000000},
+      logger: logs.add,
+    );
+    addTearDown(monitor.dispose);
+    monitor.readNative = () => <String, int>{
+      'reused_tokens': 128, 'prefilled_tokens': 32, 'prefill_ms': 250,
+    };
+    Future<void> expectUnavailable() async {
+      await monitor.sample();
+      final value = jsonDecode(publicLogProjection(
+        '[2026-10-19T12:00:00.000000] ${logs.last}',
+      )!) as Map<String, dynamic>;
+      for (final key in ['reused_tokens', 'prefilled_tokens', 'prefill_ms']) {
+        expect(value[key], -1, reason: '${monitor.phase}: $key');
+      }
+    }
+    for (final phase in ['idle', 'loading', 'tokenizing', 'inferencing',
+      'completed', 'failed', 'stalled']) {
+      monitor.phase = phase;
+      await expectUnavailable();
+    }
+    monitor.phase = 'streaming';
+    monitor.readNative = () => <String, int>{
+      'reused_tokens': 0, 'prefilled_tokens': 0, 'prefill_ms': -1,
+    };
+    await expectUnavailable();
+    monitor.readNative = () => <String, int>{'prefill_ms': 100};
+    await expectUnavailable();
+  });
+
   test('Phi remembers pressure after unloading and uses a smaller next session',
       () async {
     var data = <Object?, Object?>{

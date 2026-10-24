@@ -262,6 +262,14 @@ class ResourceMonitor extends ChangeNotifier {
     } on Object {
       native = const {};
     }
+    // Native counters survive between requests and may be updated before the
+    // prefill duration. A first emitted token proves the current prefill ended.
+    // Export the tuple only while streaming; never combine old duration with
+    // new counters during loading/tokenizing/inferencing or after termination.
+    final hasCurrentPrefill = phase == 'streaming' &&
+        ['prefill_ms', 'reused_tokens', 'prefilled_tokens']
+            .every(native.containsKey);
+    int prefillMetric(String key) => hasCurrentPrefill ? native[key]! : -1;
     if (reading != null) {
       if (_history.length >= 60) _history.removeFirst();
       _history.addLast(reading);
@@ -273,11 +281,13 @@ class ResourceMonitor extends ChangeNotifier {
           'critical=${reading.critical} phase=$phase '
           'gpu_layers=${native['gpu_layers'] ?? -1} '
           'decode_calls=${native['decode_calls'] ?? -1} '
-          'prefill_ms=${native['prefill_ms'] ?? -1} '
+          'prefill_ms=${prefillMetric('prefill_ms')} '
           'total_bytes=${reading.totalBytes ?? -1} threshold_bytes=${reading.thresholdBytes ?? -1} '
           'pressure=${reading.pressure} low_memory=${reading.lowMemory} trim_level=${reading.trimLevel} '
           'n_ctx=${native['context'] ?? -1} n_batch=${native['batch'] ?? -1} '
-          'n_ubatch=${native['micro_batch'] ?? -1}',
+          'n_ubatch=${native['micro_batch'] ?? -1} '
+          'reused_tokens=${prefillMetric('reused_tokens')} '
+          'prefilled_tokens=${prefillMetric('prefilled_tokens')}',
         );
       } on Object {
         // Diagnostics must never disable the memory guard or sampling.

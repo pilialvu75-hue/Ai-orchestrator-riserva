@@ -702,7 +702,8 @@ String? publicLogProjection(String line) {
       r'prefill_ms=(-?\d{1,12})'
       r'(?: total_bytes=(-?\d{1,15}) threshold_bytes=(-?\d{1,15}) '
       r'pressure=(unknown|normal|high|critical) low_memory=(true|false) trim_level=(\d{1,3}) '
-      r'n_ctx=(-?\d{1,6}) n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}))?$',
+      r'n_ctx=(-?\d{1,6}) n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}))?'
+      r'(?: reused_tokens=(-1|\d{1,12}) prefilled_tokens=(-1|\d{1,12}))?$',
     ).firstMatch(rest);
     if (current != null) {
       return jsonEncode({
@@ -717,6 +718,10 @@ String? publicLogProjection(String line) {
         'gpu_layers': int.parse(current[7]!),
         'decode_calls': int.parse(current[8]!),
         'prefill_ms': int.parse(current[9]!),
+        if (current[18] != null) ...{
+          'reused_tokens': int.parse(current[18]!),
+          'prefilled_tokens': int.parse(current[19]!),
+        },
         if (current[10] != null) ...{
           'total_bytes': int.parse(current[10]!),
           'threshold_bytes': int.parse(current[11]!),
