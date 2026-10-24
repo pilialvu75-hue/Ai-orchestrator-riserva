@@ -423,10 +423,16 @@ class ModelDownloadService {
           // A 416 can mean the .part already contains the complete object.
           // Validate it before promoting it.
           if (statusCode == 416 && existingBytes > 0) {
-            final remoteSize = int.tryParse(RegExp(r'^bytes\s+\*/(\d+)$',
+            var remoteSize = int.tryParse(RegExp(r'^bytes\s+\*/(\d+)
                     caseSensitive: false)
                 .firstMatch(response.headers.value('content-range') ?? '')
                 ?.group(1) ?? '');
+            // Some CDNs omit Content-Range on an unsatisfiable EOF request.
+            // Establish an exact HTTP total, never a catalogue estimate.
+            if (remoteSize == null) {
+              await response.data?.stream.listen((_) {}).cancel();
+              remoteSize = await _probeRemoteTotal(url, cancelToken);
+            }
             final validation = await _validateModelFileDetailed(
               partFile,
               treatMissingAsMissing: false,
@@ -435,6 +441,7 @@ class ModelDownloadService {
             if (validation.status ==
                     ModelValidationStatus.validatedOk &&
                 remoteSize != null && remoteSize == existingBytes) {
+              if (cancelToken.isCancelled) throw cancelToken.cancelError!;
               if (await finalFile.exists()) {
                 await finalFile.delete();
               }
@@ -454,7 +461,7 @@ class ModelDownloadService {
 
             throw DownloadException(
               'Server rejected resume for $modelId (HTTP 416) '
-              'and the partial file is not a valid GGUF.',
+              'and exact completion could not be verified; partial file preserved.',
             );
           }
 
@@ -653,6 +660,36 @@ class ModelDownloadService {
       );
     } finally {
       _cancelTokens.remove(modelId);
+    }
+  }
+
+  /// Probe only exact HTTP range metadata; never use the catalogue estimate.
+  /// Cancel immediately if the server ignores Range and starts a full body.
+  Future<int?> _probeRemoteTotal(String url, CancelToken cancelToken) async {
+    final response = await _dio.get<ResponseBody>(
+      url,
+      cancelToken: cancelToken,
+      options: Options(
+        responseType: ResponseType.stream,
+        headers: const {
+          'Accept': '*/*',
+          'Accept-Encoding': 'identity',
+          'Range': 'bytes=0-0',
+        },
+        followRedirects: true,
+        maxRedirects: 10,
+        validateStatus: (status) =>
+            status != null && status >= 200 && status < 500,
+      ),
+    );
+    try {
+      if (response.statusCode != 206) return null;
+      final match = RegExp(r'^bytes\s+0-0/(\d+)$', caseSensitive: false)
+          .firstMatch(response.headers.value('content-range')?.trim() ?? '');
+      final total = int.tryParse(match?.group(1) ?? '');
+      return total != null && total > 0 ? total : null;
+    } finally {
+      await response.data?.stream.listen((_) {}).cancel();
     }
   }
 
