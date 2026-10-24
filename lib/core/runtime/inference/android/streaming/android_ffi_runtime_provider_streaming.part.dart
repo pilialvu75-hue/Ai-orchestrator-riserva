@@ -392,9 +392,16 @@ extension AndroidFfiRuntimeStreamingExtension on AndroidFfiRuntimeProvider {
               // process. This does not convert a successful answer into an
               // error and it runs inside the serialized inference boundary.
               final postGenerationSample = await resources.sample();
+              final releaseResidentModel = postGenerationSample?.shouldReleaseResidentModel(
+                phi: startup.modelId == 'phi3_5_mini' || startup.modelPath.toLowerCase().contains('phi-3.5'),
+                gpuLayers: resources.native['gpu_layers'] ?? 0,
+              ) ?? false;
               if (!flowState.memoryCancellationSent &&
-                  postGenerationSample?.pressured == true) {
-                resources.recordModelPressure(startup.modelId);
+                  releaseResidentModel) {
+                // A preventive release must not itself shrink future context.
+                if (postGenerationSample?.pressured == true) {
+                  resources.recordModelPressure(startup.modelId);
+                }
                 AndroidFfiRuntimeProvider._log(
                   '[POST_GENERATION_MEMORY_RELEASE] '
                   'session=$sessionId '

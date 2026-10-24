@@ -105,7 +105,7 @@ jobs:
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
       - name: Test Assistant resource policy and runtime
-        run: flutter test test/core/runtime/inference test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
+        run: flutter test test/core/runtime/inference test/core/orchestrator/assistant_web_aware_orchestrator_test.dart test/features/chat/presentation/debug/local_model_benchmark_test.dart
       - name: Create ephemeral debug signing identity for CI only
         run: |
           set -euo pipefail

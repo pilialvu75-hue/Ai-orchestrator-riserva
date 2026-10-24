@@ -1183,6 +1183,23 @@ class LocalModelBenchmarkRunner {
     return model.sizeBytes + reserve;
   }
 
+  /// Preserve any critical sample and otherwise use the lowest observed RAM.
+  /// A brief recovery must not hide pressure seen immediately before loading.
+  static ResourceSample? conservativeBenchmarkLoadSample(
+      Iterable<ResourceSample?> samples) {
+    ResourceSample? selected;
+    for (final sample in samples) {
+      if (sample == null) continue;
+      if (sample.critical) return sample;
+      final available = sample.availableBytes;
+      if (available == null || available <= 0) continue;
+      if (selected == null || available < selected.availableBytes!) {
+        selected = sample;
+      }
+    }
+    return selected;
+  }
+
   static bool hasSafeBenchmarkLoadHeadroom(
     AiModel model,
     ResourceSample? sample,
@@ -2725,21 +2742,15 @@ class LocalModelBenchmarkRunner {
     // point at which to report realistic free-memory headroom.
     await androidRuntime.resetBenchmarkNativeSessions();
 
-    ResourceSample? bestSample;
+    final samples = <ResourceSample?>[];
     for (var attempt = 0; attempt < _benchmarkPreflightSamples; attempt++) {
-      final sample = await _resourceMonitor.sample();
-      if (sample != null &&
-          (bestSample == null ||
-              (sample.availableBytes ?? -1) >
-                  (bestSample.availableBytes ?? -1))) {
-        bestSample = sample;
-      }
+      samples.add(await _resourceMonitor.sample());
       if (attempt + 1 < _benchmarkPreflightSamples) {
         await Future<void>.delayed(_benchmarkPreflightSampleDelay);
       }
     }
 
-    final sample = bestSample;
+    final sample = conservativeBenchmarkLoadSample(samples);
     final required = minimumAvailableBytesForSafeBenchmarkLoad(model);
     final available = sample?.availableBytes;
 
