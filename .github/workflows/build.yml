@@ -314,7 +314,10 @@ jobs:
 
           VERSION_NAME="${APP_VERSION%%+*}"
 
-          VERSION_CODE="${GITHUB_RUN_NUMBER}"
+          # Android versionCode must exceed previously shipped beta builds.
+          # The workflow run counter is behind the existing 3511 beta track.
+          # Use a higher, fixed namespace so future runs stay monotonic.
+          VERSION_CODE="$((100000 + GITHUB_RUN_NUMBER))"
 
           export VERSION_NAME
           export VERSION_CODE
