@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/system/update/assistant_update_gate.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -151,6 +152,9 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     _lifecycle ??= AppLifecycleListener(
       onDetach: () => unawaited(_runtime.close()),
       onExitRequested: () async {
+        if (AssistantUpdateGate.instance.hasActiveChats) {
+          return AppExitResponse.cancel;
+        }
         await _runtime.close();
         return AppExitResponse.exit;
       },
