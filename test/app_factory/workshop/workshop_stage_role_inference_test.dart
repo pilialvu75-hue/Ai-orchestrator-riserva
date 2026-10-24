@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inferen
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
@@ -144,6 +145,70 @@ void main() {
       expect(result.text, 'ok');
       expect(provider.lastRequest, isNotNull);
       expect(provider.lastRequest!.isOffline, isTrue);
+    });
+
+    test('Engineer output metrics are numeric and omit private contents', () async {
+      RuntimeEventLog.instance.clear();
+      final provider = _RecordingProvider();
+      final gateway = WorkshopInferenceGateway(provider: provider);
+      final coordinator = WorkshopStageRoleInference(
+        executor: WorkshopRoleInferenceExecutor(
+          router: WorkshopRoleInferenceRouter(
+            gateways: <AppAiRole, WorkshopInferenceGateway>{
+              for (final role in WorkshopRoleInferenceRouter.workshopRoles)
+                role: gateway,
+            },
+          ),
+        ),
+      );
+
+      const sensitive = 'private-project-secret-star-source';
+      await coordinator.complete(
+        stage: WorkshopStage.implementation,
+        prompt: sensitive,
+        sessionId: sensitive,
+        maxTokens: 640,
+      );
+      await coordinator.completeWithIdentity(
+        stage: WorkshopStage.implementation,
+        prompt: sensitive,
+        sessionId: sensitive,
+        projectId: sensitive,
+        taskId: sensitive,
+        executionId: sensitive,
+        attemptId: sensitive,
+        maxTokens: 512,
+      );
+      await coordinator.completeWithFirstTokenTimeout(
+        stage: WorkshopStage.implementation,
+        prompt: sensitive,
+        sessionId: sensitive,
+        firstTokenTimeout: const Duration(seconds: 75),
+        maxTokens: 768,
+      );
+      await coordinator.complete(
+        stage: WorkshopStage.review,
+        prompt: sensitive,
+        sessionId: sensitive,
+        maxTokens: 192,
+      );
+
+      final messages = RuntimeEventLog.instance.entries
+          .where((entry) => entry.tag == 'WORKSHOP_ENGINEER_OUTPUT')
+          .map((entry) => entry.message)
+          .toList();
+      expect(messages, hasLength(3));
+      expect(messages[0], contains('outcome=success terminal=success budget=640 tokens=0 chars=2 has_text=1'));
+      expect(messages[1], contains('budget=512'));
+      expect(messages[2], contains('budget=768'));
+      for (final message in messages) {
+        expect(message, isNot(contains(sensitive)));
+        expect(message, isNot(contains('prompt=')));
+        expect(message, isNot(contains('projectId=')));
+        expect(message, isNot(contains('source=')));
+        expect(message, isNot(contains('errorMessage=')));
+      }
+      RuntimeEventLog.instance.clear();
     });
 
     test('forwards Cantiere execution identity through stage routing', () async {
