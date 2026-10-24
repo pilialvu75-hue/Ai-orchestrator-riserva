@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
+import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_background_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
@@ -347,6 +349,147 @@ void main() {
     },
   );
 
+
+  test(
+    'saved project blocks silent model-assignment drift on restore',
+    () async {
+      final preferences = PreferencesService(
+        await SharedPreferences.getInstance(),
+      );
+      final qwenAssignments =
+          List<WorkshopModelAssignment>.of(WorkshopModelAssignments.androidDefaults);
+      final firstCoordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: preferences,
+        ),
+        modelAssignmentsProvider: () => qwenAssignments,
+      );
+      final firstController = _controllerFor(workspace.path);
+
+      firstController.startProduction(
+        title: 'Bound models project',
+        instruction: 'Create a small Flutter app.',
+      );
+      final projectId = firstController.state.projectId!;
+      await firstCoordinator.saveCurrent(firstController);
+      firstController.dispose();
+
+      final driftedAssignments = WorkshopModelAssignments.withAssignment(
+        qwenAssignments,
+        AppAiRole.engineer,
+        'nvidia/nemotron-3-ultra-550b-a55b',
+      );
+      final secondCoordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: PreferencesService(
+            await SharedPreferences.getInstance(),
+          ),
+        ),
+        modelAssignmentsProvider: () => driftedAssignments,
+      );
+      final secondController = _controllerFor(workspace.path);
+
+      await expectLater(
+        secondCoordinator.restoreProject(
+          secondController,
+          projectId: projectId,
+        ),
+        throwsA(isA<WorkshopModelAssignmentMismatch>()),
+      );
+      expect(secondController.state.hasProject, isFalse);
+      secondController.dispose();
+
+      final matchingCoordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: PreferencesService(
+            await SharedPreferences.getInstance(),
+          ),
+        ),
+        modelAssignmentsProvider: () => qwenAssignments,
+      );
+      final matchingController = _controllerFor(workspace.path);
+      expect(
+        await matchingCoordinator.restoreProject(
+          matchingController,
+          projectId: projectId,
+        ),
+        isTrue,
+      );
+      expect(matchingController.state.projectId, projectId);
+      matchingController.dispose();
+    },
+  );
+
+  test(
+    'legacy project requires one explicit model binding before migration',
+    () async {
+      final preferences = PreferencesService(
+        await SharedPreferences.getInstance(),
+      );
+      final legacyCoordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: preferences,
+        ),
+      );
+      final legacyController = _controllerFor(workspace.path);
+      legacyController.startProduction(
+        title: 'Legacy unbound project',
+        instruction: 'Create a simple Flutter app.',
+      );
+      final projectId = legacyController.state.projectId!;
+      await legacyCoordinator.saveCurrent(legacyController);
+      legacyController.dispose();
+
+      final assignments =
+          List<WorkshopModelAssignment>.of(WorkshopModelAssignments.androidDefaults);
+      final bindingCoordinator = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: PreferencesService(
+            await SharedPreferences.getInstance(),
+          ),
+        ),
+        modelAssignmentsProvider: () => assignments,
+      );
+      final bindingController = _controllerFor(workspace.path);
+
+      await expectLater(
+        bindingCoordinator.restoreProject(
+          bindingController,
+          projectId: projectId,
+        ),
+        throwsA(isA<WorkshopLegacyModelBindingRequired>()),
+      );
+      expect(bindingController.state.hasProject, isFalse);
+
+      expect(
+        await bindingCoordinator.restoreProject(
+          bindingController,
+          projectId: projectId,
+          bindLegacyAssignments: true,
+        ),
+        isTrue,
+      );
+      bindingController.dispose();
+
+      final restoredAgain = WorkshopProductionRecoveryCoordinator(
+        checkpointStore: PersistentWorkshopCheckpointStore(
+          preferences: PreferencesService(
+            await SharedPreferences.getInstance(),
+          ),
+        ),
+        modelAssignmentsProvider: () => assignments,
+      );
+      final restoredController = _controllerFor(workspace.path);
+      expect(
+        await restoredAgain.restoreProject(
+          restoredController,
+          projectId: projectId,
+        ),
+        isTrue,
+      );
+      restoredController.dispose();
+    },
+  );
 
   test(
     'serializes concurrent explicit checkpoint saves without losing projects',
