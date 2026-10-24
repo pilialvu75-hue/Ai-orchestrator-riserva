@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_foreground_executi
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 /// Resolves Workshop lifecycle stages to the logical brain responsible for
@@ -52,6 +53,33 @@ final class WorkshopStageRoleInference {
   final WorkshopRoleInferenceExecutor _executor;
   final WorkshopExecutionLeaseService? _foregroundLeaseService;
 
+  /// Emit only numeric/enum output metadata. Never record prompt/source,
+  /// model text, error details, project/task IDs or provider-owned sessions.
+  /// A successful terminal state does not prove semantic task correctness.
+  static WorkshopInferenceResult _recordEngineerOutput({
+    required WorkshopStage stage,
+    required int? maxTokens,
+    required WorkshopInferenceResult result,
+  }) {
+    if (stage != WorkshopStage.implementation) return result;
+
+    final outcome = result.hasError
+        ? 'error'
+        : result.isSuccessful
+            ? 'success'
+            : 'incomplete';
+    RuntimeEventLog.instance.emit(
+      '[WORKSHOP_ENGINEER_OUTPUT] '
+      'outcome=$outcome '
+      'terminal=${result.terminalState?.name ?? 'none'} '
+      'budget=${maxTokens ?? -1} '
+      'tokens=${result.tokensGenerated} '
+      'chars=${result.text.length} '
+      'has_text=${result.hasText ? 1 : 0}',
+    );
+    return result;
+  }
+
   Future<WorkshopInferenceResult> complete({
     required WorkshopStage stage,
     required String prompt,
@@ -82,7 +110,7 @@ final class WorkshopStageRoleInference {
     }
 
     try {
-      return await _executor.complete(
+      final result = await _executor.complete(
         role: role,
         prompt: prompt,
         systemPrompt: systemPrompt,
@@ -94,6 +122,11 @@ final class WorkshopStageRoleInference {
         topP: topP,
         repeatPenalty: repeatPenalty,
         cancellationToken: cancellationToken,
+      );
+      return _recordEngineerOutput(
+        stage: stage,
+        maxTokens: maxTokens,
+        result: result,
       );
     } finally {
       if (lease != null) {
@@ -137,7 +170,7 @@ final class WorkshopStageRoleInference {
     }
 
     try {
-      return await _executor.completeWithFirstTokenTimeout(
+      final result = await _executor.completeWithFirstTokenTimeout(
         role: role,
         prompt: prompt,
         firstTokenTimeout: firstTokenTimeout,
@@ -150,6 +183,11 @@ final class WorkshopStageRoleInference {
         topP: topP,
         repeatPenalty: repeatPenalty,
         cancellationToken: cancellationToken,
+      );
+      return _recordEngineerOutput(
+        stage: stage,
+        maxTokens: maxTokens,
+        result: result,
       );
     } finally {
       if (lease != null) {
@@ -200,7 +238,7 @@ final class WorkshopStageRoleInference {
     }
 
     try {
-      return await _executor.completeWithIdentity(
+      final result = await _executor.completeWithIdentity(
         role: role,
         prompt: prompt,
         systemPrompt: systemPrompt,
@@ -218,6 +256,11 @@ final class WorkshopStageRoleInference {
         attemptId: attemptId,
         checkpointId: checkpointId,
         cancellationToken: cancellationToken,
+      );
+      return _recordEngineerOutput(
+        stage: stage,
+        maxTokens: maxTokens,
+        result: result,
       );
     } finally {
       if (lease != null) {
