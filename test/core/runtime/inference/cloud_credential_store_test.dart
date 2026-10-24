@@ -92,6 +92,58 @@ void main() {
       );
     });
 
+    test('unreadable provider is isolated without deleting any credentials',
+        () async {
+      final storage = _FailureInjectingSecretStorage();
+      final initial = CloudCredentialStore(storage: storage);
+      await initial.initialize();
+      await initial.setApiKey('openAi', 'fake-key-a');
+      await initial.setApiKey('claude', 'fake-key-b');
+
+      storage.unreadableKey = 'ai_orchestrator.cloud.credential.v1.openAi';
+      final recovered = CloudCredentialStore(storage: storage);
+      await recovered.initialize();
+      expect(recovered.isInitialized, isTrue);
+      expect(recovered.isCredentialUnreadable('openAi'), isTrue);
+      expect(recovered.snapshotFor('openAi').configured, isFalse);
+      expect(recovered.secretFor('claude'), 'fake-key-b');
+      expect(storage.values.length, 2);
+      expect(storage.deletions, 0);
+
+      storage.unreadableKey = null;
+      await recovered.initialize();
+      expect(recovered.isCredentialUnreadable('openAi'), isFalse);
+      expect(recovered.secretFor('openAi'), 'fake-key-a');
+    });
+
+    test('failed removal preserves in-memory and persisted credentials',
+        () async {
+      final storage = _FailureInjectingSecretStorage();
+      final store = CloudCredentialStore(storage: storage);
+      await store.initialize();
+      await store.setApiKey('openAi', 'fake-key');
+
+      storage.failDeletes = true;
+      await expectLater(store.remove('openAi'), throwsStateError);
+      expect(store.secretFor('openAi'), 'fake-key');
+      expect(storage.values.length, 1);
+      expect(storage.deletions, 0);
+    });
+
+    test('explicit credential replacement resets unreadable marker', () async {
+      final storage = _FailureInjectingSecretStorage();
+      storage.unreadableKey = 'ai_orchestrator.cloud.credential.v1.openAi';
+      final store = CloudCredentialStore(storage: storage);
+      await store.initialize();
+      expect(store.isCredentialUnreadable('openAi'), isTrue);
+      expect(storage.deletions, 0);
+
+      await store.setApiKey('openAi', 'fake-replacement');
+      expect(store.isCredentialUnreadable('openAi'), isFalse);
+      expect(store.secretFor('openAi'), 'fake-replacement');
+      expect(storage.deletions, 0);
+    });
+
     test('remove deletes the persisted secret and in-memory credential', () async {
       final storage = _MemorySecretStorage();
       final store = CloudCredentialStore(storage: storage);
@@ -121,5 +173,30 @@ final class _MemorySecretStorage implements CloudSecretStorage {
   @override
   Future<void> write(String key, String value) async {
     values[key] = value;
+  }
+}
+
+final class _FailureInjectingSecretStorage implements CloudSecretStorage {
+  final Map<String, String> values = <String, String>{};
+  String? unreadableKey;
+  bool failDeletes = false;
+  int deletions = 0;
+
+  @override
+  Future<String?> read(String key) async {
+    if (key == unreadableKey) throw StateError('synthetic decrypt failure');
+    return values[key];
+  }
+
+  @override
+  Future<void> write(String key, String value) async {
+    values[key] = value;
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    if (failDeletes) throw StateError('synthetic delete failure');
+    deletions++;
+    values.remove(key);
   }
 }

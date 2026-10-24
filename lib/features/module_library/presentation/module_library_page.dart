@@ -95,16 +95,28 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
       _loading = true;
       _error = null;
     });
-    final clientId = await _configStore.loadClientId();
-    final credential = await _credentialStore.load();
-    if (!mounted) return;
-    setState(() {
-      _clientId = clientId;
-      _connected = credential != null;
-      _loading = false;
-    });
-    if (credential != null) {
-      await _refresh();
+    try {
+      final clientId = await _configStore.loadClientId();
+      final credential = await _credentialStore.load();
+      if (!mounted) return;
+      setState(() {
+        _clientId = clientId;
+        _connected = credential != null;
+        _loading = false;
+      });
+      if (credential != null) {
+        await _refresh();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      // A restored secure store may not have the source device's Keystore key.
+      // Do not expose native error details or get stuck in a loading spinner.
+      setState(() {
+        _loading = false;
+        _connected = false;
+        _error = 'Credenziali GitHub non leggibili su questo dispositivo. '
+            'I dati non sono stati cancellati: riprova o riconnetti GitHub.';
+      });
     }
   }
 
