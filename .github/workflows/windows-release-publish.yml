@@ -77,7 +77,7 @@ jobs:
           }
 
           $versionName = $versionLine.Matches[0].Groups[1].Value
-          $versionCode = '${{ github.event.workflow_run.run_number }}'
+          $versionCode = [string](100000 + [int]'${{ github.event.workflow_run.run_number }}')
           if (-not $versionCode -or $versionCode -notmatch '^\d+$') {
             throw "Invalid Android workflow run number: $versionCode"
           }
