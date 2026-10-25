@@ -44,6 +44,7 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
     required this.chatController,
     this.recoveryCoordinator,
     this.emissionStore,
+    this.localOnly = false,
     AndroidIntentHandler? androidIntentHandler,
   }) : _androidIntentHandler = androidIntentHandler;
 
@@ -53,6 +54,7 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
   final WorkshopChatController chatController;
   final WorkshopProductionRecoveryCoordinator? recoveryCoordinator;
   final WorkshopAppEmissionStore? emissionStore;
+  final bool localOnly;
   final AndroidIntentHandler? _androidIntentHandler;
 
   @override
@@ -173,9 +175,9 @@ class _WorkshopProductionDashboardPageState
     });
     try {
       final result = retry
-          ? await widget.executionController.retry()
+          ? await widget.executionController.retry(forceOffline: widget.localOnly)
           : await widget.executionController.start(
-              isOffline: widget.executionController.state.isOffline,
+              isOffline: widget.localOnly || widget.executionController.state.isOffline,
             );
       if (!mounted) return;
       if (!result.readyForApproval) {
@@ -708,7 +710,7 @@ class _WorkshopProductionDashboardPageState
       _error = null;
     });
     try {
-      final isOffline = widget.executionController.state.isOffline;
+      final isOffline = widget.localOnly || widget.executionController.state.isOffline;
       final result = await _coordinator.buildWorkspace(
         target: workshopBuildTargetForPlatform(defaultTargetPlatform, isWeb: kIsWeb),
         mode: isOffline
@@ -774,6 +776,7 @@ class _WorkshopProductionDashboardPageState
           failedPlan: failedPlan,
           failedBuild: result,
           repairNumber: repairNumber,
+          isOffline: isOffline,
         );
         if (!mounted) return;
 
@@ -1253,6 +1256,13 @@ class _WorkshopProductionDashboardPageState
                         instruction: instruction,
                         title: title,
                       ),
+            savePendingDraft: widget.recoveryCoordinator == null
+                ? null
+                : (draft) => widget.recoveryCoordinator!.savePendingPrompt(
+                    instruction: draft.instruction,
+                    title: draft.title,
+                    workspaceProjectId: draft.workspaceProjectId,
+                  ),
             loadPendingPrompt: widget.recoveryCoordinator?.loadPendingPrompt,
             clearPendingPrompt: widget.recoveryCoordinator?.clearPendingPrompt,
             persistCurrentProject: widget.recoveryCoordinator == null
@@ -1262,6 +1272,7 @@ class _WorkshopProductionDashboardPageState
                   ),
             modelAssignments: widget.modelAssignments,
             productionBusy: productionBusy,
+            localOnly: widget.localOnly,
           ),
         ),
       ),

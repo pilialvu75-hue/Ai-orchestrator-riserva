@@ -5,6 +5,8 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.da
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_dashboard_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_engine.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_pending_prompt_draft.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
@@ -14,6 +16,46 @@ import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
+  testWidgets('owner modification preserves workspace and sends offline request',
+      (tester) async {
+    final provider = _CapturingProvider();
+    final chat = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+    );
+    final dashboard = WorkshopDashboardController(engine: WorkshopEngine());
+    addTearDown(chat.dispose);
+    addTearDown(dashboard.dispose);
+    final original = dashboard.startProduction(
+      title: 'Stella', instruction: 'Crea una stella.',
+    );
+    WorkshopPendingPromptDraft? saved;
+    await tester.pumpWidget(MaterialApp(home: WorkshopDashboardPage(
+      chatController: chat,
+      dashboardController: dashboard,
+      localOnly: true,
+      savePendingDraft: (draft) async { saved = draft; },
+      closeProjectForNewConversation: () async {
+        dashboard.forgetProduction();
+        return true;
+      },
+    )));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'Aumenta la stella a 140 pixel.');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Modifica questo progetto'));
+    await tester.pumpAndSettle();
+    expect(saved!.workspaceProjectId, original.effectiveWorkspaceProjectId);
+    expect(provider.requests.single.isOffline, isTrue);
+    await tester.tap(find.text('Sì, procedi'));
+    await tester.pumpAndSettle();
+    final requestId = dashboard.state.requestId!;
+    expect(dashboard.engine.planOf(requestId)!.effectiveWorkspaceProjectId,
+        original.effectiveWorkspaceProjectId);
+    expect(dashboard.engine.requestOf(requestId)!.operation, WorkshopOperation.modify);
+    expect(dashboard.state.isProjectApproved, isTrue);
+  });
+
   testWidgets(
       'production busy state disables composer and explains why',
       (tester) async {

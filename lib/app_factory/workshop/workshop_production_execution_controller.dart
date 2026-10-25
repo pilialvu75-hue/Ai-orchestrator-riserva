@@ -504,7 +504,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
   /// still-running work, preventing duplicate inference/apply chains.
   ///
   /// The original offline/online decision is preserved across retry.
-  Future<WorkshopTaskInferenceResult> retry() {
+  Future<WorkshopTaskInferenceResult> retry({bool forceOffline = false}) {
     _ensureAvailable();
     if (_activeRun != null) {
       return _activeRun!;
@@ -537,7 +537,7 @@ final class WorkshopProductionExecutionController extends ChangeNotifier {
       );
     }
 
-    final isOffline = _state.isOffline;
+    final isOffline = forceOffline || _state.isOffline;
     _setState(WorkshopProductionExecutionState(isOffline: isOffline));
     return _start(isOffline: isOffline, isRetry: true);
   }

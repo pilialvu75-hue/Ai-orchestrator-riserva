@@ -29,6 +29,7 @@ void main() {
     await first.savePendingPrompt(
       instruction: 'Crea Manga Kids con una home semplice.',
       title: 'Manga Kids',
+      workspaceProjectId: 'original-workspace',
     );
 
     final reopened = WorkshopProductionRecoveryCoordinator(
@@ -43,6 +44,7 @@ void main() {
     expect(draft, isNotNull);
     expect(draft!.instruction, 'Crea Manga Kids con una home semplice.');
     expect(draft.title, 'Manga Kids');
+    expect(draft.workspaceProjectId, 'original-workspace');
 
     await reopened.clearPendingPrompt();
     expect(await first.loadPendingPrompt(), isNull);

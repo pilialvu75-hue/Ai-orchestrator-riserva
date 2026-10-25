@@ -133,6 +133,11 @@ final class WorkshopProjectExecutor {
           taskCriteria: task.validationCriteria,
           projectCriteria: plan.validationCriteria,
         ).map((entry) => entry.asConstraint),
+        if (projectRequest != null)
+          'Owner project request: ${projectRequest.instruction}',
+        ...?projectRequest?.context.where(
+          (entry) => entry.startsWith('WORKSHOP_APPROVED_PROPOSAL:'),
+        ),
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),
@@ -235,6 +240,11 @@ final class WorkshopProjectExecutor {
           taskCriteria: task.validationCriteria,
           projectCriteria: plan.validationCriteria,
         ).map((entry) => entry.asConstraint),
+        if (projectRequest != null)
+          'Owner project request: ${projectRequest.instruction}',
+        ...?projectRequest?.context.where(
+          (entry) => entry.startsWith('WORKSHOP_APPROVED_PROPOSAL:'),
+        ),
         ...WorkshopConstraints.defaults.map(
           (constraint) => constraint.description,
         ),

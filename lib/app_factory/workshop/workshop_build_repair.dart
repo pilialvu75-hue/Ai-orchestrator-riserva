@@ -364,6 +364,7 @@ final class WorkshopBuildRepairPreparer {
     required WorkshopProjectPlan failedPlan,
     required WorkshopBuildResult failedBuild,
     required int repairNumber,
+    bool isOffline = false,
   }) async {
     final request = planner.createRepairRequest(
       failedPlan: failedPlan,
@@ -383,6 +384,7 @@ final class WorkshopBuildRepairPreparer {
       validationCriteria: request.validationCriteria,
       workspaceProjectId: failedPlan.effectiveWorkspaceProjectId,
       buildRepair: true,
+      isOffline: isOffline,
     );
   }
 

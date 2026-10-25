@@ -245,6 +245,7 @@ final class WorkshopProductionRecoveryCoordinator {
   Future<void> savePendingPrompt({
     required String instruction,
     required String title,
+    String? workspaceProjectId,
   }) async {
     final normalizedInstruction = instruction.trim();
     final normalizedTitle = title.trim();
@@ -263,7 +264,7 @@ final class WorkshopProductionRecoveryCoordinator {
           status: WorkshopBackgroundStatus.paused,
           updatedAt: updatedAt,
           message:
-              '$_draftPayloadPrefix${jsonEncode(<String, Object?>{'instruction': normalizedInstruction, 'title': normalizedTitle})}',
+              '$_draftPayloadPrefix${jsonEncode(<String, Object?>{'instruction': normalizedInstruction, 'title': normalizedTitle, if (workspaceProjectId != null) 'workspaceProjectId': workspaceProjectId})}',
         ),
       ),
     );
@@ -293,6 +294,7 @@ final class WorkshopProductionRecoveryCoordinator {
         instruction: instruction,
         title: title,
         updatedAt: checkpoint.updatedAt.toUtc(),
+        workspaceProjectId: map['workspaceProjectId'] as String?,
       );
     } catch (_) {
       return null;
