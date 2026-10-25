@@ -1449,7 +1449,7 @@ class _WorkshopProductionDashboardPageState
                 FilledButton.icon(
                   onPressed: _buildCompletedProject,
                   icon: const Icon(Icons.android),
-                  label: const Text('Genera app finale'),
+                  label: Text(workshopBuildActionLabel(defaultTargetPlatform)),
                 ),
             ],
           ),
@@ -1557,9 +1557,9 @@ final class WorkshopProductionActionState {
       );
     }
     if (!hasPreparedTask && projectReadyForBuild) {
-      return const WorkshopProductionActionState(
+      return WorkshopProductionActionState(
         action: WorkshopProductionUiAction.build,
-        label: 'Genera app finale',
+        label: workshopBuildActionLabel(defaultTargetPlatform),
         icon: Icons.android,
         enabled: true,
       );
@@ -1622,6 +1622,9 @@ final class WorkshopProductionActionState {
     );
   }
 }
+String workshopBuildActionLabel(TargetPlatform platform) =>
+    platform == TargetPlatform.android ? 'Genera APK finale' : 'Genera app finale';
+
 WorkshopBuildTarget workshopBuildTargetForPlatform(
   TargetPlatform platform, {
   bool isWeb = false,

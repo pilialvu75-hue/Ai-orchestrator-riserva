@@ -15,6 +15,8 @@ void main() {
         WorkshopBuildTarget.android);
     expect(workshopBuildTargetForPlatform(TargetPlatform.windows, isWeb: true),
         WorkshopBuildTarget.web);
+    expect(workshopBuildActionLabel(TargetPlatform.android), contains('APK'));
+    expect(workshopBuildActionLabel(TargetPlatform.windows), 'Genera app finale');
   });
 
   test('verified emissions survive recreation; failed builds never emit',
