@@ -339,9 +339,10 @@ class Orchestrator {
       '[WEBSEARCH_ENTER] session=$sessionId offline_flag=$isOffline hasTool=${webSearchTool != null}',
     );
 
-    if (webSearchTool == null) {
+    if (isOffline || webSearchTool == null) {
       _logForensic(
-        '[WEBSEARCH_EXIT] session=$sessionId success=false reason=tool_missing',
+        '[WEBSEARCH_EXIT] session=$sessionId success=false '
+        'reason=${isOffline ? 'offline' : 'tool_missing'}',
       );
       return InferenceRequest(
         sessionId: sessionId,
