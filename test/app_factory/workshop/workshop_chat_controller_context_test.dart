@@ -68,7 +68,7 @@ void main() {
       second.context.map((turn) => (turn.role, turn.content)).toList(),
       <(ChatRole, String)>[
         (ChatRole.user, 'prima richiesta'),
-        (ChatRole.assistant, 'risposta Cantiere'),
+        (ChatRole.assistant, 'PROPOSAL: risposta Cantiere'),
       ],
     );
     expect(
@@ -76,6 +76,29 @@ void main() {
       isEmpty,
     );
 
+    controller.dispose();
+  });
+
+  test('Clarification and proposal prefixes survive later turns and clear',
+      () async {
+    final provider = _ScriptedReplyProvider([
+      InferenceResponse.finalChunk(text: 'CLARIFY: Quale colore?', tokensGenerated: 5),
+      InferenceResponse.finalChunk(text: 'PROPOSAL: Stella gialla.', tokensGenerated: 5),
+      InferenceResponse.finalChunk(text: 'PROPOSAL: Stella rossa.', tokensGenerated: 5),
+      InferenceResponse.finalChunk(text: 'CLARIFY: Quale app?', tokensGenerated: 5),
+    ]);
+    final controller = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+    );
+    await controller.send('crea una stella');
+    await controller.send('gialla');
+    expect(provider.requests.last.context.last.content, 'CLARIFY: Quale colore?');
+    expect(controller.messages.last.content, 'Stella gialla.');
+    await controller.send('rossa');
+    expect(provider.requests.last.context.last.content, 'PROPOSAL: Stella gialla.');
+    controller.clearConversation();
+    await controller.send('nuova app');
+    expect(provider.requests.last.context, isEmpty);
     controller.dispose();
   });
 

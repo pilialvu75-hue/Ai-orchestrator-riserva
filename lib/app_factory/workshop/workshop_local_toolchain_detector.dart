@@ -548,8 +548,8 @@ final class WorkshopLocalToolchainDetector {
         environment: environment,
         runInShell: Platform.isWindows,
       );
-      final stdoutFuture = process.stdout.transform(utf8.decoder).join();
-      final stderrFuture = process.stderr.transform(utf8.decoder).join();
+      final stdoutFuture = process.stdout.transform(const Utf8Decoder(allowMalformed: true)).join();
+      final stderrFuture = process.stderr.transform(const Utf8Decoder(allowMalformed: true)).join();
       final exitCode = await process.exitCode.timeout(
         _configuration.timeout,
         onTimeout: () {
