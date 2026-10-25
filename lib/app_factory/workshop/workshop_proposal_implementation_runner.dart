@@ -41,9 +41,10 @@ final class WorkshopProposalImplementationRunner {
   final WorkshopProposalWorkspaceStager _stager;
   final WorkshopSourcePromptPolicy _promptPolicy;
 
-  static const int _primaryMaxTokens = 640;
-  static const int _retryMaxTokens = 512;
-  static const int _malformedOutputRetryMaxTokens = 768;
+  int get _primaryMaxTokens => _promptPolicy.implementationMaxTokens;
+  int get _retryMaxTokens => _promptPolicy.implementationRetryMaxTokens;
+  int get _malformedOutputRetryMaxTokens =>
+      _promptPolicy.implementationMalformedRetryMaxTokens;
   int get _primaryWorkspaceChars => _promptPolicy.implementationWorkspaceChars;
   int get _retryWorkspaceChars => _promptPolicy.implementationRetryWorkspaceChars;
   static const int _buildRepairTargetChars = 6400;
@@ -52,7 +53,7 @@ final class WorkshopProposalImplementationRunner {
   // Mandatory owner instructions/acceptance are never silently truncated.
   // Reject a truly oversized task before invoking the local/cloud Engineer.
   static const int _maxExactOwnerInstructionChars = 1400;
-  static const int _maxExactOwnerConstraintsChars = 1800;
+  int get _maxExactOwnerConstraintsChars => _promptPolicy.maxOwnerConstraintsChars;
   static const int _primaryRevisionFeedbackChars = 700;
   static const int _retryRevisionFeedbackChars = 420;
 
