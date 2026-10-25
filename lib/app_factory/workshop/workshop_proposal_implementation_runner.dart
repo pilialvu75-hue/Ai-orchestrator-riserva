@@ -1170,7 +1170,9 @@ Return ONLY JSON:
 
 changes MUST contain at least one real file change. Never return an empty changes
 array. type must be exactly "addition", "modification" or "deletion".
-Use workspace-relative paths: no "./", "../" or absolute paths.
+Use workspace-relative changes[].path: no "./", "../" or absolute paths.
+This output-path restriction does not ban relative imports INSIDE source text.
+A test in test/ may import '../lib/main.dart'; retain flutter_test imports too.
 request.targetFiles is a HARD ALLOWLIST when non-empty; an empty list permits
 only files required by the explicit task. Do not invent supporting files outside it.
 Only workspaceFiles supplies existing content. replaceableTargets are oversized
@@ -1242,6 +1244,9 @@ For every change, type MUST be exactly one string: "addition", "modification",
 or "deletion". Never copy a list or combine values with "|" or "/".
 Every path must be workspace-relative like "lib/main.dart": never prefix it
 with "./", never use "../", and never use an absolute path.
+This restriction applies to changes[].path, not imports inside file content.
+For example, test/main_test.dart may import '../lib/main.dart' to test the real
+application. Keep the Flutter test library import when using testWidgets/expect.
 Do not use markdown. For deletion omit content. Every addition/modification must
 contain the complete resulting file content. Every content value must be a valid
 JSON string with line breaks, double quotes and backslashes escaped according to
