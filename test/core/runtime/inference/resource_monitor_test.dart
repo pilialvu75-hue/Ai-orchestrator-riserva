@@ -5,6 +5,32 @@ import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('cold GPU admission rejects observed Phi and Nemotron low headroom', () {
+    final small = ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 3828871168, 'thresholdBytes': 408944640});
+    final phi = minimumAndroidGpuColdLoadBytes(small,
+        modelBytes: 2390000000, gpuLayers: 33)!;
+    final nemotron = minimumAndroidGpuColdLoadBytes(small,
+        modelBytes: 2837072864, gpuLayers: 43)!;
+    expect(phi, greaterThan(small.availableBytes!));
+    expect(nemotron, greaterThan(phi));
+    final enough = ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 6 << 30, 'thresholdBytes': 408944640});
+    expect(minimumAndroidGpuColdLoadBytes(enough,
+        modelBytes: 2390000000, gpuLayers: 33), lessThan(enough.availableBytes!));
+  });
+  test('cold GPU guard leaves small models CPU and larger RAM profiles unchanged', () {
+    final small = ResourceSample({'totalBytes': 7575261184});
+    expect(minimumAndroidGpuColdLoadBytes(small,
+        modelBytes: 1800000000, gpuLayers: 37), isNull);
+    expect(minimumAndroidGpuColdLoadBytes(small,
+        modelBytes: 2390000000, gpuLayers: 0), isNull);
+    expect(minimumAndroidGpuColdLoadBytes(ResourceSample({'totalBytes': 12 << 30}),
+        modelBytes: 2390000000, gpuLayers: 33), isNull);
+    expect(minimumAndroidGpuColdLoadBytes(null,
+        modelBytes: 2390000000, gpuLayers: 33), isNull);
+  });
+
   test('Phi remembers pressure after unloading and uses a smaller next session',
       () async {
     var data = <Object?, Object?>{
@@ -127,9 +153,41 @@ void main() {
       requestedGpuLayers: 50,
     );
     expect(aggressive.context, 2048);
-    expect(aggressive.batch, 128);
-    expect(aggressive.microBatch, 32);
-    expect(aggressive.reason, 'phi_gpu_conservative');
+    expect(aggressive.batch, 64);
+    expect(aggressive.microBatch, 16);
+    expect(aggressive.reason, 'phi_gpu_small_ram_headroom');
+    final larger = ResourceProfile.select(ResourceSample({'totalBytes': 12 << 30}),
+        phi: true, requestedGpuLayers: 50);
+    expect(larger.context, 2048);
+    expect(larger.microBatch, 32);
+  });
+
+  test('resident GPU is released before lowMemory on small RAM devices', () {
+    final afterAnswer = ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 982175744, 'thresholdBytes': 408944640});
+    expect(afterAnswer.critical, isFalse);
+    expect(afterAnswer.pressured, isFalse);
+    expect(afterAnswer.shouldReleaseResidentModel(phi: true, gpuLayers: 33), isTrue);
+    expect(afterAnswer.shouldReleaseResidentModel(phi: false, gpuLayers: 33), isTrue);
+    expect(afterAnswer.shouldReleaseResidentModel(phi: true, gpuLayers: 0), isFalse);
+    expect(ResourceSample({'totalBytes': 7575261184, 'availableBytes': 2 << 30,
+      'thresholdBytes': 408944640}).shouldReleaseResidentModel(phi: true, gpuLayers: 33), isFalse);
+    expect(ResourceSample({}).shouldReleaseResidentModel(phi: true, gpuLayers: 33), isFalse);
+  });
+
+  test('observed Qwen completion releases residency before later voice use', () {
+    final qwen = ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 1161732096, 'thresholdBytes': 408944640,
+      'lowMemory': false});
+    expect(qwen.pressured, isFalse);
+    expect(qwen.shouldReleaseResidentModel(phi: false, gpuLayers: 37), isTrue);
+    expect(qwen.shouldReleaseResidentModel(phi: false, gpuLayers: 0), isFalse);
+    expect(ResourceSample({'totalBytes': 12 << 30,
+      'availableBytes': 1161732096, 'thresholdBytes': 408944640})
+      .shouldReleaseResidentModel(phi: false, gpuLayers: 37), isFalse);
+    expect(ResourceSample({'totalBytes': 7575261184,
+      'availableBytes': 2 << 30, 'thresholdBytes': 408944640})
+      .shouldReleaseResidentModel(phi: false, gpuLayers: 37), isFalse);
   });
 
   test('logging and listener errors cannot prevent remaining RAM guards',

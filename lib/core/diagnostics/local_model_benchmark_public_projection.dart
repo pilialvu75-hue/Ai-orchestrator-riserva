@@ -449,10 +449,11 @@ String? localModelBenchmarkPublicProjection({
 
   if (event == 'POST_GENERATION_MEMORY_RELEASE') {
     final m = RegExp(
-      r'^session=[A-Za-z0-9._:-]{1,120} native_session=\d{1,12} '
-      r'modelId=(phi3_5_mini|nemotron3_nano_4b) '
+      r'^session=[A-Za-z0-9._:-]{1,120} native_session=\d{1,20} '
+      r'modelId=(phi3_5_mini|nemotron3_nano_4b|qwen2_5_3b_instruct|'
+      r'qwen3_1_7b|qwen3_4b|llama3_2_3b|gemma_2b_it|deepseek_r1_1_5b) '
       r'available_bytes=(-?\d{1,15}) threshold_bytes=(-?\d{1,15}) '
-      r'pressure=(high|critical)$',
+      r'pressure=(unknown|normal|high|critical)$',
     ).firstMatch(rest);
     if (m == null) return null;
     return jsonEncode(<String, Object>{

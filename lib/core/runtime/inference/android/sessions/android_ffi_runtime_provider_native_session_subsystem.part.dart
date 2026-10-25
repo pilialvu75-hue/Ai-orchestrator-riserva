@@ -136,6 +136,23 @@ class _AndroidFfiNativeSessionSubsystem {
         '[AI_RUNTIME_MONITOR] FORENSIC - File: android_ffi_runtime_provider.dart | Line: 1973 | Function: _ensureNativeSession() | AFTER LRU eviction check',
       );
 
+      // Reused sessions returned above need no new weight/staging allocation.
+      // Sample after eviction, immediately before crossing into native loading.
+      final loadSample = await resources.sample();
+      final modelBytes = await File(modelPath).length();
+      final loadBudget = minimumAndroidGpuColdLoadBytes(loadSample,
+          modelBytes: modelBytes, gpuLayers: _owner.requestedGpuLayers);
+      if (loadSample?.critical == true ||
+          (loadBudget != null &&
+              (loadSample?.availableBytes == null ||
+               loadSample!.availableBytes! < loadBudget))) {
+        _log('[RESOURCE_GUARD] action=defer reason=cold_gpu_load_headroom '
+            'model_bytes=$modelBytes required_bytes=${loadBudget ?? -1} '
+            'available_bytes=${loadSample?.availableBytes ?? -1}');
+        throw StateError('RAM insufficiente per caricare questo modello in sicurezza. '
+            'Scegli un modello più piccolo o riprova quando è disponibile più memoria.');
+      }
+
       _log('[FFI_CREATE_SESSION] entering off-ui createSession path=$modelPath');
       _log(
         '[FORENSIC_BEFORE_LLB_CREATE_SESSION] modelId=${modelId ?? 'unknown'} model_path=$modelPath'
