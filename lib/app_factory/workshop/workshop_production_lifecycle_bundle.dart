@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workshop/workshop_source_prompt_policy.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/models/workshop_model_roles.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_bounded_http_client.dart';
@@ -15,6 +16,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inferenc
 import 'package:ai_orchestrator/app_factory/workshop/workshop_prepared_task_lifecycle.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_private_github_build_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_project_executor.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_task_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_capture_service.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_reuse_library_store.dart';
@@ -72,6 +74,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
     List<WorkshopModelAssignment> assignments =
         WorkshopModelAssignments.defaults,
     Map<AppAiRole, WorkshopInferenceGateway>? roleGateways,
+    WorkshopSourcePromptPolicy sourcePromptPolicy = const WorkshopSourcePromptPolicy(),
     WorkshopBuildLab? buildLab,
     WorkshopReuseLibrary? reuseLibrary,
     Future<void> Function(WorkshopReuseLibrary)? onReuseLibraryChanged,
@@ -112,6 +115,10 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         WorkshopMultiRolePipelineFactory.createPreparedTaskRunner(
       executor: projectExecutor,
       stageInference: stageInference,
+      pipeline: WorkshopTaskInferencePipeline(
+        inference: stageInference,
+        sourcePromptPolicy: sourcePromptPolicy,
+      ),
     );
     final lifecycle = WorkshopPreparedTaskLifecycle(
       inferenceRunner: inferenceRunner,
@@ -147,6 +154,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
 
   static WorkshopProductionLifecycleBundle createForWorkspace({
     required String workspaceRootPath,
+    WorkshopSourcePromptPolicy sourcePromptPolicy = const WorkshopSourcePromptPolicy(),
     InferenceService? inferenceService,
     List<WorkshopModelAssignment> assignments =
         WorkshopModelAssignments.defaults,
@@ -191,6 +199,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         );
 
     return create(
+      sourcePromptPolicy: sourcePromptPolicy,
       projectExecutor: executor,
       inferenceService: inferenceService,
       assignments: assignments,
@@ -211,6 +220,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
   static Future<WorkshopProductionLifecycleBundle>
       createForWorkspaceWithPersistedReuse({
     required String workspaceRootPath,
+    WorkshopSourcePromptPolicy sourcePromptPolicy = const WorkshopSourcePromptPolicy(),
     required PreferencesService preferences,
     InferenceService? inferenceService,
     List<WorkshopModelAssignment> assignments =
@@ -243,6 +253,7 @@ abstract final class WorkshopProductionLifecycleBundleFactory {
         : _defaultPrivateBuildProviders();
 
     return createForWorkspace(
+      sourcePromptPolicy: sourcePromptPolicy,
       workspaceRootPath: normalizedWorkspaceRootPath,
       inferenceService: inferenceService,
       assignments: assignments,

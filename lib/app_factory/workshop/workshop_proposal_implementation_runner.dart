@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_source_prompt_policy.dart';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
@@ -29,19 +30,22 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 final class WorkshopProposalImplementationRunner {
   const WorkshopProposalImplementationRunner({
     required WorkshopStageRoleInference inference,
+    WorkshopSourcePromptPolicy promptPolicy = const WorkshopSourcePromptPolicy(),
     WorkshopProposalWorkspaceStager stager =
         const WorkshopProposalWorkspaceStager(),
   })  : _inference = inference,
+        _promptPolicy = promptPolicy,
         _stager = stager;
 
   final WorkshopStageRoleInference _inference;
   final WorkshopProposalWorkspaceStager _stager;
+  final WorkshopSourcePromptPolicy _promptPolicy;
 
   static const int _primaryMaxTokens = 640;
   static const int _retryMaxTokens = 512;
   static const int _malformedOutputRetryMaxTokens = 768;
-  static const int _primaryWorkspaceChars = 1800;
-  static const int _retryWorkspaceChars = 900;
+  int get _primaryWorkspaceChars => _promptPolicy.implementationWorkspaceChars;
+  int get _retryWorkspaceChars => _promptPolicy.implementationRetryWorkspaceChars;
   static const int _buildRepairTargetChars = 6400;
   static const int _primaryContextChars = 360;
   static const int _retryContextChars = 220;

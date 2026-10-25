@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workshop/workshop_source_prompt_policy.dart';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -21,6 +22,26 @@ import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
 void main() {
   group('WorkshopProposalReviewRunner', () {
+    test('host-sized source evidence retains the tail without bypassing rejection', () async {
+      final reviewer = _StaticGateway(result: const WorkshopInferenceResult(
+        text: '{"approved":false,"summary":"Source defect","findings":["Fix source"],"warnings":[]}',
+        terminalState: InferenceTerminalState.success,
+      ));
+      final session = await _reviewSession();
+      session.workspace.write(path: 'lib/app.dart', content:
+        '${List<String>.filled(500, "// source evidence").join("\n")}\n// END OF SOURCE');
+      final verdict = await WorkshopProposalReviewRunner(
+        inference: _stageInference(_gateways(reviewer)),
+        promptPolicy: const WorkshopSourcePromptPolicy(
+          maxPromptChars: 24000, primaryFileChars: 10000, retryFileChars: 10000,
+        ),
+      ).run(session: session);
+      expect(reviewer.lastPrompt, contains('// END OF SOURCE'));
+      expect(verdict.approved, isFalse);
+      expect(session.status, WorkspaceSessionStatus.blocked);
+      expect(session.isApplyApproved, isFalse);
+    });
+
     test(
         'routes staged diff only to Reviewer and advances approval to validation',
         () async {
@@ -472,6 +493,8 @@ void main() {
       '{\n "', // The +2979 screenshot's unterminated-string error shape.
       '{"approved":"true","summary":"wrong boolean"}',
       '{"approved":true,"summary":""}',
+      '{"approved":false,"summary":"Missing star",'
+          '"findings":[{"path":"lib/main.dart","issue":"Circle instead of star"}]}',
     ]) {
       test('recovers an invalid Reviewer verdict once: $invalid', () async {
         RuntimeEventLog.instance.clear();

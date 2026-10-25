@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_source_prompt_policy.dart';
 
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
@@ -25,20 +26,23 @@ final class WorkshopProposalValidationRunner {
   const WorkshopProposalValidationRunner({
     required WorkshopStageRoleInference inference,
     WorkshopProposalValidationGate gate = const WorkshopProposalValidationGate(),
+    WorkshopSourcePromptPolicy promptPolicy = const WorkshopSourcePromptPolicy(),
   })  : _inference = inference,
+        _promptPolicy = promptPolicy,
         _gate = gate;
 
   final WorkshopStageRoleInference _inference;
   final WorkshopProposalValidationGate _gate;
+  final WorkshopSourcePromptPolicy _promptPolicy;
 
   static const int _primaryMaxTokens = 256;
   static const int _retryMaxTokens = 192;
-  static const int _primaryFileChars = 2400;
-  static const int _retryFileChars = 1200;
+  int get _primaryFileChars => _promptPolicy.primaryFileChars;
+  int get _retryFileChars => _promptPolicy.retryFileChars;
   static const int _primaryContextChars = 320;
   static const int _retryContextChars = 160;
   static const int _filesPerBatch = 2;
-  static const int _maxHolisticPromptChars = 7000;
+  int get _maxHolisticPromptChars => _promptPolicy.maxPromptChars;
 
   Future<WorkshopValidationVerdict> run({
     required WorkspaceSession session,
