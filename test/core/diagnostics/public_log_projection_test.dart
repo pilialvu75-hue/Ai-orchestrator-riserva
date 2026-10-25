@@ -71,6 +71,8 @@ void main() {
         'outcome=success terminal=success budget=640 tokens=120 '
             'chars=200 has_text=1 ',
         'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=1\n',
+        'outcome=success terminal=success budget=640 tokens=120 '
             'chars=200',
       ];
       for (final raw in invalid) {
