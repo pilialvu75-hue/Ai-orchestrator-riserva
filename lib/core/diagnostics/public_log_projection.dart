@@ -280,7 +280,9 @@ String? publicLogProjection(String line) {
       r'chars=([0-9]{1,9}) '
       r'has_text=(0|1)$',
     ).firstMatch(rest);
-    if (m == null) return null;
+    // End anchors can match before a final newline; require byte-for-byte
+    // coverage so an appended payload never slips through a partial match.
+    if (m == null || m.end != rest.length) return null;
     return jsonEncode(<String, Object>{
       'time': timestamp[1]!,
       'event': event,
