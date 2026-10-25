@@ -8,9 +8,11 @@ final class WorkshopPendingPromptDraft {
     required this.instruction,
     required this.title,
     required this.updatedAt,
+    this.workspaceProjectId,
   });
 
   final String instruction;
   final String title;
   final DateTime updatedAt;
+  final String? workspaceProjectId;
 }

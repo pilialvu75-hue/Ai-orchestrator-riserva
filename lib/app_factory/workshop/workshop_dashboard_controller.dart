@@ -483,7 +483,9 @@ final class WorkshopDashboardController extends ChangeNotifier {
       title: normalizedTitle,
       instruction: normalizedInstruction,
       source: WorkshopRequestSource.workshop,
-      operation: WorkshopOperation.create,
+      operation: (workspaceProjectId?.trim().isNotEmpty ?? false)
+          ? WorkshopOperation.modify
+          : WorkshopOperation.create,
       targetFiles: const <String>[],
       constraints: constraints,
       context: List<String>.unmodifiable(
@@ -608,7 +610,11 @@ final class WorkshopDashboardController extends ChangeNotifier {
       title: normalizedTitle,
       instruction: normalizedInstruction,
       source: WorkshopRequestSource.workshop,
-      operation: buildRepair ? WorkshopOperation.fix : WorkshopOperation.create,
+      operation: buildRepair
+          ? WorkshopOperation.fix
+          : (workspaceProjectId?.trim().isNotEmpty ?? false)
+              ? WorkshopOperation.modify
+              : WorkshopOperation.create,
       targetFiles: const <String>[],
       constraints: constraints,
       context: List<String>.unmodifiable(

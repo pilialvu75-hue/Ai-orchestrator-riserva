@@ -44,6 +44,7 @@ void main() {
         instruction: 'Crea una semplice app Contatore Test.',
         source: WorkshopRequestSource.workshop,
         operation: WorkshopOperation.create,
+        context: ['WORKSHOP_APPROVED_PROPOSAL: Conserva tutti i requisiti.'],
       );
 
       final session = await executor.prepareNextTask(
@@ -52,8 +53,12 @@ void main() {
       );
 
       expect(session, isNotNull);
+      expect(session!.context.request.constraints,
+          contains('Owner project request: Crea una semplice app Contatore Test.'));
+      expect(session.context.request.constraints,
+          contains('WORKSHOP_APPROVED_PROPOSAL: Conserva tutti i requisiti.'));
       expect(
-        session!.context.request.operation,
+        session.context.request.operation,
         WorkshopOperation.create,
       );
     });

@@ -121,6 +121,17 @@ void main() {
     controller.dispose();
   });
 
+  test('local-only host can tighten a recovered network-capable retry', () async {
+    final runner = _RetryRunner(_handle());
+    final controller = WorkshopProductionExecutionController(runner: runner);
+    await expectLater(controller.start(), throwsStateError);
+    expect(controller.state.isOffline, isFalse);
+    await controller.retry(forceOffline: true);
+    expect(runner.offlineModes, <bool>[false, true]);
+    expect(controller.state.isOffline, isTrue);
+    controller.dispose();
+  });
+
   test('explicit offline execution is forwarded to the production runner',
       () async {
     final runner = _ControlledRunner(_handle());

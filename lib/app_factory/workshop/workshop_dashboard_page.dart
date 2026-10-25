@@ -65,17 +65,20 @@ class WorkshopDashboardPage extends StatefulWidget {
     Future<bool> Function()? closeProjectForNewConversation,
     Future<void> Function()? openProjects,
     Future<void> Function(String instruction, String title)? savePendingPrompt,
+    Future<void> Function(WorkshopPendingPromptDraft draft)? savePendingDraft,
     Future<WorkshopPendingPromptDraft?> Function()? loadPendingPrompt,
     Future<void> Function()? clearPendingPrompt,
     Future<void> Function()? persistCurrentProject,
     List<WorkshopModelAssignment>? modelAssignments,
     this.productionBusy = false,
+    this.localOnly = false,
   }) : _emissionController = emissionController,
        _dashboardController = dashboardController,
        _chatController = chatController,
        _closeProjectForNewConversation = closeProjectForNewConversation,
        _openProjects = openProjects,
        _savePendingPrompt = savePendingPrompt,
+       _savePendingDraft = savePendingDraft,
        _loadPendingPrompt = loadPendingPrompt,
        _clearPendingPrompt = clearPendingPrompt,
        _persistCurrentProject = persistCurrentProject,
@@ -89,6 +92,7 @@ class WorkshopDashboardPage extends StatefulWidget {
   final Future<void> Function()? _openProjects;
   final Future<void> Function(String instruction, String title)?
   _savePendingPrompt;
+  final Future<void> Function(WorkshopPendingPromptDraft draft)? _savePendingDraft;
   final Future<WorkshopPendingPromptDraft?> Function()? _loadPendingPrompt;
   final Future<void> Function()? _clearPendingPrompt;
   final Future<void> Function()? _persistCurrentProject;
@@ -97,6 +101,7 @@ class WorkshopDashboardPage extends StatefulWidget {
   /// Conversation input is locked only for this interval; project controls and
   /// recovery remain owned by the production page.
   final bool productionBusy;
+  final bool localOnly;
 
   /// Configurazione esclusiva dei modelli del Cantiere.
   ///
@@ -125,6 +130,7 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
   String? _pendingInstruction;
   String? _pendingTitle;
   String? _pendingApprovedProposal;
+  String? _pendingWorkspaceProjectId;
 
   @override
   void initState() {
@@ -245,6 +251,7 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
       setState(() {
         _pendingConfirmation = false;
         _pendingInstruction = instruction;
+        _pendingWorkspaceProjectId = draft.workspaceProjectId;
         _pendingTitle = title;
         _pendingApprovedProposal = null;
         if (_messageController.text.trim().isEmpty) {
@@ -277,14 +284,30 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
     }
 
     _pendingConfirmation = false;
+    if (!_chatController.messages.any((turn) => turn.role == ChatRole.user)) {
+      _pendingInstruction = message;
+    }
     _pendingInstruction ??= message;
     _pendingTitle ??= _deriveProjectTitle(_pendingInstruction);
     _pendingApprovedProposal = null;
 
     final savePendingPrompt = widget._savePendingPrompt;
-    if (savePendingPrompt != null) {
+    final savePendingDraft = widget._savePendingDraft;
+    if (savePendingPrompt != null || savePendingDraft != null) {
       try {
-        await savePendingPrompt(_pendingInstruction!, _pendingTitle!);
+        if (savePendingDraft != null) {
+          await savePendingDraft(WorkshopPendingPromptDraft(
+            instruction: _pendingInstruction!,
+            title: _pendingTitle!,
+            updatedAt: DateTime.now().toUtc(),
+            workspaceProjectId: _pendingWorkspaceProjectId,
+          ));
+        } else {
+          if (_pendingWorkspaceProjectId != null) {
+            throw StateError('Project modification draft persistence is unavailable.');
+          }
+          await savePendingPrompt!(_pendingInstruction!, _pendingTitle!);
+        }
       } catch (error) {
         if (mounted) {
           _showError(
@@ -297,7 +320,7 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
 
     _messageController.clear();
 
-    final result = await _chatController.send(message);
+    final result = await _chatController.send(message, isOffline: widget.localOnly);
 
     if (!mounted) {
       return;
@@ -332,30 +355,39 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
     }
 
     final title = dashboardState?.projectTitle?.trim();
-    final confirmed = await showDialog<bool>(
+    final currentPlan = _dashboardController!.engine.planOf(dashboardState!.requestId!);
+    final choice = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Nuova richiesta'),
         content: Text(
           'Il progetto corrente'
           '${title == null || title.isEmpty ? '' : ' “$title”'} '
-          'è ancora attivo. Per iniziare una richiesta diversa senza '
-          'mescolare conversazione ed esecuzione, parcheggialo prima.',
+          'è ancora attivo. Puoi modificarlo mantenendo i suoi file, oppure '
+          'parcheggiarlo e iniziare un progetto diverso.',
         ),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Continua progetto'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: () => Navigator.of(dialogContext).pop('modify'),
+            child: const Text('Modifica questo progetto'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('new'),
             child: const Text('Parcheggia e usa nuovo prompt'),
           ),
         ],
       ),
     );
 
-    if (confirmed != true || !mounted) {
+    if (choice == null || !mounted) {
+      return false;
+    }
+    if (choice == 'modify' && currentPlan == null) {
+      _showError('Il progetto da modificare non è disponibile. Riaprilo da Progetti.');
       return false;
     }
 
@@ -381,6 +413,10 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
       _pendingInstruction = null;
       _pendingTitle = null;
       _pendingApprovedProposal = null;
+      _pendingWorkspaceProjectId = choice == 'modify'
+          ? currentPlan?.effectiveWorkspaceProjectId
+          : null;
+      if (choice == 'modify') _pendingTitle = title;
     });
 
     _chatController.clearConversation();
@@ -420,6 +456,8 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
       await controller.startPlannedProduction(
         title: title,
         instruction: instruction,
+        workspaceProjectId: _pendingWorkspaceProjectId,
+        isOffline: widget.localOnly,
         context: approvedProposal == null || approvedProposal.isEmpty
             ? const <String>[]
             : <String>[
@@ -461,6 +499,7 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
         _pendingInstruction = null;
         _pendingTitle = null;
         _pendingApprovedProposal = null;
+        _pendingWorkspaceProjectId = null;
       });
 
       _showMessage('Produzione approvata e preparazione avviata.');
@@ -591,6 +630,7 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
       _pendingInstruction = null;
       _pendingTitle = null;
       _pendingApprovedProposal = null;
+      _pendingWorkspaceProjectId = null;
     });
 
     await widget._clearPendingPrompt?.call();
