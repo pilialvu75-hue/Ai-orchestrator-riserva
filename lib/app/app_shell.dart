@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_store.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
@@ -324,6 +326,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             executionController: executionController,
             chatController: chatController,
             recoveryCoordinator: _workshopRecoveryCoordinator,
+            emissionStore: WorkshopAppEmissionStore(di.sl<PreferencesService>()),
           ),
         ),
       ));

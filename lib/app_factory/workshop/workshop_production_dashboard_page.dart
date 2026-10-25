@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_store.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -40,6 +43,7 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
     required this.executionController,
     required this.chatController,
     this.recoveryCoordinator,
+    this.emissionStore,
     AndroidIntentHandler? androidIntentHandler,
   }) : _androidIntentHandler = androidIntentHandler;
 
@@ -48,6 +52,7 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
   final WorkshopProductionExecutionController executionController;
   final WorkshopChatController chatController;
   final WorkshopProductionRecoveryCoordinator? recoveryCoordinator;
+  final WorkshopAppEmissionStore? emissionStore;
   final AndroidIntentHandler? _androidIntentHandler;
 
   @override
@@ -60,6 +65,7 @@ class _WorkshopProductionDashboardPageState
   late final WorkshopProductionTaskCoordinator _coordinator;
   late final WorkshopBuildRepairPreparer _repairPreparer;
   late final AndroidIntentHandler _androidIntentHandler;
+  late final WorkshopAppEmissionController _emissions;
   WorkshopBuildResult? _buildResult;
   WorkshopDeviceAcceptanceReceipt? _acceptanceReceipt;
   bool _installAttempted = false;
@@ -73,6 +79,7 @@ class _WorkshopProductionDashboardPageState
   @override
   void initState() {
     super.initState();
+    _emissions = WorkshopAppEmissionController(registry: widget.emissionStore?.load());
     _coordinator = WorkshopProductionTaskCoordinator(bundle: widget.bundle);
     _repairPreparer = WorkshopBuildRepairPreparer(bundle: widget.bundle);
     _androidIntentHandler =
@@ -692,6 +699,7 @@ class _WorkshopProductionDashboardPageState
 
   Future<void> _buildCompletedProject() async {
     if (_mutationBusy || !_projectReadyForBuild || _buildResult != null) return;
+    final emissionStore = widget.emissionStore;
     final failedPlan = _activePlan;
     if (failedPlan == null) return;
 
@@ -702,11 +710,17 @@ class _WorkshopProductionDashboardPageState
     try {
       final isOffline = widget.executionController.state.isOffline;
       final result = await _coordinator.buildWorkspace(
-        target: WorkshopBuildTarget.android,
+        target: workshopBuildTargetForPlatform(defaultTargetPlatform, isWeb: kIsWeb),
         mode: isOffline
             ? WorkshopBuildExecutionMode.offlineLocal
             : WorkshopBuildExecutionMode.automatic,
       );
+      final emission = await emissionStore?.recordVerifiedBuild(
+        result: result,
+        projectId: failedPlan.effectiveWorkspaceProjectId,
+        appName: failedPlan.title,
+      );
+      if (emission != null) _emissions.register(emission);
       if (!mounted) return;
 
       final planner = _repairPreparer.planner;
@@ -1227,6 +1241,7 @@ class _WorkshopProductionDashboardPageState
         right: false,
         child: WorkshopConversationSelection(
           child: WorkshopDashboardPage(
+            emissionController: _emissions,
             dashboardController: widget.bundle.dashboardController,
             chatController: widget.chatController,
             closeProjectForNewConversation: _closeProjectForNewConversation,
@@ -1320,7 +1335,7 @@ class _WorkshopProductionDashboardPageState
               ],
               if (_hasVerifiedArtifact) ...<Widget>[
                 Text(
-                  'APK verificato pronto: ${_buildResult!.artifactPath}',
+                  'App verificata pronta: ${_buildResult!.artifactPath}',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelMedium,
@@ -1434,7 +1449,7 @@ class _WorkshopProductionDashboardPageState
                 FilledButton.icon(
                   onPressed: _buildCompletedProject,
                   icon: const Icon(Icons.android),
-                  label: const Text('Genera APK finale'),
+                  label: Text(workshopBuildActionLabel(defaultTargetPlatform)),
                 ),
             ],
           ),
@@ -1542,9 +1557,9 @@ final class WorkshopProductionActionState {
       );
     }
     if (!hasPreparedTask && projectReadyForBuild) {
-      return const WorkshopProductionActionState(
+      return WorkshopProductionActionState(
         action: WorkshopProductionUiAction.build,
-        label: 'Genera APK finale',
+        label: workshopBuildActionLabel(defaultTargetPlatform),
         icon: Icons.android,
         enabled: true,
       );
@@ -1606,4 +1621,20 @@ final class WorkshopProductionActionState {
       enabled: false,
     );
   }
+}
+String workshopBuildActionLabel(TargetPlatform platform) =>
+    platform == TargetPlatform.android ? 'Genera APK finale' : 'Genera app finale';
+
+WorkshopBuildTarget workshopBuildTargetForPlatform(
+  TargetPlatform platform, {
+  bool isWeb = false,
+}) {
+  if (isWeb) return WorkshopBuildTarget.web;
+  return switch (platform) {
+    TargetPlatform.windows => WorkshopBuildTarget.windows,
+    TargetPlatform.linux => WorkshopBuildTarget.linux,
+    TargetPlatform.macOS => WorkshopBuildTarget.macos,
+    TargetPlatform.iOS => WorkshopBuildTarget.ios,
+    TargetPlatform.android || TargetPlatform.fuchsia => WorkshopBuildTarget.android,
+  };
 }
