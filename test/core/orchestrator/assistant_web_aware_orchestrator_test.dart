@@ -1,3 +1,6 @@
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:ai_orchestrator/core/tools/search/duckduckgo_lite_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -39,6 +42,7 @@ void main() {
     executor = _MockExecutionEngine();
     inference = _MockInferenceService();
     webSearch = _MockWebSearchTool();
+    when(() => webSearch.id).thenReturn('web_search');
     settings = _MockRuntimeSettings();
     cloud = _MockCloudRuntimeProvider();
 
@@ -53,12 +57,12 @@ void main() {
     );
   });
 
-  AssistantWebAwareOrchestrator build() {
+  AssistantWebAwareOrchestrator build({WebSearchTool? actualTool}) {
     return AssistantWebAwareOrchestrator(
       intentAnalyzer: const IntentAnalyzer(),
       executor: executor,
       inferenceService: inference,
-      webSearchTool: webSearch,
+      webSearchTool: actualTool ?? webSearch,
       runtimeSettingsService: settings,
       cloudRuntimeProvider: cloud,
     );
@@ -338,4 +342,70 @@ void main() {
     });
   }
 
+
+  test('synthetic explicit NOAA search preserves second source in actual request', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(toolId: 'web_search', output:
+        '1. Secondary fixture\nURL: https://secondary.example.test/sky\n'
+        '2. NOAA synthetic fixture\nURL: https://www.noaa.gov/synthetic-fixture-not-a-real-page\n'
+        'Snippet: SYNTHETIC Rayleigh evidence, not a fetched NOAA statement.'),
+    );
+    const input = 'Cerca sul web la spiegazione NOAA del cielo blu; Cita URL e diffusione Rayleigh';
+    await build().handleStream(input, sessionId: 'synthetic-noaa',
+      context: const <ChatTurn>[]).drain<void>();
+    final args = verify(() => webSearch.execute(captureAny())).captured.single
+        as Map<String, dynamic>;
+    expect(args['query'], contains('NOAA'));
+    expect(args['query'], contains('Rayleigh'));
+    final request = verify(() => inference.stream(captureAny())).captured.single
+        as InferenceRequest;
+    expect(request.prompt, input);
+    expect(request.context, isEmpty);
+    expect(request.systemPrompt, contains('https://secondary.example.test/sky'));
+    expect(request.systemPrompt, contains('https://www.noaa.gov/synthetic-fixture-not-a-real-page'));
+    expect(request.systemPrompt, contains('SYNTHETIC Rayleigh evidence'));
+  });
+
+  test('synthetic explicit search offline never calls provider', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    // A deterministic mock ensures even a regression cannot access the network.
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(toolId: 'web_search', output: '', success: false),
+    );
+    await build().handleStream('Cerca sul web la spiegazione NOAA del cielo blu',
+      sessionId: 'synthetic-explicit-offline', isOffline: true).drain<void>();
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('synthetic Lite HTML reaches explicit request with ranked URLs intact', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    var httpCalls = 0;
+    final client = MockClient((request) async {
+      httpCalls++;
+      expect(request.method, 'POST');
+      expect(request.bodyFields['q'], contains('NOAA'));
+      return http.Response('''<html><body><table>
+<tr><td><a class="result-link" href="https://secondary.example.test/sky">Secondary fixture</a></td></tr>
+<tr><td class="result-snippet">SYNTHETIC secondary snippet.</td></tr>
+<tr><td><a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.noaa.gov%2Fsynthetic-fixture-not-a-real-page">NOAA fixture</a></td></tr>
+<tr><td class="result-snippet">SYNTHETIC Rayleigh evidence; not a fetched NOAA statement.</td></tr>
+</table></body></html>''', 200);
+    });
+    final tool = WebSearchTool(searchProvider: DuckDuckGoLiteProvider(
+      client: client, includeErrorDetailsInDiagnostics: false),
+      includeErrorDetailsInDiagnostics: false);
+    await build(actualTool: tool).handleStream(
+      'Cerca sul web la spiegazione NOAA del cielo blu; Cita URL e Rayleigh',
+      sessionId: 'synthetic-parser-chain').drain<void>();
+    expect(httpCalls, 1);
+    final request = verify(() => inference.stream(captureAny())).captured.single
+        as InferenceRequest;
+    final system = request.systemPrompt!;
+    expect(system, contains('https://www.noaa.gov/synthetic-fixture-not-a-real-page'));
+    expect(system, contains('SYNTHETIC Rayleigh evidence'));
+    expect(system.indexOf('https://secondary.example.test/sky'),
+      lessThan(system.indexOf('https://www.noaa.gov/synthetic-fixture-not-a-real-page')));
+    expect(system, isNot(contains('uddg=')));
+  });
 }
