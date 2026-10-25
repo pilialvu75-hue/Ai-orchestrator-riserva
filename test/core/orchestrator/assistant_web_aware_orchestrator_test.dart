@@ -39,6 +39,7 @@ void main() {
     executor = _MockExecutionEngine();
     inference = _MockInferenceService();
     webSearch = _MockWebSearchTool();
+    when(() => webSearch.id).thenReturn('web_search');
     settings = _MockRuntimeSettings();
     cloud = _MockCloudRuntimeProvider();
 
