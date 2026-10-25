@@ -6,6 +6,90 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const time = '[2026-09-06T02:57:18.238076]';
 
+  group('Cantiere Engineer output public projection', () {
+    test('exports only numeric counters and closed terminal/status enums', () {
+      final row = jsonDecode(publicLogProjection(
+        '$time [WORKSHOP_ENGINEER_OUTPUT] '
+        'outcome=success terminal=success budget=640 '
+        'tokens=640 chars=1402 has_text=1',
+      )!) as Map<String, dynamic>;
+      expect(row, <String, dynamic>{
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'WORKSHOP_ENGINEER_OUTPUT',
+        'outcome': 'success',
+        'terminal': 'success',
+        'budget': 640,
+        'tokens': 640,
+        'chars': 1402,
+        'has_text': true,
+      });
+      expect(row.containsKey('prompt'), isFalse);
+      expect(row.containsKey('projectId'), isFalse);
+      expect(row.containsKey('session'), isFalse);
+      expect(row.containsKey('source'), isFalse);
+    });
+
+    test('preserves explicit unknown budget and non-success result', () {
+      final row = jsonDecode(publicLogProjection(
+        '$time [WORKSHOP_ENGINEER_OUTPUT] '
+        'outcome=incomplete terminal=modelUnavailable budget=-1 '
+        'tokens=0 chars=0 has_text=0',
+      )!) as Map<String, dynamic>;
+      expect(row['budget'], -1);
+      expect(row['tokens'], 0);
+      expect(row['has_text'], false);
+      expect(row['outcome'], 'incomplete');
+      expect(row['terminal'], 'modelUnavailable');
+    });
+
+    test('fails closed on sensitive, malformed or out-of-bounds fields', () {
+      const invalid = <String>[
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=1 prompt=private-secret',
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=1 /data/user/private',
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=1 session=private-secret',
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=1\nsource=private-secret',
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=1 model=Qwen',
+        'outcome=success terminal=success budget=640 tokens=-1 '
+            'chars=200 has_text=1',
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=-1 has_text=1',
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=true',
+        'outcome=secret terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=1',
+        'outcome=success terminal=private budget=640 tokens=120 '
+            'chars=200 has_text=1',
+        'outcome=success terminal=success budget=9999999999 tokens=120 '
+            'chars=200 has_text=1',
+        'outcome=success terminal=success budget=640 tokens=1000000000 '
+            'chars=200 has_text=1',
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=1 ',
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200 has_text=1\n',
+        'outcome=success terminal=success budget=640 tokens=120 '
+            'chars=200',
+      ];
+      for (final raw in invalid) {
+        expect(
+          publicLogProjection('$time [WORKSHOP_ENGINEER_OUTPUT] $raw'),
+          isNull,
+          reason: raw,
+        );
+      }
+      expect(publicLogProjection(
+        '[no-time] [WORKSHOP_ENGINEER_OUTPUT] '
+        'outcome=success terminal=success budget=640 '
+        'tokens=100 chars=200 has_text=1',
+      ), isNull);
+    });
+  });
+
   test('exports platform diagnostics session without device identity', () {
     final line = publicLogProjection(
       '$time [DIAGNOSTICS_SESSION] '

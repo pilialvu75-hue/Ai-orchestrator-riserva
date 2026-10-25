@@ -70,6 +70,7 @@ String? publicLogProjection(String line) {
     'MODEL_DOWNLOAD_BEGIN',
     'MODEL_DOWNLOAD_COMPLETE',
     'MODEL_DOWNLOAD_FAILED',
+    'WORKSHOP_ENGINEER_OUTPUT',
     'WORKSHOP_ENGINEER_PROMPT',
     'WORKSHOP_ENGINEER_RETRY',
     'WORKSHOP_PLANNER_PROMPT',
@@ -267,6 +268,33 @@ String? publicLogProjection(String line) {
       'object': m[3]!,
     });
   }
+  // Only the exact enum/numeric form emitted by the Cantiere Engineer may
+  // leave the device. Reject all extra fields rather than attempting to redact
+  // prompt, source, session/project/task IDs or raw errors.
+  if (event == 'WORKSHOP_ENGINEER_OUTPUT') {
+    final m = RegExp(
+      r'^outcome=(success|error|incomplete) '
+      r'terminal=(success|timeout|failed|cancelled|modelUnavailable|none) '
+      r'budget=(-1|[0-9]{1,9}) '
+      r'tokens=([0-9]{1,9}) '
+      r'chars=([0-9]{1,9}) '
+      r'has_text=(0|1)$',
+    ).firstMatch(rest);
+    // End anchors can match before a final newline; require byte-for-byte
+    // coverage so an appended payload never slips through a partial match.
+    if (m == null || m.end != rest.length) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'outcome': m[1]!,
+      'terminal': m[2]!,
+      'budget': int.parse(m[3]!),
+      'tokens': int.parse(m[4]!),
+      'chars': int.parse(m[5]!),
+      'has_text': m[6] == '1',
+    });
+  }
+
   if (event == 'WORKSHOP_ENGINEER_PROMPT') {
     final m = RegExp(
       r'^request=[A-Za-z0-9._:-]{1,120} '
