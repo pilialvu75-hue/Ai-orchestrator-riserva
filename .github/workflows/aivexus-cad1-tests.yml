@@ -61,13 +61,41 @@ jobs:
           python tools/aivexus/cad/parametric_plate.py /tmp/aivexus_cad1_revision2.json --out "$RUNNER_TEMP/cad1/revision_2"
           python tools/aivexus/cad/validate_plate.py /tmp/aivexus_cad1_revision2.json --exports "$RUNNER_TEMP/cad1/revision_2" --report "$RUNNER_TEMP/cad1/revision_2/receipt.json"
 
-      - name: Retain local-only CAD validation evidence
-        if: always()
+      - name: Check sample bytes against receipts and include matching input specs
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from shutil import copyfile
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "cad1"
+          specs = {
+              1: Path("tools/aivexus/cad/fixtures/plate_spec.json"),
+              2: Path("/tmp/aivexus_cad1_revision2.json"),
+          }
+          suffixes = {"STEP": "step", "STL": "stl", "3MF": "3mf"}
+          for revision, source in specs.items():
+              directory = root / f"revision_{revision}"
+              receipt = json.loads((directory / "receipt.json").read_text(encoding="utf-8"))
+              assert receipt["status"] == "PASS" and receipt["notCanonicalEvidence"]
+              assert receipt["specRevision"] == revision
+              assert hashlib.sha256(source.read_bytes()).hexdigest() == receipt["inputSha256"]
+              artifacts = {item["format"]: item for item in receipt["artifacts"]}
+              assert set(artifacts) == set(suffixes)
+              for fmt, ext in suffixes.items():
+                  path = directory / f"plate.{ext}"
+                  assert path.is_file() and path.stat().st_size == artifacts[fmt]["sizeBytes"]
+                  assert hashlib.sha256(path.read_bytes()).hexdigest() == artifacts[fmt]["sha256"]
+                  assert artifacts[fmt]["sourceSpecRevision"] == revision
+              copyfile(source, directory / "extension.json")
+          PY
+
+      - name: Upload validated CAD samples for external Fusion and print tests
         uses: actions/upload-artifact@v4
         with:
-          name: cad1-export-receipts-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/cad1/revision_1/receipt.json
-            ${{ runner.temp }}/cad1/revision_2/receipt.json
-          if-no-files-found: warn
+          name: cad1-validated-samples-${{ github.sha }}
+          path: ${{ runner.temp }}/cad1/
+          if-no-files-found: error
           retention-days: 14
