@@ -130,6 +130,7 @@ void main() {
       emitDiagnostics: false,
     );
     expect(actual.indexOf('Sostituisci il valore di c con 680.'), greaterThan(actual.indexOf('Assegna a c il valore 910.')));
+    expect(actual, isNot(contains('<search>query</search>')));
     expect(actual.indexOf('Qual è il valore più recente'), greaterThan(actual.indexOf('Sostituisci il valore di c con 680.')));
     expect(actual, endsWith('<|im_start|>assistant\n<think></think>'));
     // ignore: avoid_print
