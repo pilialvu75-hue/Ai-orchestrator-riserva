@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_store.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emissions_page.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -45,6 +46,8 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
     this.recoveryCoordinator,
     this.emissionStore,
     this.localOnly = false,
+    this.openEmittedApp,
+    this.revealEmittedApp,
     AndroidIntentHandler? androidIntentHandler,
   }) : _androidIntentHandler = androidIntentHandler;
 
@@ -55,6 +58,8 @@ final class WorkshopProductionDashboardPage extends StatefulWidget {
   final WorkshopProductionRecoveryCoordinator? recoveryCoordinator;
   final WorkshopAppEmissionStore? emissionStore;
   final bool localOnly;
+  final WorkshopEmissionAction? openEmittedApp;
+  final WorkshopEmissionAction? revealEmittedApp;
   final AndroidIntentHandler? _androidIntentHandler;
 
   @override
@@ -1273,6 +1278,8 @@ class _WorkshopProductionDashboardPageState
             modelAssignments: widget.modelAssignments,
             productionBusy: productionBusy,
             localOnly: widget.localOnly,
+            openEmittedApp: widget.openEmittedApp,
+            revealEmittedApp: widget.revealEmittedApp,
           ),
         ),
       ),
