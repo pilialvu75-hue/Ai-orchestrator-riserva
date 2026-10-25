@@ -2,6 +2,30 @@ import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.da
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+
+  test('user-assigned latest value is conversation-relative in four languages', () {
+    for (final prompt in [
+      "Qual è il valore più recente assegnato a c dall'utente? Rispondi solo con il numero.",
+      "Qual è il valore attuale assegnato a budget_2 dall’utente?",
+      'What is the latest value assigned to c by the user?',
+      "Quelle est la valeur la plus récente attribuée à c par l'utilisateur?",
+      'Cuál es el valor más reciente asignado a c por el usuario?',
+    ]) {
+      expect(AssistantWebSearchPolicy.shouldSearch(prompt), isFalse, reason: prompt);
+    }
+  });
+  test('external and mixed requests keep fresh-evidence routing', () {
+    for (final prompt in [
+      "Qual è il valore più recente assegnato a c dall'utente? Cerca online.",
+      'What is the current value of the euro?',
+      'Qual è il budget più recente del governo?',
+      "Qual è il valore più recente assegnato a c dall'utente secondo le notizie di oggi?",
+      'Search online for the latest value assigned to c by the user',
+    ]) {
+      expect(AssistantWebSearchPolicy.shouldSearch(prompt), isTrue, reason: prompt);
+    }
+  });
+
   test('verification follow-up resolves user topic without broadening local checks', () {
     for (final request in ['Vérifie ta réponse.', 'Verifica la tua risposta',
         'Verify your answer', 'Verifica tu respuesta']) {

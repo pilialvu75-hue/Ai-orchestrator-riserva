@@ -19,6 +19,10 @@ abstract final class AssistantWebSearchPolicy {
       return false;
     }
 
+    // Explicit user-assigned variables are conversation-relative, not public facts.
+    // Anchored forms leave mixed external-verification requests unchanged.
+    if (_assignedValueRecall(value)) return false;
+
     return _explicitWebIntent(value) ||
         _timeSensitiveIntent(value) ||
         _shoppingIntent(value) ||
@@ -27,6 +31,24 @@ abstract final class AssistantWebSearchPolicy {
         _evidenceDrivenIntent(value);
   }
 
+
+
+  static bool _assignedValueRecall(String value) {
+    final normalized = value.replaceAll('’', "'")
+        .replaceAll(RegExp(r'\s+'), ' ');
+    const variable = r'[a-z_][a-z0-9_]*';
+    final patterns = <String>[
+      r"^qual [èée] il valore (?:pi[uù] recente|attuale|ultimo) assegnato a " +
+          variable + r" dall'utente[?.]?(?: rispondi solo con il numero\.?)?$",
+      r'^what is the (?:latest|most recent|current) value assigned to ' +
+          variable + r' by the user[?.]?$',
+      r'^quelle est la (?:dernière valeur|valeur la plus récente|valeur actuelle) attribuée à ' +
+          variable + r" par l'utilisateur[?.]?$",
+      r'^cu[áa]l es el (?:último valor|valor más reciente|valor actual) asignado a ' +
+          variable + r' por el usuario[?.]?$',
+    ];
+    return patterns.any((pattern) => RegExp(pattern).hasMatch(normalized));
+  }
 
   /// Explicit verification of the preceding answer; not generic proofreading.
   static bool isAnswerVerification(String prompt) {
