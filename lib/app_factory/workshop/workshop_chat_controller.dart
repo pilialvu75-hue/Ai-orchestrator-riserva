@@ -101,6 +101,10 @@ final class WorkshopChatController extends ChangeNotifier {
   static const int _defaultConversationMaxTokens = 384;
 
   final List<ChatTurn> _messages = <ChatTurn>[];
+  // Preserve the model's protocol in history while showing only its readable
+  // body in the UI. Otherwise later turns teach the model to omit the prefix
+  // required before proposal approval.
+  final Map<ChatTurn, String> _protocolReplies = Map.identity();
 
   bool _isBusy = false;
   bool _disposed = false;
@@ -203,7 +207,9 @@ final class WorkshopChatController extends ChangeNotifier {
             : _messages.sublist(
                 0,
                 _messages.length - 1,
-              ),
+              ).map((turn) => _protocolReplies.containsKey(turn)
+                  ? turn.copyWith(content: _protocolReplies[turn])
+                  : turn),
       );
 
       final effectiveMaxTokens =
@@ -304,6 +310,7 @@ final class WorkshopChatController extends ChangeNotifier {
       );
 
       _messages.add(assistantTurn);
+      _protocolReplies[assistantTurn] = result.text.trim();
 
       return assistantTurn;
     } catch (_) {
@@ -500,6 +507,7 @@ final class WorkshopChatController extends ChangeNotifier {
     _ensureNotDisposed();
 
     _messages.clear();
+    _protocolReplies.clear();
 
     _lastError = null;
     _lastRuntimeNotice = null;
@@ -553,6 +561,7 @@ final class WorkshopChatController extends ChangeNotifier {
     _disposed = true;
 
     _messages.clear();
+    _protocolReplies.clear();
 
     super.dispose();
   }

@@ -431,10 +431,10 @@ final class WorkshopLocalBuildProvider
     final stderrBuffer = StringBuffer();
 
     final stdoutSubscription = process.stdout
-        .transform(utf8.decoder)
+        .transform(const Utf8Decoder(allowMalformed: true))
         .listen(stdoutBuffer.write);
     final stderrSubscription = process.stderr
-        .transform(utf8.decoder)
+        .transform(const Utf8Decoder(allowMalformed: true))
         .listen(stderrBuffer.write);
 
     // Register stream completion futures immediately. Waiting until after
