@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_read_aloud_button.
 
 import 'package:ai_orchestrator/app_factory/models/workshop_model_assignments.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emissions_page.dart';
 //import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_manifest.dart';
 //import 'package:ai_orchestrator/app_factory/workshop/workshop_app_emission_package.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
@@ -72,6 +73,8 @@ class WorkshopDashboardPage extends StatefulWidget {
     List<WorkshopModelAssignment>? modelAssignments,
     this.productionBusy = false,
     this.localOnly = false,
+    this.openEmittedApp,
+    this.revealEmittedApp,
   }) : _emissionController = emissionController,
        _dashboardController = dashboardController,
        _chatController = chatController,
@@ -102,6 +105,8 @@ class WorkshopDashboardPage extends StatefulWidget {
   /// recovery remain owned by the production page.
   final bool productionBusy;
   final bool localOnly;
+  final WorkshopEmissionAction? openEmittedApp;
+  final WorkshopEmissionAction? revealEmittedApp;
 
   /// Configurazione esclusiva dei modelli del Cantiere.
   ///
@@ -696,8 +701,6 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
   Widget build(BuildContext context) {
     final emissionState = _emissionController.state;
 
-    final packages = _emissionController.recent(limit: 20);
-
     final dashboardState = _dashboardController?.state;
 
     return Scaffold(
@@ -826,16 +829,18 @@ class _WorkshopDashboardPageState extends State<WorkshopDashboardPage> {
                 leading: const Icon(Icons.inventory_2_outlined),
                 title: Text(
                   'App emesse '
-                  '(${packages.length})',
+                  '(${emissionState.totalPackages})',
                 ),
                 onTap: () {
                   Navigator.of(context).pop();
 
-                  _showMessage(
-                    packages.isEmpty
-                        ? 'Non ci sono ancora app emesse.'
-                        : '${packages.length} app disponibili nell\'output del Cantiere.',
-                  );
+                  Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => WorkshopAppEmissionsPage(
+                      packages: _emissionController.recent(limit: emissionState.totalPackages),
+                      openApp: widget.openEmittedApp,
+                      revealFiles: widget.revealEmittedApp,
+                    ),
+                  ));
                 },
               ),
               ListTile(
