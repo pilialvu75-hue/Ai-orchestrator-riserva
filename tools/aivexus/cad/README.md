@@ -70,3 +70,33 @@ examples and verifies three successful cross-sections in legitimate output.
 It must pass on the **exact current PR head** before reporting this fix as
 validated. Fusion 360, physical printing, the secure execution runner and
 persistent project attachment refs remain separate evidence gates.
+
+
+## Downloadable, versioned external-test specimens (GitHub Actions)
+
+The dedicated `Aivexus CAD-1 Domain Tests` GitHub Actions workflow
+produces two **validated specimen directories**, one for `specRevision=1`
+(thickness 4 mm) and another for `specRevision=2` (thickness 5 mm).
+On a fully successful run it uploads a short-lived artifact called
+`cad1-validated-samples-<commit SHA>` containing in **each** revision
+directory:
+
+- `extension.json`: exact input specification whose SHA-256 matches
+  the receipt `inputSha256`;
+- `plate.step`, `plate.stl`, `plate.3mf`: actual exported geometries;
+- `receipt.json`: the five local CAD checks, model revision, actual
+  sizes and SHA-256 hashes of each corresponding output.
+
+Before upload, CI fails if any receipt did not pass, if a stored source or
+output hash does not match its exact file bytes, if expected formats are
+missing, or if the revision number is wrong. These artifacts expire after
+14 days. They are **external-test samples only**: open STEP in Fusion 360
+and STL/3MF in an independent slicer, and record the actual observations
+before promoting any target-runtime or physical-print gate. Do not assume
+that uploading validated samples implies Fusion import, print, printer
+compatibility, or a deployed Cantiere CAD runner.
+
+GitHub Actions storage is **not** ProjectExtension persistent storage:
+it provides no immutable Cantiere `ref`, no verified ResourceExchange,
+and no operational browser CAD capability. Library issue #113 remains
+the integration/certification dependency.
