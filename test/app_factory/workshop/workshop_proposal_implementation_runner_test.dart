@@ -38,16 +38,21 @@ void main() {
         valid,
       ]);
       final gateway = _RecordingWorkspaceGateway(files: {'lib/app.dart': 'old'});
-      final session = await _session(gateway);
+      final required = '${'Owner requirement remains mandatory. ' * 65}TAIL_REQUIREMENT';
+      final session = await _session(gateway, constraints: [required]);
       await WorkshopProposalImplementationRunner(
         inference: _stageInference(_gateways(engineer)),
         promptPolicy: const WorkshopSourcePromptPolicy(
           implementationMaxTokens: 2048,
           implementationRetryMaxTokens: 1536,
           implementationMalformedRetryMaxTokens: 1800,
+          maxOwnerConstraintsChars: 6000,
         ),
       ).run(session: session);
       expect(engineer.maxTokensValues, <int?>[2048, 1800]);
+      for (final prompt in engineer.prompts) {
+        expect(prompt, contains(required));
+      }
       expect(session.status, WorkspaceSessionStatus.review);
       expect(session.isApplyApproved, isFalse);
       expect(gateway.writeCalls, 0);
@@ -2598,6 +2603,7 @@ Map<AppAiRole, _StaticGateway> _gateways(_StaticGateway engineer) {
 Future<WorkspaceSession> _session(
   _RecordingWorkspaceGateway gateway, {
   WorkshopOperation operation = WorkshopOperation.analyse,
+  List<String> constraints = const ['Do not introduce regressions'],
 }) async {
   final session = WorkspaceSession(
     request: WorkshopRequest(
@@ -2606,7 +2612,7 @@ Future<WorkspaceSession> _session(
       instruction: 'Update the app implementation safely',
       operation: operation,
       targetFiles: const <String>['lib/app.dart'],
-      constraints: const <String>['Do not introduce regressions'],
+      constraints: constraints,
     ),
     gateway: gateway,
   );
