@@ -15,9 +15,13 @@ class ResidentGenerationLimitReached implements Exception {}
 /// One local, authenticated process and one cache slot. Nothing is persisted.
 /// A different model or conversation always starts a fresh process.
 class ResidentCompletionRuntime {
-  ResidentCompletionRuntime({this.idleTimeout = const Duration(minutes: 5)});
+  ResidentCompletionRuntime({
+    this.idleTimeout = const Duration(minutes: 5),
+    this.contextSize = 4096,
+  }) : assert(contextSize > 0);
 
   final Duration idleTimeout;
+  final int contextSize;
   Process? _process;
   ResidentProcessLease? _lease;
   HttpClient? _client;
@@ -160,7 +164,7 @@ class ResidentCompletionRuntime {
     _client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
     final process = await Process.start(executable, [
       '-m', model, '--host', '127.0.0.1', '--port', '$_port', '--api-key', _key!,
-      '-c', '4096', '-t', '${threads.clamp(1, 8)}', '-ngl', device == null ? '0' : '99', '--parallel', '1',
+      '-c', '$contextSize', '-t', '${threads.clamp(1, 8)}', '-ngl', device == null ? '0' : '99', '--parallel', '1',
       // Avoid an extra synthetic generation before the first real request.
       // Measured with this pinned Vulkan package; CPU/legacy paths unchanged.
       if (device != null) ...['--device', device, '--no-warmup'],

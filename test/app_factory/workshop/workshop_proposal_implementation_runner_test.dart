@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_preflight_inference_pipeline.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_proposal_implementation_runner.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_source_prompt_policy.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_executor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_role_inference_router.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_stage_role_inference.dart';
@@ -27,6 +28,31 @@ void main() {
   // Execute the actual SDK/AAPT2 negative fixture in the first-app CI suite.
   star_negative.main();
   group('WorkshopProposalImplementationRunner', () {
+    test('host budgets reach primary and malformed retry without weakening gates', () async {
+      const valid = WorkshopInferenceResult(
+        text: '{"explanation":"Change requested file","changes":[{"path":"lib/app.dart","type":"modification","content":"new"}],"validationNotes":[],"warnings":[]}',
+        terminalState: InferenceTerminalState.success,
+      );
+      final engineer = _StaticGateway(results: const [
+        WorkshopInferenceResult(text: 'not json', terminalState: InferenceTerminalState.success),
+        valid,
+      ]);
+      final gateway = _RecordingWorkspaceGateway(files: {'lib/app.dart': 'old'});
+      final session = await _session(gateway);
+      await WorkshopProposalImplementationRunner(
+        inference: _stageInference(_gateways(engineer)),
+        promptPolicy: const WorkshopSourcePromptPolicy(
+          implementationMaxTokens: 2048,
+          implementationRetryMaxTokens: 1536,
+          implementationMalformedRetryMaxTokens: 1800,
+        ),
+      ).run(session: session);
+      expect(engineer.maxTokensValues, <int?>[2048, 1800]);
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(session.isApplyApproved, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
     test('scopes shadowed bundle parameters without masking global calls',
         () async {
       const inputs = <({String id, String code, bool retry})>[
