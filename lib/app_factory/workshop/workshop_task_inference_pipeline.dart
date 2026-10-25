@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workshop/workshop_source_prompt_policy.dart';
 import 'package:ai_orchestrator/app_factory/workspace/workspace_session.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
@@ -58,15 +59,19 @@ final class WorkshopTaskInferenceResult {
 final class WorkshopTaskInferencePipeline {
   WorkshopTaskInferencePipeline({
     required WorkshopStageRoleInference inference,
+    WorkshopSourcePromptPolicy sourcePromptPolicy = const WorkshopSourcePromptPolicy(),
   })  : _inference = inference,
         _implementationRunner = WorkshopProposalImplementationRunner(
           inference: inference,
+          promptPolicy: sourcePromptPolicy,
         ),
         _reviewRunner = WorkshopProposalReviewRunner(
           inference: inference,
+          promptPolicy: sourcePromptPolicy,
         ),
         _validationRunner = WorkshopProposalValidationRunner(
           inference: inference,
+          promptPolicy: sourcePromptPolicy,
         );
 
   final WorkshopStageRoleInference _inference;

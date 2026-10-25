@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workshop/workshop_source_prompt_policy.dart';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workspace/git_workspace_gateway.dart';
@@ -30,28 +31,31 @@ final class WorkshopProposalReviewRunner {
   WorkshopProposalReviewRunner({
     required WorkshopStageRoleInference inference,
     WorkshopProposalReviewGate gate = const WorkshopProposalReviewGate(),
+    WorkshopSourcePromptPolicy promptPolicy = const WorkshopSourcePromptPolicy(),
     Future<bool> Function(CancellationToken? cancellationToken)?
         memoryRecoveryWaiter,
   })  : _inference = inference,
+        _promptPolicy = promptPolicy,
         _gate = gate,
         _memoryRecoveryWaiter =
             memoryRecoveryWaiter ?? _waitForRuntimeMemoryRecovery;
 
   final WorkshopStageRoleInference _inference;
   final WorkshopProposalReviewGate _gate;
+  final WorkshopSourcePromptPolicy _promptPolicy;
   final Future<bool> Function(CancellationToken? cancellationToken)
       _memoryRecoveryWaiter;
 
   // Physical +3117: 9,385-char full Reviewer input failed before any token;
   // the existing 6,601-char compact input ran. This is only a prompt-shape
   // selection threshold, not a token-budget, model, retry or gate change.
-  static const int _maxFullPromptChars = 7000;
+  int get _maxFullPromptChars => _promptPolicy.maxPromptChars;
   static const int _primaryMaxTokens = 256;
   static const int _retryMaxTokens = 192;
   static const Duration _retryFirstTokenTimeout = Duration(seconds: 75);
   static const int _filesPerBatch = 2;
-  static const int _primaryFileChars = 2400;
-  static const int _retryFileChars = 1200;
+  int get _primaryFileChars => _promptPolicy.primaryFileChars;
+  int get _retryFileChars => _promptPolicy.retryFileChars;
   static const int _primaryContextChars = 320;
   static const int _retryContextChars = 160;
 
@@ -883,7 +887,9 @@ Do not return markdown fences or any text outside the JSON object.
       'revision, add the EXACT standalone finding HANDOFF:ARCHITECT. '
       'For an owner requirement conflict needing re-scoping, use '
       'HANDOFF:ORCHESTRATOR. Never add these markers for ordinary '
-      'source-code errors. Return the required JSON verdict only.';
+      'source-code errors. Return the required JSON verdict only. '
+      'findings and warnings MUST be arrays of strings, never objects. '
+      'For example: "findings":["file: issue description"].';
 
   static const String _retrySystemPrompt =
       'You are the Cantiere Reviewer retrying after a runtime or invalid-verdict failure. '
@@ -893,7 +899,9 @@ Do not return markdown fences or any text outside the JSON object.
       'increment is correct and safe. Return the required JSON verdict only; '
       'do not use project-wide future requirements. On rejection, '
       'use standalone findings HANDOFF:ARCHITECT or HANDOFF:ORCHESTRATOR '
-      'only for plan or owner requirement conflicts, never ordinary errors.';
+      'only for plan or owner requirement conflicts, never ordinary errors. '
+      'findings and warnings MUST be arrays of strings, never objects. '
+      'For example: "findings":["file: issue description"].';
 }
 
 final class _WorkshopReviewCoverageManifest {
