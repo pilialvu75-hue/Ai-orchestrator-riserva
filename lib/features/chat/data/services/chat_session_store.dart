@@ -18,13 +18,35 @@ class ChatSessionInfo {
 
 class ChatSessionStore {
   ChatSessionStore({required DatabaseHelper databaseHelper})
-      : _databaseHelper = databaseHelper;
+      : _databaseHelper = databaseHelper,
+        _testDatabase = null;
+
+  /// Unit tests inject an in-memory database; never use real user data.
+  ChatSessionStore.forTesting(Database database)
+      : _databaseHelper = null,
+        _testDatabase = database;
+
   static const String defaultSessionId = 'default';
   static const String activeSessionPreference = 'assistant.chat.active_session';
-  final DatabaseHelper _databaseHelper;
+  final DatabaseHelper? _databaseHelper;
+  final Database? _testDatabase;
+
+  Future<Database> get _database async =>
+      _testDatabase ?? await _databaseHelper!.database;
+
+  Future<String?> _getActivePreference() async {
+    final db = await _database;
+    final rows = await db.query(
+      AppConstants.tableUserPreferences,
+      where: '${AppConstants.colPrefKey} = ?',
+      whereArgs: const <String>[activeSessionPreference],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first[AppConstants.colPrefValue] as String?;
+  }
 
   Future<String> restoreActiveSession() async {
-    final saved = await _databaseHelper.getPreference(activeSessionPreference);
+    final saved = await _getActivePreference();
     final sessions = await listSessions();
     if (saved != null && sessions.any((item) => item.id == saved)) {
       return saved;
@@ -42,7 +64,7 @@ class ChatSessionStore {
   Future<void> createSession(String sessionId) async {
     final id = sessionId.trim();
     if (id.isEmpty) throw ArgumentError('Session id must not be empty');
-    final db = await _databaseHelper.database;
+    final db = await _database;
     await db.insert(
       AppConstants.tableChatSessions,
       <String, Object>{
@@ -54,11 +76,20 @@ class ChatSessionStore {
     );
   }
 
-  Future<void> selectSession(String sessionId) =>
-      _databaseHelper.setPreference(activeSessionPreference, sessionId);
+  Future<void> selectSession(String sessionId) async {
+    final db = await _database;
+    await db.insert(
+      AppConstants.tableUserPreferences,
+      <String, Object>{
+        AppConstants.colPrefKey: activeSessionPreference,
+        AppConstants.colPrefValue: sessionId,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
 
   Future<void> setPinned(String sessionId, bool pinned) async {
-    final db = await _databaseHelper.database;
+    final db = await _database;
     await db.update(
       AppConstants.tableChatSessions,
       <String, Object>{'pinned': pinned ? 1 : 0},
@@ -70,7 +101,7 @@ class ChatSessionStore {
   /// Pinned sessions first, then most recent. Titles come only from the
   /// first user message rather than model-generated text.
   Future<List<ChatSessionInfo>> listSessions() async {
-    final db = await _databaseHelper.database;
+    final db = await _database;
     final rows = await db.rawQuery('''
       SELECT s.id, s.pinned,
              COALESCE(
