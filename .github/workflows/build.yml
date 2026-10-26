@@ -64,7 +64,7 @@ jobs:
           fi
 
       - name: Verify Android release publication gate
-        run: python3 scripts/check_android_release_gate.py .github/workflows/build.yml
+        run: python3 scripts/check_android_release_gate.py .github/workflows/build.yml .github/workflows/macos-release-publish.yml
 
       - name: Setup Java
         uses: actions/setup-java@v6
