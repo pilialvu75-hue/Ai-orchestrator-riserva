@@ -1447,27 +1447,41 @@ class _ChatBodyState
     }
   }
 
-  void _clearChatDebug() {
+  Future<void> _clearChatDebug() async {
     if (!mounted) return;
+    final sessionId = widget.chatNavigation.sessionId;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cancellare questa chat?'),
+        content: const Text(
+          'Clear Chat elimina definitivamente i messaggi e l\'indice '
+          'semantico della conversazione corrente. Le altre chat rimangono '
+          'disponibili. Per iniziare una nuova conversazione senza perdere '
+          'questa usa Nuova chat.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Elimina chat'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
 
     _uiDebugLog(
-      action:
-          'clear_chat_triggered',
-      sessionId:
-          widget.chatNavigation.sessionId,
+      action: 'clear_chat_confirmed',
+      sessionId: sessionId,
     );
-
-    context
-        .read<OrchestratorStateEngine>()
-        .add(
-          DebugClearChatEvent(
-            sessionId:
-                widget.chatNavigation.sessionId,
-          ),
-        );
-
-    widget
-        .onClearDebugLabMessages();
+    context.read<OrchestratorStateEngine>().add(
+      DebugClearChatEvent(sessionId: sessionId),
+    );
+    widget.onClearDebugLabMessages();
   }
 
   void _uiDebugLog({
