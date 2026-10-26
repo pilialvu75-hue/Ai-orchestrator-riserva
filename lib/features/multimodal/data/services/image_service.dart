@@ -6,7 +6,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'dart:ui' as ui;
 
 /// Service providing image pick (from gallery / camera) and app-screenshot
@@ -33,12 +32,16 @@ class ImageService {
     return xFile == null ? null : File(xFile.path);
   }
 
-  /// Opens the device camera and returns the captured image file, or `null`
-  /// if the user cancelled or denied the camera permission.
+  /// Opens the platform camera and returns a capture, or null on cancellation.
+  ///
+  /// The platform camera picker owns permission/consent. Asking for a second
+  /// permission through permission_handler before opening the camera caused a
+  /// silent abort on devices with restricted camera access and on platforms
+  /// where a broad camera permission is not exposed.
+  ///
+  /// A denied permission or unsupported platform throws an explicit picker
+  /// error; the chat UI displays it without sending an empty attachment.
   Future<File?> pickFromCamera() async {
-    final status = await Permission.camera.request();
-    if (status.isDenied || status.isPermanentlyDenied) return null;
-
     final xFile = await _picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 85,
