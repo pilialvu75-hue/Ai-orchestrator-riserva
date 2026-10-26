@@ -35,6 +35,7 @@ class LocalDocumentIndexService {
   Future<int> indexDocument({
     required String filePath,
     String? documentId,
+    bool replaceExistingPath = true,
   }) async {
     final file = File(filePath);
     if (!await file.exists()) {
@@ -57,9 +58,12 @@ class LocalDocumentIndexService {
     await db.transaction((txn) async {
       await txn.delete(
         AppConstants.tableDocumentChunks,
-        where:
-            '${AppConstants.colDocumentId} = ? OR ${AppConstants.colDocumentPath} = ?',
-        whereArgs: [resolvedDocumentId, file.path],
+        where: replaceExistingPath
+            ? '${AppConstants.colDocumentId} = ? OR ${AppConstants.colDocumentPath} = ?'
+            : '${AppConstants.colDocumentId} = ?',
+        whereArgs: replaceExistingPath
+            ? <Object?>[resolvedDocumentId, file.path]
+            : <Object?>[resolvedDocumentId],
       );
 
       for (var i = 0; i < chunks.length; i++) {

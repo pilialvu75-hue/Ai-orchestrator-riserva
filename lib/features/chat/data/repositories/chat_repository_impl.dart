@@ -19,6 +19,7 @@ import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repositor
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_file_context_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
@@ -33,6 +34,7 @@ class ChatRepositoryImpl implements ChatRepository {
     this.inferenceService,
     this.runtimeSettingsService,
     this.imageVisionService,
+    this.fileContextService,
   })  : _orchestrator = orchestrator,
         _orchestratorProvider = orchestratorProvider;
 
@@ -49,6 +51,7 @@ class ChatRepositoryImpl implements ChatRepository {
   final InferenceService? inferenceService;
   final AiRuntimeSettingsService? runtimeSettingsService;
   final ChatImageVisionService? imageVisionService;
+  final ChatFileContextService? fileContextService;
 
   static const _uuid = Uuid();
   final Set<String> _activeSendSessions = <String>{};
@@ -123,7 +126,8 @@ class ChatRepositoryImpl implements ChatRepository {
             );
 
             if (normalizedPrompt.isEmpty && attachments.isNotEmpty &&
-                !attachmentsSnapshot.any((item) => item.isImage)) {
+                !attachmentsSnapshot.any((item) =>
+                    item.isImage || item.type == ChatAttachmentType.file)) {
               final forensicMessage =
                   '[PRE_STREAM_BYPASS] session=$sessionId boundary=chat_repository.attachments_only reason=empty_prompt_with_attachments target=inference_not_invoked attachments=${attachments.length}';
               _log(forensicMessage);
@@ -206,6 +210,44 @@ class ChatRepositoryImpl implements ChatRepository {
               return imageAnswer;
             }
 
+            String effectivePrompt = normalizedPrompt;
+            if (attachmentsSnapshot.any(
+              (item) => item.type == ChatAttachmentType.file,
+            )) {
+              // No silent third-party upload through Hybrid. A user-chosen
+              // Local or Cloud mode governs where document excerpts go.
+              final mode = runtimeSettingsService?.runtimeMode;
+              if (mode != AiRuntimeMode.local && mode != AiRuntimeMode.cloud) {
+                throw const ServerFailure(
+                  'File: seleziona esplicitamente Local o Cloud. '
+                  'In Hybrid il percorso documentale non è ancora verificato.',
+                );
+              }
+              if (fileContextService == null) {
+                throw const ServerFailure(
+                  'File: indicizzazione documentale non disponibile.',
+                );
+              }
+            }
+            final mode = runtimeSettingsService?.runtimeMode;
+            if (fileContextService != null &&
+                (mode == AiRuntimeMode.local || mode == AiRuntimeMode.cloud)) {
+              final fileContext = await fileContextService!.buildContext(
+                sessionId: sessionId,
+                userPrompt: normalizedPrompt,
+                attachments: attachmentsSnapshot,
+              );
+              if (fileContext != null) {
+                effectivePrompt = fileContext.prompt;
+                onRuntimeNotice?.call(
+                  mode == AiRuntimeMode.cloud
+                      ? 'File: estratti locali recuperati; inviati al '
+                          'provider Cloud selezionato con la tua domanda.'
+                      : 'File: estratti recuperati dal RAG locale.',
+                );
+              }
+            }
+
             final streamedResponse = StringBuffer();
             String responseProvider = 'local';
 
@@ -222,7 +264,7 @@ class ChatRepositoryImpl implements ChatRepository {
             final contextSnapshot = List<ChatTurn>.unmodifiable(context);
             final stream = _buildInferenceStream(
               sessionId: sessionId,
-              prompt: normalizedPrompt,
+              prompt: effectivePrompt,
               systemPrompt: systemPrompt,
               context: contextSnapshot,
             );
