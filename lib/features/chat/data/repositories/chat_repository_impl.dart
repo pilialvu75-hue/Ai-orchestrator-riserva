@@ -19,6 +19,8 @@ import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repositor
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_video_storyboard_service.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_file_context_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
@@ -34,6 +36,7 @@ class ChatRepositoryImpl implements ChatRepository {
     this.inferenceService,
     this.runtimeSettingsService,
     this.imageVisionService,
+    this.videoStoryboardService,
     this.fileContextService,
   })  : _orchestrator = orchestrator,
         _orchestratorProvider = orchestratorProvider;
@@ -51,6 +54,7 @@ class ChatRepositoryImpl implements ChatRepository {
   final InferenceService? inferenceService;
   final AiRuntimeSettingsService? runtimeSettingsService;
   final ChatImageVisionService? imageVisionService;
+  final ChatVideoStoryboardService? videoStoryboardService;
   final ChatFileContextService? fileContextService;
 
   static const _uuid = Uuid();
@@ -127,7 +131,8 @@ class ChatRepositoryImpl implements ChatRepository {
 
             if (normalizedPrompt.isEmpty && attachments.isNotEmpty &&
                 !attachmentsSnapshot.any((item) =>
-                    item.isImage || item.type == ChatAttachmentType.file)) {
+                    item.isImage || item.isVideo ||
+                    item.type == ChatAttachmentType.file)) {
               final forensicMessage =
                   '[PRE_STREAM_BYPASS] session=$sessionId boundary=chat_repository.attachments_only reason=empty_prompt_with_attachments target=inference_not_invoked attachments=${attachments.length}';
               _log(forensicMessage);
@@ -208,6 +213,95 @@ class ChatRepositoryImpl implements ChatRepository {
                 timestamp: imageAnswer.timestamp,
               );
               return imageAnswer;
+            }
+
+            final videoAttachments = attachmentsSnapshot
+                .where((item) => item.isVideo)
+                .toList(growable: false);
+            if (videoAttachments.isNotEmpty) {
+              if (attachmentsSnapshot.length != 1) {
+                throw const ServerFailure(
+                  'Video: invia un solo filmato per volta senza altri allegati.',
+                );
+              }
+              if (runtimeSettingsService?.runtimeMode != AiRuntimeMode.cloud) {
+                throw const ServerFailure(
+                  'Video: l\\'analisi locale dei filmati non è disponibile. '
+                  'Per analizzare tre fotogrammi, seleziona Cloud '
+                  'e un provider visivo manualmente.',
+                );
+              }
+              final provider = runtimeSettingsService?.manualCloudProvider;
+              if (provider != 'openAi' && provider != 'gemini') {
+                throw const ServerFailure(
+                  'Video: scegli manualmente OpenAI o Gemini in modalità Cloud.',
+                );
+              }
+              if (videoStoryboardService == null || imageVisionService == null) {
+                throw const ServerFailure(
+                  'Video: il servizio fotogrammi non è configurato.',
+                );
+              }
+              final jpeg = await videoStoryboardService!
+                  .extractStoryboard(videoAttachments.single);
+              final temporaryDirectory = await getTemporaryDirectory();
+              final contactSheet = File(
+                '${temporaryDirectory.path}/video-storyboard-${_uuid.v4()}.jpg',
+              );
+              await contactSheet.writeAsBytes(jpeg, flush: true);
+              try {
+                final question = normalizedPrompt.isEmpty
+                    ? 'Descrivi le tre scene principali visibili.'
+                    : normalizedPrompt;
+                final visual = await imageVisionService!.analyze(
+                  providerId: provider!,
+                  image: ChatAttachment(
+                    id: _uuid.v4(),
+                    type: ChatAttachmentType.image,
+                    path: contactSheet.path,
+                    name: 'video-storyboard.jpg',
+                    mimeType: 'image/jpeg',
+                    uploadState: ChatAttachmentUploadState.ready,
+                  ),
+                  prompt: 'Questa è una storyboard con tre fotogrammi '
+                      'campionati nell\\'ordine inizio, metà e fine del video. '
+                      'Non hai accesso al video completo o all\\'audio. '
+                      'Non inventare movimenti, parole o eventi non osservabili. '
+                      'Richiesta: $question',
+                  systemPrompt: systemPrompt,
+                  context: context,
+                );
+                onRuntimeNotice?.call(
+                  'Video: analizzati tre fotogrammi con ${visual.providerId} '
+                  'in Cloud; video completo e audio non trasmessi.',
+                );
+                onPartialResponse?.call(visual.text);
+                final answer = ChatMessageModel(
+                  id: _uuid.v4(),
+                  sessionId: sessionId,
+                  role: 'assistant',
+                  content: visual.text,
+                  timestamp: DateTime.now().millisecondsSinceEpoch,
+                  provider: visual.providerId,
+                );
+                await localDataSource.insertMessage(answer);
+                await conversationMemoryService.storeMessageEmbedding(
+                  sessionId: sessionId,
+                  messageId: answer.id,
+                  role: answer.role,
+                  content: answer.content,
+                  timestamp: answer.timestamp,
+                );
+                return answer;
+              } finally {
+                try {
+                  if (await contactSheet.exists()) {
+                    await contactSheet.delete();
+                  }
+                } catch (_) {
+                  // A temporary-file cleanup error must not lose an answer.
+                }
+              }
             }
 
             String effectivePrompt = normalizedPrompt;
