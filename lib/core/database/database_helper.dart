@@ -93,6 +93,7 @@ class DatabaseHelper {
       )
     ''');
     await _createChatHistoryTable(db);
+    await _createChatSessionsTable(db);
     await _createUserPreferencesTable(db);
     await _createDocumentChunksTable(db);
     await _createSyncChangesTable(db);
@@ -123,6 +124,9 @@ class DatabaseHelper {
     if (oldVersion < 5) {
       await _createSyncChangesTable(db);
     }
+    if (oldVersion < 6) {
+      await _createChatSessionsTable(db);
+    }
   }
 
   Future<void> _createChatHistoryTable(Database db) async {
@@ -140,6 +144,26 @@ class DatabaseHelper {
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_chat_session
       ON ${AppConstants.tableChatHistory} (${AppConstants.colSessionId}, ${AppConstants.colTimestamp})
+    ''');
+  }
+
+  Future<void> _createChatSessionsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tableChatSessions} (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    // Preserve every existing conversation when upgrading from the legacy
+    // single-session UI. No chat message or semantic memory is modified.
+    await db.execute('''
+      INSERT OR IGNORE INTO ${AppConstants.tableChatSessions}
+        (id, created_at, pinned)
+      SELECT ${AppConstants.colSessionId},
+             MIN(${AppConstants.colTimestamp}), 0
+      FROM ${AppConstants.tableChatHistory}
+      GROUP BY ${AppConstants.colSessionId}
     ''');
   }
 
@@ -310,7 +334,16 @@ class DatabaseHelper {
   /// report partial failures and let the user choose exactly what is erased.
   Future<int> deleteAllChatMessages() async {
     final db = await database;
-    return db.delete(AppConstants.tableChatHistory);
+    return db.transaction<int>((txn) async {
+      final removed = await txn.delete(AppConstants.tableChatHistory);
+      await txn.delete(AppConstants.tableChatSessions);
+      await txn.delete(
+        AppConstants.tableUserPreferences,
+        where: '${AppConstants.colPrefKey} = ?',
+        whereArgs: const <String>['assistant.chat.active_session'],
+      );
+      return removed;
+    });
   }
 
   Future<int> deleteChatMessagesBeyondLimit(int maxRows) async {
