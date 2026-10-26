@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
@@ -136,6 +138,51 @@ void main() {
       isTrue,
     );
     expect(await userRecords(), isEmpty);
+  });
+
+  test('concurrent updates are serialized in their arrival order', () async {
+    final updates = <Future<bool>>[
+      capture.applyExplicitUserInstruction(
+        sessionId: 'one',
+        userPrompt: 'Ricorda che il budget è 420',
+      ),
+      capture.applyExplicitUserInstruction(
+        sessionId: 'one',
+        userPrompt: 'Ricorda che il budget è 680',
+      ),
+    ];
+    expect(await Future.wait(updates), <bool>[true, true]);
+    expect((await userRecords()).single.content, 'il budget è 680');
+  });
+
+  test('reset barrier rejects new writes until the reset finishes', () async {
+    final releaseReset = Completer<void>();
+    final enteredReset = Completer<void>();
+    final reset = capture.runWithResetBarrier(() async {
+      enteredReset.complete();
+      await releaseReset.future;
+      return 'cleared';
+    });
+
+    await enteredReset.future;
+    expect(
+      await capture.applyExplicitUserInstruction(
+        sessionId: 'one',
+        userPrompt: 'Ricorda che il budget è 420',
+      ),
+      isFalse,
+    );
+    releaseReset.complete();
+    expect(await reset, 'cleared');
+    expect(await userRecords(), isEmpty);
+
+    expect(
+      await capture.applyExplicitUserInstruction(
+        sessionId: 'one',
+        userPrompt: 'Ricorda che il budget è 680',
+      ),
+      isTrue,
+    );
   });
 
   test('unrecognized forget does not modify another memory', () async {
