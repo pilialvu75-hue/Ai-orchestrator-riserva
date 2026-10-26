@@ -17,6 +17,7 @@ class _DangerZonePageState extends State<DangerZonePage> {
   bool _recentContext = false;
   bool _chatHistory = false;
   bool _semanticChatIndex = false;
+  bool _documentAndProjectRagIndexes = false;
   bool _durableMemory = false;
   bool _projectMemory = false;
   bool _running = false;
@@ -25,6 +26,7 @@ class _DangerZonePageState extends State<DangerZonePage> {
         recentContext: _recentContext,
         chatHistory: _chatHistory,
         semanticChatIndex: _semanticChatIndex,
+        documentAndProjectRagIndexes: _documentAndProjectRagIndexes,
         durableMemory: _durableMemory,
         projectMemory: _projectMemory,
       );
@@ -87,6 +89,15 @@ class _DangerZonePageState extends State<DangerZonePage> {
               value: _semanticChatIndex,
               enabled: !_running,
               onChanged: (value) => setState(() => _semanticChatIndex = value),
+            ),
+            _ResetOption(
+              title: 'Document and project RAG indexes',
+              subtitle:
+                  'Deletes generated document/project search indexes, not original files or chat embeddings.',
+              value: _documentAndProjectRagIndexes,
+              enabled: !_running,
+              onChanged: (value) =>
+                  setState(() => _documentAndProjectRagIndexes = value),
             ),
             _ResetOption(
               title: 'Durable Assistant memory',
@@ -173,6 +184,7 @@ class _DangerZonePageState extends State<DangerZonePage> {
           _recentContext = false;
           _chatHistory = false;
           _semanticChatIndex = false;
+          _documentAndProjectRagIndexes = false;
           _durableMemory = false;
           _projectMemory = false;
         });
@@ -257,7 +269,9 @@ class _DangerZonePageState extends State<DangerZonePage> {
               children: [
                 const Text(
                   'This erases recent context, all chat history, semantic chat '
-                  'embeddings, durable Assistant memory and retained project memory.',
+                  'embeddings, generated document/project RAG indexes, durable '
+                  'Assistant memory and retained project memory. Original '
+                  'documents, project files, models and settings are preserved.',
                   style: TextStyle(
                     color: Colors.white70,
                     height: 1.45,
@@ -364,6 +378,8 @@ class _DangerZonePageState extends State<DangerZonePage> {
           'Recent conversation context',
         AssistantDataResetCategory.chatHistory => 'Chat history',
         AssistantDataResetCategory.semanticChatIndex => 'Semantic chat index',
+        AssistantDataResetCategory.documentAndProjectRagIndexes =>
+          'Document and project RAG indexes',
         AssistantDataResetCategory.durableMemory =>
           'Durable Assistant memory',
         AssistantDataResetCategory.projectMemory => 'Project memory',
