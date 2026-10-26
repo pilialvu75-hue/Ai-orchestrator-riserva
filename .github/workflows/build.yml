@@ -63,6 +63,9 @@ jobs:
             git submodule update --init --recursive
           fi
 
+      - name: Verify Android release publication gate
+        run: python3 scripts/check_android_release_gate.py .github/workflows/build.yml
+
       - name: Setup Java
         uses: actions/setup-java@v6
         with:
