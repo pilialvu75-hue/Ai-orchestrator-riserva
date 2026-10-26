@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
@@ -166,6 +167,90 @@ void main() {
       expect(delegate.lastSystemPrompt, contains(SystemPromptConfig.defaultPrompt));
       expect(delegate.lastSystemPrompt, contains('CONFIRMED DURABLE MEMORY'));
       expect(delegate.lastSystemPrompt, contains('La bici attuale è quella nuova.'));
+    });
+
+    test('explicit memory is updated, recalled across chats and forgotten',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final persistence = _PromptMemoryPersistence();
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: persistence),
+      );
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: AssistantDurableMemoryCaptureService(
+          memoryService: memory,
+          now: () => 42,
+        ),
+      );
+
+      await repository.sendMessage(
+        sessionId: 'session-one',
+        userPrompt: 'Ricorda che il budget è 420',
+      );
+      await repository.sendMessage(
+        sessionId: 'session-two',
+        userPrompt: 'Qual è il budget?',
+      );
+      expect(delegate.lastSystemPrompt, contains('il budget è 420'));
+
+      await repository.sendMessage(
+        sessionId: 'session-two',
+        userPrompt: 'Ricorda che il budget è 680',
+      );
+      await repository.sendMessage(
+        sessionId: 'session-three',
+        userPrompt: 'Qual è il budget?',
+      );
+      expect(delegate.lastSystemPrompt, contains('il budget è 680'));
+      expect(delegate.lastSystemPrompt, isNot(contains('il budget è 420')));
+
+      await repository.sendMessage(
+        sessionId: 'session-three',
+        userPrompt: 'Dimentica il budget',
+      );
+      await repository.sendMessage(
+        sessionId: 'session-four',
+        userPrompt: 'Qual è il budget?',
+      );
+      expect(delegate.lastSystemPrompt, isNot(contains('CONFIRMED DURABLE MEMORY')));
+    });
+
+    test('specialized Assistant requests cannot create durable user facts',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final persistence = _PromptMemoryPersistence();
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: persistence),
+      );
+      final repository = PromptResolvingChatRepository(
+        delegate: _RecordingChatRepository(),
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: AssistantDurableMemoryCaptureService(
+          memoryService: memory,
+        ),
+      );
+
+      await repository.sendMessage(
+        sessionId: 'worker',
+        userPrompt: 'Ricorda che il budget è 999',
+        systemPrompt: 'Specialized system prompt.',
+      );
+      expect(
+        await memory.loadConfirmed(
+          scope: AssistantMemoryScope.user,
+          scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        ),
+        isEmpty,
+      );
     });
 
     test('preserves explicit specialized system prompt', () async {
