@@ -57,7 +57,7 @@ class PromptResolvingChatRepository implements ChatRepository {
         if (updated) {
           onRuntimeNotice?.call('Long-term Assistant memory updated.');
         } else if (RegExp(
-          r'^(?:ricorda|memorizza|remember that|dimentica|forget)\\b',
+          r'^(?:ricorda|memorizza|remember that|dimentica|forget)\b',
           caseSensitive: false,
         ).hasMatch(userPrompt.trim())) {
           // Avoid making the model's conversational acknowledgement look like
