@@ -14,7 +14,7 @@ void main() {
   setUp(() async {
     db = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
     await db.execute('''
-      CREATE TABLE user_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)
+      CREATE TABLE user_preferences (pref_key TEXT PRIMARY KEY, pref_value TEXT NOT NULL)
     ''');
     await db.execute('''
       CREATE TABLE chat_sessions (
