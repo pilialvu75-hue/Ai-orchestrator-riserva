@@ -85,7 +85,9 @@ void main() {
   });
 
   test('returns captured PNG bytes through the multimodal boundary', () async {
-    final expected = Uint8List.fromList(<int>[137, 80, 78, 71, 1, 2, 3]);
+    final expected = Uint8List.fromList(<int>[
+      137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3,
+    ]);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'captureScreenshot') return expected;
@@ -93,6 +95,48 @@ void main() {
     });
 
     expect(await service().capturePng(), expected);
+  });
+
+  test('rejects a malformed or truncated native PNG frame', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'captureScreenshot') {
+        return Uint8List.fromList(<int>[137, 80, 78, 71, 1, 2, 3]);
+      }
+      return null;
+    });
+
+    await expectLater(
+      service().capturePng(),
+      throwsA(
+        isA<ScreenVisionException>().having(
+          (error) => error.code,
+          'code',
+          'SCREEN_VISION_INVALID_PNG',
+        ),
+      ),
+    );
+  });
+
+  test('rejects native PNG frames above the Cloud image limit', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'captureScreenshot') {
+        return Uint8List(8 * 1024 * 1024 + 1);
+      }
+      return null;
+    });
+
+    await expectLater(
+      service().capturePng(),
+      throwsA(
+        isA<ScreenVisionException>().having(
+          (error) => error.code,
+          'code',
+          'SCREEN_VISION_FRAME_TOO_LARGE',
+        ),
+      ),
+    );
   });
 
   test('stop then restart performs a fresh consent request', () async {
