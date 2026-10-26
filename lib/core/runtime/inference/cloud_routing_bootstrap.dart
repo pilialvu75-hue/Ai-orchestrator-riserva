@@ -30,6 +30,7 @@ import 'package:ai_orchestrator/core/tools/search/fallback_search_provider.dart'
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/cloud_web_enriching_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
@@ -173,6 +174,7 @@ abstract final class CloudRoutingBootstrap {
             conversationMemoryService: sl<ConversationMemoryService>(),
             inferenceService: sl<InferenceService>(),
             runtimeSettingsService: sl<AiRuntimeSettingsService>(),
+            imageVisionService: CloudChatImageVisionService(),
             // Important: do not resolve Orchestrator here. Explicit Cloud chat
             // must remain constructible and usable even if Hannibal is unavailable.
             orchestratorProvider: () => sl<Orchestrator>(),
