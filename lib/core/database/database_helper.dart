@@ -489,13 +489,26 @@ class DatabaseHelper {
 
   /// Deletes only semantic vectors derived from Assistant conversations.
   ///
-  /// Document/project indexes use different document ids and are preserved.
+  /// GLOB treats the underscore in chat_memory as a literal character.
+  /// Document/project indexes use different ids and remain untouched.
   Future<int> deleteAllChatSemanticMemory() async {
     final db = await database;
     return db.delete(
       AppConstants.tableDocumentChunks,
-      where: '${AppConstants.colDocumentId} LIKE ?',
-      whereArgs: const <Object?>['chat_memory:%'],
+      where: '${AppConstants.colDocumentId} GLOB ?',
+      whereArgs: const <Object?>['chat_memory:*'],
+    );
+  }
+
+  /// Deletes generated document and project RAG indexes without deleting
+  /// source files or conversation embeddings. The latter have their own
+  /// independently selectable reset category in Danger Zone.
+  Future<int> deleteAllDocumentAndProjectRagIndexes() async {
+    final db = await database;
+    return db.delete(
+      AppConstants.tableDocumentChunks,
+      where: '${AppConstants.colDocumentId} NOT GLOB ?',
+      whereArgs: const <Object?>['chat_memory:*'],
     );
   }
 
