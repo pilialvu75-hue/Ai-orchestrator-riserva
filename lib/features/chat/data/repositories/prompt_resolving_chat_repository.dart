@@ -56,6 +56,16 @@ class PromptResolvingChatRepository implements ChatRepository {
         );
         if (updated) {
           onRuntimeNotice?.call('Long-term Assistant memory updated.');
+        } else if (RegExp(
+          r'^(?:ricorda|memorizza|remember that|dimentica|forget)\\b',
+          caseSensitive: false,
+        ).hasMatch(userPrompt.trim())) {
+          // Avoid making the model's conversational acknowledgement look like
+          // proof that an unsupported or rejected fact was actually saved.
+          onRuntimeNotice?.call(
+            'Long-term memory unchanged. To save a fact, use: '
+            'Ricorda che [soggetto] è [valore].',
+          );
         }
       } catch (_) {
         // A local memory storage failure must not break chat inference.
