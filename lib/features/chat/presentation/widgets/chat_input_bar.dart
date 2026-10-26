@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/features/multimodal/data/services/screen_vision_
 import 'package:ai_orchestrator/features/voice/presentation/widgets/voice_input_button.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
@@ -276,12 +277,63 @@ class _ChatInputBarState extends State<ChatInputBar> {
         break;
 
       case _AttachmentPickerAction.camera:
-        final file = await _imageService.pickFromCamera();
+        try {
+          final file = await _imageService.pickFromCamera();
+          if (!mounted || file == null) break; // User cancelled the camera.
 
-        if (file != null && mounted) {
-          _addAttachment(
-            _buildImageAttachment(file),
+          if (!await file.exists() || await file.length() == 0) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('La fotocamera non ha restituito una foto valida.'),
+                ),
+              );
+            }
+            break;
+          }
+          if (mounted) _addAttachment(_buildImageAttachment(file));
+        } on PlatformException catch (error) {
+          RuntimeEventLog.instance.emit(
+            '[CAMERA_PICKER_FAILURE] code=${error.code}',
           );
+          if (mounted) {
+            final permissionDenied = error.code.contains('denied') ||
+                error.code.contains('restricted');
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  permissionDenied
+                      ? 'Accesso alla fotocamera negato. '
+                          'Controlla i permessi dell\'app nelle impostazioni.'
+                      : 'Fotocamera non disponibile su questo dispositivo. '
+                          'Puoi usare Image per scegliere una foto.',
+                ),
+              ),
+            );
+          }
+        } on UnsupportedError {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Fotocamera non supportata. Usa Image per scegliere una foto.',
+                ),
+              ),
+            );
+          }
+        } catch (error) {
+          RuntimeEventLog.instance.emit(
+            '[CAMERA_PICKER_FAILURE] error_type=${error.runtimeType}',
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Impossibile acquisire la foto. Riprova o usa Image.',
+                ),
+              ),
+            );
+          }
         }
         break;
 
