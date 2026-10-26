@@ -29,7 +29,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
-  group: android-release-${{ github.ref }}
+  group: android-release-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 defaults:
@@ -62,6 +62,9 @@ jobs:
           if [ ! -f third_party/llama.cpp/CMakeLists.txt ]; then
             git submodule update --init --recursive
           fi
+
+      - name: Verify Android release publication gate
+        run: python3 scripts/check_android_release_gate.py .github/workflows/build.yml .github/workflows/macos-release-publish.yml .github/workflows/linux-release-publish.yml .github/workflows/windows-release-publish.yml
 
       - name: Setup Java
         uses: actions/setup-java@v6
@@ -344,7 +347,7 @@ jobs:
           path.write_text(content)
           PY
 
-          CHANNEL="${{ github.event_name == 'workflow_dispatch' && inputs.release_channel || 'stable' }}"
+          CHANNEL="${{ github.event_name == 'workflow_dispatch' && inputs.release_channel || 'ci' }}"
           TAG="v${VERSION_NAME}+${VERSION_CODE}"
           if [ "$CHANNEL" != "stable" ]; then
             TAG="${TAG}-${CHANNEL}"
@@ -552,8 +555,10 @@ jobs:
             git log --pretty=format:'- %s (%h)' -n 20
           } > RELEASE_NOTES.md
 
+      # Never publish from a main push or PR. A beta/nightly/dev release
+      # requires an explicit manual workflow_dispatch selecting the channel.
       - name: Create GitHub Release
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}

@@ -52,7 +52,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
-      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
+      github.event.workflow_run.event == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
 
@@ -113,6 +113,29 @@ jobs:
           echo "Coordinated Linux version: $release_version"
           echo "Target GitHub release: $tag"
           echo "Source commit: ${{ github.event.workflow_run.head_sha }}"
+
+      - name: Resolve existing manually published prerelease tag
+        id: publish_tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="v${{ steps.version.outputs.release_version }}"
+          matches=()
+          for channel in beta nightly dev; do
+            candidate="${base}-${channel}"
+            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" \
+              --json isPrerelease --jq '.isPrerelease' 2>/dev/null | grep -Fxq true; then
+              matches+=("$candidate")
+            fi
+          done
+          if [ "${#matches[@]}" -ne 1 ]; then
+            echo "::error::Expected one manually published prerelease for $base"
+            exit 1
+          fi
+          echo "tag=${matches[0]}" >> "$GITHUB_OUTPUT"
+          echo "Attaching desktop asset to ${matches[0]}"
 
       - name: Resolve Flutter dependencies
         run: flutter pub get --enforce-lockfile
@@ -189,7 +212,7 @@ jobs:
         run: |
           set -euo pipefail
           command -v gh >/dev/null
-          gh release view '${{ steps.version.outputs.tag }}' \
+          gh release view '${{ steps.publish_tag.outputs.tag }}' \
             --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt >/dev/null
 
       - name: Publish Linux installer into matching GitHub Release
@@ -198,7 +221,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release upload '${{ steps.version.outputs.tag }}' \
+          gh release upload '${{ steps.publish_tag.outputs.tag }}' \
             '${{ steps.package.outputs.deb_path }}' \
             '${{ steps.package.outputs.sha_path }}' \
             --clobber --repo "$GITHUB_REPOSITORY"
@@ -209,11 +232,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          assets="$(gh release view '${{ steps.version.outputs.tag }}' \
+          assets="$(gh release view '${{ steps.publish_tag.outputs.tag }}' \
             --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           grep -Fxq 'AI-Orchestrator-Linux-amd64.deb' <<<"$assets"
           grep -Fxq 'AI-Orchestrator-Linux-amd64.deb.sha256' <<<"$assets"
-          echo "Linux release assets published on ${{ steps.version.outputs.tag }}"
+          echo "Linux release assets published on ${{ steps.publish_tag.outputs.tag }}"
 
       - name: Preserve published installer artifact
         uses: actions/upload-artifact@v4
