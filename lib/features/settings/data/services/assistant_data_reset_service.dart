@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/core/database/database_helper.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
 import 'package:ai_orchestrator/core/memory/context_window_manager.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
@@ -108,13 +109,16 @@ final class AssistantDataResetService {
     required DatabaseHelper databaseHelper,
     required ConversationMemoryService conversationMemoryService,
     required ContextWindowManager contextWindowManager,
+    AssistantDurableMemoryCaptureService? memoryCaptureService,
   })  : _databaseHelper = databaseHelper,
         _conversationMemoryService = conversationMemoryService,
-        _contextWindowManager = contextWindowManager;
+        _contextWindowManager = contextWindowManager,
+        _memoryCaptureService = memoryCaptureService;
 
   final DatabaseHelper _databaseHelper;
   final ConversationMemoryService _conversationMemoryService;
   final ContextWindowManager _contextWindowManager;
+  final AssistantDurableMemoryCaptureService? _memoryCaptureService;
 
   Future<AssistantDataResetReport> reset(
     AssistantDataResetSelection selection,
@@ -123,7 +127,8 @@ final class AssistantDataResetService {
       throw ArgumentError('At least one Assistant data category is required.');
     }
 
-    return _conversationMemoryService.runWithGlobalResetBarrier(() async {
+    Future<AssistantDataResetReport> resetUnderSemanticBarrier() =>
+        _conversationMemoryService.runWithGlobalResetBarrier(() async {
       final outcomes = <AssistantDataResetOutcome>[];
 
       if (selection.recentContext) {
@@ -195,6 +200,14 @@ final class AssistantDataResetService {
 
       return AssistantDataResetReport(outcomes);
     });
+
+    // Wait for queued confirmed-memory writes before clearing SQLite. Keeping
+    // the same capture instance as ordinary chat prevents erased memories from
+    // being rewritten by a late in-flight Assistant message.
+    return _memoryCaptureService?.runWithResetBarrier(
+          resetUnderSemanticBarrier,
+        ) ??
+        resetUnderSemanticBarrier();
   }
 
   Future<AssistantDataResetOutcome> _eraseRows(
