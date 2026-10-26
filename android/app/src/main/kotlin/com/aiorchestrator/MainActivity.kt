@@ -64,6 +64,7 @@ class MainActivity : FlutterActivity() {
         ProcessExitDiagnostics.register(this, flutterEngine)
         BackgroundDownloads.register(this, flutterEngine)
         ScreenVisionBridge.register(this, flutterEngine)
+        VideoStoryboardBridge.register(flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
         registerMlcNativeChannel(flutterEngine)
