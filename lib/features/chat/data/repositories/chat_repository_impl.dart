@@ -226,7 +226,7 @@ class ChatRepositoryImpl implements ChatRepository {
               }
               if (runtimeSettingsService?.runtimeMode != AiRuntimeMode.cloud) {
                 throw const ServerFailure(
-                  'Video: l\\'analisi locale dei filmati non è disponibile. '
+                  'Video: l\'analisi locale dei filmati non è disponibile. '
                   'Per analizzare tre fotogrammi, seleziona Cloud '
                   'e un provider visivo manualmente.',
                 );
@@ -264,8 +264,8 @@ class ChatRepositoryImpl implements ChatRepository {
                     uploadState: ChatAttachmentUploadState.ready,
                   ),
                   prompt: 'Questa è una storyboard con tre fotogrammi '
-                      'campionati nell\\'ordine inizio, metà e fine del video. '
-                      'Non hai accesso al video completo o all\\'audio. '
+                      'campionati nell\'ordine inizio, metà e fine del video. '
+                      'Non hai accesso al video completo o all\'audio. '
                       'Non inventare movimenti, parole o eventi non osservabili. '
                       'Richiesta: $question',
                   systemPrompt: systemPrompt,
