@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
@@ -16,13 +17,16 @@ class PromptResolvingChatRepository implements ChatRepository {
     required ChatRepository delegate,
     required AssistantSystemPromptService systemPromptService,
     required AssistantDurableMemoryContextService durableMemoryContextService,
+    AssistantDurableMemoryCaptureService? durableMemoryCaptureService,
   })  : _delegate = delegate,
         _systemPromptService = systemPromptService,
-        _durableMemoryContextService = durableMemoryContextService;
+        _durableMemoryContextService = durableMemoryContextService,
+        _durableMemoryCaptureService = durableMemoryCaptureService;
 
   final ChatRepository _delegate;
   final AssistantSystemPromptService _systemPromptService;
   final AssistantDurableMemoryContextService _durableMemoryContextService;
+  final AssistantDurableMemoryCaptureService? _durableMemoryCaptureService;
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) =>
@@ -39,6 +43,26 @@ class PromptResolvingChatRepository implements ChatRepository {
   }) async {
     final isOrdinary =
         _systemPromptService.isOrdinaryAssistantRequest(systemPrompt);
+    // Only the direct user's ordinary chat input is eligible. Attachments,
+    // specialized workers and retrieved web content never seed user memory.
+    if (isOrdinary &&
+        attachments.isEmpty &&
+        _durableMemoryCaptureService != null) {
+      try {
+        final updated = await _durableMemoryCaptureService
+            .applyExplicitUserInstruction(
+          sessionId: sessionId,
+          userPrompt: userPrompt,
+        );
+        if (updated) {
+          onRuntimeNotice?.call('Long-term Assistant memory updated.');
+        }
+      } catch (_) {
+        // A local memory storage failure must not break chat inference.
+        onRuntimeNotice?.call('Long-term memory could not be updated.');
+      }
+    }
+
     final resolvedPrompt = _systemPromptService.resolveForIncoming(systemPrompt);
     final effectivePrompt = isOrdinary
         ? await _durableMemoryContextService.augmentSystemPrompt(
