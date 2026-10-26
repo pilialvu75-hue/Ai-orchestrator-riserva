@@ -7,6 +7,7 @@ enum AssistantDataResetCategory {
   recentContext,
   chatHistory,
   semanticChatIndex,
+  documentAndProjectRagIndexes,
   durableMemory,
   projectMemory,
 }
@@ -16,6 +17,7 @@ final class AssistantDataResetSelection {
     this.recentContext = false,
     this.chatHistory = false,
     this.semanticChatIndex = false,
+    this.documentAndProjectRagIndexes = false,
     this.durableMemory = false,
     this.projectMemory = false,
   });
@@ -24,12 +26,14 @@ final class AssistantDataResetSelection {
       : recentContext = true,
         chatHistory = true,
         semanticChatIndex = true,
+        documentAndProjectRagIndexes = true,
         durableMemory = true,
         projectMemory = true;
 
   final bool recentContext;
   final bool chatHistory;
   final bool semanticChatIndex;
+  final bool documentAndProjectRagIndexes;
   final bool durableMemory;
   final bool projectMemory;
 
@@ -37,6 +41,7 @@ final class AssistantDataResetSelection {
       !recentContext &&
       !chatHistory &&
       !semanticChatIndex &&
+      !documentAndProjectRagIndexes &&
       !durableMemory &&
       !projectMemory;
 
@@ -44,6 +49,7 @@ final class AssistantDataResetSelection {
       recentContext &&
       chatHistory &&
       semanticChatIndex &&
+      documentAndProjectRagIndexes &&
       durableMemory &&
       projectMemory;
 
@@ -51,6 +57,8 @@ final class AssistantDataResetSelection {
         AssistantDataResetCategory.recentContext => recentContext,
         AssistantDataResetCategory.chatHistory => chatHistory,
         AssistantDataResetCategory.semanticChatIndex => semanticChatIndex,
+        AssistantDataResetCategory.documentAndProjectRagIndexes =>
+          documentAndProjectRagIndexes,
         AssistantDataResetCategory.durableMemory => durableMemory,
         AssistantDataResetCategory.projectMemory => projectMemory,
       };
@@ -152,6 +160,15 @@ final class AssistantDataResetService {
           await _eraseRows(
             AssistantDataResetCategory.semanticChatIndex,
             _databaseHelper.deleteAllChatSemanticMemory,
+          ),
+        );
+      }
+
+      if (selection.documentAndProjectRagIndexes) {
+        outcomes.add(
+          await _eraseRows(
+            AssistantDataResetCategory.documentAndProjectRagIndexes,
+            _databaseHelper.deleteAllDocumentAndProjectRagIndexes,
           ),
         );
       }
