@@ -1,7 +1,4 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 class LocalAttachmentFile {
   const LocalAttachmentFile({
@@ -33,25 +30,15 @@ class FileAttachmentService {
   }
 
   Future<LocalAttachmentFile?> pickVideo() async {
-    final granted = await _requestVideoPermission();
-    if (!granted) return null;
-
+    // The Android system file picker grants read access to the selected
+    // video only. Broad READ_MEDIA_VIDEO/storage permissions are unnecessary
+    // and could prevent the picker from opening on modern Android versions.
     final result = await _filePicker.pickFiles(
       allowMultiple: false,
       withData: false,
       type: FileType.video,
     );
     return _toAttachmentFile(result, fallbackMimeType: 'video/*');
-  }
-
-  Future<bool> _requestVideoPermission() async {
-    if (!Platform.isAndroid) return true;
-
-    final videos = await Permission.videos.request();
-    if (videos.isGranted || videos.isLimited) return true;
-
-    final storage = await Permission.storage.request();
-    return storage.isGranted;
   }
 
   LocalAttachmentFile? _toAttachmentFile(
