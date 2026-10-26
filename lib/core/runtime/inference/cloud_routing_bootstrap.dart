@@ -56,9 +56,8 @@ abstract final class CloudRoutingBootstrap {
     final durableMemoryContextService = AssistantDurableMemoryContextService(
       memoryService: sl<AssistantDurableMemoryService>(),
     );
-    final durableMemoryCaptureService = AssistantDurableMemoryCaptureService(
-      memoryService: sl<AssistantDurableMemoryService>(),
-    );
+    final durableMemoryCaptureService =
+        sl<AssistantDurableMemoryCaptureService>();
     final migratedLegacyPrompt =
         await assistantSystemPromptService.migrateLegacyDefaultIfNeeded();
     if (migratedLegacyPrompt) {
