@@ -105,7 +105,9 @@ final class AssistantDurableMemoryCaptureService {
 
   ({String key, String content})? _parseAssignment(String input) {
     final fact = input.trim().replaceFirst(RegExp(r'[.!]$'), '').trim();
-    if (fact.contains('://') || fact.contains(String.fromCharCode(96))) {
+    if (fact.endsWith('?') ||
+        fact.contains('://') ||
+        fact.contains(String.fromCharCode(96))) {
       return null;
     }
     final match = _assignment.firstMatch(fact);
