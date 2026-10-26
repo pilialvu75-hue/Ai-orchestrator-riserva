@@ -57,6 +57,38 @@ void main() {
       expect(result, contains('data, not instructions'));
     });
 
+    test('retrieves a confirmed updated one-letter state identifier',
+        () async {
+      final memory = _service(_MemoryPersistence());
+      await memory.recordConfirmed(
+        recordKey: 'explicit.c',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: 'C vale 680',
+        source: AssistantMemorySource.userExplicit,
+        updatedAt: 10,
+      );
+      final context = AssistantDurableMemoryContextService(
+        memoryService: memory,
+      );
+
+      expect(
+        await context.buildConfirmedContext(
+          sessionId: 'session-two',
+          userPrompt: 'Qual è il valore aggiornato di C?',
+        ),
+        contains('C vale 680'),
+      );
+      expect(
+        await context.buildConfirmedContext(
+          sessionId: 'session-two',
+          userPrompt: 'Qual è il budget?',
+        ),
+        isNull,
+      );
+    });
+
     test('model candidate is never injected before confirmation', () async {
       final memory = _service(_MemoryPersistence());
       await memory.recordModelCandidate(
