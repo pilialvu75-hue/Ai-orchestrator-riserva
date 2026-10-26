@@ -48,7 +48,8 @@ final class CloudWebEnrichingChatRepository implements ChatRepository {
   }) async {
     if (_runtimeMode() != AiRuntimeMode.cloud ||
         attachments.any((item) =>
-            item.isImage || item.type == ChatAttachmentType.file) ||
+            item.isImage || item.isVideo ||
+            item.type == ChatAttachmentType.file) ||
         !AssistantWebSearchPolicy.shouldSearch(userPrompt)) {
       return _delegate.sendMessage(
         sessionId: sessionId,
