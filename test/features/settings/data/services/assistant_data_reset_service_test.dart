@@ -48,6 +48,8 @@ void main() {
         .thenAnswer((_) async => 12);
     when(() => database.deleteAllChatSemanticMemory())
         .thenAnswer((_) async => 10);
+    when(() => database.deleteAllDocumentAndProjectRagIndexes())
+        .thenAnswer((_) async => 8);
     when(
       () => database.deletePreferencesWithPrefix(
         AssistantDurableMemoryStore.storagePrefix,
@@ -73,6 +75,12 @@ void main() {
       10,
     );
     expect(
+      report.outcomeFor(
+        AssistantDataResetCategory.documentAndProjectRagIndexes,
+      )?.removedItems,
+      8,
+    );
+    expect(
       report.outcomeFor(AssistantDataResetCategory.durableMemory)?.removedItems,
       4,
     );
@@ -84,6 +92,7 @@ void main() {
     verify(() => contextWindow.startNewSession()).called(1);
     verify(() => database.deleteAllChatMessages()).called(1);
     verify(() => database.deleteAllChatSemanticMemory()).called(1);
+    verify(() => database.deleteAllDocumentAndProjectRagIndexes()).called(1);
     verify(
       () => database.deletePreferencesWithPrefix(
         AssistantDurableMemoryStore.storagePrefix,
@@ -111,6 +120,32 @@ void main() {
 
     verify(() => database.deleteAllChatMessages()).called(1);
     verifyNever(() => database.deleteAllChatSemanticMemory());
+    verifyNever(() => database.deleteAllDocumentAndProjectRagIndexes());
+    verifyNever(() => database.deleteAllProjectMemories());
+    verifyNever(
+      () => database.deletePreferencesWithPrefix(any()),
+    );
+    verifyNever(() => contextWindow.startNewSession());
+  });
+
+  test('RAG index reset is independently selectable', () async {
+    when(() => database.deleteAllDocumentAndProjectRagIndexes())
+        .thenAnswer((_) async => 5);
+
+    final report = await service.reset(
+      const AssistantDataResetSelection(documentAndProjectRagIndexes: true),
+    );
+
+    expect(report.complete, isTrue);
+    expect(report.outcomes, hasLength(1));
+    expect(
+      report.outcomes.single.category,
+      AssistantDataResetCategory.documentAndProjectRagIndexes,
+    );
+    expect(report.outcomes.single.removedItems, 5);
+    verify(() => database.deleteAllDocumentAndProjectRagIndexes()).called(1);
+    verifyNever(() => database.deleteAllChatSemanticMemory());
+    verifyNever(() => database.deleteAllChatMessages());
     verifyNever(() => database.deleteAllProjectMemories());
     verifyNever(
       () => database.deletePreferencesWithPrefix(any()),
@@ -167,6 +202,7 @@ void main() {
     verifyNever(() => database.deleteAllChatMessages());
     verifyNever(() => database.deleteAllChatSemanticMemory());
     verifyNever(() => database.deleteAllProjectMemories());
+    verifyNever(() => database.deleteAllDocumentAndProjectRagIndexes());
     verifyNever(
       () => database.deletePreferencesWithPrefix(any()),
     );
