@@ -156,6 +156,30 @@ jobs:
           echo "Target GitHub release: $tag"
           echo "Source commit: ${{ github.event.workflow_run.head_sha }}"
 
+      - name: Resolve existing manually published prerelease tag
+        if: steps.signing.outputs.ready == 'true'
+        id: publish_tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="v${{ steps.version.outputs.release_version }}"
+          matches=()
+          for channel in beta nightly dev; do
+            candidate="${base}-${channel}"
+            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" \
+              --json isPrerelease --jq '.isPrerelease' 2>/dev/null | grep -Fxq true; then
+              matches+=("$candidate")
+            fi
+          done
+          if [ "${#matches[@]}" -ne 1 ]; then
+            echo "::error::Expected one manually published prerelease for $base"
+            exit 1
+          fi
+          echo "tag=${matches[0]}" >> "$GITHUB_OUTPUT"
+          echo "Attaching desktop asset to ${matches[0]}"
+
       - name: Resolve Flutter dependencies
         if: steps.signing.outputs.ready == 'true'
         run: flutter pub get --enforce-lockfile
@@ -313,7 +337,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release view '${{ steps.version.outputs.tag }}' \
+          gh release view '${{ steps.publish_tag.outputs.tag }}' \
             --repo "$GITHUB_REPOSITORY" \
             --json tagName,publishedAt >/dev/null
 
@@ -324,7 +348,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release upload '${{ steps.version.outputs.tag }}' \
+          gh release upload '${{ steps.publish_tag.outputs.tag }}' \
             '${{ steps.dmg.outputs.dmg_path }}' \
             '${{ steps.dmg.outputs.hash_path }}' \
             --clobber \
@@ -337,7 +361,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag='${{ steps.version.outputs.tag }}'
+          tag='${{ steps.publish_tag.outputs.tag }}'
           assets="$(gh release view "$tag" \
             --repo "$GITHUB_REPOSITORY" \
             --json assets \
