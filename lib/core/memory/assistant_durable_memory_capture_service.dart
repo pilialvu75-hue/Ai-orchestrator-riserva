@@ -21,6 +21,27 @@ final class AssistantDurableMemoryCaptureService {
   final AssistantDurableMemoryService _memoryService;
   final int Function() _now;
 
+  // A single serialized queue ensures two rapid updates never overwrite each
+  // other through concurrent SQLite read-modify-write operations.
+  Future<void> _pendingWrites = Future<void>.value();
+  bool _resetInProgress = false;
+
+  /// Prevents in-flight memory capture from repopulating storage after reset.
+  /// Used by the Danger Zone coordinator together with the semantic index
+  /// barrier. New captures are discarded while reset is in progress.
+  Future<T> runWithResetBarrier<T>(Future<T> Function() operation) async {
+    if (_resetInProgress) {
+      throw StateError('Durable memory reset is already in progress.');
+    }
+    _resetInProgress = true;
+    try {
+      await _pendingWrites;
+      return await operation();
+    } finally {
+      _resetInProgress = false;
+    }
+  }
+
   static int _clock() => DateTime.now().millisecondsSinceEpoch;
 
   static final RegExp _save = RegExp(
@@ -50,6 +71,26 @@ final class AssistantDurableMemoryCaptureService {
   /// No model-provided content or attachment text is processed. The caller is
   /// responsible for passing only the direct user's ordinary chat prompt.
   Future<bool> applyExplicitUserInstruction({
+    required String sessionId,
+    required String userPrompt,
+  }) {
+    if (_resetInProgress) return Future<bool>.value(false);
+
+    final operation = _pendingWrites.then((_) {
+      if (_resetInProgress) return Future<bool>.value(false);
+      return _applyExplicitUserInstruction(
+        sessionId: sessionId,
+        userPrompt: userPrompt,
+      );
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  Future<bool> _applyExplicitUserInstruction({
     required String sessionId,
     required String userPrompt,
   }) async {
