@@ -21,9 +21,11 @@ class ImageService {
   /// Opens the device gallery and returns the selected image file, or `null`
   /// if the user cancelled.
   Future<File?> pickFromGallery() async {
-    final granted = await _requestImagePermission();
-    if (!granted) return null;
-
+    // Android 13+ uses the OS Photo Picker, which grants access to the
+    // selected image without a broad Photos/Storage permission. Requesting
+    // that permission first prevented the picker from opening on devices
+    // where the permission is unavailable or deliberately denied.
+    // The platform picker owns consent for this single selected image.
     final xFile = await _picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 85,
@@ -99,16 +101,4 @@ class ImageService {
     return base64Encode(bytes);
   }
 
-  Future<bool> _requestImagePermission() async {
-    if (!Platform.isAndroid) {
-      final status = await Permission.photos.request();
-      return status.isGranted || status.isLimited;
-    }
-
-    final photos = await Permission.photos.request();
-    if (photos.isGranted || photos.isLimited) return true;
-
-    final storage = await Permission.storage.request();
-    return storage.isGranted;
-  }
 }

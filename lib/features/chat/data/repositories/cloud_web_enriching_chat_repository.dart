@@ -47,6 +47,7 @@ final class CloudWebEnrichingChatRepository implements ChatRepository {
     void Function(String notice)? onRuntimeNotice,
   }) async {
     if (_runtimeMode() != AiRuntimeMode.cloud ||
+        attachments.any((item) => item.isImage) ||
         !AssistantWebSearchPolicy.shouldSearch(userPrompt)) {
       return _delegate.sendMessage(
         sessionId: sessionId,

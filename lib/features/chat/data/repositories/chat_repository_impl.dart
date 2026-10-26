@@ -18,6 +18,7 @@ import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart'
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
@@ -31,6 +32,7 @@ class ChatRepositoryImpl implements ChatRepository {
     Orchestrator Function()? orchestratorProvider,
     this.inferenceService,
     this.runtimeSettingsService,
+    this.imageVisionService,
   })  : _orchestrator = orchestrator,
         _orchestratorProvider = orchestratorProvider;
 
@@ -46,6 +48,7 @@ class ChatRepositoryImpl implements ChatRepository {
   /// Direct inference dependencies used only by explicit Cloud mode.
   final InferenceService? inferenceService;
   final AiRuntimeSettingsService? runtimeSettingsService;
+  final ChatImageVisionService? imageVisionService;
 
   static const _uuid = Uuid();
   final Set<String> _activeSendSessions = <String>{};
@@ -119,7 +122,8 @@ class ChatRepositoryImpl implements ChatRepository {
               timestamp: userMsg.timestamp,
             );
 
-            if (normalizedPrompt.isEmpty && attachments.isNotEmpty) {
+            if (normalizedPrompt.isEmpty && attachments.isNotEmpty &&
+                !attachmentsSnapshot.any((item) => item.isImage)) {
               final forensicMessage =
                   '[PRE_STREAM_BYPASS] session=$sessionId boundary=chat_repository.attachments_only reason=empty_prompt_with_attachments target=inference_not_invoked attachments=${attachments.length}';
               _log(forensicMessage);
@@ -139,6 +143,68 @@ class ChatRepositoryImpl implements ChatRepository {
             _log(
               'memory retrieval session=$sessionId history_count=${sessionMessages.length} context_injected=${context.length}',
             );
+
+            final imageAttachments = attachmentsSnapshot
+                .where((item) => item.isImage)
+                .toList(growable: false);
+            if (imageAttachments.isNotEmpty) {
+              // Image-only requests are valid and must reach actual vision,
+              // never a text-only model or a pretend image analysis.
+              if (attachmentsSnapshot.length != 1) {
+                throw const ServerFailure(
+                  'Image: invia una sola immagine per volta, '
+                  'senza altri tipi di allegato.',
+                );
+              }
+              if (runtimeSettingsService?.runtimeMode != AiRuntimeMode.cloud) {
+                throw const ServerFailure(
+                  'Image: l\'inferenza visiva locale non è ancora disponibile. '
+                  'Se desideri analizzare una foto tramite Cloud, '
+                  'seleziona la modalità Cloud e un provider visivo.',
+                );
+              }
+              final selectedProvider = runtimeSettingsService?.manualCloudProvider;
+              if (selectedProvider != 'openAi' &&
+                  selectedProvider != 'gemini') {
+                throw const ServerFailure(
+                  'Image: scegli manualmente OpenAI o Gemini come provider '
+                  'Cloud prima di inviare una fotografia.',
+                );
+              }
+              if (imageVisionService == null) {
+                throw const ServerFailure(
+                  'Il servizio Image non è ancora configurato.',
+                );
+              }
+              final vision = await imageVisionService!.analyze(
+                providerId: selectedProvider!,
+                image: imageAttachments.single,
+                prompt: normalizedPrompt,
+                systemPrompt: systemPrompt,
+                context: context,
+              );
+              onRuntimeNotice?.call(
+                'Immagine analizzata con ${vision.providerId} via Cloud.',
+              );
+              onPartialResponse?.call(vision.text);
+              final imageAnswer = ChatMessageModel(
+                id: _uuid.v4(),
+                sessionId: sessionId,
+                role: 'assistant',
+                content: vision.text,
+                timestamp: DateTime.now().millisecondsSinceEpoch,
+                provider: vision.providerId,
+              );
+              await localDataSource.insertMessage(imageAnswer);
+              await conversationMemoryService.storeMessageEmbedding(
+                sessionId: sessionId,
+                messageId: imageAnswer.id,
+                role: imageAnswer.role,
+                content: imageAnswer.content,
+                timestamp: imageAnswer.timestamp,
+              );
+              return imageAnswer;
+            }
 
             final streamedResponse = StringBuffer();
             String responseProvider = 'local';
