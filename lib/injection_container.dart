@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/context_window_manager.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
 import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_record.dart';
@@ -188,6 +189,11 @@ Future<void> initDependencies({
       store: sl<AssistantDurableMemoryStore>(),
     ),
   );
+  sl.registerLazySingleton<AssistantDurableMemoryCaptureService>(
+    () => AssistantDurableMemoryCaptureService(
+      memoryService: sl<AssistantDurableMemoryService>(),
+    ),
+  );
   sl.registerLazySingleton<LocalDocumentIndexService>(
     () => LocalDocumentIndexService(databaseHelper: sl<DatabaseHelper>()),
   );
@@ -273,6 +279,7 @@ Future<void> initDependencies({
       databaseHelper: sl<DatabaseHelper>(),
       conversationMemoryService: sl<ConversationMemoryService>(),
       contextWindowManager: sl<ContextWindowManager>(),
+      memoryCaptureService: sl<AssistantDurableMemoryCaptureService>(),
     ),
   );
   sl.registerLazySingleton<WorkspaceProjectMemoryService>(

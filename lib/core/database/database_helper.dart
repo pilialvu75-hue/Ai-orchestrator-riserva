@@ -6,6 +6,12 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 
 class DatabaseHelper {
   DatabaseHelper._internal();
+
+  /// Injects an isolated SQLite database for integration tests, preventing
+  /// memory/RAG tests from reading or deleting a user's actual app database.
+  @visibleForTesting
+  DatabaseHelper.forTesting(Database database) : _database = database;
+
   static final DatabaseHelper instance = DatabaseHelper._internal();
   Database? _database;
 

@@ -126,10 +126,19 @@ class AssistantDurableMemoryContextService {
         .replaceAll(RegExp(r'[^a-z0-9à-öø-ÿ]+'), ' ')
         .trim();
     if (normalized.isEmpty) return const <String>{};
-    return normalized
+    final terms = normalized
         .split(RegExp(r'\s+'))
         .where((term) => term.length >= 3 && !_stopWords.contains(term))
         .toSet();
+
+    // Keep explicit one-letter uppercase identifiers (A, B, C...) used by
+    // short conversation-state tests. Normal one-letter prose is ignored.
+    // Exact token matching avoids treating the letter C inside another word
+    // as a mention of the variable C.
+    for (final match in RegExp(r'\b[A-Z]\b').allMatches(value)) {
+      terms.add(match.group(0)!.toLowerCase());
+    }
+    return terms;
   }
 
   bool _isBroadMemoryRequest(String value) {

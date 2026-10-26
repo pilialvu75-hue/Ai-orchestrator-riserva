@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/assistant_web_aware_orchestrator.dart';
@@ -55,6 +56,8 @@ abstract final class CloudRoutingBootstrap {
     final durableMemoryContextService = AssistantDurableMemoryContextService(
       memoryService: sl<AssistantDurableMemoryService>(),
     );
+    final durableMemoryCaptureService =
+        sl<AssistantDurableMemoryCaptureService>();
     final migratedLegacyPrompt =
         await assistantSystemPromptService.migrateLegacyDefaultIfNeeded();
     if (migratedLegacyPrompt) {
@@ -165,6 +168,7 @@ abstract final class CloudRoutingBootstrap {
       () => PromptResolvingChatRepository(
         systemPromptService: assistantSystemPromptService,
         durableMemoryContextService: durableMemoryContextService,
+        durableMemoryCaptureService: durableMemoryCaptureService,
         delegate: CloudWebEnrichingChatRepository(
           runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
           webSearchTool: assistantWebSearchTool,
