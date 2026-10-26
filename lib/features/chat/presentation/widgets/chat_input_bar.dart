@@ -338,11 +338,22 @@ class _ChatInputBarState extends State<ChatInputBar> {
         break;
 
       case _AttachmentPickerAction.screen:
-        var projectionStarted = false;
+        var projectionRequested = false;
         try {
+          // Android consent is always requested by the system; the capture
+          // never starts a Cloud upload. Sending is a separate user action.
+          projectionRequested = true;
           final granted = await _screenVisionService.requestProjection();
-          if (!granted) break;
-          projectionStarted = true;
+          if (!granted) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Acquisizione schermo annullata.'),
+                ),
+              );
+            }
+            break;
+          }
 
           final file = await _screenVisionService.captureToFile();
           if (mounted) {
@@ -354,8 +365,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
             );
           }
         } on ScreenVisionException catch (error) {
+          // Log error codes only, not system messages or captured content.
           RuntimeEventLog.instance.emit(
-            '[SCREEN_VISION_UI_ERROR] code=${error.code} message=${error.message}',
+            '[SCREEN_VISION_UI_ERROR] code=${error.code}',
           );
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -363,12 +375,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
             );
           }
         } finally {
-          if (projectionStarted) {
+          // Also release any partially started projection when the native
+          // consent bridge fails. Never keep screen recording active.
+          if (projectionRequested) {
             try {
               await _screenVisionService.stopProjection();
             } on ScreenVisionException catch (error) {
               RuntimeEventLog.instance.emit(
-                '[SCREEN_VISION_STOP_ERROR] code=${error.code} message=${error.message}',
+                '[SCREEN_VISION_STOP_ERROR] code=${error.code}',
               );
             }
           }
