@@ -101,6 +101,27 @@ jobs:
           Write-Host "Target GitHub release: $tag"
           Write-Host "Source commit: ${{ github.event.workflow_run.head_sha }}"
 
+      - name: Resolve existing manually published prerelease tag
+        id: publish_tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $base = 'v${{ steps.version.outputs.release_version }}'
+          $releases = gh release list --limit 100 --repo $env:GITHUB_REPOSITORY --json tagName,isPrerelease | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to inspect the published GitHub prereleases.'
+          }
+          $candidates = @("$base-beta", "$base-nightly", "$base-dev")
+          $matches = @($releases | Where-Object {
+            $_.isPrerelease -eq $true -and $_.tagName -in $candidates
+          })
+          if ($matches.Count -ne 1) {
+            throw "Expected one manually published prerelease for $base."
+          }
+          "tag=$($matches[0].tagName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Attaching desktop asset to $($matches[0].tagName)"
+
       - name: Resolve Flutter dependencies
         shell: pwsh
         run: flutter pub get --enforce-lockfile
@@ -246,7 +267,7 @@ jobs:
           if (-not $gh) {
             throw 'GitHub CLI is unavailable on the hosted runner.'
           }
-          gh release view '${{ steps.version.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json tagName,publishedAt
+          gh release view '${{ steps.publish_tag.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json tagName,publishedAt
           if ($LASTEXITCODE -ne 0) {
             throw 'The matching Android GitHub Release does not exist; refusing to publish a mismatched Windows installer.'
           }
@@ -256,7 +277,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload '${{ steps.version.outputs.tag }}' '${{ steps.installer.outputs.setup_path }}' '${{ steps.installer.outputs.hash_path }}' --clobber --repo "$env:GITHUB_REPOSITORY"
+          gh release upload '${{ steps.publish_tag.outputs.tag }}' '${{ steps.installer.outputs.setup_path }}' '${{ steps.installer.outputs.hash_path }}' --clobber --repo "$env:GITHUB_REPOSITORY"
           if ($LASTEXITCODE -ne 0) {
             throw 'Failed to upload Windows installer assets to the coordinated GitHub Release.'
           }
@@ -266,7 +287,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $release = gh release view '${{ steps.version.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json assets | ConvertFrom-Json
+          $release = gh release view '${{ steps.publish_tag.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json assets | ConvertFrom-Json
           $assetNames = @($release.assets | ForEach-Object { $_.name })
           if ($assetNames -notcontains 'AI-Orchestrator-Setup-x64.exe') {
             throw 'Published release is missing AI-Orchestrator-Setup-x64.exe.'
@@ -274,7 +295,7 @@ jobs:
           if ($assetNames -notcontains 'AI-Orchestrator-Setup-x64.exe.sha256') {
             throw 'Published release is missing the Windows installer SHA-256 file.'
           }
-          Write-Host "Windows release assets published on ${{ steps.version.outputs.tag }}"
+          Write-Host "Windows release assets published on ${{ steps.publish_tag.outputs.tag }}"
 
       - name: Preserve published installer artifact
         uses: actions/upload-artifact@v4
