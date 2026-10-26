@@ -28,6 +28,9 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_stat
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_session_store.dart';
+import 'package:ai_orchestrator/core/database/database_helper.dart';
+import 'package:uuid/uuid.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_overlay.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
@@ -45,6 +48,76 @@ const String _kDefaultSessionId = 'default';
 
 // Width threshold above which a persistent sidebar replaces the Drawer.
 const double _kSidebarBreakpoint = 720;
+
+
+/// Shared UI state for narrow and wide layouts. Choosing another session
+/// switches the view; only the Debug Lab's explicit Clear Chat can erase data.
+class _ChatNavigation {
+  const _ChatNavigation({
+    required this.sessionId,
+    required this.sessions,
+    required this.onNewChat,
+    required this.onSelectChat,
+    required this.onTogglePin,
+  });
+  final String sessionId;
+  final List<ChatSessionInfo> sessions;
+  final VoidCallback onNewChat;
+  final ValueChanged<String> onSelectChat;
+  final ValueChanged<ChatSessionInfo> onTogglePin;
+}
+
+class _ChatSessionList extends StatelessWidget {
+  const _ChatSessionList({
+    required this.navigation,
+    this.closeDrawer = false,
+  });
+  final _ChatNavigation navigation;
+  final bool closeDrawer;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      itemCount: navigation.sessions.length,
+      itemBuilder: (context, index) {
+        final session = navigation.sessions[index];
+        return ListTile(
+          dense: true,
+          selected: session.id == navigation.sessionId,
+          selectedTileColor: Colors.white10,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          leading: Icon(
+            session.pinned ? Icons.push_pin : Icons.chat_bubble_outline,
+            color: session.pinned ? const Color(0xFF8AB4F8) : Colors.white60,
+            size: 18,
+          ),
+          title: Text(
+            session.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+          ),
+          trailing: IconButton(
+            tooltip: session.pinned ? 'Rimuovi dai fissati' : 'Fissa in alto',
+            icon: Icon(
+              session.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+              size: 18,
+              color: session.pinned ? const Color(0xFF8AB4F8) : Colors.white54,
+            ),
+            onPressed: () => navigation.onTogglePin(session),
+          ),
+          onTap: () {
+            if (closeDrawer) Navigator.of(context).pop();
+            navigation.onSelectChat(session.id);
+          },
+        );
+      },
+    );
+  }
+}
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
@@ -82,18 +155,16 @@ class _ChatPageState extends State<ChatPage>
       _deadlockController;
 
   bool _isSending = false;
+  String _activeSessionId = _kDefaultSessionId;
+  List<ChatSessionInfo> _chatSessions = const <ChatSessionInfo>[];
+  late final ChatSessionStore _sessionStore;
 
   @override
   void initState() {
     super.initState();
 
-    context
-        .read<OrchestratorStateEngine>()
-        .add(
-          const LoadMessagesEvent(
-            sessionId: _kDefaultSessionId,
-          ),
-        );
+    _sessionStore = ChatSessionStore(databaseHelper: di.sl<DatabaseHelper>());
+    unawaited(_restoreChatSessions());
 
     _runtimeDiagnostics =
         di.sl<LocalRuntimeDiagnosticsService>();
@@ -154,6 +225,90 @@ class _ChatPageState extends State<ChatPage>
       modelBloc.add(
         const LoadAvailableModels(),
       );
+    }
+  }
+
+
+  _ChatNavigation get _chatNavigation => _ChatNavigation(
+        sessionId: _activeSessionId,
+        sessions: _chatSessions,
+        onNewChat: () => unawaited(_startNewChat()),
+        onSelectChat: (id) => unawaited(_selectChat(id)),
+        onTogglePin: (session) => unawaited(_togglePinned(session)),
+      );
+
+  Future<void> _restoreChatSessions() async {
+    try {
+      final id = await _sessionStore.restoreActiveSession();
+      if (!mounted) return;
+      setState(() => _activeSessionId = id);
+      context.read<OrchestratorStateEngine>().add(LoadMessagesEvent(sessionId: id));
+      await _refreshChatSessions();
+    } catch (error) {
+      if (!mounted) return;
+      _uiLog('[CHAT_SESSIONS] restoration failed: $error');
+      context.read<OrchestratorStateEngine>().add(
+        const LoadMessagesEvent(sessionId: _kDefaultSessionId),
+      );
+    }
+  }
+
+  Future<void> _refreshChatSessions() async {
+    try {
+      final sessions = await _sessionStore.listSessions();
+      if (mounted) setState(() => _chatSessions = sessions);
+    } catch (error) {
+      _uiLog('[CHAT_SESSIONS] listing failed: $error');
+    }
+  }
+
+  void _showChatNavigationError(Object error) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Operazione chat non riuscita: $error')),
+    );
+  }
+
+  Future<void> _startNewChat() async {
+    if (_isSending) {
+      _showChatNavigationError('Termina la risposta prima di cambiare chat.');
+      return;
+    }
+    try {
+      final id = const Uuid().v4();
+      await _sessionStore.createSession(id);
+      await _selectChat(id);
+    } catch (error) {
+      _showChatNavigationError(error);
+    }
+  }
+
+  Future<void> _selectChat(String id) async {
+    if (_isSending) {
+      _showChatNavigationError('Termina la risposta prima di cambiare chat.');
+      return;
+    }
+    if (id == _activeSessionId) return;
+    try {
+      await _sessionStore.selectSession(id);
+      if (!mounted) return;
+      setState(() {
+        _activeSessionId = id;
+        _debugLabMessages.clear();
+      });
+      context.read<OrchestratorStateEngine>().add(LoadMessagesEvent(sessionId: id));
+      await _refreshChatSessions();
+    } catch (error) {
+      _showChatNavigationError(error);
+    }
+  }
+
+  Future<void> _togglePinned(ChatSessionInfo session) async {
+    try {
+      await _sessionStore.setPinned(session.id, !session.pinned);
+      await _refreshChatSessions();
+    } catch (error) {
+      _showChatNavigationError(error);
     }
   }
 
@@ -261,13 +416,13 @@ class _ChatPageState extends State<ChatPage>
       onDeadlockTriggered: () {
         _uiLog(
           '[UI_WAITING_STUCK] '
-          'session=$_kDefaultSessionId '
+          'session=$_activeSessionId '
           'runtime=${_runtimeStateController.value.state.status.name}',
         );
 
         _uiLog(
           '[inference_loop_detected] '
-          'session=$_kDefaultSessionId '
+          'session=$_activeSessionId '
           'waiting=true '
           'no_token=true '
           'runtime_inferencing=false',
@@ -275,16 +430,16 @@ class _ChatPageState extends State<ChatPage>
 
         _uiLog(
           '[UI_SEND_CANCEL] '
-          'session=$_kDefaultSessionId '
+          'session=$_activeSessionId '
           'reason=deadlock_breaker',
         );
 
         context
             .read<OrchestratorStateEngine>()
             .add(
-              const RecoverFromStuckUiEvent(
+              RecoverFromStuckUiEvent(
                 sessionId:
-                    _kDefaultSessionId,
+                    _activeSessionId,
                 runtimeMessage:
                     'Local runtime stalled before first token. Request cancelled and UI recovered.',
               ),
@@ -294,7 +449,7 @@ class _ChatPageState extends State<ChatPage>
 
     _uiLog(
       '[UI_SEND] '
-      'session=$_kDefaultSessionId '
+      'session=$_activeSessionId '
       'page=${hashCode.toRadixString(16)} '
       'chars=${text.length} '
       'attachments=${attachments.length}',
@@ -302,7 +457,7 @@ class _ChatPageState extends State<ChatPage>
 
     _uiLog(
       '[UI_SEND_BEGIN] '
-      'session=$_kDefaultSessionId '
+      'session=$_activeSessionId '
       'chars=${text.length} '
       'attachments=${attachments.length}',
     );
@@ -312,7 +467,7 @@ class _ChatPageState extends State<ChatPage>
         .add(
           SendMessageEvent(
             sessionId:
-                _kDefaultSessionId,
+                _activeSessionId,
             userPrompt: text,
             attachments: attachments,
           ),
@@ -348,7 +503,7 @@ class _ChatPageState extends State<ChatPage>
 
         _uiLog(
           '[UI_STREAM_BEGIN] '
-          'session=$_kDefaultSessionId',
+          'session=$_activeSessionId',
         );
       }
 
@@ -357,12 +512,13 @@ class _ChatPageState extends State<ChatPage>
 
     _uiLog(
       '[UI_STREAM_END] '
-      'session=$_kDefaultSessionId '
+      'session=$_activeSessionId '
       'state=${state.runtimeType}',
     );
 
     _deadlockController
         .cancelGuard();
+    unawaited(_refreshChatSessions());
   }
 
   void _appendDebugLabConversation({
@@ -503,6 +659,7 @@ class _ChatPageState extends State<ChatPage>
 
           return isWide
               ? _WideLayout(
+                  chatNavigation: _chatNavigation,
                   scrollController:
                       _scrollController,
                   onSend: _onSend,
@@ -536,6 +693,7 @@ class _ChatPageState extends State<ChatPage>
                       _systemIndicatorsController,
                 )
               : _NarrowLayout(
+                  chatNavigation: _chatNavigation,
                   scrollController:
                       _scrollController,
                   onSend: _onSend,
@@ -585,6 +743,7 @@ class _ChatPageState extends State<ChatPage>
 class _NarrowLayout
     extends StatelessWidget {
   const _NarrowLayout({
+    required this.chatNavigation,
     required this.scrollController,
     required this.onSend,
     required this.onSettings,
@@ -600,6 +759,8 @@ class _NarrowLayout
     required this.hardwareController,
     required this.systemIndicatorsController,
   });
+
+  final _ChatNavigation chatNavigation;
 
   final ScrollController
       scrollController;
@@ -648,6 +809,7 @@ class _NarrowLayout
   ) {
     return _ChatBody(
       isWide: false,
+      chatNavigation: chatNavigation,
       scrollController:
           scrollController,
       onSend: onSend,
@@ -681,6 +843,7 @@ class _NarrowLayout
 class _WideLayout
     extends StatelessWidget {
   const _WideLayout({
+    required this.chatNavigation,
     required this.scrollController,
     required this.onSend,
     required this.onSettings,
@@ -696,6 +859,8 @@ class _WideLayout
     required this.hardwareController,
     required this.systemIndicatorsController,
   });
+
+  final _ChatNavigation chatNavigation;
 
   final ScrollController
       scrollController;
@@ -786,13 +951,22 @@ class _WideLayout
                         Colors.white12,
                   ),
                   _SidebarTile(
-                    icon: Icons
-                        .chat_bubble_outline_rounded,
-                    label:
-                        l10n.t('chat'),
-                    onTap: () {},
+                    icon: Icons.add,
+                    label: 'Nuova chat',
+                    onTap: chatNavigation.onNewChat,
                   ),
-                  const Spacer(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8,
+                    ),
+                    child: Text(
+                      l10n.t('chat'),
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  Expanded(
+                    child: _ChatSessionList(navigation: chatNavigation),
+                  ),
                   const Divider(
                     color:
                         Colors.white12,
@@ -818,6 +992,7 @@ class _WideLayout
         Expanded(
           child: _ChatBody(
             isWide: true,
+            chatNavigation: chatNavigation,
             scrollController:
                 scrollController,
             onSend: onSend,
@@ -855,6 +1030,7 @@ class _ChatBody
     extends StatefulWidget {
   const _ChatBody({
     required this.isWide,
+    required this.chatNavigation,
     required this.scrollController,
     required this.onSend,
     required this.onSettings,
@@ -872,6 +1048,8 @@ class _ChatBody
   });
 
   final bool isWide;
+
+  final _ChatNavigation chatNavigation;
 
   final ScrollController
       scrollController;
@@ -1004,6 +1182,14 @@ class _ChatBodyState
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(covariant _ChatBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.chatNavigation.sessionId != widget.chatNavigation.sessionId) {
+      _editingUserMessage = null;
+    }
+  }
+
   void _handleDebugLabVisibilityChanged() {
     if (!mounted) return;
     setState(() {});
@@ -1031,14 +1217,14 @@ class _ChatBodyState
       await _runtimeSettingsService.setManualCloudProvider(provider);
       _uiDebugLog(
         action: 'cloud_provider_selection_changed',
-        sessionId: _kDefaultSessionId,
+        sessionId: widget.chatNavigation.sessionId,
         details: 'mode=${provider == null ? 'automatic' : 'manual'} '
             'provider=${provider ?? 'auto'}',
       );
     } catch (error) {
       _uiDebugLog(
         action: 'cloud_provider_selection_failed',
-        sessionId: _kDefaultSessionId,
+        sessionId: widget.chatNavigation.sessionId,
         details: 'provider=${provider ?? 'auto'} error=$error',
       );
     }
@@ -1245,7 +1431,7 @@ class _ChatBodyState
         action:
             'assistant_text_size_changed',
         sessionId:
-            _kDefaultSessionId,
+            widget.chatNavigation.sessionId,
         details:
             'size=${size.name}',
       );
@@ -1254,7 +1440,7 @@ class _ChatBodyState
         action:
             'assistant_text_size_change_failed',
         sessionId:
-            _kDefaultSessionId,
+            widget.chatNavigation.sessionId,
         details:
             'error=$error',
       );
@@ -1268,15 +1454,15 @@ class _ChatBodyState
       action:
           'clear_chat_triggered',
       sessionId:
-          _kDefaultSessionId,
+          widget.chatNavigation.sessionId,
     );
 
     context
         .read<OrchestratorStateEngine>()
         .add(
-          const DebugClearChatEvent(
+          DebugClearChatEvent(
             sessionId:
-                _kDefaultSessionId,
+                widget.chatNavigation.sessionId,
           ),
         );
 
@@ -1326,7 +1512,7 @@ class _ChatBodyState
       action:
           'user_message_edit_started',
       sessionId:
-          _kDefaultSessionId,
+          widget.chatNavigation.sessionId,
       details:
           'message_id=${message.id} chars=${message.content.length}',
     );
@@ -1346,7 +1532,7 @@ class _ChatBodyState
       action:
           'user_message_edit_cancelled',
       sessionId:
-          _kDefaultSessionId,
+          widget.chatNavigation.sessionId,
       details:
           'message_id=${_editingUserMessage!.id}',
     );
@@ -1377,7 +1563,7 @@ class _ChatBodyState
         action:
             'user_message_edit_submitted',
         sessionId:
-            _kDefaultSessionId,
+            widget.chatNavigation.sessionId,
         details:
             'message_id=${editedMessage.id} '
             'new_chars=${text.length}',
@@ -1392,7 +1578,7 @@ class _ChatBodyState
           .add(
             EditMessageEvent(
               sessionId:
-                  _kDefaultSessionId,
+                  widget.chatNavigation.sessionId,
               originalMessageId:
                   editedMessage.id,
               newUserPrompt: text,
@@ -1664,6 +1850,7 @@ class _ChatBodyState
             ),
 
             ChatInputBar(
+              key: ValueKey(widget.chatNavigation.sessionId),
               onSend:
                   _sendFromComposer,
               isLoading:
@@ -1806,10 +1993,8 @@ class _ChatBodyState
                                         .icon(
                                   onPressed:
                                       () {
-                                    _clearChatDebug();
-                                    Navigator.of(
-                                      context,
-                                    ).pop();
+                                    Navigator.of(context).pop();
+                                    widget.chatNavigation.onNewChat();
                                   },
                                   icon:
                                       const Icon(
@@ -1846,62 +2031,9 @@ class _ChatBodyState
                             ),
 
                             Expanded(
-                              child:
-                                  ListView(
-                                padding:
-                                    const EdgeInsets
-                                        .symmetric(
-                                  horizontal:
-                                      12,
-                                ),
-                                children: [
-                                  ListTile(
-                                    leading:
-                                        const Icon(
-                                      Icons
-                                          .chat_bubble_outline,
-                                      color:
-                                          Color(
-                                        0xFF8AB4F8,
-                                      ),
-                                      size:
-                                          18,
-                                    ),
-                                    title:
-                                        const Text(
-                                      "Sessione predefinita",
-                                      style:
-                                          TextStyle(
-                                        color:
-                                            Colors.white,
-                                        fontSize:
-                                            14,
-                                        fontWeight:
-                                            FontWeight.w500,
-                                      ),
-                                    ),
-                                    selected:
-                                        true,
-                                    selectedTileColor:
-                                        Colors.white
-                                            .withValues(
-                                      alpha:
-                                          0.05,
-                                    ),
-                                    shape:
-                                        RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(
-                                        12,
-                                      ),
-                                    ),
-                                    onTap:
-                                        () =>
-                                            Navigator.of(
-                                      context,
-                                    ).pop(),
-                                  ),
-                                ],
+                              child: _ChatSessionList(
+                                navigation: widget.chatNavigation,
+                                closeDrawer: true,
                               ),
                             ),
 

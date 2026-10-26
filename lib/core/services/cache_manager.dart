@@ -1,17 +1,13 @@
-import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 
 class CacheManager {
   const CacheManager();
 
+  /// Chats are user content, not disposable cache. Automatic cleanup must
+  /// never erase older conversations that the user expects to find in Chat.
+  /// Explicit Clear Chat / Danger Zone remain the deletion entry points.
   Future<void> performCleanup(DatabaseHelper db) async {
-    final cutoff = DateTime.now()
-        .subtract(const Duration(days: AppConstants.chatHistoryMaxAgeDays));
-    await db.deleteOldChatMessages(cutoff);
-    final remaining = await db.countChatMessages();
-    if (remaining > AppConstants.chatHistoryMaxRows) {
-      await db.deleteChatMessagesBeyondLimit(AppConstants.chatHistoryMaxRows);
-    }
+    // No destructive cleanup of chat_history.
   }
 
   Future<Map<String, dynamic>> getCacheStats(DatabaseHelper db) async {
