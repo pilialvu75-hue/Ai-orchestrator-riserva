@@ -27,7 +27,7 @@ abstract interface class ChatImageVisionService {
     required ChatAttachment image,
     required String prompt,
     String? systemPrompt,
-    List<ChatTurn> context,
+    List<ChatTurn> context = const <ChatTurn>[],
   });
 }
 
