@@ -32,6 +32,7 @@ import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_video_storyboard_service.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_file_context_service.dart';
 import 'package:ai_orchestrator/features/document_intelligence/data/services/local_document_index_service.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
@@ -182,6 +183,7 @@ abstract final class CloudRoutingBootstrap {
             inferenceService: sl<InferenceService>(),
             runtimeSettingsService: sl<AiRuntimeSettingsService>(),
             imageVisionService: CloudChatImageVisionService(),
+            videoStoryboardService: AndroidChatVideoStoryboardService(),
             fileContextService: ChatFileContextService(
               indexService: sl<LocalDocumentIndexService>(),
               databaseHelper: sl<DatabaseHelper>(),
