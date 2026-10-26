@@ -50,23 +50,36 @@ def validate(source: str) -> list[str]:
     return errors
 
 
-def validate_macos(source: str) -> list[str]:
-    # A successful Android push CI can no longer be interpreted as a
-    # publishable release. macOS may only attach to a manually dispatched
-    # Android release that actually exists.
+def validate_desktop_publisher(source: str, platform: str) -> list[str]:
+    # All desktop assets attach to an existing, deliberately dispatched
+    # Android prerelease. Merely finishing main push CI must not publish.
+    problems: list[str] = []
     required = "github.event.workflow_run.event == 'workflow_dispatch'"
     if required not in source or (
         "github.event.workflow_run.event == 'push'" in source
     ):
-        return ["macOS publisher must require an explicit release dispatch"]
-    return []
+        problems.append(f"{platform}: publisher must require manual release dispatch")
+    if "id: publish_tag" not in source or "steps.publish_tag.outputs.tag" not in source:
+        problems.append(f"{platform}: publisher must resolve the actual beta/nightly/dev tag")
+    if "steps.version.outputs.tag" in source:
+        problems.append(f"{platform}: publisher may not upload to an unsuffixed tag")
+    if platform == "macos" and 'version_code="$((100000 +' not in source:
+        problems.append("macOS must use the same build-code namespace as Android")
+    return problems
 
 
 def main() -> int:
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".github/workflows/build.yml")
     problems = validate(path.read_text(encoding="utf-8"))
-    if len(sys.argv) > 2:
-        problems.extend(validate_macos(Path(sys.argv[2]).read_text(encoding="utf-8")))
+    for publisher_path in sys.argv[2:]:
+        filename = Path(publisher_path).name
+        platform = filename.split("-", 1)[0]
+        problems.extend(
+            validate_desktop_publisher(
+                Path(publisher_path).read_text(encoding="utf-8"),
+                platform,
+            )
+        )
     for problem in problems:
         print(f"::error::{problem}")
     if problems:
