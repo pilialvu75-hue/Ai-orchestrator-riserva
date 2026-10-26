@@ -693,6 +693,7 @@ class _ChatPageState extends State<ChatPage>
                       _systemIndicatorsController,
                 )
               : _NarrowLayout(
+                  chatNavigation: _chatNavigation,
                   scrollController:
                       _scrollController,
                   onSend: _onSend,
@@ -742,6 +743,7 @@ class _ChatPageState extends State<ChatPage>
 class _NarrowLayout
     extends StatelessWidget {
   const _NarrowLayout({
+    required this.chatNavigation,
     required this.scrollController,
     required this.onSend,
     required this.onSettings,
@@ -757,6 +759,8 @@ class _NarrowLayout
     required this.hardwareController,
     required this.systemIndicatorsController,
   });
+
+  final _ChatNavigation chatNavigation;
 
   final ScrollController
       scrollController;
@@ -805,6 +809,7 @@ class _NarrowLayout
   ) {
     return _ChatBody(
       isWide: false,
+      chatNavigation: chatNavigation,
       scrollController:
           scrollController,
       onSend: onSend,
@@ -838,6 +843,7 @@ class _NarrowLayout
 class _WideLayout
     extends StatelessWidget {
   const _WideLayout({
+    required this.chatNavigation,
     required this.scrollController,
     required this.onSend,
     required this.onSettings,
@@ -853,6 +859,8 @@ class _WideLayout
     required this.hardwareController,
     required this.systemIndicatorsController,
   });
+
+  final _ChatNavigation chatNavigation;
 
   final ScrollController
       scrollController;
@@ -943,13 +951,22 @@ class _WideLayout
                         Colors.white12,
                   ),
                   _SidebarTile(
-                    icon: Icons
-                        .chat_bubble_outline_rounded,
-                    label:
-                        l10n.t('chat'),
-                    onTap: () {},
+                    icon: Icons.add,
+                    label: 'Nuova chat',
+                    onTap: chatNavigation.onNewChat,
                   ),
-                  const Spacer(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8,
+                    ),
+                    child: Text(
+                      l10n.t('chat'),
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  Expanded(
+                    child: _ChatSessionList(navigation: chatNavigation),
+                  ),
                   const Divider(
                     color:
                         Colors.white12,
@@ -975,6 +992,7 @@ class _WideLayout
         Expanded(
           child: _ChatBody(
             isWide: true,
+            chatNavigation: chatNavigation,
             scrollController:
                 scrollController,
             onSend: onSend,
@@ -1012,6 +1030,7 @@ class _ChatBody
     extends StatefulWidget {
   const _ChatBody({
     required this.isWide,
+    required this.chatNavigation,
     required this.scrollController,
     required this.onSend,
     required this.onSettings,
@@ -1029,6 +1048,8 @@ class _ChatBody
   });
 
   final bool isWide;
+
+  final _ChatNavigation chatNavigation;
 
   final ScrollController
       scrollController;
@@ -1159,6 +1180,14 @@ class _ChatBodyState
     _appearanceViewModel.dispose();
 
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChatBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.chatNavigation.sessionId != widget.chatNavigation.sessionId) {
+      _editingUserMessage = null;
+    }
   }
 
   void _handleDebugLabVisibilityChanged() {
@@ -1821,6 +1850,7 @@ class _ChatBodyState
             ),
 
             ChatInputBar(
+              key: ValueKey(widget.chatNavigation.sessionId),
               onSend:
                   _sendFromComposer,
               isLoading:
@@ -1963,10 +1993,8 @@ class _ChatBodyState
                                         .icon(
                                   onPressed:
                                       () {
-                                    _clearChatDebug();
-                                    Navigator.of(
-                                      context,
-                                    ).pop();
+                                    Navigator.of(context).pop();
+                                    widget.chatNavigation.onNewChat();
                                   },
                                   icon:
                                       const Icon(
@@ -2003,62 +2031,9 @@ class _ChatBodyState
                             ),
 
                             Expanded(
-                              child:
-                                  ListView(
-                                padding:
-                                    const EdgeInsets
-                                        .symmetric(
-                                  horizontal:
-                                      12,
-                                ),
-                                children: [
-                                  ListTile(
-                                    leading:
-                                        const Icon(
-                                      Icons
-                                          .chat_bubble_outline,
-                                      color:
-                                          Color(
-                                        0xFF8AB4F8,
-                                      ),
-                                      size:
-                                          18,
-                                    ),
-                                    title:
-                                        const Text(
-                                      "Sessione predefinita",
-                                      style:
-                                          TextStyle(
-                                        color:
-                                            Colors.white,
-                                        fontSize:
-                                            14,
-                                        fontWeight:
-                                            FontWeight.w500,
-                                      ),
-                                    ),
-                                    selected:
-                                        true,
-                                    selectedTileColor:
-                                        Colors.white
-                                            .withValues(
-                                      alpha:
-                                          0.05,
-                                    ),
-                                    shape:
-                                        RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(
-                                        12,
-                                      ),
-                                    ),
-                                    onTap:
-                                        () =>
-                                            Navigator.of(
-                                      context,
-                                    ).pop(),
-                                  ),
-                                ],
+                              child: _ChatSessionList(
+                                navigation: widget.chatNavigation,
+                                closeDrawer: true,
                               ),
                             ),
 
