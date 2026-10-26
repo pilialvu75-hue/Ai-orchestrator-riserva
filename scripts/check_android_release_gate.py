@@ -50,9 +50,23 @@ def validate(source: str) -> list[str]:
     return errors
 
 
+def validate_macos(source: str) -> list[str]:
+    # A successful Android push CI can no longer be interpreted as a
+    # publishable release. macOS may only attach to a manually dispatched
+    # Android release that actually exists.
+    required = "github.event.workflow_run.event == 'workflow_dispatch'"
+    if required not in source or (
+        "github.event.workflow_run.event == 'push'" in source
+    ):
+        return ["macOS publisher must require an explicit release dispatch"]
+    return []
+
+
 def main() -> int:
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".github/workflows/build.yml")
     problems = validate(path.read_text(encoding="utf-8"))
+    if len(sys.argv) > 2:
+        problems.extend(validate_macos(Path(sys.argv[2]).read_text(encoding="utf-8")))
     for problem in problems:
         print(f"::error::{problem}")
     if problems:
