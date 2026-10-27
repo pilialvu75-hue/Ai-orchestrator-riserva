@@ -348,6 +348,13 @@ class DatabaseHelper {
         where: '${AppConstants.colPrefKey} = ?',
         whereArgs: const <String>['assistant.chat.active_session'],
       );
+      // User-supplied chat titles are part of deleted conversation history.
+      // Leave unrelated user preferences and durable memories untouched.
+      await txn.delete(
+        AppConstants.tableUserPreferences,
+        where: '${AppConstants.colPrefKey} LIKE ?',
+        whereArgs: const <String>['assistant.chat.title.%'],
+      );
       return removed;
     });
   }

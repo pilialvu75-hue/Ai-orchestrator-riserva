@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -88,6 +89,75 @@ void main() {
       (await store.listSessions()).map((s) => s.id).toList(),
       <String>['b', 'c', 'a'],
     );
+  });
+
+  test('manual title persists after restore without changing chat messages',
+      () async {
+    await store.createSession('a');
+    await addMessage('m1', 'a', 10, 'Messaggio originale');
+    await store.renameSession('a', '  Titolo scelto  ');
+    expect((await store.listSessions()).single.title, 'Titolo scelto');
+
+    final reopenedStore = ChatSessionStore.forTesting(db);
+    expect((await reopenedStore.listSessions()).single.title, 'Titolo scelto');
+    expect((await db.query('chat_history')).single['content'],
+        'Messaggio originale');
+
+    await store.renameSession('a', 'Titolo aggiornato');
+    expect((await store.listSessions()).single.title, 'Titolo aggiornato');
+  });
+
+  test('renaming one chat preserves all other titles and pins', () async {
+    await store.createSession('a');
+    await store.createSession('b');
+    await addMessage('m1', 'a', 1, 'Chat A');
+    await addMessage('m2', 'b', 2, 'Chat B');
+    await store.setPinned('a', true);
+    await store.renameSession('b', 'Conversazione B');
+    final sessions = await store.listSessions();
+    expect(sessions.map((s) => s.id), <String>['a', 'b']);
+    expect(sessions.first.title, 'Chat A');
+    expect(sessions.first.pinned, isTrue);
+    expect(sessions.last.title, 'Conversazione B');
+    expect((await db.query('chat_history')).length, 2);
+  });
+
+  test('invalid titles and missing sessions do not change stored history',
+      () async {
+    await store.createSession('a');
+    await addMessage('m1', 'a', 1, 'Messaggio intatto');
+    await expectLater(store.renameSession('a', '   '), throwsArgumentError);
+    await expectLater(
+      store.renameSession('a', List<String>.filled(81, 'x').join()),
+      throwsArgumentError,
+    );
+    await expectLater(
+      store.renameSession('missing', 'Un titolo'),
+      throwsStateError,
+    );
+    expect((await store.listSessions()).single.title, 'Messaggio intatto');
+    expect((await db.query('chat_history')).single['content'],
+        'Messaggio intatto');
+  });
+
+  test('explicit chat-history wipe clears custom titles but no other settings',
+      () async {
+    await store.createSession('a');
+    await addMessage('m1', 'a', 10, 'La prima chat');
+    await store.renameSession('a', 'Nome privato');
+    await db.insert('user_preferences', <String, Object>{
+      'pref_key': 'user.theme',
+      'pref_value': 'dark',
+    });
+
+    final helper = DatabaseHelper.forTesting(db);
+    expect(await helper.deleteAllChatMessages(), 1);
+    expect(await db.query('chat_sessions'), isEmpty);
+    expect(await db.query('chat_history'), isEmpty);
+    final preferences = await db.query('user_preferences');
+    expect(preferences, hasLength(1));
+    expect(preferences.single['pref_key'], 'user.theme');
+    expect(preferences.single['pref_value'], 'dark');
   });
 
   test('titles are derived from user prompts and not model output', () async {
