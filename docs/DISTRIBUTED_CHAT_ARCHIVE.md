@@ -33,6 +33,48 @@ promoted to confirmed truth.
 - No migration deletes or rewrites user history; no UI, upload, eviction,
   background scheduling, or automatic promotion to memory is enabled.
 
+## Multi-account isolation and shared learning (issues #911, #913)
+
+The archive catalog is **owner-scoped**, not merely device-scoped. Device IDs
+identify an origin but never establish a human identity. Every pointer and
+provenance link has an opaque `owner_account_id`; catalog operations require an
+owner bound to the caller's authenticated local account/profile context.
+Missing owner is invalid. Queries, source lookups and writes are scoped to the
+bound owner; identical `default` session IDs or memory keys from two people
+cannot resolve to the other person's source. Tests exercise both owners in
+one synthetic SQLite database.
+
+**This is only a local catalog boundary, not completed authentication.**
+Before distributing accounts, an authenticated identity lifecycle, per-user
+key isolation, backend ACLs, device enrollment, logout/cache invalidation and
+cross-profile end-to-end tests are mandatory. Do not derive an owner from text
+in a model prompt or trust an owner attached to an unverified remote envelope.
+Even catalog hashes and object keys can be private metadata; sharing the same
+physical NAS does not authorize listing another owner's archive.
+
+Separate replication policies:
+- **Private facts**: profile preferences, conversation records, motorcycle
+  ownership, sporting preferences, project facts and chat references replicate
+  only to authorized devices of the same owner (or narrowly authorized project
+  collaborators).
+- **Shared skill candidates**: generic procedures proposed from opt-in
+  experiences may enter a separate privacy-scrubbed, validated, versioned
+  skill pipeline. Never publish raw transcripts or assume an LLM summary is
+  anonymized. Review for sensitive facts, names, prompt injection, poisoning
+  and factual correctness before other users receive the skill. A skill
+  describing possible useful motorcycle comparison dimensions is not
+  evidence of anyone's motorcycle or favourite sport.
+- **Safety assistance**: provide support to the user at risk. Alerting another
+  adult requires explicit and revocable opt-in by the person whose information
+  would be shared. For minor accounts, implement authorized guardian roles
+  and narrowly defined, proportionate safeguards with false-positive checks,
+  minimal disclosures and applicable legal constraints. General curiosity
+  about dangerous subjects is not sufficient grounds to notify family.
+  No monitoring, risk notifications or cross-account sharing are active now.
+
+Archive synchronization remains strictly opt-in. Never publish a
+family beta (1.0.16) without the user's explicit authorization.
+
 ## Mandatory cross-device knowledge convergence (S24 -> ASUS example)
 
 An archived transcript alone is **not** enough. Every authorized platform must
