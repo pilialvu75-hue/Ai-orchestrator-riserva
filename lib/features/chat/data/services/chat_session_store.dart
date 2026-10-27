@@ -28,6 +28,7 @@ class ChatSessionStore {
 
   static const String defaultSessionId = 'default';
   static const String activeSessionPreference = 'assistant.chat.active_session';
+  static const String _titlePreferencePrefix = 'assistant.chat.title.';
   final DatabaseHelper? _databaseHelper;
   final Database? _testDatabase;
 
@@ -98,12 +99,44 @@ class ChatSessionStore {
     );
   }
 
-  /// Pinned sessions first, then most recent. Titles come only from the
-  /// first user message rather than model-generated text.
+  /// Persist a user-provided title without changing the original message.
+  /// Existing SQLite databases already contain user_preferences: no migration.
+  Future<void> renameSession(String sessionId, String title) async {
+    final normalized = title.trim();
+    if (normalized.isEmpty || normalized.length > 80) {
+      throw ArgumentError('Chat title must contain 1 to 80 characters');
+    }
+    final db = await _database;
+    await db.transaction((txn) async {
+      final existing = await txn.query(
+        AppConstants.tableChatSessions,
+        columns: const <String>['id'],
+        where: 'id = ?',
+        whereArgs: <String>[sessionId],
+        limit: 1,
+      );
+      if (existing.isEmpty) throw StateError('Chat session not found');
+      await txn.insert(
+        AppConstants.tableUserPreferences,
+        <String, Object>{
+          AppConstants.colPrefKey: '$_titlePreferencePrefix$sessionId',
+          AppConstants.colPrefValue: normalized,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    });
+  }
+
+  /// Pinned sessions first, then most recent. User titles override titles
+  /// derived from the first message; the original message is never edited.
   Future<List<ChatSessionInfo>> listSessions() async {
     final db = await _database;
     final rows = await db.rawQuery('''
       SELECT s.id, s.pinned,
+             (SELECT p.${AppConstants.colPrefValue}
+              FROM ${AppConstants.tableUserPreferences} AS p
+              WHERE p.${AppConstants.colPrefKey} = '$_titlePreferencePrefix' || s.id
+              LIMIT 1) AS custom_title,
              COALESCE(
                (SELECT MAX(m.${AppConstants.colTimestamp})
                 FROM ${AppConstants.tableChatHistory} AS m
@@ -125,11 +158,13 @@ class ChatSessionStore {
       final firstPrompt = (row['first_prompt'] as String? ?? '')
           .trim()
           .replaceAll(RegExp(r'\s+'), ' ');
-      final title = firstPrompt.isEmpty
+      final fallbackTitle = firstPrompt.isEmpty
           ? 'Nuova chat'
           : firstPrompt.length <= 65
               ? firstPrompt
               : '${firstPrompt.substring(0, 62)}...';
+      final customTitle = (row['custom_title'] as String? ?? '').trim();
+      final title = customTitle.isEmpty ? fallbackTitle : customTitle;
       return ChatSessionInfo(
         id: row['id'] as String,
         title: title,
