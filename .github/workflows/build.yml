@@ -15,6 +15,7 @@ on:
         required: true
         default: beta
         options:
+          - stable
           - beta
           - nightly
           - dev
@@ -557,8 +558,8 @@ jobs:
             git log --pretty=format:'- %s (%h)' -n 20
           } > RELEASE_NOTES.md
 
-      # Never publish from a main push or PR. A beta/nightly/dev release
-      # requires an explicit manual workflow_dispatch selecting the channel.
+      # Never publish from main push or PR. Any stable/beta/nightly/dev release
+      # requires an explicitly authorized workflow_dispatch selecting its channel.
       - name: Create GitHub Release
         if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v3
