@@ -33,6 +33,74 @@ promoted to confirmed truth.
 - No migration deletes or rewrites user history; no UI, upload, eviction,
   background scheduling, or automatic promotion to memory is enabled.
 
+## Mandatory cross-device knowledge convergence (S24 -> ASUS example)
+
+An archived transcript alone is **not** enough. Every authorized platform must
+maintain its own up-to-date **SQLite materialized view** of user-confirmed
+memories, recent chat indexes, remote archive pointers and source provenance,
+subject to offline synchronization delays.
+
+Example: on S24 the user discusses a motorbike and optionally captures a
+photo. The event stream must make the conversation reference, tentative
+identification and any user-confirmed fact discoverable on ASUS. ASUS must
+answer "the bike we saw earlier" from its locally synchronized SQLite index,
+then download a verified encrypted source/photo *on demand* if it needs to
+identify the exact model. Current pricing/specifications require fresh
+research and should never be invented. Source content may need additional
+explicit authorization before being sent to a Cloud inference provider.
+
+### Distinct replicable collections
+
+- `confirmed_user_memory`: one event per record key + scope, with source,
+  revision, origin node and authenticated delete/supersede tombstones.
+- `conversation_catalog`: global conversation IDs, lightweight summaries
+  explicitly reviewed/derived, pointers and metadata. These are retrieval
+  cues, *not confirmed facts*.
+- `archive_catalog`: immutable encrypted snapshot identities, provider IDs,
+  ciphertext hashes and locations; a pointer does not assert it was uploaded.
+- `project_memory` and `conversation_memory`: scoped to authorized project
+  members and the originating conversation; never spill to all peers.
+- `media_index`: only opaque references to encrypted photographs/attachments,
+  with explicit retention and sync policy. The original is not sent to an AI
+  provider simply because it is synchronized.
+
+The full SQLite file never moves between devices. Use per-record
+CRDT/HLC/revision event envelopes and local projections. Never use a plain LWW
+overwrite of the current `assistant.durable_memory.v1:` JSON arrays: their
+storage groups multiple records in one scope, causing concurrent writes to
+overwrite independent updates. Never upgrade candidate/model-generated facts
+to confirmed through replication.
+
+There is already a `SyncManager` and a `sync_changes` SQLite log. Before
+reusing its network transport on a cross-device trust boundary, implement
+identity pairing, peer authentication, end-to-end encrypted transport/payload,
+authorization per collection, rate/size limits, replay protection and
+authenticated erasure tombstones. The current `LocalSyncServer` uses a
+LAN HTTP listener bound to anyIPv4 with no obvious auth gate in its request
+handler; **do not expose that service to the public Internet** or silently
+activate it for the archive. All synchronization requires opt-in.
+
+### Acceptance: 2 isolated SQLite databases
+
+1. S24/test DB A records a synthetic motorbike conversation cue, archive
+   reference and explicit confirmed memory. ASUS/test DB B is initially empty.
+2. Authorized event transfer populates DB B without transferring full
+   chat_history rows or opening the archive object; a query can identify the
+   conversation by reference and is clear that model identification is not yet
+   known.
+3. Offline updates on A and B use different record keys and both survive
+   the subsequent merge in either order; duplicate delivery is idempotent.
+4. Delete/supersede on B propagates to A and is not resurrected by an old
+   archive snapshot or delayed A-to-B transfer.
+5. An unauthorized peer or a replayed/stale event cannot change memory.
+   No raw tokens, photos, plaintext archives or API keys leak in logs.
+6. On permanent connection loss, each device remains useful with local memory
+   and accurately states when off-device sources cannot be retrieved.
+
+**Phase A is only the metadata catalog and does not pass the cross-device
+convergence criteria.** These are mandatory for later authenticated sync
+phases, not promises about current installed builds.
+
 ## Next phases: completion criteria
 
 **B — portable ciphertext snapshot (no network):**
