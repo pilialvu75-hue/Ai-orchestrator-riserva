@@ -45,8 +45,13 @@ jobs:
             echo "::error::Stable request targets an outdated main commit."
             exit 1
           fi
-          gh api "repos/$GITHUB_REPOSITORY/contents/pubspec.yaml?ref=main" \
-            --jq '.content' | base64 -d | grep -Eq '^version: 1\.0\.15\+'
+          version_name="$(gh api "repos/$GITHUB_REPOSITORY/contents/pubspec.yaml?ref=main" \
+            --jq '.content' | base64 -d | sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)\+[0-9]+[[:space:]]*$/\1/p' | head -n 1)"
+          if [ -z "$version_name" ]; then
+            echo "::error::No valid SemVer app version found on main."
+            exit 1
+          fi
+          stable_prefix="v${version_name}+"
 
           # Do not repeat an already running official Android release of the
           # same head. A prior release of this commit is also idempotent.
@@ -60,7 +65,7 @@ jobs:
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
             case "$tag" in
-              v1.0.15+*)
+              "$stable_prefix"*)
                 published_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null || true)"
                 if [ "$published_sha" = "$requested_sha" ]; then
                   echo "::notice::Stable release already published for this exact main: $tag"
