@@ -209,6 +209,21 @@ reali. Un difetto concreto genera una sola PR circoscritta.
    pronti, ASUS Windows, Mac, Linux e Web. Distinguere build CI verde da
    test fisici superati; registrare PASS/FAIL e prove.
 
+**Image LOCAL — prima fase Android, riconoscimento offline reale:**
+il runtime FFI `llama.cpp` attuale tratta solo testo e non riceve pixel.
+Implementare prima un classificatore locale limitato (ML Kit modello *bundled*)
+con etichette e confidence, pre-decoding bounded <=1024 px, bitmap RGB_565,
+limite file 8 MB, zero upload e nessuna nuova key API. Dichiarare visivamente
+che si tratta di categorie probabilistiche, **non** di visione generale
+del modello 3B. LOCAL/HYBRID non devono deviare silenziosamente a Cloud.
+Un backend desktop non disponibile deve esporre il limite, non inviare foto.
+Seconda fase separata: vera inferenza multimodale `llama.cpp/libmtmd`
+con progetto MM projector + GGUF vision quantizzato, modello visivo
+esplicitamente scaricato/autorizzato dall'utente, stima RAM con caricamento
+esclusivo o dismissione temporanea del modello testo; benchmark S24 fisico
+e fallback CPU/accelerazione GPU solo dopo test. Non caricare due grandi
+modelli contemporaneamente né considerare il dispositivo incapace a priori.
+
 **Nuovo risultato fisico Image del 27/10/2026:**
 sulla build 1.0.15.103459-beta LOCAL mostra correttamente l'impossibilità
 di visione, galleria/thumb salvati; Gemini Cloud HTTP 503 ripetuti e timeout
