@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -137,6 +138,26 @@ void main() {
     expect((await store.listSessions()).single.title, 'Messaggio intatto');
     expect((await db.query('chat_history')).single['content'],
         'Messaggio intatto');
+  });
+
+  test('explicit chat-history wipe clears custom titles but no other settings',
+      () async {
+    await store.createSession('a');
+    await addMessage('m1', 'a', 10, 'La prima chat');
+    await store.renameSession('a', 'Nome privato');
+    await db.insert('user_preferences', <String, Object>{
+      'pref_key': 'user.theme',
+      'pref_value': 'dark',
+    });
+
+    final helper = DatabaseHelper.forTesting(db);
+    expect(await helper.deleteAllChatMessages(), 1);
+    expect(await db.query('chat_sessions'), isEmpty);
+    expect(await db.query('chat_history'), isEmpty);
+    final preferences = await db.query('user_preferences');
+    expect(preferences, hasLength(1));
+    expect(preferences.single['pref_key'], 'user.theme');
+    expect(preferences.single['pref_value'], 'dark');
   });
 
   test('titles are derived from user prompts and not model output', () async {
