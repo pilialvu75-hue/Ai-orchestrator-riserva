@@ -220,7 +220,9 @@ class ChatRepositoryImpl implements ChatRepository {
               }
               onRuntimeNotice?.call(isCloud
                   ? 'Immagine analizzata con ${vision.providerId} via Cloud.'
-                  : 'Riconoscimento visivo offline: categorie preliminari.');
+                  : vision.providerId == 'localImageLabelsOcr'
+                      ? 'Riconoscimento visivo e lettura testo OCR offline.'
+                      : 'Riconoscimento visivo offline: categorie preliminari.');
               onPartialResponse?.call(vision.text);
               final imageAnswer = ChatMessageModel(
                 id: _uuid.v4(),

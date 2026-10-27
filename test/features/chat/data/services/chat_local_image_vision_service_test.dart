@@ -130,6 +130,45 @@ void main() {
     expect(calls, 0);
   });
 
+  test('Chat LOCAL receives image labels plus poster text via on-device OCR',
+      () async {
+    const ocrChannel = MethodChannel('com.aiorchestrator/local_image_text');
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls++;
+      return <Map<String, Object>>[
+        <String, Object>{'label': 'Tableware', 'confidence': 0.91},
+        <String, Object>{'label': 'Poster', 'confidence': 0.77},
+      ];
+    });
+    messenger.setMockMethodCallHandler(ocrChannel, (call) async {
+      expect(call.method, 'readText');
+      expect(call.arguments, <String, String>{'path': file.path});
+      return <String, Object>{
+        'text': 'AVANT J’AVAIS LA SCIENCE INFUSE',
+        'truncated': false,
+      };
+    });
+    try {
+      final response = await AndroidChatLocalImageVisionService(
+        channel: channel,
+        ocrChannel: ocrChannel,
+        supportedPlatform: true,
+      ).analyze(
+        providerId: 'local',
+        image: attachment,
+        prompt: 'Cosa vedi in questa immagine?',
+      );
+      expect(response.providerId, 'localImageLabelsOcr');
+      expect(response.text, contains('Poster (77%)'));
+      expect(response.text, contains('SCIENCE INFUSE'));
+      expect(response.text,
+          contains('Nessuna immagine è stata inviata al Cloud'));
+      expect(calls, 1);
+    } finally {
+      messenger.setMockMethodCallHandler(ocrChannel, null);
+    }
+  });
+
   test('native classifier error is reported instead of fake vision output',
       () async {
     messenger.setMockMethodCallHandler(channel, (call) async {
