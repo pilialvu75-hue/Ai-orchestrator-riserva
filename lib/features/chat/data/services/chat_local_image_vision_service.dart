@@ -7,6 +7,7 @@ import 'package:cantiere_local_image_vision/cantiere_local_image_vision.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_local_image_ocr_enrichment.dart';
 
 /// The first offline image capability: device-side category labels, NOT a
 /// general-purpose VLM. Never claim colors, counts, OCR, or details not proven
@@ -14,8 +15,11 @@ import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_se
 final class AndroidChatLocalImageVisionService implements ChatImageVisionService {
   AndroidChatLocalImageVisionService({
     MethodChannel? channel,
+    MethodChannel? ocrChannel,
     bool? supportedPlatform,
-  })  : _channel =
+  })  : _ocrChannel = ocrChannel ??
+            const MethodChannel('com.aiorchestrator/local_image_text'),
+        _channel =
             channel ?? const MethodChannel('com.aiorchestrator/local_image_vision'),
         _supportedPlatform = supportedPlatform ??
             (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
@@ -23,6 +27,7 @@ final class AndroidChatLocalImageVisionService implements ChatImageVisionService
   static const int maxImageBytes = 8 * 1024 * 1024;
   static const Duration requestTimeout = Duration(seconds: 20);
   final MethodChannel _channel;
+  final MethodChannel _ocrChannel;
   final bool _supportedPlatform;
 
   @override
@@ -63,9 +68,18 @@ final class AndroidChatLocalImageVisionService implements ChatImageVisionService
         channel: _channel,
         supportedPlatform: _supportedPlatform,
       ).labelFile(file.path);
+      final enriched = await ChatLocalImageOcrEnrichment(
+        channel: _ocrChannel,
+      ).enrich(
+        imagePath: file.path,
+        prompt: prompt,
+        labels: processed,
+      );
       return ChatImageVisionResult(
-        providerId: LocalImageLabelResult.providerId,
-        text: processed.text,
+        providerId: enriched.hasText
+            ? 'localImageLabelsOcr'
+            : LocalImageLabelResult.providerId,
+        text: enriched.text,
       );
     } on TimeoutException {
       throw StateError(
