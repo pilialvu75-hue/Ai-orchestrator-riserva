@@ -12,6 +12,7 @@ void main() {
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
   ChatArchivePointer pointer({
+    String owner = 'owner-a',
     String archiveId = 'snapshot-1',
     String device = 'device-a',
     String session = 'default',
@@ -22,6 +23,7 @@ void main() {
     int? verifiedAt,
   }) =>
       ChatArchivePointer(
+        ownerAccountId: owner,
         archiveId: archiveId,
         originDeviceId: device,
         sourceSessionId: session,
@@ -69,7 +71,7 @@ void main() {
       'timestamp': 20,
     });
     await DatabaseHelper.createChatArchiveCatalogTables(db);
-    catalog = ChatArchiveCatalog.forTesting(db);
+    catalog = ChatArchiveCatalog.forTesting(db, ownerAccountId: 'owner-a');
   });
 
   tearDown(() async => db.close());
@@ -175,6 +177,7 @@ void main() {
       () async {
     await catalog.addPendingPointer(pointer());
     const link = ChatArchiveMemoryLink(
+      ownerAccountId: 'owner-a',
       memoryScope: 'user',
       memoryKey: 'hardware.s24.model',
       archiveId: 'snapshot-1',
@@ -199,9 +202,111 @@ void main() {
     expect((await db.query('chat_history')).single['id'], 'msg-1');
   });
 
+  test('different accounts cannot enumerate each other on shared storage',
+      () async {
+    final carlo = ChatArchiveCatalog.forTesting(
+      db,
+      ownerAccountId: 'owner-carlo',
+    );
+    // Even matching device IDs, session IDs, archive IDs and memory keys
+    // must not cross the authenticated principal boundary.
+    await catalog.addPendingPointer(pointer());
+    await carlo.addPendingPointer(pointer(
+      owner: 'owner-carlo',
+      key: 'conversation/carlo.enc',
+    ));
+    expect((await db.query(AppConstants.tableChatArchiveCatalog)), hasLength(2));
+    expect((await catalog.findPointer('snapshot-1'))!.ownerAccountId,
+        'owner-a');
+    expect((await carlo.findPointer('snapshot-1'))!.objectKey,
+        'conversation/carlo.enc');
+    expect((await catalog.findByOrigin(
+      originDeviceId: 'device-a',
+      sessionId: 'default',
+    )), hasLength(1));
+    expect((await carlo.findByOrigin(
+      originDeviceId: 'device-a',
+      sessionId: 'default',
+    )), hasLength(1));
+
+    await catalog.addMemorySource(const ChatArchiveMemoryLink(
+      ownerAccountId: 'owner-a',
+      memoryScope: 'user',
+      memoryKey: 'preferred_sport',
+      archiveId: 'snapshot-1',
+      messageId: 'msg-a',
+    ));
+    await carlo.addMemorySource(const ChatArchiveMemoryLink(
+      ownerAccountId: 'owner-carlo',
+      memoryScope: 'user',
+      memoryKey: 'preferred_sport',
+      archiveId: 'snapshot-1',
+      messageId: 'msg-carlo',
+    ));
+    expect((await catalog.sourcesForMemory(
+      memoryScope: 'user',
+      memoryKey: 'preferred_sport',
+    )).single.messageId, 'msg-a');
+    expect((await carlo.sourcesForMemory(
+      memoryScope: 'user',
+      memoryKey: 'preferred_sport',
+    )).single.messageId, 'msg-carlo');
+  });
+
+  test('missing or forged owner cannot alter pointers or memory links',
+      () async {
+    expect(
+      () => ChatArchiveCatalog.forTesting(db, ownerAccountId: ''),
+      throwsArgumentError,
+    );
+    await catalog.addPendingPointer(pointer());
+    await expectLater(
+      catalog.addPendingPointer(pointer(
+        owner: 'owner-carlo',
+        archiveId: 'carlo-only',
+        key: 'conversation/carlo.enc',
+      )),
+      throwsStateError,
+    );
+    await expectLater(
+      catalog.addMemorySource(const ChatArchiveMemoryLink(
+        ownerAccountId: 'owner-carlo',
+        memoryScope: 'user',
+        memoryKey: 'preferred_sport',
+        archiveId: 'snapshot-1',
+        messageId: 'msg-a',
+      )),
+      throwsStateError,
+    );
+    final stranger = ChatArchiveCatalog.forTesting(
+      db,
+      ownerAccountId: 'stranger',
+    );
+    expect(await stranger.findPointer('snapshot-1'), isNull);
+    expect(await stranger.findByOrigin(
+      originDeviceId: 'device-a',
+      sessionId: 'default',
+    ), isEmpty);
+    expect(await stranger.sourcesForMemory(
+      memoryScope: 'user',
+      memoryKey: 'preferred_sport',
+    ), isEmpty);
+    await expectLater(
+      stranger.addMemorySource(const ChatArchiveMemoryLink(
+        ownerAccountId: 'stranger',
+        memoryScope: 'user',
+        memoryKey: 'preferred_sport',
+        archiveId: 'snapshot-1',
+        messageId: 'msg-a',
+      )),
+      throwsStateError,
+    );
+  });
+
   test('cannot link memory to an unregistered archive', () async {
     await expectLater(
       catalog.addMemorySource(const ChatArchiveMemoryLink(
+        ownerAccountId: 'owner-a',
         memoryScope: 'user',
         memoryKey: 'example',
         archiveId: 'unknown',
