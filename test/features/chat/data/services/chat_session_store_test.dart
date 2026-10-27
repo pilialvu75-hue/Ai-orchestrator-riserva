@@ -127,7 +127,7 @@ void main() {
     await addMessage('m1', 'a', 1, 'Messaggio intatto');
     await expectLater(store.renameSession('a', '   '), throwsArgumentError);
     await expectLater(
-      store.renameSession('a', 'x' * 81),
+      store.renameSession('a', List<String>.filled(81, 'x').join()),
       throwsArgumentError,
     );
     await expectLater(
