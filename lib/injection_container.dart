@@ -225,6 +225,9 @@ Future<void> initDependencies({
       preferences: sl<SharedPreferences>(),
       intentHandler: sl<AndroidIntentHandler>(),
       currentVersion: appVersion,
+      // Android PackageInfo has no prerelease suffix: compare opted-in Beta
+      // APKs using their monotonic build codes when base version matches.
+      enableAndroidBetaBuildNumberComparison: true,
     ),
   );
   sl.registerLazySingleton<ContextWindowManager>(
