@@ -82,8 +82,10 @@ class _ChatSessionList extends StatelessWidget {
     switch (action) {
       case _ChatSessionAction.togglePin:
         navigation.onTogglePin(session);
+        return;
       case _ChatSessionAction.rename:
         navigation.onRenameChat(session);
+        return;
     }
   }
 
