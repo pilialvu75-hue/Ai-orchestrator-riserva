@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -31,22 +32,56 @@ abstract interface class ChatImageVisionService {
   });
 }
 
-/// Explicit Cloud-only Image support. No implicit provider switching,
-/// no image URL exposure, and no fallback to text-only local inference.
+/// Select a configured visual provider for Cloud AUTO. This capability-specific
+/// router must not reuse the text router: a provider with text support is not
+/// necessarily able to receive image bytes.
+///
+/// AUTO presently has one supported free-tier vision adapter (Gemini).
+/// OpenAI is paid and therefore never selected implicitly. A manual provider
+/// selection stays authoritative; LOCAL mode is handled by the caller.
+abstract final class ChatImageVisionAutoRouter {
+  static String? select({
+    required String? manualProvider,
+    required bool Function(String providerId) automaticUseAllowed,
+    required bool Function(String providerId) hasCredential,
+  }) {
+    if (manualProvider != null) {
+      return manualProvider == 'gemini' || manualProvider == 'openAi'
+          ? manualProvider
+          : null;
+    }
+    const autoCandidates = <String>['gemini'];
+    for (final provider in autoCandidates) {
+      if (automaticUseAllowed(provider) && hasCredential(provider)) {
+        return provider;
+      }
+    }
+    return null;
+  }
+}
+
+/// Explicit Cloud-only Image support. Only configured supported vision
+/// providers receive pixels; never route images to text-only local inference.
 final class CloudChatImageVisionService implements ChatImageVisionService {
   CloudChatImageVisionService({
     http.Client? client,
     String? Function(String)? credentialFor,
     String? Function(String)? modelFor,
-  })  : _client = client ?? http.Client(),
+    Duration timeout = requestTimeout,
+    Duration retryDelay = const Duration(seconds: 1),
+  })  : _timeout = timeout,
+        _retryDelay = retryDelay,
+        _client = client ?? http.Client(),
         _credentialFor =
             credentialFor ?? CloudCredentialStore.instance.secretFor,
         _modelFor =
             modelFor ?? CloudRuntimePreferences.instance.modelForProvider;
 
   static const int maxImageBytes = 8 * 1024 * 1024;
-  static const Duration requestTimeout = Duration(seconds: 45);
+  static const Duration requestTimeout = Duration(seconds: 30);
 
+  final Duration _timeout;
+  final Duration _retryDelay;
   final http.Client _client;
   final String? Function(String) _credentialFor;
   final String? Function(String) _modelFor;
@@ -184,13 +219,40 @@ final class CloudChatImageVisionService implements ChatImageVisionService {
     }
 
     // Credentials and image bytes must never be included in diagnostics.
-    final response = await _client
-        .post(endpoint, headers: headers, body: jsonEncode(payload))
-        .timeout(requestTimeout);
+    // Retry only Gemini's transient 503 once; never retry paid OpenAI
+    // automatically and never repeat an uncertain/timed-out request.
+    final requestBody = jsonEncode(payload);
+    Future<http.Response> sendOnce() async {
+      try {
+        return await _client
+            .post(endpoint, headers: headers, body: requestBody)
+            .timeout(_timeout);
+      } on TimeoutException {
+        throw StateError(
+          'Image: $providerId non ha risposto entro ${_timeout.inSeconds} '
+          'secondi. Nessun altro provider è stato contattato.',
+        );
+      }
+    }
+
+    var response = await sendOnce();
+    if (providerId == 'gemini' && response.statusCode == 503) {
+      await Future<void>.delayed(_retryDelay);
+      response = await sendOnce();
+    }
+    if (response.statusCode == 503) {
+      final exhausted = providerId == 'gemini'
+          ? 'anche dopo un secondo tentativo'
+          : 'il servizio non è disponibile';
+      throw StateError(
+        'Image: $providerId temporaneamente non disponibile (HTTP 503), '
+        '$exhausted. Riprova più tardi.',
+      );
+    }
     if (response.statusCode != 200) {
       throw StateError(
         'Analisi Image non riuscita ($providerId, HTTP ${response.statusCode}). '
-        'Controlla modello, credenziali e limiti del provider.',
+        'Verifica disponibilità del modello e limiti dell\'account.',
       );
     }
 

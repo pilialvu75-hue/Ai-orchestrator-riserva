@@ -112,6 +112,143 @@ void main() {
     expect(result.text, 'Vedo un edificio.');
   });
 
+  test('Cloud AUTO picks configured Gemini without selecting paid OpenAI', () {
+    final providers = <String>[];
+    final selected = ChatImageVisionAutoRouter.select(
+      manualProvider: null,
+      automaticUseAllowed: (id) => id == 'gemini',
+      hasCredential: (id) {
+        providers.add(id);
+        return id == 'gemini';
+      },
+    );
+    expect(selected, 'gemini');
+    expect(providers, <String>['gemini']);
+  });
+
+  test('Cloud AUTO does not bypass disabled free provider or missing key', () {
+    expect(ChatImageVisionAutoRouter.select(
+      manualProvider: null,
+      automaticUseAllowed: (_) => false,
+      hasCredential: (_) => true,
+    ), isNull);
+    expect(ChatImageVisionAutoRouter.select(
+      manualProvider: null,
+      automaticUseAllowed: (_) => true,
+      hasCredential: (_) => false,
+    ), isNull);
+  });
+
+  test('manual provider selection stays authoritative', () {
+    expect(ChatImageVisionAutoRouter.select(
+      manualProvider: 'openAi',
+      automaticUseAllowed: (_) => false,
+      hasCredential: (_) => false,
+    ), 'openAi');
+    expect(ChatImageVisionAutoRouter.select(
+      manualProvider: 'nvidiaNim',
+      automaticUseAllowed: (_) => true,
+      hasCredential: (_) => true,
+    ), isNull);
+  });
+
+  test('Gemini transient 503 retries once with identical image', () async {
+    final bodies = <String>[];
+    var attempts = 0;
+    final service = CloudChatImageVisionService(
+      credentialFor: (_) => 'gemini-secret',
+      modelFor: (_) => 'gemini-3.8-flash',
+      retryDelay: Duration.zero,
+      client: MockClient((request) async {
+        attempts++;
+        bodies.add(request.body);
+        if (attempts == 1) return http.Response('overloaded', 503);
+        return http.Response(jsonEncode(<String, Object>{
+          'candidates': <Map<String, Object>>[
+            <String, Object>{
+              'content': <String, Object>{
+                'parts': <Map<String, String>>[
+                  <String, String>{'text': 'Vedo il logo.'},
+                ],
+              },
+              'finishReason': 'STOP',
+            },
+          ],
+        }), 200);
+      }),
+    );
+    final response = await service.analyze(
+      providerId: 'gemini',
+      prompt: 'Cosa vedi?',
+      image: attachment,
+    );
+    expect(response.text, 'Vedo il logo.');
+    expect(attempts, 2);
+    expect(bodies[0], bodies[1]);
+  });
+
+  test('Gemini repeated 503 stops after second request without secrets', () async {
+    var attempts = 0;
+    final service = CloudChatImageVisionService(
+      credentialFor: (_) => 'private-gemini-secret',
+      retryDelay: Duration.zero,
+      client: MockClient((request) async {
+        attempts++;
+        return http.Response('private server details', 503);
+      }),
+    );
+    await expectLater(
+      service.analyze(
+        providerId: 'gemini',
+        prompt: 'Cosa vedi?',
+        image: attachment,
+      ),
+      throwsA(predicate((error) {
+        final message = error.toString();
+        return message.contains('503') &&
+            !message.contains('private-gemini-secret') &&
+            !message.contains('private server details');
+      })),
+    );
+    expect(attempts, 2);
+  });
+
+  test('OpenAI paid request is never retried after 503', () async {
+    var attempts = 0;
+    final service = CloudChatImageVisionService(
+      credentialFor: (_) => 'private-openai-secret',
+      retryDelay: Duration.zero,
+      client: MockClient((request) async {
+        attempts++;
+        return http.Response('overloaded', 503);
+      }),
+    );
+    await expectLater(
+      service.analyze(providerId: 'openAi', prompt: '', image: attachment),
+      throwsStateError,
+    );
+    expect(attempts, 1);
+  });
+
+  test('timeout fails clearly without repeating a request', () async {
+    var attempts = 0;
+    final service = CloudChatImageVisionService(
+      credentialFor: (_) => 'gemini-secret',
+      timeout: const Duration(milliseconds: 20),
+      retryDelay: Duration.zero,
+      client: MockClient((request) async {
+        attempts++;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        return http.Response('late', 200);
+      }),
+    );
+    await expectLater(
+      service.analyze(providerId: 'gemini', prompt: '', image: attachment),
+      throwsA(predicate((error) => error.toString().contains('non ha risposto'))),
+    );
+    expect(attempts, 1);
+  });
+
   test('never reroutes a photo to an unselected provider', () async {
     var calls = 0;
     final service = CloudChatImageVisionService(

@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
@@ -173,12 +174,19 @@ class ChatRepositoryImpl implements ChatRepository {
                   'seleziona la modalità Cloud e un provider visivo.',
                 );
               }
-              final selectedProvider = runtimeSettingsService?.manualCloudProvider;
-              if (selectedProvider != 'openAi' &&
-                  selectedProvider != 'gemini') {
+              final selectedProvider = ChatImageVisionAutoRouter.select(
+                manualProvider: runtimeSettingsService?.manualCloudProvider,
+                automaticUseAllowed: (providerId) =>
+                    runtimeSettingsService?.automaticCloudUseAllowed(providerId)
+                        ?? false,
+                hasCredential: CloudCredentialStore.instance.hasCredential,
+              );
+              if (selectedProvider == null) {
                 throw const ServerFailure(
-                  'Image: scegli manualmente OpenAI o Gemini come provider '
-                  'Cloud prima di inviare una fotografia.',
+                  'Image: nessun provider visivo autorizzato disponibile. '
+                  'In Cloud AUTO configura Gemini e abilitalo in AUTO, '
+                  'oppure seleziona manualmente un provider compatibile. '
+                  'OpenAI a pagamento non viene scelto automaticamente.',
                 );
               }
               if (imageVisionService == null) {
