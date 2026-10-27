@@ -1,6 +1,7 @@
 package com.aiorchestrator
 
 import android.content.Context
+import android.app.ActivityManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Handler
@@ -52,6 +53,28 @@ internal object LocalImageVisionBridge {
                             main.post {
                                 busy.set(false)
                                 result.error("INVALID_IMAGE", "Immagine non disponibile o oltre 8 MB.", null)
+                            }
+                            return@execute
+                        }
+
+                        // Refuse a new vision workload if Android is already
+                        // under memory pressure. Keep the resident text model
+                        // untouched; a single image is never worth an OOM crash.
+                        val activityManager = appContext.getSystemService(
+                            Context.ACTIVITY_SERVICE
+                        ) as? ActivityManager
+                        val memory = ActivityManager.MemoryInfo()
+                        activityManager?.getMemoryInfo(memory)
+                        if (activityManager != null &&
+                            (memory.lowMemory || memory.availMem < 256L * 1024 * 1024)) {
+                            main.post {
+                                busy.set(false)
+                                result.error(
+                                    "LOCAL_VISION_MEMORY",
+                                    "Memoria libera insufficiente per Image LOCAL. " +
+                                        "Chiudi altre applicazioni e riprova.",
+                                    null
+                                )
                             }
                             return@execute
                         }
