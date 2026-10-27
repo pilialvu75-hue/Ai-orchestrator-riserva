@@ -155,3 +155,156 @@ La macro-fase e completa quando esistono prove che:
 AI-Orchestrator-Core resta la base stabile: confini modulari, contratti runtime, persistenza, orchestrazione, plugin/agent contracts e packaging multipiattaforma. MobileIDE e gli strumenti di sviluppo devono crescere sopra questi contratti, non come fork caotici.
 
 L'obiettivo finale resta una piattaforma cognitiva modulare, offline-first, evolutiva e capace di completare workflow complessi dall'intento all'artefatto verificato.
+
+
+## 14. Piano operativo Assistente e memoria condivisa: Roberto-first (27 ottobre 2026)
+
+Questa sequenza **non sostituisce** i ring del Cantiere delle sezioni precedenti.
+È la roadmap concreta per completare la UX della chat e poi verificare la
+continuità cognitiva tra dispositivi *prima* della distribuzione multiutente.
+**Una sola fase sperimentale attiva alla volta**; non aprire sviluppi concorrenti
+su utenti e sync se i gate precedenti non sono superati sul dispositivo reale.
+
+### Fase 0 — Completare Chat e menu "+" (priorità immediata)
+
+Stato verificato al 27/10/2026:
+- Galaxy S24 FE su versione 1.0.15; nuove chat, cronologia, pin e persistenza
+  al riavvio **PASS fisico** (issue #902).
+- PR #910: menu contestuale Chat, Rinomina e titolo persistente SQLite;
+  richiede CI sul commit finale, integrazione e *successivo collaudo fisico*.
+  Include pulizia dei titoli soltanto in caso di cancellazione esplicita di
+  tutta la cronologia. Nessun reset sui dati dell'utente.
+- Menu "+": Image #903, Camera #904, File TXT/RAG #905, Screen #906,
+  Video/storyboard #907 implementati in main con CI; **non ancora certificati
+  fisicamente**. Non confondere feature integrate con prove su S24.
+
+**Ordine collaudi "+": Image -> Camera -> File TXT/RAG -> Screen -> Video**.
+Per Image: galleria/preview, invio con sola immagine e con testo, messaggio
+chiaro di mancato supporto Local, riconoscimento reale via Cloud esplicitamente
+scelto, nessun upload implicito. Poi un'azione alla volta con materiale di
+prova non sensibile; registrare pass/fail, prova, modello/modalità e difetto
+nell'issue #902. Per Chat: rinomina, pin, annullamento, riavvio, messaggi
+immutati e conservazione dopo aggiornamento, senza premere Danger Zone su dati
+reali. Un difetto concreto genera una sola PR circoscritta.
+
+**Gate F0**: menu Chat e "+" verificati fisicamente o con problemi delimitati
+e documentati. Nessuna nuova beta solo per accelerare i test: release e OTA
+rimangono deliberate, mai installazioni manuali o downgrade.
+
+### Fase 1 — Un solo utente: memoria SQLite di Roberto su un dispositivo
+
+Partire da S24 con dati sintetici e consensuali, non da dati personali reali.
+Verificare pipeline reale
+\`messaggio -> candidato -> verifica/promozione -> SQLite -> richiamo\` e RAG
+con fonte/provenienza; deduplica, aggiornamento e dimenticanza. Provare un
+fatto aggiornato (per esempio \`C=420 -> C=680\`), una preferenza durevole,
+un riferimento ad una conversazione precedente e un fatto irrilevante.
+Distinguere memoria del profilo e memoria della singola chat. Offline,
+riavvio e pressione RAM non devono cancellare input o inventare ricordi.
+Non promuovere automaticamente in «confermato» un'uscita del modello.
+Tracciamento: issue #899.
+
+**Gate F1**: recupero corretto dopo riavvio e su nuova conversazione con
+provenienza; reset/dimenticanza solo su dati di prova e senza resurrezione.
+
+### Fase 2 — Roberto su più dispositivi: S24, ASUS, Mac, Raspberry Pi quando pronto
+
+Un solo **profilo personale Roberto**, più installazioni autorizzate, senza
+alcun secondo utente reale. Ogni dispositivo conserva una proiezione SQLite
+locale minima (ricordi confermati, catalogo, riferimenti alla fonte); non
+replicare alla cieca l'intero file DB. Chat recenti e fissate restano locali;
+archivio storico cifrato esterno **opt-in** e recuperabile on demand quando
+online. Mai inviare conversazioni al repository Diagnostics, che è pubblico.
+\`diagnostics.installationId\` può aiutare ad individuare l'installazione e
+\`diagnostics.deviceName\` è soltanto l'etichetta visuale, non una credenziale
+o una prova di ownership. Pairing e chiavi sono separati (issue #915).
+
+Sequenza di prova crescente, senza sovrapporre tecnologie:
+1. **Due database sintetici locali** con export/import cifrato, roundtrip,
+   duplicati, correzioni, conflitti, revoca e dimenticanza verificati offline.
+2. **S24 <-> ASUS**, usando uno storage privato e un meccanismo di pairing
+   autorizzati e scelti esplicitamente. Verificare la memoria in entrambi
+   i sensi: parlare di una moto su S24, chiedere su ASUS, confrontare fonti,
+   fare una correzione su ASUS, controllarne la propagazione a S24.
+3. **Mac** e successivamente **Raspberry Pi/Linux ARM**, solo dopo aver
+   verificato compatibilità/build effettive; non dichiarare piattaforme
+   installabili senza prova. Test con rete assente e ritorno online.
+4. Valutare dimensione SQLite, occupazione disco, RAM, latenza, limiti token
+   e banda distintamente. Il trasferimento remoto non libera RAM da solo:
+   retrieval selettivo, chunking e cache bounded evitano prompt enormi.
+   Nessuna eliminazione locale finché non esistano copia remota cifrata,
+   recupero verificato e policy di conservazione approvata.
+
+Riferimenti: issue #911 / PR #912 catalogo additivo, #899 memorie,
+#915 dispositivi. Queste basi tecniche possono essere mantenute come PR
+pronte, ma **non attivare sincronizzazione multiutente** in questa fase.
+
+**Gate F2**: lo stesso fatto autobiografico è richiamabile solo sui
+dispositivi abbinati di Roberto, online e con fallback offline, senza
+confusione e senza perdere la conversazione originale.
+
+### Fase 3 — Secondo profilo fittizio sui dispositivi di Roberto
+
+Solo dopo F2, creare profilo test **Roberto1** (o Paolo/Tom) su ASUS e Mac,
+con dataset *interamente fittizio*. Per ogni profilo: ID opaco persistente,
+base dati/namespace e chiavi separati, account/device pairing autenticato.
+Mai usare il nome Diagnostics come autenticazione.
+
+Prove A/B: Roberto associa sport = equitazione e moto A; Roberto1 sport =
+nuoto e moto B. Stesse parole, date, ID conversazione \`default\` e memory
+key sui due profili non devono causare recupero reciproco; testare cambio
+profilo, logout, cache, backup, device revocato e ricerca RAG cross-owner.
+Nessun vero utente/familiare viene arruolato qui.
+
+Riferimenti: issue #913 / PR #914 (isolamento del *catalogo* soltanto) e
+issue #915 (pairing). La PR #914 **non prova** ancora l'isolamento completo
+di SQLite, embedding, provider, cache o storage: richiede test end-to-end.
+
+**Gate F3**: zero contaminazioni tra profili, neppure negli indici e nei
+metadati; dati di Roberto sempre intatti.
+
+### Fase 4 — Evoluzione del motore condivisa, memorie private
+
+Due canali indipendenti:
+- **Diagnostica tecnica opt-in**, con eventi chiusi/filtrati, senza prompt,
+  chat, documenti o informazioni sensibili sul repository Diagnostics
+  pubblico; serve a correggere stabilità, prestazioni, regressioni.
+- **Skill/esperienze condivisibili opt-in**, estratte come candidati,
+  private-data redaction, verifica di utilità, test di regressione,
+  protezione da prompt injection/poisoning e approvazione prima della
+  distribuzione. Condividere capacità generali (es. confrontare anche
+  colori e prezzi se pertinenti), non ricordi sulle moto o sport di
+  persone identificate. Non dichiarare training dei pesi del LLM quando
+  si tratta di retrieval o procedure.
+
+Avvisi a familiari/contatti di fiducia: funzione separata e successiva,
+con consenso revocabile per adulti, requisiti specifici per minori,
+minimizzazione, tutela della privacy e attenzione ai falsi positivi.
+Nessuna lettura generalizzata delle conversazioni di altri adulti.
+
+**Gate F4**: due profili beneficiano della stessa correzione generale e
+mantengono risposte personali differenti e corrette.
+
+### Fase 5 — Distribuzione ad amici e familiari
+
+La versione 1.0.16 resta un **obiettivo futuro riservato**:
+solo dopo F0-F4 e autorizzazione esplicita del proprietario del progetto.
+Checklist: provisioning, account separati, onboarding, privacy e opt-in,
+restore/revoca, cancellazioni, test Android/desktop sulle piattaforme
+effettivamente disponibili, test signing e OTA non distruttivo.
+Nessuna release, invio di chat, raccolta di dati personali o monitoraggio
+a terzi autorizzati soltanto dall'esistenza di questa roadmap.
+
+### Regole operative per evitare dispersione
+
+1. Priorità viva = completare e collaudare menu Chat / "+";
+   il prossimo test fisico dopo le chat/pin PASS è **Image** sul S24.
+2. Una fase sperimentale **attiva** per volta. La pianificazione di
+   memoria multi-dispositivo e multiutente non interrompe F0.
+3. Riutilizzare PR #910, #912 e #914; verificare prima CI/overlap/head,
+   non creare implementazioni parallele o rami duplicati.
+4. Ogni gate richiede **evidenza fisica o test end-to-end pertinente**:
+   il verde CI non è «funziona sull'ASUS» o «sincronizzato».
+5. Conservare la versione 1.0.15 e la distribuzione OTA ufficiale
+   finché una nuova release non sia autorizzata; nessuna modifica
+   alla numerazione per questo aggiornamento documentale.
