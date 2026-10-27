@@ -348,9 +348,11 @@ jobs:
           PY
 
           CHANNEL="${{ github.event_name == 'workflow_dispatch' && inputs.release_channel || 'ci' }}"
+          # SemVer: prerelease comes BEFORE build metadata; e.g.
+          # v1.0.15-beta+103456, not the invalid v1.0.15+103456-beta.
           TAG="v${VERSION_NAME}+${VERSION_CODE}"
-          if [ "$CHANNEL" != "stable" ]; then
-            TAG="${TAG}-${CHANNEL}"
+          if [ "$CHANNEL" != "stable" ] && [ "$CHANNEL" != "ci" ]; then
+            TAG="v${VERSION_NAME}-${CHANNEL}+${VERSION_CODE}"
           fi
 
           {
