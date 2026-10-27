@@ -227,7 +227,8 @@ Future<void> initDependencies({
       currentVersion: appVersion,
       // Android PackageInfo has no prerelease suffix: compare opted-in Beta
       // APKs using their monotonic build codes when base version matches.
-      enableAndroidBetaBuildNumberComparison: true,
+      enableAndroidBetaBuildNumberComparison:
+          !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
     ),
   );
   sl.registerLazySingleton<ContextWindowManager>(
