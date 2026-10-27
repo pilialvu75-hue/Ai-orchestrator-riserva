@@ -49,6 +49,7 @@ const String _kDefaultSessionId = 'default';
 // Width threshold above which a persistent sidebar replaces the Drawer.
 const double _kSidebarBreakpoint = 720;
 
+enum _ChatSessionAction { togglePin, rename }
 
 /// Shared UI state for narrow and wide layouts. Choosing another session
 /// switches the view; only the Debug Lab's explicit Clear Chat can erase data.
@@ -59,12 +60,14 @@ class _ChatNavigation {
     required this.onNewChat,
     required this.onSelectChat,
     required this.onTogglePin,
+    required this.onRenameChat,
   });
   final String sessionId;
   final List<ChatSessionInfo> sessions;
   final VoidCallback onNewChat;
   final ValueChanged<String> onSelectChat;
   final ValueChanged<ChatSessionInfo> onTogglePin;
+  final ValueChanged<ChatSessionInfo> onRenameChat;
 }
 
 class _ChatSessionList extends StatelessWidget {
@@ -74,6 +77,45 @@ class _ChatSessionList extends StatelessWidget {
   });
   final _ChatNavigation navigation;
   final bool closeDrawer;
+
+  void _runAction(_ChatSessionAction action, ChatSessionInfo session) {
+    switch (action) {
+      case _ChatSessionAction.togglePin:
+        navigation.onTogglePin(session);
+      case _ChatSessionAction.rename:
+        navigation.onRenameChat(session);
+    }
+  }
+
+  void _showSessionMenu(BuildContext context, ChatSessionInfo session) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF303134),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.push_pin_outlined),
+              title: Text(session.pinned ? 'Rimuovi dai fissati' : 'Fissa'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                navigation.onTogglePin(session);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Rinomina'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                navigation.onRenameChat(session);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -100,15 +142,36 @@ class _ChatSessionList extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Colors.white, fontSize: 13),
           ),
-          trailing: IconButton(
-            tooltip: session.pinned ? 'Rimuovi dai fissati' : 'Fissa in alto',
-            icon: Icon(
-              session.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-              size: 18,
-              color: session.pinned ? const Color(0xFF8AB4F8) : Colors.white54,
-            ),
-            onPressed: () => navigation.onTogglePin(session),
+          trailing: PopupMenuButton<_ChatSessionAction>(
+            key: ValueKey('chat-session-actions-${session.id}'),
+            tooltip: 'Azioni conversazione',
+            color: const Color(0xFF303134),
+            icon: const Icon(Icons.more_vert, color: Colors.white70),
+            onSelected: (action) => _runAction(action, session),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: _ChatSessionAction.togglePin,
+                child: Row(
+                  children: [
+                    const Icon(Icons.push_pin_outlined, size: 20),
+                    const SizedBox(width: 12),
+                    Text(session.pinned ? 'Rimuovi dai fissati' : 'Fissa'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: _ChatSessionAction.rename,
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_outlined, size: 20),
+                    SizedBox(width: 12),
+                    Text('Rinomina'),
+                  ],
+                ),
+              ),
+            ],
           ),
+          onLongPress: () => _showSessionMenu(context, session),
           onTap: () {
             if (closeDrawer) Navigator.of(context).pop();
             navigation.onSelectChat(session.id);
@@ -235,6 +298,7 @@ class _ChatPageState extends State<ChatPage>
         onNewChat: () => unawaited(_startNewChat()),
         onSelectChat: (id) => unawaited(_selectChat(id)),
         onTogglePin: (session) => unawaited(_togglePinned(session)),
+        onRenameChat: (session) => unawaited(_renameChat(session)),
       );
 
   Future<void> _restoreChatSessions() async {
@@ -309,6 +373,55 @@ class _ChatPageState extends State<ChatPage>
       await _refreshChatSessions();
     } catch (error) {
       _showChatNavigationError(error);
+    }
+  }
+
+  Future<void> _renameChat(ChatSessionInfo session) async {
+    final controller = TextEditingController(text: session.title);
+    try {
+      final title = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Rinomina chat'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 80,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Titolo conversazione',
+            ),
+            onSubmitted: (value) {
+              final trimmed = value.trim();
+              if (trimmed.isNotEmpty) {
+                Navigator.of(dialogContext).pop(trimmed);
+              }
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Annulla'),
+            ),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: controller,
+              builder: (context, value, _) => TextButton(
+                onPressed: value.text.trim().isEmpty
+                    ? null
+                    : () => Navigator.of(dialogContext).pop(value.text.trim()),
+                child: const Text('Salva'),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (title == null || !mounted) return;
+      await _sessionStore.renameSession(session.id, title);
+      await _refreshChatSessions();
+    } catch (error) {
+      _showChatNavigationError(error);
+    } finally {
+      controller.dispose();
     }
   }
 
