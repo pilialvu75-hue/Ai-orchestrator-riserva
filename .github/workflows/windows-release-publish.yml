@@ -101,7 +101,7 @@ jobs:
           Write-Host "Target GitHub release: $tag"
           Write-Host "Source commit: ${{ github.event.workflow_run.head_sha }}"
 
-      - name: Resolve existing manually published prerelease tag
+      - name: Resolve existing explicitly published release tag
         id: publish_tag
         shell: pwsh
         env:
@@ -111,14 +111,16 @@ jobs:
           $build = '${{ steps.version.outputs.version_code }}'
           $releases = gh release list --limit 100 --repo $env:GITHUB_REPOSITORY --json tagName,isPrerelease | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) {
-            throw 'Unable to inspect the published GitHub prereleases.'
+            throw 'Unable to inspect the published GitHub releases.'
           }
-          $candidates = @("$base-beta+$build", "$base-nightly+$build", "$base-dev+$build")
+          $prereleaseCandidates = @("$base-beta+$build", "$base-nightly+$build", "$base-dev+$build")
+          $stableCandidate = "$base+$build"
           $matches = @($releases | Where-Object {
-            $_.isPrerelease -eq $true -and $_.tagName -in $candidates
+            ($_.isPrerelease -eq $true -and $_.tagName -in $prereleaseCandidates) -or
+            ($_.isPrerelease -eq $false -and $_.tagName -eq $stableCandidate)
           })
           if ($matches.Count -ne 1) {
-            throw "Expected one manually published prerelease for $base."
+            throw "Expected exactly one explicitly published release for $base and build $build."
           }
           "tag=$($matches[0].tagName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Attaching desktop asset to $($matches[0].tagName)"
