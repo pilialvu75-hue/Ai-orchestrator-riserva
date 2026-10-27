@@ -4,12 +4,14 @@ class AppConstants {
 
   // ── Database ────────────────────────────────────────────────────────────────
   static const String databaseName = 'ai_orchestrator.db';
-  static const int databaseVersion = 6;
+  static const int databaseVersion = 7;
 
   // ── Tables ──────────────────────────────────────────────────────────────────
   static const String tableProjectMemory = 'project_memory';
   static const String tableChatHistory = 'chat_history';
   static const String tableChatSessions = 'chat_sessions';
+  static const String tableChatArchiveCatalog = 'chat_archive_catalog';
+  static const String tableChatArchiveMemoryLinks = 'chat_archive_memory_links';
   static const String tableUserPreferences = 'user_preferences';
   static const String tableDocumentChunks = 'document_chunks';
   static const String tableSyncChanges = 'sync_changes';
