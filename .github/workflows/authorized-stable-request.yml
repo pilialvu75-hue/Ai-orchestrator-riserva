@@ -1,0 +1,84 @@
+name: Authorized Stable Release Request
+
+# A stable release requires a dedicated one-time request file on this branch.
+# A push/PR to main cannot publish a release or trigger this request.
+on:
+  push:
+    branches:
+      - release-request/stable
+    paths:
+      - release-requests/ship-stable.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: authorized-stable-release-request
+  cancel-in-progress: false
+
+jobs:
+  dispatch-official-stable:
+    if: github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' && github.ref == 'refs/heads/release-request/stable'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Read explicit stable request
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate channel, immutable requested main and duplicate safety
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          request_file="release-requests/ship-stable.txt"
+          test -f "$request_file"
+          test "$(wc -l < "$request_file")" -eq 2
+          grep -Fxq "channel=stable" "$request_file"
+          requested_sha="$(sed -n 's/^main_sha=//p' "$request_file")"
+          [[ "$requested_sha" =~ ^[0-9a-f]{40}$ ]]
+          current_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.sha')"
+          if [ "$requested_sha" != "$current_sha" ]; then
+            echo "::error::Stable request targets an outdated main commit."
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/contents/pubspec.yaml?ref=main" \
+            --jq '.content' | base64 -d | grep -Eq '^version: 1\.0\.15\+'
+
+          # Do not repeat an already running official Android release of the
+          # same head. A prior release of this commit is also idempotent.
+          running="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build.yml \
+            --event workflow_dispatch --limit 30 --json status,headSha \
+            --jq "[.[] | select(.headSha == \"$requested_sha\" and (.status == \"in_progress\" or .status == \"queued\" or .status == \"waiting\"))] | length")"
+          if [ "$running" -gt 0 ]; then
+            echo "::notice::An official Android release is already running for this exact main."
+            exit 0
+          fi
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            case "$tag" in
+              v1.0.15+*)
+                published_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null || true)"
+                if [ "$published_sha" = "$requested_sha" ]; then
+                  echo "::notice::Stable release already published for this exact main: $tag"
+                  exit 0
+                fi
+                ;;
+            esac
+          done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json tagName,isPrerelease --jq '.[] | select(.isPrerelease == false) | .tagName')
+
+      - name: Dispatch canonical signed stable Android build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run build.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f release_channel=stable
+          echo "Explicit stable release requested from current main."
