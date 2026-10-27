@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 /// The encrypted transcript and attachment bytes are NEVER stored here.
 class ChatArchivePointer {
   const ChatArchivePointer({
+    required this.ownerAccountId,
     required this.archiveId,
     required this.originDeviceId,
     required this.sourceSessionId,
@@ -18,6 +19,8 @@ class ChatArchivePointer {
     this.remoteVerifiedAtMs,
   });
 
+  /// Owner identity, never an origin device ID or a model-generated label.
+  final String ownerAccountId;
   final String archiveId;
   final String originDeviceId;
   final String sourceSessionId;
@@ -35,6 +38,7 @@ class ChatArchivePointer {
   bool get isRemoteVerified => remoteVerifiedAtMs != null;
 
   Map<String, Object?> toRow() => <String, Object?>{
+        'owner_account_id': ownerAccountId,
         'archive_id': archiveId,
         'origin_device_id': originDeviceId,
         'source_session_id': sourceSessionId,
@@ -49,6 +53,7 @@ class ChatArchivePointer {
 
   factory ChatArchivePointer.fromRow(Map<String, Object?> row) =>
       ChatArchivePointer(
+        ownerAccountId: row['owner_account_id'] as String,
         archiveId: row['archive_id'] as String,
         originDeviceId: row['origin_device_id'] as String,
         sourceSessionId: row['source_session_id'] as String,
@@ -66,18 +71,21 @@ class ChatArchivePointer {
 /// It does not promote candidates or inject any data into inference.
 class ChatArchiveMemoryLink {
   const ChatArchiveMemoryLink({
+    required this.ownerAccountId,
     required this.memoryScope,
     required this.memoryKey,
     required this.archiveId,
     required this.messageId,
   });
 
+  final String ownerAccountId;
   final String memoryScope;
   final String memoryKey;
   final String archiveId;
   final String messageId;
 
   Map<String, Object> toRow() => <String, Object>{
+        'owner_account_id': ownerAccountId,
         'memory_scope': memoryScope,
         'memory_key': memoryKey,
         'archive_id': archiveId,
@@ -86,6 +94,7 @@ class ChatArchiveMemoryLink {
 
   factory ChatArchiveMemoryLink.fromRow(Map<String, Object?> row) =>
       ChatArchiveMemoryLink(
+        ownerAccountId: row['owner_account_id'] as String,
         memoryScope: row['memory_scope'] as String,
         memoryKey: row['memory_key'] as String,
         archiveId: row['archive_id'] as String,
@@ -98,22 +107,32 @@ class ChatArchiveMemoryLink {
 /// This first phase performs no file I/O, network access, eviction or
 /// modification of the existing chat_history / durable memory records.
 class ChatArchiveCatalog {
-  ChatArchiveCatalog({required DatabaseHelper databaseHelper})
-      : _databaseHelper = databaseHelper,
+  /// ownerAccountId must come from an authenticated account/profile context,
+  /// never from the model, a fetched snapshot, or a caller-selected query.
+  ChatArchiveCatalog({
+    required DatabaseHelper databaseHelper,
+    required String ownerAccountId,
+  })  : _databaseHelper = databaseHelper,
+        _ownerAccountId = _validatedOwner(ownerAccountId),
         _testDatabase = null;
 
-  ChatArchiveCatalog.forTesting(Database db)
+  ChatArchiveCatalog.forTesting(Database db, {required String ownerAccountId})
       : _databaseHelper = null,
+        _ownerAccountId = _validatedOwner(ownerAccountId),
         _testDatabase = db;
 
   final DatabaseHelper? _databaseHelper;
   final Database? _testDatabase;
+  final String _ownerAccountId;
 
   Future<Database> get _db async =>
       _testDatabase ?? await _databaseHelper!.database;
 
   Future<void> addPendingPointer(ChatArchivePointer pointer) async {
     _validatePointer(pointer);
+    if (pointer.ownerAccountId != _ownerAccountId) {
+      throw StateError('Archive pointer does not belong to this owner');
+    }
     if (pointer.remoteVerifiedAtMs != null) {
       throw ArgumentError('Remote verification cannot be claimed by catalog');
     }
@@ -121,8 +140,8 @@ class ChatArchiveCatalog {
     await db.transaction((txn) async {
       final rows = await txn.query(
         AppConstants.tableChatArchiveCatalog,
-        where: 'archive_id = ?',
-        whereArgs: <Object>[pointer.archiveId],
+        where: 'owner_account_id = ? AND archive_id = ?',
+        whereArgs: <Object>[_ownerAccountId, pointer.archiveId],
         limit: 1,
       );
       if (rows.isNotEmpty) {
@@ -150,8 +169,8 @@ class ChatArchiveCatalog {
   Future<ChatArchivePointer?> findPointer(String archiveId) async {
     final rows = await (await _db).query(
       AppConstants.tableChatArchiveCatalog,
-      where: 'archive_id = ?',
-      whereArgs: <Object>[archiveId],
+      where: 'owner_account_id = ? AND archive_id = ?',
+      whereArgs: <Object>[_ownerAccountId, archiveId],
       limit: 1,
     );
     return rows.isEmpty ? null : ChatArchivePointer.fromRow(rows.single);
@@ -163,8 +182,8 @@ class ChatArchiveCatalog {
   }) async {
     final rows = await (await _db).query(
       AppConstants.tableChatArchiveCatalog,
-      where: 'origin_device_id = ? AND source_session_id = ?',
-      whereArgs: <Object>[originDeviceId, sessionId],
+      where: 'owner_account_id = ? AND origin_device_id = ? AND source_session_id = ?',
+      whereArgs: <Object>[_ownerAccountId, originDeviceId, sessionId],
       orderBy: 'indexed_at_ms DESC, archive_id DESC',
     );
     return List<ChatArchivePointer>.unmodifiable(
@@ -173,6 +192,9 @@ class ChatArchiveCatalog {
   }
 
   Future<void> addMemorySource(ChatArchiveMemoryLink link) async {
+    if (link.ownerAccountId != _ownerAccountId) {
+      throw StateError('Memory source does not belong to this owner');
+    }
     _requireId(link.memoryScope, 'memoryScope');
     _requireId(link.memoryKey, 'memoryKey');
     _requireId(link.archiveId, 'archiveId');
@@ -182,8 +204,8 @@ class ChatArchiveCatalog {
       final rows = await txn.query(
         AppConstants.tableChatArchiveCatalog,
         columns: const <String>['archive_id'],
-        where: 'archive_id = ?',
-        whereArgs: <Object>[link.archiveId],
+        where: 'owner_account_id = ? AND archive_id = ?',
+        whereArgs: <Object>[_ownerAccountId, link.archiveId],
         limit: 1,
       );
       if (rows.isEmpty) throw StateError('Unknown archive source');
@@ -201,8 +223,8 @@ class ChatArchiveCatalog {
   }) async {
     final rows = await (await _db).query(
       AppConstants.tableChatArchiveMemoryLinks,
-      where: 'memory_scope = ? AND memory_key = ?',
-      whereArgs: <Object>[memoryScope, memoryKey],
+      where: 'owner_account_id = ? AND memory_scope = ? AND memory_key = ?',
+      whereArgs: <Object>[_ownerAccountId, memoryScope, memoryKey],
       orderBy: 'archive_id, message_id',
     );
     return List<ChatArchiveMemoryLink>.unmodifiable(
@@ -211,6 +233,7 @@ class ChatArchiveCatalog {
   }
 
   static void _validatePointer(ChatArchivePointer pointer) {
+    _requireId(pointer.ownerAccountId, 'ownerAccountId');
     _requireId(pointer.archiveId, 'archiveId');
     _requireId(pointer.originDeviceId, 'originDeviceId');
     _requireId(pointer.sourceSessionId, 'sourceSessionId');
@@ -235,6 +258,11 @@ class ChatArchiveCatalog {
         pointer.indexedAtMs < 0) {
       throw ArgumentError('Invalid archive size/count/timestamp');
     }
+  }
+
+  static String _validatedOwner(String ownerAccountId) {
+    _requireId(ownerAccountId, 'ownerAccountId');
+    return ownerAccountId;
   }
 
   static void _requireId(String value, String field) {
