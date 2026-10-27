@@ -165,7 +165,7 @@ continuità cognitiva tra dispositivi *prima* della distribuzione multiutente.
 **Una sola fase sperimentale attiva alla volta**; non aprire sviluppi concorrenti
 su utenti e sync se i gate precedenti non sono superati sul dispositivo reale.
 
-### Fase 0 — Completare Chat e menu "+" (priorità immediata)
+### Fase 0 — Prima UX completa e affidabile per l'utente singolo (P0 prodotto)
 
 Stato verificato al 27/10/2026:
 - Galaxy S24 FE su versione 1.0.15; nuove chat, cronologia, pin e persistenza
@@ -187,9 +187,43 @@ nell'issue #902. Per Chat: rinomina, pin, annullamento, riavvio, messaggi
 immutati e conservazione dopo aggiornamento, senza premere Danger Zone su dati
 reali. Un difetto concreto genera una sola PR circoscritta.
 
-**Gate F0**: menu Chat e "+" verificati fisicamente o con problemi delimitati
-e documentati. Nessuna nuova beta solo per accelerare i test: release e OTA
-rimangono deliberate, mai installazioni manuali o downgrade.
+**Priorità F0 vincolante per un'esperienza soddisfacente:**
+1. Finire **tutti i percorsi del menu "+"** in ordine: Image prima di Camera,
+   File/RAG, Screen e Video; non considerare completata la funzione se mostra
+   soltanto un allegato o un pulsante. Test S24 prima, poi Windows, macOS,
+   Linux e Web nei limiti delle capacità reali di ogni piattaforma.
+2. Completare **menu Chat**: cronologia, nuove chat, pin, Rinomina #910,
+   edit/copy e azioni che esistono davvero; mai eliminare dati implicitamente.
+3. Audit UX **di tutti i menu/app flow**: impostazioni, modelli, provider,
+   aggiornamenti OTA, selettore AUTO, ricerca Web, Live/voce, allegati e
+   persistenza; errori leggibili, stati occupato/annulla, permessi chiari.
+   Una voce UI non deve promettere un comportamento non implementato.
+4. Robustezza del motore **per l'utente singolo**: contenere allucinazioni,
+   risposte vuote e non pertinenti, lingua sbagliata, tempi eccessivi,
+   conflitti Local/Hybrid/Cloud, disponibilità reale dei provider,
+   rispetto dei consensi ai Cloud e limiti di spesa. Misurare latenza e
+   regressioni con test di richieste ripetibili. Un fallback deve scegliere
+   solo un modello compatibile, configurato e autorizzato; se nessuno
+   esiste, spiegare perché senza fingere successo.
+5. QA **per piattaforma disponibile**: scenari E2E Android S24 e, quando
+   pronti, ASUS Windows, Mac, Linux e Web. Distinguere build CI verde da
+   test fisici superati; registrare PASS/FAIL e prove.
+
+**Nuovo risultato fisico Image del 27/10/2026:**
+sulla build 1.0.15.103459-beta LOCAL mostra correttamente l'impossibilità
+di visione, galleria/thumb salvati; Gemini Cloud HTTP 503 ripetuti e timeout
+45s, nessuna descrizione riuscita. **FAIL visione**. PR #917 propone
+selezione AUTO Gemini configurato in Cloud senza fallback paid e retry
+bounded su 503, ancora da integrare/collaudare. I modelli locali correnti
+non ricevono pixel solo perché la UI consente di allegare un'immagine.
+
+**Gate F0**: flussi principali e menu "+" e Chat utilizzabili in modo
+affidabile e soddisfacente sulle piattaforme disponibili, con errori/limiti
+e fallback verificati. Difetti P0 (Web/Live rotto, crash, perdita di chat,
+allucinazione grave ricorrente, timeout senza recovery) impediscono di
+dichiarare questa fase completa. Le limitazioni hardware non supportate
+devono essere esplicite. Nessuna nuova beta solo per accelerare i test:
+release e OTA rimangono deliberate, mai installazioni manuali o downgrade.
 
 ### Fase 1 — Un solo utente: memoria SQLite di Roberto su un dispositivo
 
