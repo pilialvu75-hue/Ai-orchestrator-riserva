@@ -1,0 +1,43 @@
+name: Cantiere isolated experimental Library import
+on:
+  pull_request:
+    paths:
+      - "tool/cantiere_library_sandbox_preview.py"
+      - "test/tool/test_cantiere_library_sandbox_preview.py"
+      - ".github/workflows/cantiere-library-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox-import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - name: Checkout Cantiere without retained credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js for allowlisted sandbox probe
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify importer fail-closed invariants offline
+        run: python -m unittest discover -s test/tool -p 'test_cantiere_library_sandbox_preview.py' -v
+
+      - name: Import actual pinned experimental Library package and execute isolated probe
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          python tool/cantiere_library_sandbox_preview.py \
+            --pin release.update_manager.firstparty.mia@0.1.0 \
+            --probe
