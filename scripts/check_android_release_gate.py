@@ -33,6 +33,11 @@ def validate(source: str) -> list[str]:
     if "group: android-release-\u0024{{ github.ref }}-\u0024{{ github.event_name }}" not in source:
         errors.append("Manual releases must not share the push CI concurrency group")
 
+    if 'TAG="v${VERSION_NAME}-${CHANNEL}+${VERSION_CODE}"' not in source:
+        errors.append(
+            "Official prerelease tag must follow SemVer (vX.Y.Z-beta+build)"
+        )
+
     block_match = re.search(
         r"(?ms)^      release_channel:\s*\n(.*?)(?=^#|^permissions:)",
         source,
@@ -61,6 +66,10 @@ def validate_desktop_publisher(source: str, platform: str) -> list[str]:
         problems.append(f"{platform}: publisher must require manual release dispatch")
     if "id: publish_tag" not in source or "steps.publish_tag.outputs.tag" not in source:
         problems.append(f"{platform}: publisher must resolve the actual beta/nightly/dev tag")
+    if platform in ("linux", "macos") and 'candidate="${base}-${channel}+${build}"' not in source:
+        problems.append(f"{platform}: must resolve SemVer prerelease tag")
+    if platform == "windows" and '"$base-beta+$build"' not in source:
+        problems.append("windows: must resolve SemVer prerelease tag")
     if "steps.version.outputs.tag" in source:
         problems.append(f"{platform}: publisher may not upload to an unsuffixed tag")
     if platform == "macos" and 'version_code="$((100000 +' not in source:

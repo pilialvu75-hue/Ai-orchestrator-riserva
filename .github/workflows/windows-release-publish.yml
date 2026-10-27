@@ -107,12 +107,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $base = 'v${{ steps.version.outputs.release_version }}'
+          $base = 'v${{ steps.version.outputs.version_name }}'
+          $build = '${{ steps.version.outputs.version_code }}'
           $releases = gh release list --limit 100 --repo $env:GITHUB_REPOSITORY --json tagName,isPrerelease | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) {
             throw 'Unable to inspect the published GitHub prereleases.'
           }
-          $candidates = @("$base-beta", "$base-nightly", "$base-dev")
+          $candidates = @("$base-beta+$build", "$base-nightly+$build", "$base-dev+$build")
           $matches = @($releases | Where-Object {
             $_.isPrerelease -eq $true -and $_.tagName -in $candidates
           })

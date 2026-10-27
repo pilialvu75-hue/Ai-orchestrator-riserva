@@ -1,0 +1,61 @@
+name: Authorized Beta Release Request
+
+# Only an explicit one-time request branch can start this workflow.
+# A main push cannot publish a beta or stable release.
+on:
+  push:
+    branches:
+      - release-request/beta
+    paths:
+      - release-requests/ship-beta.txt
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: authorized-beta-release-request
+  cancel-in-progress: false
+
+jobs:
+  dispatch-official-beta:
+    if: github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' && github.ref == 'refs/heads/release-request/beta'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Read explicit beta request
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate request matches current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          request_file="release-requests/ship-beta.txt"
+          test -f "$request_file"
+          test "$(wc -l < "$request_file")" -eq 2
+          grep -Fxq "channel=beta" "$request_file"
+          requested_sha="$(sed -n 's/^main_sha=//p' "$request_file")"
+          [[ "$requested_sha" =~ ^[0-9a-f]{40}$ ]]
+          current_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.sha')"
+          if [ "$requested_sha" != "$current_sha" ]; then
+            echo "::error::Beta request targets an outdated main commit."
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/contents/pubspec.yaml?ref=main" \
+            --jq '.content' | base64 -d | grep -Eq '^version: 1\.0\.15\+'
+
+      - name: Dispatch canonical Android beta workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run build.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f release_channel=beta
+          echo "Official Build & Release APK dispatched on main, beta channel."
