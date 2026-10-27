@@ -64,7 +64,8 @@ class MainActivity : FlutterActivity() {
         ProcessExitDiagnostics.register(this, flutterEngine)
         BackgroundDownloads.register(this, flutterEngine)
         ScreenVisionBridge.register(this, flutterEngine)
-        LocalImageVisionBridge.register(this, flutterEngine)
+        // Image LOCAL now auto-registers through CantiereLocalImageVisionPlugin.
+        // Do NOT register legacy LocalImageVisionBridge on the same channel.
         VideoStoryboardBridge.register(flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
