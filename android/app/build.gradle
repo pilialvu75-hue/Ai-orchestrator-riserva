@@ -192,3 +192,9 @@ android {
 flutter {
     source "../.."
 }
+
+// Bundled on-device labeler: no network/model download at inference time.
+// Android minSdk 28 already exceeds ML Kit's supported minimum.
+dependencies {
+    implementation 'com.google.mlkit:image-labeling:17.0.9'
+}
