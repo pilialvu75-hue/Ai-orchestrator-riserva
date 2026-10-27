@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:ai_orchestrator/core/system/update/release_channel.dart';
 import 'package:ai_orchestrator/core/system/update/update_checker.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
+import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
 import 'package:ai_orchestrator/core/system/update/update_state.dart';
 import 'package:ai_orchestrator/core/system/update/version_comparator.dart';
 import 'package:ai_orchestrator/native/platform/android_intent_handler.dart';
@@ -25,7 +26,7 @@ void main() {
   Future<UpdateManager> manager({
     required String installedVersion,
     required ReleaseChannel preferredChannel,
-    int remoteBuild = 103480,
+    int? remoteBuild = 103480,
     String remoteAppVersion = '1.0.15',
     bool androidBetaComparison = true,
   }) async {
@@ -36,7 +37,9 @@ void main() {
         return http.Response(
           jsonEncode(<Map<String, Object>>[
             <String, Object>{
-              'tag_name': 'v$remoteAppVersion-beta+$remoteBuild',
+              'tag_name': remoteBuild == null
+                  ? 'v$remoteAppVersion-beta'
+                  : 'v$remoteAppVersion-beta+$remoteBuild',
               'prerelease': true,
               'draft': false,
               'body': 'Image LOCAL via ML Kit',
@@ -171,7 +174,7 @@ void main() {
     final updater = await manager(
       installedVersion: '1.0.15+103459',
       preferredChannel: ReleaseChannel.beta,
-      remoteBuild: 0,
+      remoteBuild: null,
     );
     await updater.checkForUpdates(allowCachedFallback: false);
     expect(updater.state.value.status, UpdateStatus.upToDate);
