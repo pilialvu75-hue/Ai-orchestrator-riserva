@@ -90,6 +90,55 @@ void main() {
     );
   });
 
+  test('manual title persists after restore without changing chat messages',
+      () async {
+    await store.createSession('a');
+    await addMessage('m1', 'a', 10, 'Messaggio originale');
+    await store.renameSession('a', '  Titolo scelto  ');
+    expect((await store.listSessions()).single.title, 'Titolo scelto');
+
+    final reopenedStore = ChatSessionStore.forTesting(db);
+    expect((await reopenedStore.listSessions()).single.title, 'Titolo scelto');
+    expect((await db.query('chat_history')).single['content'],
+        'Messaggio originale');
+
+    await store.renameSession('a', 'Titolo aggiornato');
+    expect((await store.listSessions()).single.title, 'Titolo aggiornato');
+  });
+
+  test('renaming one chat preserves all other titles and pins', () async {
+    await store.createSession('a');
+    await store.createSession('b');
+    await addMessage('m1', 'a', 1, 'Chat A');
+    await addMessage('m2', 'b', 2, 'Chat B');
+    await store.setPinned('a', true);
+    await store.renameSession('b', 'Conversazione B');
+    final sessions = await store.listSessions();
+    expect(sessions.map((s) => s.id), <String>['a', 'b']);
+    expect(sessions.first.title, 'Chat A');
+    expect(sessions.first.pinned, isTrue);
+    expect(sessions.last.title, 'Conversazione B');
+    expect((await db.query('chat_history')).length, 2);
+  });
+
+  test('invalid titles and missing sessions do not change stored history',
+      () async {
+    await store.createSession('a');
+    await addMessage('m1', 'a', 1, 'Messaggio intatto');
+    await expectLater(store.renameSession('a', '   '), throwsArgumentError);
+    await expectLater(
+      store.renameSession('a', 'x' * 81),
+      throwsArgumentError,
+    );
+    await expectLater(
+      store.renameSession('missing', 'Un titolo'),
+      throwsStateError,
+    );
+    expect((await store.listSessions()).single.title, 'Messaggio intatto');
+    expect((await db.query('chat_history')).single['content'],
+        'Messaggio intatto');
+  });
+
   test('titles are derived from user prompts and not model output', () async {
     await store.createSession('s1');
     await db.insert('chat_history', <String, Object>{
