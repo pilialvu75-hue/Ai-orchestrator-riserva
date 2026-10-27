@@ -38,6 +38,7 @@ class ChatRepositoryImpl implements ChatRepository {
     this.inferenceService,
     this.runtimeSettingsService,
     this.imageVisionService,
+    this.localImageVisionService,
     this.videoStoryboardService,
     this.fileContextService,
   })  : _orchestrator = orchestrator,
@@ -56,6 +57,7 @@ class ChatRepositoryImpl implements ChatRepository {
   final InferenceService? inferenceService;
   final AiRuntimeSettingsService? runtimeSettingsService;
   final ChatImageVisionService? imageVisionService;
+  final ChatImageVisionService? localImageVisionService;
   final ChatVideoStoryboardService? videoStoryboardService;
   final ChatFileContextService? fileContextService;
 
@@ -167,43 +169,58 @@ class ChatRepositoryImpl implements ChatRepository {
                   'senza altri tipi di allegato.',
                 );
               }
-              if (runtimeSettingsService?.runtimeMode != AiRuntimeMode.cloud) {
-                throw const ServerFailure(
-                  'Image: l\'inferenza visiva locale non è ancora disponibile. '
-                  'Se desideri analizzare una foto tramite Cloud, '
-                  'seleziona la modalità Cloud e un provider visivo.',
+              // LOCAL and HYBRID remain strictly on-device for Image.
+              // The offline labeler produces approximate object categories;
+              // it does not run a multimodal LLM or upload any image.
+              final isCloud =
+                  runtimeSettingsService?.runtimeMode == AiRuntimeMode.cloud;
+              final ChatImageVisionResult vision;
+              if (isCloud) {
+                final selectedProvider = ChatImageVisionAutoRouter.select(
+                  manualProvider: runtimeSettingsService?.manualCloudProvider,
+                  automaticUseAllowed: (providerId) =>
+                      runtimeSettingsService?.automaticCloudUseAllowed(providerId)
+                          ?? false,
+                  hasCredential: CloudCredentialStore.instance.hasCredential,
+                );
+                if (selectedProvider == null) {
+                  throw const ServerFailure(
+                    'Image: nessun provider visivo autorizzato disponibile. '
+                    'In Cloud AUTO configura Gemini e abilitalo in AUTO, '
+                    'oppure seleziona manualmente un provider compatibile. '
+                    'OpenAI a pagamento non viene scelto automaticamente.',
+                  );
+                }
+                if (imageVisionService == null) {
+                  throw const ServerFailure(
+                    'Il servizio Image Cloud non è configurato.',
+                  );
+                }
+                vision = await imageVisionService!.analyze(
+                  providerId: selectedProvider,
+                  image: imageAttachments.single,
+                  prompt: normalizedPrompt,
+                  systemPrompt: systemPrompt,
+                  context: context,
+                );
+              } else {
+                if (localImageVisionService == null) {
+                  throw const ServerFailure(
+                    'Image LOCAL non è configurato su questo dispositivo. '
+                    'Non è stata inviata alcuna foto al Cloud.',
+                  );
+                }
+                vision = await localImageVisionService!.analyze(
+                  providerId: 'local',
+                  image: imageAttachments.single,
+                  prompt: normalizedPrompt,
+                  systemPrompt: systemPrompt,
+                  context: context,
                 );
               }
-              final selectedProvider = ChatImageVisionAutoRouter.select(
-                manualProvider: runtimeSettingsService?.manualCloudProvider,
-                automaticUseAllowed: (providerId) =>
-                    runtimeSettingsService?.automaticCloudUseAllowed(providerId)
-                        ?? false,
-                hasCredential: CloudCredentialStore.instance.hasCredential,
-              );
-              if (selectedProvider == null) {
-                throw const ServerFailure(
-                  'Image: nessun provider visivo autorizzato disponibile. '
-                  'In Cloud AUTO configura Gemini e abilitalo in AUTO, '
-                  'oppure seleziona manualmente un provider compatibile. '
-                  'OpenAI a pagamento non viene scelto automaticamente.',
-                );
-              }
-              if (imageVisionService == null) {
-                throw const ServerFailure(
-                  'Il servizio Image non è ancora configurato.',
-                );
-              }
-              final vision = await imageVisionService!.analyze(
-                providerId: selectedProvider!,
-                image: imageAttachments.single,
-                prompt: normalizedPrompt,
-                systemPrompt: systemPrompt,
-                context: context,
-              );
-              onRuntimeNotice?.call(
-                'Immagine analizzata con ${vision.providerId} via Cloud.',
-              );
+              onRuntimeNotice?.call(isCloud
+                  ? 'Immagine analizzata con ${vision.providerId} via Cloud.'
+                  : 'Riconoscimento visivo offline: categorie preliminari.');
               onPartialResponse?.call(vision.text);
               final imageAnswer = ChatMessageModel(
                 id: _uuid.v4(),
