@@ -241,9 +241,12 @@ final class CloudChatImageVisionService implements ChatImageVisionService {
       response = await sendOnce();
     }
     if (response.statusCode == 503) {
+      final exhausted = providerId == 'gemini'
+          ? 'anche dopo un secondo tentativo'
+          : 'il servizio non è disponibile';
       throw StateError(
-        'Image: Gemini temporaneamente non disponibile (HTTP 503), '
-        'anche dopo un secondo tentativo. Riprova più tardi.',
+        'Image: $providerId temporaneamente non disponibile (HTTP 503), '
+        '$exhausted. Riprova più tardi.',
       );
     }
     if (response.statusCode != 200) {
