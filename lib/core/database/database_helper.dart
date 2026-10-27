@@ -145,7 +145,8 @@ class DatabaseHelper {
   static Future<void> createChatArchiveCatalogTables(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS ${AppConstants.tableChatArchiveCatalog} (
-        archive_id TEXT PRIMARY KEY,
+        owner_account_id TEXT NOT NULL,
+        archive_id TEXT NOT NULL,
         origin_device_id TEXT NOT NULL,
         source_session_id TEXT NOT NULL,
         storage_provider_id TEXT NOT NULL,
@@ -154,29 +155,31 @@ class DatabaseHelper {
         ciphertext_bytes INTEGER NOT NULL CHECK(ciphertext_bytes > 0),
         message_count INTEGER NOT NULL CHECK(message_count >= 0),
         indexed_at_ms INTEGER NOT NULL,
-        remote_verified_at_ms INTEGER
+        remote_verified_at_ms INTEGER,
+        PRIMARY KEY(owner_account_id, archive_id)
       )
     ''');
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_chat_archive_source
       ON ${AppConstants.tableChatArchiveCatalog}
-        (origin_device_id, source_session_id, indexed_at_ms)
+        (owner_account_id, origin_device_id, source_session_id, indexed_at_ms)
     ''');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS ${AppConstants.tableChatArchiveMemoryLinks} (
+        owner_account_id TEXT NOT NULL,
         memory_scope TEXT NOT NULL,
         memory_key TEXT NOT NULL,
         archive_id TEXT NOT NULL,
         message_id TEXT NOT NULL,
-        PRIMARY KEY(memory_scope, memory_key, archive_id, message_id),
-        FOREIGN KEY(archive_id) REFERENCES
-          ${AppConstants.tableChatArchiveCatalog}(archive_id)
+        PRIMARY KEY(owner_account_id, memory_scope, memory_key, archive_id, message_id),
+        FOREIGN KEY(owner_account_id, archive_id) REFERENCES
+          ${AppConstants.tableChatArchiveCatalog}(owner_account_id, archive_id)
       )
     ''');
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_chat_archive_memory
       ON ${AppConstants.tableChatArchiveMemoryLinks}
-        (memory_scope, memory_key)
+        (owner_account_id, memory_scope, memory_key)
     ''');
   }
 
