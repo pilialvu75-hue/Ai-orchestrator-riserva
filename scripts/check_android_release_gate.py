@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fail CI if an ordinary push or PR could publish an Android release.
 
-Only an explicitly dispatched beta/nightly/dev workflow may create a GitHub
-Release. This is an offline source check: no GitHub token or network required.
+Only an explicitly dispatched stable/beta/nightly/dev workflow may create a
+GitHub Release. This is an offline source check: no token or network required.
 """
 from pathlib import Path
 import re
@@ -47,10 +47,8 @@ def validate(source: str) -> list[str]:
     else:
         block = block_match.group(1)
         if not all(re.search(r"(?m)^\s*- " + item + r"\s*$", block)
-                   for item in ("beta", "nightly", "dev")):
-            errors.append("Manual channels must include beta/nightly/dev")
-        if re.search(r"(?m)^\s*- stable\s*$", block):
-            errors.append("Stable distribution must not be an implicit manual option")
+                   for item in ("stable", "beta", "nightly", "dev")):
+            errors.append("Manual channels must include stable/beta/nightly/dev")
 
     return errors
 
@@ -65,11 +63,15 @@ def validate_desktop_publisher(source: str, platform: str) -> list[str]:
     ):
         problems.append(f"{platform}: publisher must require manual release dispatch")
     if "id: publish_tag" not in source or "steps.publish_tag.outputs.tag" not in source:
-        problems.append(f"{platform}: publisher must resolve the actual beta/nightly/dev tag")
+        problems.append(f"{platform}: publisher must resolve the actual explicit release tag")
     if platform in ("linux", "macos") and 'candidate="${base}-${channel}+${build}"' not in source:
         problems.append(f"{platform}: must resolve SemVer prerelease tag")
     if platform == "windows" and '"$base-beta+$build"' not in source:
         problems.append("windows: must resolve SemVer prerelease tag")
+    if platform in ("linux", "macos") and 'candidate="${base}+${build}"' not in source:
+        problems.append(f"{platform}: must recognize manually published stable tag")
+    if platform == "windows" and '"$base+$build"' not in source:
+        problems.append("windows: must recognize manually published stable tag")
     if "steps.version.outputs.tag" in source:
         problems.append(f"{platform}: publisher may not upload to an unsuffixed tag")
     if platform == "macos" and 'version_code="$((100000 +' not in source:
@@ -93,7 +95,7 @@ def main() -> int:
         print(f"::error::{problem}")
     if problems:
         return 1
-    print("Release gate OK: pushes and PRs build artifacts; dispatch publishes explicit prereleases")
+    print("Release gate OK: pushes and PRs cannot publish; dispatch explicitly selects stable or prerelease")
     return 0
 
 

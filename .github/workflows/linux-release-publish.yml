@@ -114,7 +114,7 @@ jobs:
           echo "Target GitHub release: $tag"
           echo "Source commit: ${{ github.event.workflow_run.head_sha }}"
 
-      - name: Resolve existing manually published prerelease tag
+      - name: Resolve existing explicitly published release tag
         id: publish_tag
         shell: bash
         env:
@@ -131,8 +131,13 @@ jobs:
               matches+=("$candidate")
             fi
           done
+          candidate="${base}+${build}"
+          if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" \
+            --json isPrerelease --jq '.isPrerelease' 2>/dev/null | grep -Fxq false; then
+            matches+=("$candidate")
+          fi
           if [ "${#matches[@]}" -ne 1 ]; then
-            echo "::error::Expected one manually published prerelease for $base"
+            echo "::error::Expected exactly one explicitly published release for $base and build $build"
             exit 1
           fi
           echo "tag=${matches[0]}" >> "$GITHUB_OUTPUT"
