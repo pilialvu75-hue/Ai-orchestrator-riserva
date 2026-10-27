@@ -92,6 +92,7 @@ class UpdateManager {
     required AndroidIntentHandler intentHandler,
     required String currentVersion,
     bool? allowDebugSignatureMismatchBypass,
+    bool enableAndroidBetaBuildNumberComparison = false,
     Dio? dio,
   })  : _updateChecker = updateChecker,
         _comparator = comparator,
@@ -100,6 +101,8 @@ class UpdateManager {
         _currentVersion = comparator.normalize(currentVersion) ?? currentVersion,
         _allowDebugSignatureMismatchBypass =
             allowDebugSignatureMismatchBypass ?? kDebugMode,
+        _enableAndroidBetaBuildNumberComparison =
+            enableAndroidBetaBuildNumberComparison,
         _dio = dio ?? Dio(),
         state = ValueNotifier<UpdateState>(
           UpdateState.initial(
@@ -116,6 +119,7 @@ class UpdateManager {
   final AndroidIntentHandler _intentHandler;
   final String _currentVersion;
   final bool _allowDebugSignatureMismatchBypass;
+  final bool _enableAndroidBetaBuildNumberComparison;
   final Dio _dio;
 
   final ValueNotifier<UpdateState> state;
@@ -224,7 +228,7 @@ class UpdateManager {
         return;
       }
 
-      final compareResult = _comparator.compare(manifest.version, _currentVersion);
+      final compareResult = _compareCandidateToInstalled(manifest.version);
       final compatible = manifest.isCompatibleWith(
         currentVersion: _currentVersion,
         comparator: _comparator,
@@ -338,7 +342,7 @@ class UpdateManager {
       _logStructuredDownloadTrigger(
         detectedVersion: manifest.version,
         selectedChannel: state.value.preferredChannel,
-        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        comparisonResult: _compareCandidateToInstalled(manifest.version),
         finalDecisionState: 'skipped_downloading',
       );
       return false;
@@ -347,7 +351,7 @@ class UpdateManager {
       _logStructuredDownloadTrigger(
         detectedVersion: manifest.version,
         selectedChannel: state.value.preferredChannel,
-        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        comparisonResult: _compareCandidateToInstalled(manifest.version),
         finalDecisionState: 'skipped_install_in_progress',
       );
       return false;
@@ -355,7 +359,7 @@ class UpdateManager {
     _logStructuredDownloadTrigger(
       detectedVersion: manifest.version,
       selectedChannel: state.value.preferredChannel,
-      comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+      comparisonResult: _compareCandidateToInstalled(manifest.version),
       finalDecisionState: 'download_requested',
     );
     _logUpdateDownload(
@@ -374,7 +378,7 @@ class UpdateManager {
         action: 'download_latest_apk',
         detectedVersion: manifest.version,
         selectedChannel: state.value.preferredChannel,
-        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        comparisonResult: _compareCandidateToInstalled(manifest.version),
         finalDecisionState: 'error',
         message: 'Invalid APK URL: ${manifest.apkUrl}',
       );
@@ -442,7 +446,7 @@ class UpdateManager {
           _logStructuredDownloadTrigger(
             detectedVersion: manifest.version,
             selectedChannel: state.value.preferredChannel,
-            comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+            comparisonResult: _compareCandidateToInstalled(manifest.version),
             finalDecisionState: 'ready_to_install',
           );
           await _clearDownloadState();
@@ -509,7 +513,7 @@ class UpdateManager {
           action: 'download_latest_apk',
           detectedVersion: manifest.version,
           selectedChannel: state.value.preferredChannel,
-          comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+          comparisonResult: _compareCandidateToInstalled(manifest.version),
           finalDecisionState: 'error',
           message: 'Downloaded APK failed verification: ${verification.reason}',
         );
@@ -553,7 +557,7 @@ class UpdateManager {
       _logStructuredDownloadTrigger(
         detectedVersion: manifest.version,
         selectedChannel: state.value.preferredChannel,
-        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        comparisonResult: _compareCandidateToInstalled(manifest.version),
         finalDecisionState: 'ready_to_install',
       );
       state.value = state.value.copyWith(
@@ -576,7 +580,7 @@ class UpdateManager {
         action: 'download_latest_apk',
         detectedVersion: manifest.version,
         selectedChannel: state.value.preferredChannel,
-        comparisonResult: _comparator.compare(manifest.version, _currentVersion),
+        comparisonResult: _compareCandidateToInstalled(manifest.version),
         finalDecisionState: 'error',
         message: 'Download failed: $error',
       );
@@ -892,7 +896,7 @@ class UpdateManager {
     if (manifest == null) {
       return false;
     }
-    return _comparator.compare(manifest.version, _currentVersion) > 0;
+    return _compareCandidateToInstalled(manifest.version) > 0;
   }
 
   Future<bool> forceUpdate() async {
@@ -984,11 +988,42 @@ class UpdateManager {
     );
   }
 
+  /// Official Android beta APKs use a plain versionName (1.0.15) and
+  /// a separate monotonic versionCode (103459). PackageInfo loses the beta
+  /// designation while the GitHub release tag preserves it.
+  ///
+  /// With explicit beta opt-in, permit only same-base beta upgrades whose
+  /// numeric APK build code is strictly greater. Ordinary SemVer ordering and
+  /// other platforms remain unchanged; missing codes cannot bypass checks.
+  int _compareCandidateToInstalled(String candidateVersion) {
+    final conventional = _comparator.compare(candidateVersion, _currentVersion);
+    if (!_enableAndroidBetaBuildNumberComparison ||
+        !state.value.preferredChannel.allows(ReleaseChannel.beta)) {
+      return conventional;
+    }
+    final candidate = _comparator.parse(candidateVersion);
+    final installed = _comparator.parse(_currentVersion);
+    if (candidate == null ||
+        installed == null ||
+        candidate.channel != ReleaseChannel.beta ||
+        installed.isPreRelease ||
+        candidate.numericSegments.length != 4 ||
+        installed.numericSegments.length != 4) {
+      return conventional;
+    }
+    for (var i = 0; i < 3; i++) {
+      if (candidate.numericSegments[i] != installed.numericSegments[i]) {
+        return conventional;
+      }
+    }
+    return candidate.numericSegments[3].compareTo(installed.numericSegments[3]);
+  }
+
   int? _comparisonResultFor(String? detectedVersion) {
     if (detectedVersion == null || detectedVersion.trim().isEmpty) {
       return null;
     }
-    return _comparator.compare(detectedVersion, _currentVersion);
+    return _compareCandidateToInstalled(detectedVersion);
   }
 
   Future<void> _invalidateStalePersistedState({
@@ -1010,7 +1045,7 @@ class UpdateManager {
         }
       } else {
         final shouldClearPending = forceInvalidateMismatched ||
-            _comparator.compare(_currentVersion, pendingVersion) >= 0;
+            _compareCandidateToInstalled(pendingVersion) <= 0;
         if (shouldClearPending) {
           await _cleanupInstallerArtifacts(pendingPath);
           await _clearPendingInstallerState();
@@ -1058,7 +1093,7 @@ class UpdateManager {
         !partialExists ||
         downloadVersion == null ||
         downloadVersion.trim().isEmpty ||
-        _comparator.compare(_currentVersion, downloadVersion) >= 0;
+        _compareCandidateToInstalled(downloadVersion) <= 0;
     if (shouldClearDownload) {
       await _cleanupInstallerArtifacts(partialPath);
       await _clearDownloadState();
@@ -1086,7 +1121,7 @@ class UpdateManager {
       return false;
     }
 
-    if (_comparator.compare(_currentVersion, pendingVersion) >= 0 ||
+    if (_compareCandidateToInstalled(pendingVersion) <= 0 ||
         _comparator.compare(pendingVersion, manifest.version) < 0) {
       await _cleanupInstallerArtifacts(pendingPath);
       await _clearPendingInstallerState();
@@ -1162,7 +1197,7 @@ class UpdateManager {
     if (saved == null) return false;
     try {
       final manifest = UpdateManifest.fromJson(jsonDecode(saved) as Map<String, dynamic>);
-      if (_comparator.compare(_currentVersion, manifest.version) >= 0) {
+      if (_compareCandidateToInstalled(manifest.version) <= 0) {
         await BackgroundDownload.release(manifest.apkUrl);
         await _preferences.remove(_prefApprovedDownload);
         return false;
@@ -1190,7 +1225,7 @@ class UpdateManager {
 
     final pendingVersion = _preferences.getString(_prefPendingVersion);
     if (pendingVersion != null &&
-        _comparator.compare(_currentVersion, pendingVersion) >= 0) {
+        _compareCandidateToInstalled(pendingVersion) <= 0) {
       _logUpdateInstallCleanup(
         'installed_version_reached current=$_currentVersion pending=$pendingVersion',
       );
