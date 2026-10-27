@@ -13,6 +13,10 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+
+  # Real tested Library module; vendored locally to retain reproducible signing builds.
+  cantiere_local_image_vision:
+    path: packages/cantiere_local_image_vision
   meta: ^1.11.0
 
   sqflite: ^2.3.3+1
