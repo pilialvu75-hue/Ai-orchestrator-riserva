@@ -164,10 +164,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          base="v${{ steps.version.outputs.release_version }}"
+          base="v${{ steps.version.outputs.version_name }}"
+          build="${{ steps.version.outputs.version_code }}"
           matches=()
           for channel in beta nightly dev; do
-            candidate="${base}-${channel}"
+            candidate="${base}-${channel}+${build}"
             if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" \
               --json isPrerelease --jq '.isPrerelease' 2>/dev/null | grep -Fxq true; then
               matches+=("$candidate")
