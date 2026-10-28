@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Explicitly user-selected PDF extraction. Never sends file or text to Cloud.
+/// Local PDF extraction performs no network requests; downstream chat routing\n/// still follows the explicitly selected LOCAL/Cloud mode.
 abstract interface class PdfOfflineTextReader {
   Future<String> readPdf(String path);
 }
