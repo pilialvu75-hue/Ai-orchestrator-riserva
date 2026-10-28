@@ -12,6 +12,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 import 'package:flutter/foundation.dart';
 
 /// Central routing layer for Assistant/Hybrid AI calls.
@@ -92,6 +93,7 @@ class Orchestrator {
     int? maxTokens,
     double? temperature,
     bool documentContext = false,
+    String? documentWebQuery,
   }) {
     _logForensic(
       '[ORCHESTRATOR_SEND] session=$sessionId'
@@ -154,10 +156,21 @@ class Orchestrator {
       InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: systemPrompt,
+        systemPrompt: documentContext && documentWebQuery == null
+            ? AssistantWebSearchPolicy.applyOfflineOnlyMarker(systemPrompt)
+            : systemPrompt,
         context: contextSnapshot,
         isOffline: isOffline,
-        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        allowWebSearchTool: !documentContext || documentWebQuery != null,
+        trustedDocumentWebQuery: documentWebQuery,
+        // Keep a bounded generation reserve for short document questions.
+        // The native GGUF budget fits prompt + reserved output exactly;
+        // Phi-3.5 Mini otherwise reserves ~1024 response tokens even when
+        // the answer only needs a single PDF table row.
+        maxTokens: documentContext
+            ? (maxTokens ?? 384).clamp(1, 384).toInt()
+            : (maxTokens ?? InferenceRequest.defaultMaxTokens),
+        preserveMaxTokens: documentContext,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       ),
     );

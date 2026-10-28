@@ -609,6 +609,168 @@ Top results:
       expect(seenSessionIds, <String>['search-s1', 'search-s1::search']);
     });
 
+    test('PDF LOCAL rejects model web-search tag without using network or cloud',
+        () async {
+      final searchTool = _FakeWebSearchTool(
+        const ToolResult(
+          toolId: 'web_search',
+          output: 'This external result must never be used.',
+          success: true,
+        ),
+      );
+      var localCalls = 0;
+      var cloudCalls = 0;
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel.copyWith(
+          id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+        ),
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (request, cancellationToken) async* {
+            localCalls++;
+            expect(request.allowWebSearchTool, isFalse);
+            if (localCalls == 1) {
+              yield InferenceResponse.token(
+                text: '<search>Thé vert2,45 € TR-07</search>',
+                model: 'phi3_5_mini',
+              );
+            } else {
+              expect(request.sessionId, endsWith('::document-no-tools'));
+              yield InferenceResponse.finalChunk(
+                text: 'Teiera rossa: 24,00 €, quantità 1, codice TR-07.',
+                tokensGenerated: 10,
+                model: 'phi3_5_mini',
+              );
+            }
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(
+          sendQuery: (_, __) async {
+            cloudCalls++;
+            return AiResponse(
+              text: 'forbidden cloud response',
+              model: 'test', tokensUsed: 0,
+              timestamp: DateTime.now().millisecondsSinceEpoch,
+            );
+          },
+        ),
+        webSearchTool: searchTool,
+      );
+      final response = await service.infer(const InferenceRequest(
+        sessionId: 'pdf-local-s24',
+        prompt: 'Qual è il prezzo della teiera rossa? '
+            '[Pagina 1/1] Teiera rossa 1 24,00 € TR-07',
+        routeDirective: InferenceRouteDirective.localOnly,
+        allowWebSearchTool: false,
+      ));
+      expect(response.text, contains('Teiera rossa: 24,00 €, quantità 1'));
+      expect(response.text, isNot(contains('Searching the web')));
+      expect(localCalls, 2);
+      expect(searchTool.calls, 0);
+      expect(cloudCalls, 0);
+    });
+
+    test('explicit PDF online query uses only original user wording', () async {
+      final searchTool = _FakeWebSearchTool(
+        const ToolResult(
+          toolId: 'web_search',
+          output: 'Public website about teapots.',
+          success: true,
+        ),
+      );
+      var localCalls = 0;
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel.copyWith(
+          id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+        ),
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (request, _) async* {
+            localCalls++;
+            if (localCalls == 1) {
+              yield InferenceResponse.token(
+                text: '<search>PRIVATE PDF CONTENT TR-07 24,00 €</search>',
+                model: 'phi3_5_mini',
+              );
+            } else {
+              yield InferenceResponse.finalChunk(
+                text: 'Trovate fonti pubbliche.',
+                tokensGenerated: 7,
+                model: 'phi3_5_mini',
+              );
+            }
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(),
+        webSearchTool: searchTool,
+      );
+      final response = await service.infer(const InferenceRequest(
+        sessionId: 'pdf-opt-in',
+        prompt: 'Dati PDF privati: Teiera rossa 24,00 € TR-07.',
+        trustedDocumentWebQuery: 'Verifica online il negozio di teiere.',
+        allowWebSearchTool: true,
+        routeDirective: InferenceRouteDirective.localOnly,
+      ));
+      expect(response.text, contains('Trovate fonti pubbliche'));
+      expect(searchTool.calls, 1);
+      expect(searchTool.lastQuery, 'Verifica online il negozio di teiere.');
+      expect(searchTool.lastQuery, isNot(contains('TR-07')));
+      expect(localCalls, 2);
+    });
+
+    test('optional online PDF verification falls back to LOCAL without connection',
+        () async {
+      final searchTool = _FakeWebSearchTool(
+        const ToolResult(
+          toolId: 'web_search',
+          output: 'Network unavailable.',
+          success: false,
+        ),
+      );
+      var localCalls = 0;
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel.copyWith(
+          id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+        ),
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (request, _) async* {
+            localCalls++;
+            if (localCalls == 1) {
+              yield InferenceResponse.token(
+                text: '<search>online shop from PDF</search>',
+                model: 'phi3_5_mini',
+              );
+            } else {
+              expect(request.allowWebSearchTool, isFalse);
+              expect(request.sessionId, endsWith('::document-no-tools'));
+              yield InferenceResponse.finalChunk(
+                text: 'Dati PDF locali: Teiera rossa, 24,00 €, TR-07.',
+                tokensGenerated: 9,
+                model: 'phi3_5_mini',
+              );
+            }
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(
+          configured: false,
+        ),
+        webSearchTool: searchTool,
+      );
+      final answer = await service.infer(const InferenceRequest(
+        sessionId: 'pdf-web-unavailable',
+        prompt: '[Pagina 1/1] Teiera rossa 1 24,00 € TR-07',
+        allowWebSearchTool: true,
+        trustedDocumentWebQuery: 'Verifica online prezzo teiera rossa.',
+        routeDirective: InferenceRouteDirective.localOnly,
+      ));
+      expect(answer.text, contains('24,00 €'));
+      expect(answer.isError, isFalse);
+      expect(localCalls, 2);
+      expect(searchTool.calls, 1);
+      expect(searchTool.lastQuery, 'Verifica online prezzo teiera rossa.');
+    });
+
     test(
         'offline local search tags never execute the web tool and recover locally',
         () async {
@@ -788,6 +950,7 @@ class _FakeWebSearchTool implements Tool {
 
   final ToolResult _result;
   var calls = 0;
+  String? lastQuery;
 
   @override
   String get id => 'web_search';
@@ -801,6 +964,7 @@ class _FakeWebSearchTool implements Tool {
   @override
   Future<ToolResult> execute(Map<String, dynamic> params) async {
     calls += 1;
+    lastQuery = params['query'] as String?;
     expect(params['query'], isNotEmpty);
     return _result;
   }

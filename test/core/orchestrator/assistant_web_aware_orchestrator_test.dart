@@ -92,9 +92,37 @@ void main() {
         .single as InferenceRequest;
     expect(forwarded.prompt, document);
     expect(forwarded.routeDirective, InferenceRouteDirective.localOnly);
+    expect(forwarded.allowWebSearchTool, isFalse);
+    expect(forwarded.maxTokens, 384);
+    expect(forwarded.preserveMaxTokens, isTrue);
+    expect(forwarded.systemPrompt,
+        contains('[AI_ORCHESTRATOR_WEB_ACCESS_DISABLED_OFFLINE]'));
     verifyNever(() => webSearch.execute(any()));
     verifyNever(() => inference.infer(any()));
     verifyNever(() => executor.execute(any()));
+  });
+
+  test('explicit online PDF verification allows web only with trusted query', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    const document = 'Verifica online il negozio della teiera.\\n'
+        '[AIVEXUS_Test_PDF_S24.pdf]\\n'
+        'Testo privato NON DA TRASMETTERE a servizi esterni.';
+    await build().handleStream(
+      document,
+      sessionId: 'pdf-online-opt-in',
+      documentContext: true,
+      documentWebQuery: 'Verifica online il negozio della teiera.',
+    ).drain<void>();
+    final request = verify(() => inference.stream(captureAny())).captured
+        .single as InferenceRequest;
+    expect(request.routeDirective, InferenceRouteDirective.localOnly);
+    expect(request.allowWebSearchTool, isTrue);
+    expect(request.trustedDocumentWebQuery,
+        'Verifica online il negozio della teiera.');
+    expect(request.systemPrompt,
+        isNot(contains('[AI_ORCHESTRATOR_WEB_ACCESS_DISABLED_OFFLINE]')));
+    expect(request.maxTokens, 384);
+    verifyNever(() => webSearch.execute(any()));
   });
 
   test('verification uses user topic, preserves history and cites fresh evidence', () async {

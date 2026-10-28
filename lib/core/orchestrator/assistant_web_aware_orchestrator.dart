@@ -94,6 +94,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     int? maxTokens,
     double? temperature,
     bool documentContext = false,
+    String? documentWebQuery,
   }) async* {
     if (documentContext) {
       // Do not interpret content extracted from a file as shopping,
@@ -108,6 +109,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
         maxTokens: maxTokens,
         temperature: temperature,
         documentContext: true,
+        documentWebQuery: documentWebQuery,
       );
       return;
     }

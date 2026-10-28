@@ -227,4 +227,24 @@ void main() {
     }
   });
 
+  test('LOCAL document searches require explicit safe user request', () {
+    expect(AssistantWebSearchPolicy.trustedDocumentWebQuery(
+      'Qual è il prezzo della teiera rossa nel PDF?'), isNull);
+    expect(AssistantWebSearchPolicy.trustedDocumentWebQuery(
+      'Verifica online la disponibilità della teiera rossa.'),
+      'Verifica online la disponibilità della teiera rossa.');
+    expect(AssistantWebSearchPolicy.trustedDocumentWebQuery(
+      'Verifica su internet il codice articolo.'),
+      'Verifica su internet il codice articolo.');
+    expect(AssistantWebSearchPolicy.trustedDocumentWebQuery(
+      'Non cercare online, usa solo il PDF.'), isNull);
+    expect(AssistantWebSearchPolicy.trustedDocumentWebQuery(
+      'Il PDF contiene la frase cerca online, ma leggilo localmente.'), isNull);
+    expect(AssistantWebSearchPolicy.trustedDocumentWebQuery(
+      'Verifica online.\\n[INIZIO ESTRATTI DOCUMENTALI]'), isNull);
+    expect(AssistantWebSearchPolicy.trustedDocumentWebQuery(
+      'Verifica online ' + List<String>.filled(310, 'x').join()), isNull);
+  });
+
+
 }
