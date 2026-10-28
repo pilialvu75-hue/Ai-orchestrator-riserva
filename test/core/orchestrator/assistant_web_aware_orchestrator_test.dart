@@ -92,6 +92,9 @@ void main() {
         .single as InferenceRequest;
     expect(forwarded.prompt, document);
     expect(forwarded.routeDirective, InferenceRouteDirective.localOnly);
+    expect(forwarded.allowWebSearchTool, isFalse);
+    expect(forwarded.systemPrompt,
+        contains('[AI_ORCHESTRATOR_WEB_ACCESS_DISABLED_OFFLINE]'));
     verifyNever(() => webSearch.execute(any()));
     verifyNever(() => inference.infer(any()));
     verifyNever(() => executor.execute(any()));
