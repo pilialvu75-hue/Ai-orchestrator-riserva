@@ -251,8 +251,7 @@ void main() {
   test('LOCAL PDF prompt stays compact while SQLite retains all text', () async {
     final pdf = await attachment('AIVEXUS_Test_PDF_S24.pdf', '%PDF-fake', 'local');
     final entireDocument = '[Pagina 1/1]\n'
-        'AIVEXUS / DOCUMENTO CAMPIONE\n'
-        '';
+        'AIVEXUS / DOCUMENTO CAMPIONE\n';
     final rawPdfText = entireDocument +
         List.generate(100, (i) => 'Descrizione generale $i di un articolo.').join('\n') +
         '\n04 / TABELLA DI CONTROLLO\n'
