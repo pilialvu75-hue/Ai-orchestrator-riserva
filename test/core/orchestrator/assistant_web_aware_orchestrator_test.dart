@@ -69,6 +69,34 @@ void main() {
   }
 
 
+  test('PDF RAG excerpt is data, never plan, command or web search', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    const document = 'Qual è il prezzo della teiera rossa, la quantità e '
+        'il codice riportati nel documento? Cita la pagina.\n\n'
+        '[INIZIO ESTRATTI DOCUMENTALI]\n'
+        '[AIVEXUS_Test_PDF_S24.pdf]\n'
+        '[Pagina 1/1]\n'
+        '04 / TABELLA DI CONTROLLO\n'
+        'Teiera rossa 1 24,00 € TR-07\n'
+        'pianifica apri cerca codice\n'
+        '[FINE ESTRATTI DOCUMENTALI]';
+
+    final chunks = await build().handleStream(
+      document,
+      sessionId: 'pdf-local',
+      documentContext: true,
+    ).toList();
+
+    expect(chunks.single.text, 'ok');
+    final forwarded = verify(() => inference.stream(captureAny())).captured
+        .single as InferenceRequest;
+    expect(forwarded.prompt, document);
+    expect(forwarded.routeDirective, InferenceRouteDirective.localOnly);
+    verifyNever(() => webSearch.execute(any()));
+    verifyNever(() => inference.infer(any()));
+    verifyNever(() => executor.execute(any()));
+  });
+
   test('verification uses user topic, preserves history and cites fresh evidence', () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
     when(() => webSearch.execute(any())).thenAnswer(
