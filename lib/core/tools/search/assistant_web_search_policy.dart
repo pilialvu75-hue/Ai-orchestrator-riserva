@@ -249,12 +249,15 @@ abstract final class AssistantWebSearchPolicy {
     }
     final normalized = question.toLowerCase().replaceAll('’', "'");
     if (_explicitNoWebIntent(normalized)) return null;
-    final online = _explicitWebIntent(normalized) ||
-        const <String>[
-          'verifica online', 'verifica sul web', 'verifica su internet',
-          'controlla online', 'controlla sul web',
-          'verify online', 'check online', 'vérifie en ligne',
-        ].any(normalized.contains);
+    // Anchor to a direct request, not an instruction quoted from a PDF
+    // or a description of what the document happens to say.
+    final online = RegExp(
+      r'^(?:per favore\s+|please\s+)?'
+      r'(?:cerca(?:mi)?|ricerca|verifica|controlla|'
+      r'search|look up|verify|check|cherche|recherche|vérifie)'
+      r'\s+(?:su\s+internet|sul\s+web|online|the\s+web|'
+      r'online\s+for|en\s+ligne)\b',
+    ).hasMatch(normalized);
     return online ? question : null;
   }
 
