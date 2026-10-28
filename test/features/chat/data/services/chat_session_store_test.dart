@@ -195,4 +195,65 @@ void main() {
     expect(await renewed.restoreActiveSession(), 'fresh');
     expect((await renewed.listSessions()).single.title, 'Nuova chat');
   });
+
+  test('trash hides a chat but keeps messages, title and pinned state', () async {
+    await store.createSession('s1');
+    await store.createSession('s2');
+    await addMessage('one', 's1', 10, 'Messaggio privato');
+    await addMessage('two', 's2', 11, 'Altra chat');
+    await store.renameSession('s1', 'Titolo scelto');
+    await store.setPinned('s1', true);
+
+    await store.moveToTrash('s1');
+    expect((await store.listSessions()).map((s) => s.id), <String>['s2']);
+    final trash = await store.listSessions(inTrash: true);
+    expect(trash.single.id, 's1');
+    expect(trash.single.title, 'Titolo scelto');
+    expect(trash.single.pinned, isTrue);
+    expect(await db.query('chat_history'), hasLength(2));
+
+    // The trash marker survives recreating the store over the same SQLite DB.
+    final reopened = ChatSessionStore.forTesting(db);
+    expect((await reopened.listSessions(inTrash: true)).single.id, 's1');
+
+    await reopened.restoreFromTrash('s1');
+    expect((await store.listSessions()).map((s) => s.id),
+        <String>['s1', 's2']);
+    expect((await store.listSessions(inTrash: true)), isEmpty);
+    expect((await db.query('chat_history')).length, 2);
+    expect((await store.listSessions()).first.title, 'Titolo scelto');
+  });
+
+  test('trash of active default cannot silently revive its old conversation',
+      () async {
+    await store.createSession('default');
+    await addMessage('m1', 'default', 10, 'Contenuto da conservare');
+    await store.selectSession('default');
+    await store.moveToTrash('default');
+
+    final restoredActive = await store.restoreActiveSession();
+    expect(restoredActive, isNot('default'));
+    expect((await store.listSessions()).single.id, restoredActive);
+    expect((await store.listSessions(inTrash: true)).single.id, 'default');
+    expect((await db.query('chat_history')).single['content'],
+        'Contenuto da conservare');
+  });
+
+  test('trash of selected chat switches to an existing visible chat', () async {
+    await store.createSession('a');
+    await store.createSession('b');
+    await store.selectSession('a');
+    await store.moveToTrash('a');
+
+    expect(await store.restoreActiveSession(), 'b');
+    expect((await store.listSessions(inTrash: true)).single.id, 'a');
+    expect((await store.listSessions()).single.id, 'b');
+  });
+
+  test('trash refuses missing session without creating dangling markers',
+      () async {
+    await expectLater(store.moveToTrash('missing'), throwsStateError);
+    expect(await store.listSessions(inTrash: true), isEmpty);
+    expect(await db.query('user_preferences'), isEmpty);
+  });
 }

@@ -355,6 +355,14 @@ class DatabaseHelper {
         where: '${AppConstants.colPrefKey} LIKE ?',
         whereArgs: const <String>['assistant.chat.title.%'],
       );
+      // Remove only orphan trash markers when the user explicitly wipes
+      // the entire history, otherwise a newly-created default chat could
+      // remain hidden after the reset. No effect on ordinary moves to trash.
+      await txn.delete(
+        AppConstants.tableUserPreferences,
+        where: '${AppConstants.colPrefKey} LIKE ?',
+        whereArgs: const <String>['assistant.chat.trash.%'],
+      );
       return removed;
     });
   }
