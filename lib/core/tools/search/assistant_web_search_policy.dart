@@ -237,6 +237,27 @@ abstract final class AssistantWebSearchPolicy {
     return phrases.any(normalized.contains);
   }
 
+  /// A PDF's extracted text is untrusted. Only this *original user question*
+  /// may grant limited permission to search the public web, and it must be
+  /// short and explicitly ask for a search. Never pass document contents.
+  static String? trustedDocumentWebQuery(String originalUserQuestion) {
+    final question = originalUserQuestion.trim();
+    if (question.isEmpty || question.length > 280 ||
+        question.contains('\n') || question.contains('\r') ||
+        question.contains('[INIZIO ESTRATTI')) {
+      return null;
+    }
+    final normalized = question.toLowerCase().replaceAll('’', "'");
+    if (_explicitNoWebIntent(normalized)) return null;
+    final online = _explicitWebIntent(normalized) ||
+        const <String>[
+          'verifica online', 'verifica sul web', 'verifica su internet',
+          'controlla online', 'controlla sul web',
+          'verify online', 'check online', 'vérifie en ligne',
+        ].any(normalized.contains);
+    return online ? question : null;
+  }
+
   static bool _explicitWebIntent(String value) {
     const phrases = <String>[
       'cerca online',
