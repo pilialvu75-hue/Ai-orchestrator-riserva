@@ -12,6 +12,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 import 'package:flutter/foundation.dart';
 
 /// Central routing layer for Assistant/Hybrid AI calls.
@@ -154,9 +155,12 @@ class Orchestrator {
       InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: systemPrompt,
+        systemPrompt: documentContext
+            ? AssistantWebSearchPolicy.applyOfflineOnlyMarker(systemPrompt)
+            : systemPrompt,
         context: contextSnapshot,
         isOffline: isOffline,
+        allowWebSearchTool: !documentContext,
         maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       ),
