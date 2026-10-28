@@ -359,6 +359,7 @@ class ChatRepositoryImpl implements ChatRepository {
                 sessionId: sessionId,
                 userPrompt: normalizedPrompt,
                 attachments: attachmentsSnapshot,
+                compactForLocal: mode == AiRuntimeMode.local,
               );
               if (fileContext != null) {
                 hasDocumentContext = true;
@@ -385,7 +386,15 @@ class ChatRepositoryImpl implements ChatRepository {
               _activeInferenceSubscriptions.remove(sessionId);
             }
 
-            final contextSnapshot = List<ChatTurn>.unmodifiable(context);
+            // The local document index remains persistent, but prior chat
+            // messages (including duplicate PDF questions) are not needed
+            // in the transient on-device prompt. This prevents over-budget
+            // repeats without altering chat history or saved memory.
+            final contextSnapshot = List<ChatTurn>.unmodifiable(
+              hasDocumentContext && mode == AiRuntimeMode.local
+                  ? const <ChatTurn>[]
+                  : context,
+            );
             final stream = _buildInferenceStream(
               sessionId: sessionId,
               prompt: effectivePrompt,
