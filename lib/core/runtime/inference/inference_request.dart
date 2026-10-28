@@ -27,6 +27,7 @@ class InferenceRequest {
     this.context = const [],
     this.isOffline = false,
     this.allowWebSearchTool = true,
+    this.trustedDocumentWebQuery,
     this.maxTokens = defaultMaxTokens,
     this.temperature = defaultTemperature,
     this.preserveMaxTokens = false,
@@ -56,6 +57,8 @@ class InferenceRequest {
   /// requested by text generated from untrusted document content. This is
   /// independent of the regular LOCAL-mode policy allowing optional web tools.
   final bool allowWebSearchTool;
+  /// Trusted original user request for optional public lookup, not PDF data.
+  final String? trustedDocumentWebQuery;
   final int maxTokens;
   final double temperature;
 
@@ -197,6 +200,7 @@ class InferenceRequest {
     List<ChatTurn>? context,
     bool? isOffline,
     bool? allowWebSearchTool,
+    String? trustedDocumentWebQuery,
     int? maxTokens,
     double? temperature,
     bool? preserveMaxTokens,
@@ -223,6 +227,7 @@ class InferenceRequest {
       context: List.unmodifiable(context ?? this.context),
       isOffline: isOffline ?? this.isOffline,
       allowWebSearchTool: allowWebSearchTool ?? this.allowWebSearchTool,
+      trustedDocumentWebQuery: trustedDocumentWebQuery ?? this.trustedDocumentWebQuery,
       maxTokens: maxTokens ?? this.maxTokens,
       temperature: temperature ?? this.temperature,
       preserveMaxTokens: preserveMaxTokens ?? this.preserveMaxTokens,
