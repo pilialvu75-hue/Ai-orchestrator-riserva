@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_file_context_service.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_local_pdf_text_service.dart';
 import 'package:ai_orchestrator/features/document_intelligence/data/services/local_document_index_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -15,6 +16,7 @@ void main() {
   late Directory folder;
 
   setUpAll(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   });
@@ -140,23 +142,34 @@ void main() {
     );
   });
 
-  test('PDF and DOCX are rejected rather than supplying binary hallucinations',
+  test('unsupported DOCX and unavailable PDF parser fail without indexing',
       () async {
-    for (final extension in <String>['pdf', 'docx']) {
-      final doc = await attachment(
-        'documento.$extension',
-        'Not truly parsed',
-        extension,
-      );
-      await expectLater(
-        files.buildContext(
-          sessionId: 'chat-A',
-          userPrompt: 'Leggi il documento',
-          attachments: <ChatAttachment>[doc],
-        ),
-        throwsStateError,
-      );
-    }
+    final docx = await attachment('documento.docx', 'Not truly parsed', 'docx');
+    await expectLater(
+      files.buildContext(
+        sessionId: 'chat-A',
+        userPrompt: 'Leggi il documento',
+        attachments: <ChatAttachment>[docx],
+      ),
+      throwsStateError,
+    );
+
+    // Explicit failure of the local PDF parser: the binary payload must
+    // never enter RAG as fake text or be sent to a provider.
+    final pdf = await attachment('documento.pdf', '%PDF-fake', 'pdf');
+    final unavailablePdf = ChatFileContextService(
+      indexService: LocalDocumentIndexService(databaseHelper: helper),
+      databaseHelper: helper,
+      pdfReader: _PdfStub('', failure: true),
+    );
+    await expectLater(
+      unavailablePdf.buildContext(
+        sessionId: 'chat-A',
+        userPrompt: 'Leggi il documento',
+        attachments: <ChatAttachment>[pdf],
+      ),
+      throwsStateError,
+    );
     expect(await helper.getAllDocumentChunks(), isEmpty);
   });
 
@@ -198,4 +211,98 @@ void main() {
     );
     expect(await File(doc.path).exists(), isTrue);
   });
+  test('PDF extracted by a trusted local adapter is indexed and cited', () async {
+    final pdf = await attachment('facture.pdf', '%PDF-fake', 'pdf1');
+    final reader = _PdfStub(
+      'Pagina 1: facture n. 2048\n'
+      'Ligne en français: ça coûte 12,50 €.\n'
+      'Teiera rossa: 24,00 €.\n',
+    );
+    final pdfFiles = ChatFileContextService(
+      indexService: LocalDocumentIndexService(databaseHelper: helper),
+      databaseHelper: helper,
+      pdfReader: reader,
+    );
+    final result = await pdfFiles.buildContext(
+      sessionId: 'chat-A',
+      userPrompt: 'Qual è il prezzo della teiera?',
+      attachments: <ChatAttachment>[pdf],
+    );
+    expect(result!.prompt, contains('facture.pdf'));
+    expect(result.prompt, contains('Teiera rossa: 24,00 €'));
+    expect(reader.paths, hasLength(1));
+    final chunks = await helper.getAllDocumentChunks();
+    expect(chunks, hasLength(1));
+    expect(chunks.single[AppConstants.colDocumentTitle], 'facture.pdf');
+    expect(chunks.single[AppConstants.colDocumentPath], pdf.path);
+
+    // The same page stays available to subsequent queries in the same chat.
+    final followUp = await pdfFiles.buildContext(
+      sessionId: 'chat-A',
+      userPrompt: 'Quanto costa la teiera?',
+    );
+    expect(followUp!.prompt, contains('facture.pdf'));
+    expect(await pdfFiles.buildContext(
+      sessionId: 'chat-B',
+      userPrompt: 'Teiera',
+    ), isNull);
+  });
+
+  test('PDF reader failure never indexes binary or leaks into chat memory',
+      () async {
+    final pdf = await attachment('rotto.pdf', '%PDF-invalid', 'pdfbad');
+    final pdfFiles = ChatFileContextService(
+      indexService: LocalDocumentIndexService(databaseHelper: helper),
+      databaseHelper: helper,
+      pdfReader: _PdfStub('', failure: true),
+    );
+    await expectLater(
+      pdfFiles.buildContext(
+        sessionId: 'chat-A',
+        userPrompt: 'Leggi PDF',
+        attachments: [pdf],
+      ),
+      throwsStateError,
+    );
+    expect(await helper.getAllDocumentChunks(), isEmpty);
+  });
+
+  test('oversized PDF is rejected before invoking native reader',
+      () async {
+    final big = File('${folder.path}/large.pdf');
+    await big.writeAsBytes(List<int>.filled(8 * 1024 * 1024 + 1, 65));
+    final doc = ChatAttachment(
+      id: 'big', type: ChatAttachmentType.file,
+      path: big.path, name: 'large.pdf',
+    );
+    final reader = _PdfStub('Should not be called');
+    final pdfFiles = ChatFileContextService(
+      indexService: LocalDocumentIndexService(databaseHelper: helper),
+      databaseHelper: helper,
+      pdfReader: reader,
+    );
+    await expectLater(
+      pdfFiles.buildContext(
+        sessionId: 'chat-A',
+        userPrompt: 'Leggi PDF', attachments: [doc],
+      ), throwsStateError,
+    );
+    expect(reader.paths, isEmpty);
+    expect(await helper.getAllDocumentChunks(), isEmpty);
+  });
+
+}
+
+class _PdfStub implements PdfOfflineTextReader {
+  _PdfStub(this.text, {this.failure = false});
+  final String text;
+  final bool failure;
+  final List<String> paths = <String>[];
+
+  @override
+  Future<String> readPdf(String path) async {
+    paths.add(path);
+    if (failure) throw StateError('PDF intentionally invalid');
+    return text;
+  }
 }

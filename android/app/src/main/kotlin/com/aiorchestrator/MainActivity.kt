@@ -68,6 +68,7 @@ class MainActivity : FlutterActivity() {
         // Do NOT register legacy LocalImageVisionBridge on the same channel.
         // Separate local OCR channel; leaves Library image-labeling plugin intact.
         LocalImageTextBridge.register(this, flutterEngine)
+        LocalPdfTextBridge.register(this, flutterEngine)
         VideoStoryboardBridge.register(flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
