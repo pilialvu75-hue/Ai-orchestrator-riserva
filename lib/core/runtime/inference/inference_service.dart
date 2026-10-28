@@ -748,13 +748,12 @@ class InferenceService {
               'reason=local_document_tool_boundary',
             );
             firstGenerationToken.cancel();
-            yield InferenceResponse.finalChunk(
-              text: 'Il modello ha tentato una ricerca Web non autorizzata '
-                  'per questo documento locale. Nessuna ricerca è stata '
-                  'eseguita. Riprova una domanda più specifica sul testo.',
-              tokensGenerated: 0,
-              model: localRequest.modelId ?? 'unknown',
-              providerId: 'local_document_tool_blocked',
+            // Retain the original on-device PDF evidence and try once more,
+            // without tools. A search-tag error must not prevent LOCAL from
+            // answering a question it can resolve using the file itself.
+            yield* _recoverLocalDocumentWithoutTools(
+              request: localRequest,
+              cancellationToken: cancellationToken,
             );
             return;
           }
@@ -955,6 +954,50 @@ class InferenceService {
       'emittedLocalToken=$emittedLocalToken '
       'chunks=$localChunkCount',
     );
+  }
+
+  TokenStream _recoverLocalDocumentWithoutTools({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) async* {
+    final retryToken = CancellationToken();
+    cancellationToken.onCancel(retryToken.cancel);
+    final retryRequest = request.copyWith(
+      sessionId: '${request.sessionId}::document-no-tools',
+      systemPrompt: '${request.systemPrompt ?? ''}\n'
+          'Rispondi usando solo il documento già fornito. '
+          'Non usare strumenti o tag di ricerca Web.',
+      maxTokens: request.maxTokens > 256 ? 256 : request.maxTokens,
+      preserveMaxTokens: true,
+      allowWebSearchTool: false,
+    );
+
+    _log(
+      '[DOCUMENT_TOOL_RECOVERY] '
+      'session=${request.sessionId} mode=on_device_once_only',
+    );
+
+    final recovered = _runtimeProvider.streamInference(
+      request: retryRequest,
+      cancellationToken: retryToken,
+    ).transform(ToolInterceptorTransformer());
+
+    await for (final chunk in recovered) {
+      final notice = chunk.runtimeNotice;
+      if (notice != null && notice.startsWith(_searchNoticePrefix)) {
+        retryToken.cancel();
+        yield InferenceResponse.finalChunk(
+          text: 'Il modello ha richiesto di nuovo una ricerca Web '
+              'non autorizzata per questo PDF. Nessun dato è stato '
+              'inviato online. La risposta locale non è disponibile.',
+          tokensGenerated: 0,
+          model: request.modelId ?? 'unknown',
+          providerId: 'local_document_tool_blocked',
+        );
+        return;
+      }
+      yield chunk;
+    }
   }
 
   TokenStream _recoverOfflineSearchWithoutTools({
