@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/features/document_intelligence/data/services/local_document_index_service.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_local_pdf_text_service.dart';
 import 'package:path/path.dart' as p;
 
 /// Bounded excerpts retrieved from a session's own local RAG index.
@@ -19,10 +20,13 @@ class ChatFileContextService {
   ChatFileContextService({
     required LocalDocumentIndexService indexService,
     required DatabaseHelper databaseHelper,
+    PdfOfflineTextReader? pdfReader,
   })  : _indexService = indexService,
-        _databaseHelper = databaseHelper;
+        _databaseHelper = databaseHelper,
+        _pdfReader = pdfReader ?? AndroidPdfOfflineTextReader();
 
   static const int maxFileBytes = 512 * 1024;
+  static const int maxPdfBytes = 8 * 1024 * 1024;
   static const int maxContextChars = 6200;
   static const Set<String> _plainTextExtensions = <String>{
     '.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.log',
@@ -31,6 +35,7 @@ class ChatFileContextService {
 
   final LocalDocumentIndexService _indexService;
   final DatabaseHelper _databaseHelper;
+  final PdfOfflineTextReader _pdfReader;
 
   Future<ChatFileContext?> buildContext({
     required String sessionId,
@@ -47,13 +52,11 @@ class ChatFileContextService {
     if (files.isNotEmpty) {
       final attachment = files.single;
       final extension = p.extension(attachment.name).toLowerCase();
-      if (!_plainTextExtensions.contains(extension)) {
+      final isPdf = extension == '.pdf';
+      if (!isPdf && !_plainTextExtensions.contains(extension)) {
         throw StateError(
-          extension == '.pdf'
-              ? 'File: la lettura affidabile dei PDF non è ancora pronta. '
-                  'Per ora allega una versione TXT del documento.'
-              : 'File: formato non ancora supportato. '
-                  'Sono disponibili TXT, Markdown, CSV, JSON, LOG e YAML.',
+          'File: formato non ancora supportato. '
+          'Sono disponibili PDF, TXT, Markdown, CSV, JSON, LOG e YAML.',
         );
       }
       if (attachment.uploadState != ChatAttachmentUploadState.ready) {
@@ -64,28 +67,41 @@ class ChatFileContextService {
         throw StateError('File: il documento selezionato non è più disponibile.');
       }
       final length = await source.length();
-      if (length <= 0 || length > maxFileBytes) {
-        throw StateError('File: usa un documento di testo tra 1 byte e 512 KB.');
+      final limit = isPdf ? maxPdfBytes : maxFileBytes;
+      if (length <= 0 || length > limit) {
+        throw StateError(isPdf
+            ? 'File PDF: dimensione consentita tra 1 byte e 8 MB.'
+            : 'File: usa un documento di testo tra 1 byte e 512 KB.');
       }
-      final bytes = await source.readAsBytes();
-      late final String text;
-      try {
-        text = utf8.decode(bytes, allowMalformed: false);
-      } on FormatException {
-        throw StateError('File: non è un documento di testo UTF-8 valido.');
-      }
-      if (text.contains('\u0000') || text.trim().isEmpty) {
-        throw StateError('File: il documento non contiene testo leggibile.');
-      }
-
       final documentId = 'chat_file:$sessionId:${attachment.id}';
-      // The same picked path may be reused in two conversations; do not
-      // delete another session's chunks when indexing this attachment.
-      await _indexService.indexDocument(
-        filePath: source.path,
-        documentId: documentId,
-        replaceExistingPath: false,
-      );
+      if (isPdf) {
+        // Parser on-device only, invoked for explicitly selected PDFs.
+        // No indexing (nor persistent source text) on parse failures.
+        final text = await _pdfReader.readPdf(source.path);
+        await _indexService.indexExtractedText(
+          documentId: documentId,
+          documentPath: source.path,
+          documentTitle: attachment.name,
+          text: text,
+          replaceExistingPath: false,
+        );
+      } else {
+        final bytes = await source.readAsBytes();
+        late final String text;
+        try {
+          text = utf8.decode(bytes, allowMalformed: false);
+        } on FormatException {
+          throw StateError('File: non è un documento di testo UTF-8 valido.');
+        }
+        if (text.contains('\\u0000') || text.trim().isEmpty) {
+          throw StateError('File: il documento non contiene testo leggibile.');
+        }
+        await _indexService.indexDocument(
+          filePath: source.path,
+          documentId: documentId,
+          replaceExistingPath: false,
+        );
+      }
     }
 
     final rows = await _databaseHelper.getAllDocumentChunks(limit: 4000);
