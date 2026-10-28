@@ -241,7 +241,7 @@ void main() {
     expect(AssistantWebSearchPolicy.trustedDocumentWebQuery(
       'Verifica online.\\n[INIZIO ESTRATTI DOCUMENTALI]'), isNull);
     expect(AssistantWebSearchPolicy.trustedDocumentWebQuery(
-      'Verifica online ' + 'x' * 310), isNull);
+      'Verifica online ' + List<String>.filled(310, 'x').join()), isNull);
   });
 
 
