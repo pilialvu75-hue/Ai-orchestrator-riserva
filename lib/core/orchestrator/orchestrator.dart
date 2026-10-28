@@ -161,7 +161,14 @@ class Orchestrator {
         context: contextSnapshot,
         isOffline: isOffline,
         allowWebSearchTool: !documentContext,
-        maxTokens: maxTokens ?? InferenceRequest.defaultMaxTokens,
+        // Keep a bounded generation reserve for short document questions.
+        // The native GGUF budget fits prompt + reserved output exactly;
+        // Phi-3.5 Mini otherwise reserves ~1024 response tokens even when
+        // the answer only needs a single PDF table row.
+        maxTokens: documentContext
+            ? (maxTokens ?? 384).clamp(1, 384).toInt()
+            : (maxTokens ?? InferenceRequest.defaultMaxTokens),
+        preserveMaxTokens: documentContext,
         temperature: temperature ?? InferenceRequest.defaultTemperature,
       ),
     );
