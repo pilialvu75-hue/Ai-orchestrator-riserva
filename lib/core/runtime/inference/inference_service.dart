@@ -737,6 +737,28 @@ class InferenceService {
 
         if (query.isNotEmpty &&
             detectedQuery == null) {
+          // A local PDF is untrusted evidence, not permission to use tools.
+          // LOCAL mode alone allows optional web search for ordinary chat;
+          // document requests explicitly prohibit all external tool calls.
+          if (!localRequest.allowWebSearchTool) {
+            _log(
+              '[TOOL_EXECUTION_SKIPPED] '
+              'tool=web_search '
+              'session=${localRequest.sessionId} '
+              'reason=local_document_tool_boundary',
+            );
+            firstGenerationToken.cancel();
+            yield InferenceResponse.finalChunk(
+              text: 'Il modello ha tentato una ricerca Web non autorizzata '
+                  'per questo documento locale. Nessuna ricerca è stata '
+                  'eseguita. Riprova una domanda più specifica sul testo.',
+              tokensGenerated: 0,
+              model: localRequest.modelId ?? 'unknown',
+              providerId: 'local_document_tool_blocked',
+            );
+            return;
+          }
+
           detectedQuery = query;
 
           if (localRequest.isOffline) {
