@@ -93,6 +93,8 @@ void main() {
     expect(forwarded.prompt, document);
     expect(forwarded.routeDirective, InferenceRouteDirective.localOnly);
     expect(forwarded.allowWebSearchTool, isFalse);
+    expect(forwarded.maxTokens, 384);
+    expect(forwarded.preserveMaxTokens, isTrue);
     expect(forwarded.systemPrompt,
         contains('[AI_ORCHESTRATOR_WEB_ACCESS_DISABLED_OFFLINE]'));
     verifyNever(() => webSearch.execute(any()));
