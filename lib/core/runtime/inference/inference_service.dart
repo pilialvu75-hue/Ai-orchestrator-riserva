@@ -887,6 +887,9 @@ class InferenceService {
             await searchTool.execute(
           {'query': detectedQuery},
         );
+        if (!searchResult.success) {
+          throw StateError('Public Web search unavailable');
+        }
 
         _log(
           '[INTERCEPTOR] '
@@ -939,10 +942,20 @@ class InferenceService {
           'error=$e',
         );
 
+        if (localRequest.trustedDocumentWebQuery != null) {
+          yield InferenceResponse.notice(
+            'Verifica online non disponibile: continuo con il PDF locale.',
+          );
+          yield* _recoverLocalDocumentWithoutTools(
+            request: localRequest,
+            cancellationToken: cancellationToken,
+          );
+          return;
+        }
+
         yield InferenceResponse.error(
           'Unable to retrieve web data. See logs for details.',
         );
-
         return;
       }
     }
