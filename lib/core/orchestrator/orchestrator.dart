@@ -93,6 +93,7 @@ class Orchestrator {
     int? maxTokens,
     double? temperature,
     bool documentContext = false,
+    String? documentWebQuery,
   }) {
     _logForensic(
       '[ORCHESTRATOR_SEND] session=$sessionId'
@@ -155,12 +156,13 @@ class Orchestrator {
       InferenceRequest(
         sessionId: sessionId,
         prompt: input,
-        systemPrompt: documentContext
+        systemPrompt: documentContext && documentWebQuery == null
             ? AssistantWebSearchPolicy.applyOfflineOnlyMarker(systemPrompt)
             : systemPrompt,
         context: contextSnapshot,
         isOffline: isOffline,
-        allowWebSearchTool: !documentContext,
+        allowWebSearchTool: !documentContext || documentWebQuery != null,
+        trustedDocumentWebQuery: documentWebQuery,
         // Keep a bounded generation reserve for short document questions.
         // The native GGUF budget fits prompt + reserved output exactly;
         // Phi-3.5 Mini otherwise reserves ~1024 response tokens even when
