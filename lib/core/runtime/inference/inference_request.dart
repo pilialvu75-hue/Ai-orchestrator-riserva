@@ -26,6 +26,7 @@ class InferenceRequest {
     this.systemPrompt,
     this.context = const [],
     this.isOffline = false,
+    this.allowWebSearchTool = true,
     this.maxTokens = defaultMaxTokens,
     this.temperature = defaultTemperature,
     this.preserveMaxTokens = false,
@@ -51,6 +52,10 @@ class InferenceRequest {
   final String? systemPrompt;
   final List<ChatTurn> context;
   final bool isOffline;
+  /// False for on-device document evidence: never execute an external search
+  /// requested by text generated from untrusted document content. This is
+  /// independent of the regular LOCAL-mode policy allowing optional web tools.
+  final bool allowWebSearchTool;
   final int maxTokens;
   final double temperature;
 
@@ -191,6 +196,7 @@ class InferenceRequest {
     String? systemPrompt,
     List<ChatTurn>? context,
     bool? isOffline,
+    bool? allowWebSearchTool,
     int? maxTokens,
     double? temperature,
     bool? preserveMaxTokens,
@@ -216,6 +222,7 @@ class InferenceRequest {
       systemPrompt: systemPrompt ?? this.systemPrompt,
       context: List.unmodifiable(context ?? this.context),
       isOffline: isOffline ?? this.isOffline,
+      allowWebSearchTool: allowWebSearchTool ?? this.allowWebSearchTool,
       maxTokens: maxTokens ?? this.maxTokens,
       temperature: temperature ?? this.temperature,
       preserveMaxTokens: preserveMaxTokens ?? this.preserveMaxTokens,
