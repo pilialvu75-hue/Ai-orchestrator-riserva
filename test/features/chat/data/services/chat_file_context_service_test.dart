@@ -248,6 +248,75 @@ void main() {
     ), isNull);
   });
 
+  test('LOCAL PDF prompt stays compact while SQLite retains all text', () async {
+    final pdf = await attachment('AIVEXUS_Test_PDF_S24.pdf', '%PDF-fake', 'local');
+    final entireDocument = '[Pagina 1/1]\n'
+        'AIVEXUS / DOCUMENTO CAMPIONE\n'
+        '';
+    final rawPdfText = entireDocument +
+        List.generate(100, (i) => 'Descrizione generale $i di un articolo.').join('\n') +
+        '\n04 / TABELLA DI CONTROLLO\n'
+        'ARTICOLO Q.TÀ PREZZO CODICE\n'
+        'Teiera rossa 1 24,00 € TR-07';
+    final localFiles = ChatFileContextService(
+      indexService: LocalDocumentIndexService(databaseHelper: helper),
+      databaseHelper: helper,
+      pdfReader: _PdfStub(rawPdfText),
+    );
+    const question = 'Qual è il prezzo della teiera rossa, '
+        'la quantità e il codice? Cita la pagina.';
+    final context = await localFiles.buildContext(
+      sessionId: 'chat-A',
+      userPrompt: question,
+      attachments: <ChatAttachment>[pdf],
+      compactForLocal: true,
+    );
+    expect(context, isNotNull);
+    expect(context!.prompt, contains('Teiera rossa 1 24,00 € TR-07'));
+    expect(context.prompt, contains('[Pagina 1/1]'));
+    expect(context.prompt, contains('AIVEXUS_Test_PDF_S24.pdf'));
+    expect(context.prompt.length, lessThan(1500));
+    final saved = await helper.getAllDocumentChunks();
+    expect(saved, isNotEmpty);
+    expect(saved.map((row) => row[AppConstants.colChunkText]).join(' '),
+        contains('Teiera rossa 1 24,00 € TR-07'));
+    // Compacting the prompt never truncates or deletes the indexed document.
+    expect(saved.length, greaterThan(2));
+  });
+
+  test('selected PDF ignores old attachments in the same chat', () async {
+    final first = await attachment('old.pdf', '%PDF-a', 'first');
+    final second = await attachment('new.pdf', '%PDF-b', 'second');
+    final older = ChatFileContextService(
+      indexService: LocalDocumentIndexService(databaseHelper: helper),
+      databaseHelper: helper,
+      pdfReader: _PdfStub('[Pagina 1/1]\nVecchio prezzo 999,00 €'),
+    );
+    await older.buildContext(
+      sessionId: 'chat-A',
+      userPrompt: 'prezzo',
+      attachments: [first],
+      compactForLocal: true,
+    );
+    final newer = ChatFileContextService(
+      indexService: LocalDocumentIndexService(databaseHelper: helper),
+      databaseHelper: helper,
+      pdfReader: _PdfStub('[Pagina 1/1]\nTeiera rossa 1 24,00 € TR-07'),
+    );
+    final context = await newer.buildContext(
+      sessionId: 'chat-A',
+      userPrompt: 'prezzo teiera rossa codice',
+      attachments: [second],
+      compactForLocal: true,
+    );
+    expect(context!.prompt, contains('new.pdf'));
+    expect(context.prompt, contains('24,00 €'));
+    expect(context.prompt, isNot(contains('old.pdf')));
+    expect(context.prompt, isNot(contains('999,00 €')));
+    // The earlier document stays stored, only excluded from this prompt.
+    expect(await helper.getAllDocumentChunks(), hasLength(2));
+  });
+
   test('PDF reader failure never indexes binary or leaks into chat memory',
       () async {
     final pdf = await attachment('rotto.pdf', '%PDF-invalid', 'pdfbad');
