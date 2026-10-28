@@ -759,7 +759,10 @@ class InferenceService {
             return;
           }
 
-          detectedQuery = query;
+          // For an explicitly requested document lookup, transmit only the
+          // short, trusted original user query. The model's generated tag
+          // can contain private PDF bytes or invented values; never use it.
+          detectedQuery = localRequest.trustedDocumentWebQuery ?? query;
 
           if (localRequest.isOffline) {
             _log(
