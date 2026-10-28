@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
@@ -399,6 +400,11 @@ class ChatRepositoryImpl implements ChatRepository {
               sessionId: sessionId,
               prompt: effectivePrompt,
               documentContext: hasDocumentContext,
+              documentWebQuery: hasDocumentContext && mode == AiRuntimeMode.local
+                  ? AssistantWebSearchPolicy.trustedDocumentWebQuery(
+                      normalizedPrompt,
+                    )
+                  : null,
               systemPrompt: systemPrompt,
               context: contextSnapshot,
             );
@@ -569,6 +575,7 @@ class ChatRepositoryImpl implements ChatRepository {
     required String sessionId,
     required String prompt,
     required bool documentContext,
+    required String? documentWebQuery,
     required String? systemPrompt,
     required List<ChatTurn> context,
   }) {
@@ -617,6 +624,7 @@ class ChatRepositoryImpl implements ChatRepository {
       context: context,
       systemPrompt: systemPrompt,
       documentContext: documentContext,
+      documentWebQuery: documentWebQuery,
     );
   }
 
