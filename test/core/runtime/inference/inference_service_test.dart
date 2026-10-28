@@ -609,6 +609,58 @@ Top results:
       expect(seenSessionIds, <String>['search-s1', 'search-s1::search']);
     });
 
+    test('PDF LOCAL rejects model web-search tag without using network or cloud',
+        () async {
+      final searchTool = _FakeWebSearchTool(
+        const ToolResult(
+          toolId: 'web_search',
+          output: 'This external result must never be used.',
+          success: true,
+        ),
+      );
+      var localCalls = 0;
+      var cloudCalls = 0;
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel.copyWith(
+          id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+        ),
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (request, cancellationToken) async* {
+            localCalls++;
+            expect(request.allowWebSearchTool, isFalse);
+            yield InferenceResponse.token(
+              text: '<search>Thé vert2,45 € TR-07</search>',
+              model: 'phi3_5_mini',
+            );
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(
+          sendQuery: (_, __) async {
+            cloudCalls++;
+            return AiResponse(
+              text: 'forbidden cloud response',
+              model: 'test', tokensUsed: 0,
+              timestamp: DateTime.now().millisecondsSinceEpoch,
+            );
+          },
+        ),
+        webSearchTool: searchTool,
+      );
+      final response = await service.infer(const InferenceRequest(
+        sessionId: 'pdf-local-s24',
+        prompt: 'Qual è il prezzo della teiera rossa? '
+            '[Pagina 1/1] Teiera rossa 1 24,00 € TR-07',
+        routeDirective: InferenceRouteDirective.localOnly,
+        allowWebSearchTool: false,
+      ));
+      expect(response.text, contains('Nessuna ricerca è stata eseguita'));
+      expect(response.text, isNot(contains('Searching the web')));
+      expect(localCalls, 1);
+      expect(searchTool.calls, 0);
+      expect(cloudCalls, 0);
+    });
+
     test(
         'offline local search tags never execute the web tool and recover locally',
         () async {
