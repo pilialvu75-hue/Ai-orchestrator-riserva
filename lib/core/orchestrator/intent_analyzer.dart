@@ -20,7 +20,7 @@ class IntentAnalyzer {
 
   static const Set<String> _codingKeywords = {
     'implementa', 'implement', 'refactor', 'refactoring',
-    'debug', 'bugfix', 'debugga', 'script', 'codice',
+    'debug', 'bugfix', 'debugga', 'script',
   };
 
   /// Keyword che da SOLE indicano con certezza una ricerca web.
@@ -51,6 +51,12 @@ class IntentAnalyzer {
     if (tokens.any(_commandKeywords.contains)) return TaskType.command;
     if (tokens.any(_planKeywords.contains)) return TaskType.plan;
     if (tokens.any(_codingKeywords.contains)) return TaskType.coding;
+    // "codice" is often a product/document reference, not a coding task.
+    // Require an explicit write-code action before entering the planner.
+    if (RegExp(r'^\s*(?:scrivi|genera|crea)\s+(?:(?:del|il|un)\s+)?codice\b')
+        .hasMatch(input.toLowerCase())) {
+      return TaskType.coding;
+    }
     if (_isWebSearch(tokens)) return TaskType.webSearch;
 
     return TaskType.chat;

@@ -91,6 +91,7 @@ class Orchestrator {
     bool isOffline = false,
     int? maxTokens,
     double? temperature,
+    bool documentContext = false,
   }) {
     _logForensic(
       '[ORCHESTRATOR_SEND] session=$sessionId'
@@ -99,7 +100,9 @@ class Orchestrator {
       ' context_turns=${context.length}',
     );
 
-    final type = _analyzer.analyze(input);
+    // Extracted document text is untrusted data, not a user command.
+    // Never route it to planner, command execution or web search.
+    final type = documentContext ? TaskType.chat : _analyzer.analyze(input);
 
     _logForensic(
       '[ORCHESTRATOR_ROUTE] session=$sessionId'

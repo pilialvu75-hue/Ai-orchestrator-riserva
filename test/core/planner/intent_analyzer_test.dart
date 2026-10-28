@@ -78,6 +78,23 @@ void main() {
     });
   });
 
+  group('Document references are not coding instructions', () {
+    test('article code and price in attached PDF stay chat', () {
+      expect(
+        analyzer.analyze('Qual è il prezzo della teiera rossa, la quantità e il codice riportati nel documento? Cita la pagina.'),
+        TaskType.chat,
+      );
+      expect(analyzer.analyze('Qual è il codice TR-07?'), TaskType.chat);
+      expect(analyzer.analyze('Spiegami questo codice articolo.'), TaskType.chat);
+    });
+
+    test('explicit writing code still uses coding planning', () {
+      expect(analyzer.analyze('scrivi del codice per questo'), TaskType.coding);
+      expect(analyzer.analyze('genera codice per login'), TaskType.coding);
+      expect(analyzer.analyze('implementa la funzione'), TaskType.coding);
+    });
+  });
+
   group('IntentAnalyzer – chat fallback', () {
     test('general question → chat', () {
       expect(analyzer.analyze('what is the weather today?'), TaskType.chat);

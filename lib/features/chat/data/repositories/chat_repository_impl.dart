@@ -333,6 +333,7 @@ class ChatRepositoryImpl implements ChatRepository {
             }
 
             String effectivePrompt = normalizedPrompt;
+            var hasDocumentContext = false;
             if (attachmentsSnapshot.any(
               (item) => item.type == ChatAttachmentType.file,
             )) {
@@ -360,6 +361,7 @@ class ChatRepositoryImpl implements ChatRepository {
                 attachments: attachmentsSnapshot,
               );
               if (fileContext != null) {
+                hasDocumentContext = true;
                 effectivePrompt = fileContext.prompt;
                 onRuntimeNotice?.call(
                   mode == AiRuntimeMode.cloud
@@ -387,6 +389,7 @@ class ChatRepositoryImpl implements ChatRepository {
             final stream = _buildInferenceStream(
               sessionId: sessionId,
               prompt: effectivePrompt,
+              documentContext: hasDocumentContext,
               systemPrompt: systemPrompt,
               context: contextSnapshot,
             );
@@ -556,6 +559,7 @@ class ChatRepositoryImpl implements ChatRepository {
   Stream<InferenceResponse> _buildInferenceStream({
     required String sessionId,
     required String prompt,
+    required bool documentContext,
     required String? systemPrompt,
     required List<ChatTurn> context,
   }) {
@@ -603,6 +607,7 @@ class ChatRepositoryImpl implements ChatRepository {
       sessionId: sessionId,
       context: context,
       systemPrompt: systemPrompt,
+      documentContext: documentContext,
     );
   }
 
