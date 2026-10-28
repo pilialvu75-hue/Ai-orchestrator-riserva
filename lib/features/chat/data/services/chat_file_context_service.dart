@@ -93,7 +93,7 @@ class ChatFileContextService {
         } on FormatException {
           throw StateError('File: non è un documento di testo UTF-8 valido.');
         }
-        if (text.contains('\\u0000') || text.trim().isEmpty) {
+        if (text.contains('\u0000') || text.trim().isEmpty) {
           throw StateError('File: il documento non contiene testo leggibile.');
         }
         await _indexService.indexDocument(
