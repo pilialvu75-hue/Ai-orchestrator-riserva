@@ -1,10 +1,16 @@
 // chat_page.dart
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:ai_orchestrator/presentation/chat/controllers/runtime_notice_presenter.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -49,7 +55,9 @@ const String _kDefaultSessionId = 'default';
 // Width threshold above which a persistent sidebar replaces the Drawer.
 const double _kSidebarBreakpoint = 720;
 
-enum _ChatSessionAction { togglePin, rename }
+enum _ChatSessionAction {
+  togglePin, rename, archive, export, share, trash, showTrash
+}
 
 /// Shared UI state for narrow and wide layouts. Choosing another session
 /// switches the view; only the Debug Lab's explicit Clear Chat can erase data.
@@ -61,6 +69,10 @@ class _ChatNavigation {
     required this.onSelectChat,
     required this.onTogglePin,
     required this.onRenameChat,
+    required this.onExportChat,
+    required this.onShareChat,
+    required this.onTrashChat,
+    required this.onOpenTrash,
   });
   final String sessionId;
   final List<ChatSessionInfo> sessions;
@@ -68,6 +80,10 @@ class _ChatNavigation {
   final ValueChanged<String> onSelectChat;
   final ValueChanged<ChatSessionInfo> onTogglePin;
   final ValueChanged<ChatSessionInfo> onRenameChat;
+  final ValueChanged<ChatSessionInfo> onExportChat;
+  final ValueChanged<ChatSessionInfo> onShareChat;
+  final ValueChanged<ChatSessionInfo> onTrashChat;
+  final VoidCallback onOpenTrash;
 }
 
 class _ChatSessionList extends StatelessWidget {
@@ -86,36 +102,76 @@ class _ChatSessionList extends StatelessWidget {
       case _ChatSessionAction.rename:
         navigation.onRenameChat(session);
         return;
+      case _ChatSessionAction.export:
+        navigation.onExportChat(session);
+        return;
+      case _ChatSessionAction.share:
+        navigation.onShareChat(session);
+        return;
+      case _ChatSessionAction.trash:
+        navigation.onTrashChat(session);
+        return;
+      case _ChatSessionAction.showTrash:
+        navigation.onOpenTrash();
+        return;
+      case _ChatSessionAction.archive:
+        // Placeholder intentionally disabled; never touch stored messages.
+        return;
     }
   }
 
   void _showSessionMenu(BuildContext context, ChatSessionInfo session) {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF303134),
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.push_pin_outlined),
-              title: Text(session.pinned ? 'Rimuovi dai fissati' : 'Fissa'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                navigation.onTogglePin(session);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Rinomina'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                navigation.onRenameChat(session);
-              },
-            ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _sheetAction(sheetContext, session, _ChatSessionAction.togglePin,
+                  Icons.push_pin_outlined,
+                  session.pinned ? 'Rimuovi dai fissati' : 'Fissa'),
+              _sheetAction(sheetContext, session, _ChatSessionAction.rename,
+                  Icons.edit_outlined, 'Rinomina'),
+              _sheetAction(sheetContext, session, _ChatSessionAction.archive,
+                  Icons.archive_outlined, 'Archivia (prossimamente)',
+                  enabled: false),
+              _sheetAction(sheetContext, session, _ChatSessionAction.export,
+                  Icons.download_outlined, 'Esporta conversazione'),
+              _sheetAction(sheetContext, session, _ChatSessionAction.share,
+                  Icons.share_outlined, 'Condividi conversazione'),
+              _sheetAction(sheetContext, session, _ChatSessionAction.trash,
+                  Icons.delete_outline, 'Sposta nel cestino'),
+              const Divider(height: 1),
+              _sheetAction(sheetContext, session, _ChatSessionAction.showTrash,
+                  Icons.restore_from_trash_outlined, 'Apri cestino / ripristina'),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _sheetAction(
+    BuildContext context,
+    ChatSessionInfo session,
+    _ChatSessionAction action,
+    IconData icon,
+    String label, {
+    bool enabled = true,
+  }) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(label),
+      enabled: enabled,
+      onTap: enabled
+          ? () {
+              Navigator.of(context).pop();
+              _runAction(action, session);
+            }
+          : null,
     );
   }
 
@@ -153,23 +209,61 @@ class _ChatSessionList extends StatelessWidget {
             itemBuilder: (_) => [
               PopupMenuItem(
                 value: _ChatSessionAction.togglePin,
-                child: Row(
-                  children: [
-                    const Icon(Icons.push_pin_outlined, size: 20),
-                    const SizedBox(width: 12),
-                    Text(session.pinned ? 'Rimuovi dai fissati' : 'Fissa'),
-                  ],
-                ),
+                child: Row(children: [
+                  const Icon(Icons.push_pin_outlined, size: 20),
+                  const SizedBox(width: 12),
+                  Text(session.pinned ? 'Rimuovi dai fissati' : 'Fissa'),
+                ]),
               ),
               const PopupMenuItem(
                 value: _ChatSessionAction.rename,
-                child: Row(
-                  children: [
-                    Icon(Icons.edit_outlined, size: 20),
-                    SizedBox(width: 12),
-                    Text('Rinomina'),
-                  ],
-                ),
+                child: Row(children: [
+                  Icon(Icons.edit_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('Rinomina'),
+                ]),
+              ),
+              const PopupMenuItem(
+                value: _ChatSessionAction.archive,
+                enabled: false,
+                child: Row(children: [
+                  Icon(Icons.archive_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('Archivia (prossimamente)'),
+                ]),
+              ),
+              const PopupMenuItem(
+                value: _ChatSessionAction.export,
+                child: Row(children: [
+                  Icon(Icons.download_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('Esporta conversazione'),
+                ]),
+              ),
+              const PopupMenuItem(
+                value: _ChatSessionAction.share,
+                child: Row(children: [
+                  Icon(Icons.share_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('Condividi conversazione'),
+                ]),
+              ),
+              const PopupMenuItem(
+                value: _ChatSessionAction.trash,
+                child: Row(children: [
+                  Icon(Icons.delete_outline, size: 20),
+                  SizedBox(width: 12),
+                  Text('Sposta nel cestino'),
+                ]),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: _ChatSessionAction.showTrash,
+                child: Row(children: [
+                  Icon(Icons.restore_from_trash_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('Apri cestino / ripristina'),
+                ]),
               ),
             ],
           ),
@@ -301,6 +395,10 @@ class _ChatPageState extends State<ChatPage>
         onSelectChat: (id) => unawaited(_selectChat(id)),
         onTogglePin: (session) => unawaited(_togglePinned(session)),
         onRenameChat: (session) => unawaited(_renameChat(session)),
+        onExportChat: (session) => unawaited(_exportChat(session)),
+        onShareChat: (session) => unawaited(_shareChat(session)),
+        onTrashChat: (session) => unawaited(_trashChat(session)),
+        onOpenTrash: () => unawaited(_openTrash()),
       );
 
   Future<void> _restoreChatSessions() async {
@@ -424,6 +522,179 @@ class _ChatPageState extends State<ChatPage>
       _showChatNavigationError(error);
     } finally {
       controller.dispose();
+    }
+  }
+
+  // Explicit user action only: exports never run automatically or via Cloud.
+  Future<String> _chatTranscript(ChatSessionInfo session) async {
+    final rows = await di.sl<DatabaseHelper>().getChatMessages(session.id);
+    final transcript = StringBuffer('Conversazione: ${session.title}\n\n');
+    for (final row in rows) {
+      final role = row['role'] == 'user'
+          ? 'Utente'
+          : row['role'] == 'assistant' ? 'Assistente' : 'Sistema';
+      final stamp = row['timestamp'];
+      final when = stamp is num
+          ? DateTime.fromMillisecondsSinceEpoch(stamp.toInt()).toIso8601String()
+          : '';
+      transcript.writeln('[$when] $role');
+      transcript.writeln((row['content'] as String?) ?? '');
+      transcript.writeln();
+    }
+    return transcript.toString();
+  }
+
+  Future<void> _exportChat(ChatSessionInfo session) async {
+    try {
+      final data = utf8.encode(await _chatTranscript(session));
+      final safeName = session.title
+          .replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_')
+          .replaceAll(RegExp(r'_+'), '_')
+          .replaceAll(RegExp(r'^_+|_+$'), '')
+          .take(48);
+      final name = safeName.isEmpty ? 'conversazione' : safeName;
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Esporta conversazione',
+        fileName: '$name.txt',
+        type: FileType.custom,
+        allowedExtensions: const ['txt'],
+        bytes: Uint8List.fromList(data),
+      );
+      if (path == null) return;
+      // In file_picker 8.3.x desktop implementations return the selected
+      // path but do not persist supplied bytes. Android writes via SAF.
+      if (!kIsWeb && defaultTargetPlatform != TargetPlatform.android &&
+          defaultTargetPlatform != TargetPlatform.iOS) {
+        await File(path).writeAsBytes(data, flush: true);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Conversazione esportata sul dispositivo.')),
+      );
+    } catch (_) {
+      _showChatNavigationError('Esportazione non riuscita. Nessuna chat modificata.');
+    }
+  }
+
+  Future<void> _shareChat(ChatSessionInfo session) async {
+    try {
+      final text = await _chatTranscript(session);
+      if (utf8.encode(text).length > 512 * 1024) {
+        _showChatNavigationError('Conversazione troppo lunga per la condivisione. Usa Esporta.');
+        return;
+      }
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        await AndroidIntent(
+          action: 'android.intent.action.SEND',
+          type: 'text/plain',
+          arguments: <String, dynamic>{
+            'android.intent.extra.TEXT': text,
+          },
+        ).launchChooser('Condividi conversazione');
+      } else {
+        // Clipboard fallback is explicit for platforms without an OS chooser.
+        await Clipboard.setData(ClipboardData(text: text));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Testo copiato: pronto da condividere.')),
+          );
+        }
+      }
+    } catch (_) {
+      _showChatNavigationError('Condivisione non disponibile. Nessuna chat modificata.');
+    }
+  }
+
+  Future<void> _trashChat(ChatSessionInfo session) async {
+    if (_isSending) {
+      _showChatNavigationError('Attendi la fine della risposta prima di spostare una chat.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Spostare nel cestino?'),
+        content: Text('"${session.title}" verrà nascosta dalla cronologia, '
+            'ma potrai ripristinarla. Nessun messaggio sarà cancellato.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Sposta nel cestino'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await _sessionStore.moveToTrash(session.id);
+      if (!mounted) return;
+      if (session.id == _activeSessionId) {
+        final nextId = await _sessionStore.restoreActiveSession();
+        if (!mounted) return;
+        setState(() {
+          _activeSessionId = nextId;
+          _debugLabMessages.clear();
+        });
+        context.read<OrchestratorStateEngine>().add(
+          LoadMessagesEvent(sessionId: nextId),
+        );
+      }
+      await _refreshChatSessions();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chat nel cestino. Puoi ripristinarla dal menu ⋮.')),
+      );
+    } catch (_) {
+      _showChatNavigationError('Spostamento nel cestino non riuscito.');
+    }
+  }
+
+  Future<void> _openTrash() async {
+    try {
+      final sessions = await _sessionStore.listSessions(inTrash: true);
+      if (!mounted) return;
+      final selectedId = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        builder: (sheetContext) => SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(sheetContext).size.height * 0.7,
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const ListTile(title: Text('Cestino — tocca una chat per ripristinarla')),
+              Flexible(
+                child: sessions.isEmpty
+                    ? const Center(child: Text('Cestino vuoto'))
+                    : ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final session in sessions)
+                            ListTile(
+                              leading: const Icon(Icons.restore_outlined),
+                              title: Text(session.title),
+                              onTap: () => Navigator.of(sheetContext).pop(session.id),
+                            ),
+                        ],
+                      ),
+              ),
+            ]),
+          ),
+        ),
+      );
+      if (selectedId == null) return;
+      await _sessionStore.restoreFromTrash(selectedId);
+      await _refreshChatSessions();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Conversazione ripristinata.')),
+      );
+    } catch (_) {
+      _showChatNavigationError('Impossibile aprire o ripristinare il cestino.');
     }
   }
 
