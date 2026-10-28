@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cantiere_local_image_vision/cantiere_local_image_vision.dart';
 import 'package:flutter/services.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_local_ocr_layout_formatter.dart';
 
 /// Adds text *observed on device* to offline image categories.
 /// Uses a separate bundled OCR model; no image, prompt or text goes to Cloud.
@@ -28,7 +29,13 @@ final class ChatLocalImageOcrEnrichment {
         <String, String>{'path': imagePath},
       ).timeout(const Duration(seconds: 20));
       final raw = response?['text'];
-      final value = raw is String ? raw.trim() : '';
+      // Prefer geometric order when native ML Kit returned valid bounded
+      // rectangles. Older builds, malformed geometry, or empty layouts
+      // continue to use the original detected.text output unmodified.
+      final reordered = ChatLocalOcrLayoutFormatter.reflow(
+        response?['layoutLines'],
+      );
+      final value = (reordered ?? (raw is String ? raw : '')).trim();
       if (value.isEmpty) {
         return ChatLocalOcrResult(
           text: labels.text + '\nOCR locale: nessuna scritta leggibile identificata.',
@@ -45,6 +52,7 @@ final class ChatLocalImageOcrEnrichment {
           ? value.substring(0, maxOutputChars)
           : value;
       final truncated = response?['truncated'] == true ||
+          response?['layoutTruncated'] == true ||
           value.length > maxOutputChars;
       return ChatLocalOcrResult(
         hasText: true,

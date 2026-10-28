@@ -146,4 +146,61 @@ void main() {
     expect(response.text, contains('Poster (77%)'));
     expect(response.text, contains('OCR locale non disponibile'));
   });
+  test('uses native line rectangles to retain table rows, not flat block order',
+      () async {
+    messenger.setMockMethodCallHandler(channel, (call) async => {
+      'text': 'CODICE\nTV-02\nThé vert\n2\n4,50 €',
+      'layoutLines': [
+        {'text': 'CODICE', 'left': 350, 'top': 100, 'right': 405, 'bottom': 118},
+        {'text': 'TV-02', 'left': 350, 'top': 125, 'right': 405, 'bottom': 143},
+        {'text': 'Thé vert', 'left': 20, 'top': 125, 'right': 130, 'bottom': 143},
+        {'text': '2', 'left': 185, 'top': 125, 'right': 198, 'bottom': 143},
+        {'text': '4,50 €', 'left': 260, 'top': 125, 'right': 321, 'bottom': 143},
+      ],
+      'truncated': false,
+      'layoutTruncated': false,
+    });
+    final response = await ChatLocalImageOcrEnrichment(channel: channel).enrich(
+      imagePath: '/private/document.jpg',
+      prompt: 'Leggi la tabella',
+      labels: poster,
+    );
+    expect(response.hasText, true);
+    expect(response.text, contains('Thé vert | 2 | 4,50 € | TV-02'));
+  });
+
+  test('malformed native rectangles fall back to original OCR text',
+      () async {
+    messenger.setMockMethodCallHandler(channel, (call) async => {
+      'text': 'Testo precedente valido',
+      'layoutLines': [
+        {'text': 'NO', 'left': -3, 'top': 5, 'right': 8, 'bottom': 16},
+      ],
+    });
+    final response = await ChatLocalImageOcrEnrichment(channel: channel).enrich(
+      imagePath: '/private/document.jpg',
+      prompt: 'OCR',
+      labels: poster,
+    );
+    expect(response.text, contains('Testo precedente valido'));
+    expect(response.text, isNot(contains('\nNO')));
+  });
+
+  test('bounded line extraction signals abbreviated text to user', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async => {
+      'text': 'Testo',
+      'layoutLines': [
+        {'text': 'Testo', 'left': 1, 'top': 1, 'right': 50, 'bottom': 19},
+      ],
+      'layoutTruncated': true,
+      'truncated': false,
+    });
+    final response = await ChatLocalImageOcrEnrichment(channel: channel).enrich(
+      imagePath: '/private/document.jpg',
+      prompt: 'OCR',
+      labels: poster,
+    );
+    expect(response.text, contains('[Testo abbreviato]'));
+  });
+
 }

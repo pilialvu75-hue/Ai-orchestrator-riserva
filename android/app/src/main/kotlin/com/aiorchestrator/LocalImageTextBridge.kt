@@ -28,6 +28,8 @@ internal object LocalImageTextBridge {
     private const val maxInputBytes = 8L * 1024 * 1024
     private const val maxImageEdge = 1600
     private const val maxOutputChars = 1800
+    private const val maxLayoutLines = 120
+    private const val maxLayoutTextChars = 3200
     private val active = AtomicBoolean(false)
     private val executor = Executors.newSingleThreadExecutor()
     private val mainThread = Handler(Looper.getMainLooper())
@@ -115,9 +117,40 @@ internal object LocalImageTextBridge {
                                 recognizer.process(InputImage.fromBitmap(bitmap, 0))
                                     .addOnSuccessListener { detected ->
                                         val text = detected.text.trim()
+                                        // ML Kit plain text may list headings from a
+                                        // different block before the preceding paragraph.
+                                        // Supply bounded observed line rectangles to Dart
+                                        // for spatial reflow. Never invent text or infer
+                                        // table values. Plain text remains the fallback.
+                                        val layoutLines = ArrayList<Map<String, Any>>()
+                                        var layoutChars = 0
+                                        var layoutTruncated = false
+                                        lineLoop@ for (block in detected.textBlocks) {
+                                            for (line in block.lines) {
+                                                val rect = line.boundingBox ?: continue
+                                                val value = line.text.trim()
+                                                if (value.isEmpty()) continue
+                                                if (layoutLines.size >= maxLayoutLines ||
+                                                    value.length > 280 ||
+                                                    layoutChars + value.length > maxLayoutTextChars) {
+                                                    layoutTruncated = true
+                                                    break@lineLoop
+                                                }
+                                                layoutLines.add(mapOf(
+                                                    "text" to value,
+                                                    "left" to rect.left.coerceAtLeast(0),
+                                                    "top" to rect.top.coerceAtLeast(0),
+                                                    "right" to rect.right.coerceAtLeast(0),
+                                                    "bottom" to rect.bottom.coerceAtLeast(0)
+                                                ))
+                                                layoutChars += value.length
+                                            }
+                                        }
                                         result.success(mapOf(
                                             "text" to text.take(maxOutputChars),
-                                            "truncated" to (text.length > maxOutputChars)
+                                            "truncated" to (text.length > maxOutputChars),
+                                            "layoutLines" to layoutLines,
+                                            "layoutTruncated" to layoutTruncated
                                         ))
                                     }
                                     .addOnFailureListener {
