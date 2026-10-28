@@ -718,6 +718,59 @@ Top results:
       expect(localCalls, 2);
     });
 
+    test('optional online PDF verification falls back to LOCAL without connection',
+        () async {
+      final searchTool = _FakeWebSearchTool(
+        const ToolResult(
+          toolId: 'web_search',
+          output: 'Network unavailable.',
+          success: false,
+        ),
+      );
+      var localCalls = 0;
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: validModel.copyWith(
+          id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+        ),
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (request, _) async* {
+            localCalls++;
+            if (localCalls == 1) {
+              yield InferenceResponse.token(
+                text: '<search>online shop from PDF</search>',
+                model: 'phi3_5_mini',
+              );
+            } else {
+              expect(request.allowWebSearchTool, isFalse);
+              expect(request.sessionId, endsWith('::document-no-tools'));
+              yield InferenceResponse.finalChunk(
+                text: 'Dati PDF locali: Teiera rossa, 24,00 €, TR-07.',
+                tokensGenerated: 9,
+                model: 'phi3_5_mini',
+              );
+            }
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(
+          configured: false,
+        ),
+        webSearchTool: searchTool,
+      );
+      final answer = await service.infer(const InferenceRequest(
+        sessionId: 'pdf-web-unavailable',
+        prompt: '[Pagina 1/1] Teiera rossa 1 24,00 € TR-07',
+        allowWebSearchTool: true,
+        trustedDocumentWebQuery: 'Verifica online prezzo teiera rossa.',
+        routeDirective: InferenceRouteDirective.localOnly,
+      ));
+      expect(answer.text, contains('24,00 €'));
+      expect(answer.isError, isFalse);
+      expect(localCalls, 2);
+      expect(searchTool.calls, 1);
+      expect(searchTool.lastQuery, 'Verifica online prezzo teiera rossa.');
+    });
+
     test(
         'offline local search tags never execute the web tool and recover locally',
         () async {
