@@ -93,7 +93,24 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     bool isOffline = false,
     int? maxTokens,
     double? temperature,
+    bool documentContext = false,
   }) async* {
+    if (documentContext) {
+      // Do not interpret content extracted from a file as shopping,
+      // web-search, clock, recall, planning or device commands.
+      // Preserve the original text as evidence for direct inference.
+      yield* super.handleStream(
+        input,
+        sessionId: sessionId,
+        context: context,
+        systemPrompt: systemPrompt,
+        isOffline: isOffline,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        documentContext: true,
+      );
+      return;
+    }
     final recalledName = AssistantConversationRecall.answer(input, context);
     if (recalledName != null) {
       yield InferenceResponse.finalChunk(text: recalledName, tokensGenerated: 0,
