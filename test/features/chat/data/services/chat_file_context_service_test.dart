@@ -16,6 +16,7 @@ void main() {
   late Directory folder;
 
   setUpAll(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   });
@@ -141,23 +142,34 @@ void main() {
     );
   });
 
-  test('PDF and DOCX are rejected rather than supplying binary hallucinations',
+  test('unsupported DOCX and unavailable PDF parser fail without indexing',
       () async {
-    for (final extension in <String>['pdf', 'docx']) {
-      final doc = await attachment(
-        'documento.$extension',
-        'Not truly parsed',
-        extension,
-      );
-      await expectLater(
-        files.buildContext(
-          sessionId: 'chat-A',
-          userPrompt: 'Leggi il documento',
-          attachments: <ChatAttachment>[doc],
-        ),
-        throwsStateError,
-      );
-    }
+    final docx = await attachment('documento.docx', 'Not truly parsed', 'docx');
+    await expectLater(
+      files.buildContext(
+        sessionId: 'chat-A',
+        userPrompt: 'Leggi il documento',
+        attachments: <ChatAttachment>[docx],
+      ),
+      throwsStateError,
+    );
+
+    // Explicit failure of the local PDF parser: the binary payload must
+    // never enter RAG as fake text or be sent to a provider.
+    final pdf = await attachment('documento.pdf', '%PDF-fake', 'pdf');
+    final unavailablePdf = ChatFileContextService(
+      indexService: LocalDocumentIndexService(databaseHelper: helper),
+      databaseHelper: helper,
+      pdfReader: _PdfStub('', failure: true),
+    );
+    await expectLater(
+      unavailablePdf.buildContext(
+        sessionId: 'chat-A',
+        userPrompt: 'Leggi il documento',
+        attachments: <ChatAttachment>[pdf],
+      ),
+      throwsStateError,
+    );
     expect(await helper.getAllDocumentChunks(), isEmpty);
   });
 
