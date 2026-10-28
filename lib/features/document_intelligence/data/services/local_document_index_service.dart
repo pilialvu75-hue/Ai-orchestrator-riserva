@@ -50,8 +50,30 @@ class LocalDocumentIndexService {
     final resolvedDocumentId = documentId?.trim().isNotEmpty == true
         ? documentId!.trim()
         : _deriveDocumentId(file);
-    final title = p.basename(file.path);
-    final chunks = _chunkText(text);
+    return indexExtractedText(
+      documentId: resolvedDocumentId,
+      documentPath: file.path,
+      documentTitle: p.basename(file.path),
+      text: text,
+      replaceExistingPath: replaceExistingPath,
+    );
+  }
+
+  /// Index only text supplied by a verified local parser (e.g. Android PDF).
+  /// Do not pretend the legacy byte-scanning PDF helper is an extractor.
+  Future<int> indexExtractedText({
+    required String documentId,
+    required String documentPath,
+    required String documentTitle,
+    required String text,
+    bool replaceExistingPath = false,
+  }) async {
+    if (documentId.trim().isEmpty || documentPath.trim().isEmpty ||
+        documentTitle.trim().isEmpty || text.trim().isEmpty) {
+      throw const FormatException('Document index requires nonempty text and metadata.');
+    }
+    final resolvedDocumentId = documentId.trim();
+    final chunks = _chunkText(text.trim());
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final db = await _databaseHelper.database;
 
@@ -62,7 +84,7 @@ class LocalDocumentIndexService {
             ? '${AppConstants.colDocumentId} = ? OR ${AppConstants.colDocumentPath} = ?'
             : '${AppConstants.colDocumentId} = ?',
         whereArgs: replaceExistingPath
-            ? <Object?>[resolvedDocumentId, file.path]
+            ? <Object?>[resolvedDocumentId, documentPath]
             : <Object?>[resolvedDocumentId],
       );
 
@@ -73,8 +95,8 @@ class LocalDocumentIndexService {
           {
             AppConstants.colId: '$resolvedDocumentId:$i',
             AppConstants.colDocumentId: resolvedDocumentId,
-            AppConstants.colDocumentPath: file.path,
-            AppConstants.colDocumentTitle: title,
+            AppConstants.colDocumentPath: documentPath,
+            AppConstants.colDocumentTitle: documentTitle,
             AppConstants.colChunkIndex: i,
             AppConstants.colChunkText: chunks[i],
             AppConstants.colVectorJson: jsonEncode(vector),
