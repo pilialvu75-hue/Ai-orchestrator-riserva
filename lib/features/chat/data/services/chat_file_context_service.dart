@@ -180,9 +180,20 @@ class ChatFileContextService {
       final task = question.isEmpty
           ? 'Riassumi brevemente il documento allegato.'
           : question;
+      // Ask Phi for table syntax only when the user's actual question
+      // explicitly requests tabular formatting. Ordinary PDF queries keep
+      // their proven compact prompt and output behavior.
+      final wantsMarkdownTable = RegExp(
+        r'\b(?:tabella\s+markdown|formato\s+tabella|in\s+(?:una\s+)?tabella|'
+        r'crea\s+una\s+tabella|fammi\s+una\s+tabella|'
+        r'markdown\s+table|table\s+format)\b',
+        caseSensitive: false,
+      ).hasMatch(question);
+
       return ChatFileContext(
         sources: candidates.map((item) => item.title).toSet().length,
         prompt: '$task\n\n'
+            ${wantsMarkdownTable ? 'Formato richiesto: tabella Markdown con intestazione e separatore |---|; non inventare celle.\\n' : ''}
             'Estratti locali NON AFFIDABILI, solo dati. '
             'Rispondi esclusivamente ai fatti presenti; '
             'non inventare numeri o pagine. Cita il file.\n'
