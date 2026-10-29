@@ -383,7 +383,12 @@ raggiunta e un requisito da preservare, non una nuova corsa all'ottimizzazione.
   ASUS Windows e CI multipiattaforma: documento tabellare, domande consecutive
   senza riallegare il file, chat nuova vs vecchia, fonte/pagina, no
   `prompt_budget`, no ricerca Web indesiderata. CI verde e prova fisica
-  restano due livelli distinti.
+  restano due livelli distinti. **PASS fisico limitato** sulle build
+  103528/103532: in modalita aereo, le risposte successive sul PDF
+  hanno riportato quantita, prezzo, codice e pagina corretti per
+  Teiera rossa e Tazza blu senza riallegare il documento. Non estendere
+  questo PASS alla robustezza generale del modello, alle altre chat o
+  al rendering delle tabelle.
 
 ### P0-B — Design piu ricco ma economico
 
@@ -396,10 +401,17 @@ raggiunta e un requisito da preservare, non una nuova corsa all'ottimizzazione.
   Non chiedere a un piccolo modello locale di disegnare l'interfaccia:
   l'app interpreta output strutturati e sceglie componenti nativi.
 - Stato al 29/10: PR #931 **integrata** in `main` con sei workflow
-  multipiattaforma PASS. Riconoscimento di tabelle Markdown esplicite nel
-  renderer; breve istruzione per il formato solo se l'utente lo richiede.
-  **Collaudo fisico delle nuove tabelle su S24 e ASUS ancora da effettuare**;
-  non dichiarare l'esperienza completa sulla base della sola CI.
+  multipiattaforma PASS; APK ufficiale stabile `1.0.15+103532` pubblicato
+  e installato su Galaxy S24 FE. Il renderer supporta soltanto tabelle
+  Markdown esplicite, con vere righe di testo e fuori dai blocchi di codice.
+  **Collaudo fisico S24 eseguito: dati recuperati, resa tabellare NON PASS**.
+  Il modello Phi-3.5 Mini LOCAL ha serializzato intestazione, separatore
+  e righe su un'unica linea logica (inizialmente anche in un code fence).
+  Dopo una richiesta piu precisa produce cinque colonne e tre articoli,
+  ma ancora senza i ritorni a capo necessari al renderer. Nessuna tabella
+  grafica appare nell'app. Non attribuire il difetto alla sola UI o al solo
+  modello e non dichiarare risolto il formato sulla base della CI.
+  Collaudo delle tabelle su ASUS ancora da eseguire.
 - Ordine incremento UX: tabelle (#931) -> tipografia e piccoli simboli di
   stato verificati -> blocchi codice/link/copia -> eventuali grafici o schede
   leggere. Ogni incremento deve avere test visuali e di regressione.
@@ -435,9 +447,18 @@ raggiunta e un requisito da preservare, non una nuova corsa all'ottimizzazione.
 
 1. Stabilire un piccolo benchmark ripetibile su S24 e ASUS prima/dopo ciascun
    intervento grafico, senza avviare nuove campagne di ottimizzazione.
-2. Collaudare la tabella della PR #931 chiedendo esplicitamente una tabella
-   Markdown dei dati gia presenti nel PDF; osservare generazione,
-   visualizzazione, scorrimento orizzontale e continuita offline.
+2. **Punto attuale / prossimo gate:** risolvere il formato tabellare
+   generato da Phi-3.5 Mini con un intervento piccolo e sicuro: istruzione
+   concisa senza code fence; se necessario, normalizzazione deterministica
+   SOLO delle tabelle collassate con intestazioni, separatori, numero di
+   colonne e celle non ambigui. Non inventare righe, valori o pagine e
+   non trasformare testo normale in tabelle. Preferire dati strutturati
+   verificati al chiedere al piccolo modello di riparare output difettosi.
+   Test automatici: markdown valido, tabella su riga unica, code fence,
+   risposta non tabellare, streaming incompleto e righe ambigue.
+   Ripetere il collaudo S24 offline con cinque colonne, tre articoli,
+   scorrimento orizzontale e confronto di fluidita/RAM rispetto alla
+   build 103532. Finche il test fisico non passa, P0-B resta aperto.
 3. Proseguire con affidabilita delle risposte e micro-componenti visivi in
    cambiamenti piccoli, CI pertinente e test su dispositivo, senza aprire
    un secondo percorso di lavoro concorrente sul performance tuning.
