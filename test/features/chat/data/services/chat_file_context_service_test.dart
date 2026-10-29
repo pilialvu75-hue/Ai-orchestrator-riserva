@@ -303,7 +303,7 @@ void main() {
       compactForLocal: true,
     );
     expect(formatted, isNotNull);
-    expect(formatted!.prompt, contains('Formato richiesto: tabella Markdown'));
+    expect(formatted!.prompt, contains('Tabella Markdown: a capo dopo ogni riga'));
     expect(formatted.prompt, contains('non inventare celle'));
     expect(formatted.prompt, contains('Tazza blu 1 8,90 € TZ-19'));
     expect(formatted.prompt.length, lessThan(1500));
