@@ -272,7 +272,8 @@ void main() {
     );
     expect(context, isNotNull);
     expect(context!.prompt, contains('Teiera rossa 1 24,00 € TR-07'));
-    expect(context.prompt, contains('[Pagina 1/1]'));
+    expect(context.prompt, contains('Quantità: 1; Prezzo: 24,00 €; Codice: TR-07'));
+    expect(context.prompt, contains('Pagina del documento: [Pagina 1/1]'));
     expect(context.prompt, contains('AIVEXUS_Test_PDF_S24.pdf'));
     expect(context.prompt.length, lessThan(1500));
     final saved = await helper.getAllDocumentChunks();
