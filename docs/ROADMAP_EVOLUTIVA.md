@@ -357,3 +357,87 @@ a terzi autorizzati soltanto dall'esistenza di questa roadmap.
 5. Conservare la versione 1.0.15 e la distribuzione OTA ufficiale
    finché una nuova release non sia autorizzata; nessuna modifica
    alla numerazione per questo aggiornamento documentale.
+
+## 15. Direzione prodotto concordata — 29 ottobre 2026
+
+Questo aggiornamento prodotto prevale, per **priorita UX immediate**, sugli
+elementi storici delle sezioni precedenti, senza eliminarli né cambiare i
+contratti architetturali del Cantiere. Due filoni procedono in parallelo:
+**qualita delle risposte** e **design leggero della chat**. La velocita gia
+raggiunta e un requisito da preservare, non una nuova corsa all'ottimizzazione.
+
+### P0-A — Risposte affidabili prima dell'apparenza
+
+- Ridurre allucinazioni, affermazioni non supportate, risposte incomplete,
+  confusione tra domanda corrente e precedente e citazioni di pagina errate.
+  Non inventare valori, fonti, risultati, azioni o percentuali di successo.
+- Distinguere e verificare separatamente: recupero dei dati/documenti,
+  completezza della risposta, correttezza, contesto della sessione e
+  formattazione. Un PDF letto bene non certifica la fedelta di tutte le
+  domande future o la qualita del ragionamento.
+- LOCAL deve rimanere realmente funzionante senza rete; quando Internet e
+  disponibile puo aggiungere funzionalita opzionali. Contenuti di documenti
+  locali non vanno inviati a ricerca Web o provider Cloud senza scelta
+  autorizzata. Nessun fallback remoto implicito.
+- Test riproducibili su Galaxy S24 FE (Phi-3.5 Mini e modelli compatibili),
+  ASUS Windows e CI multipiattaforma: documento tabellare, domande consecutive
+  senza riallegare il file, chat nuova vs vecchia, fonte/pagina, no
+  `prompt_budget`, no ricerca Web indesiderata. CI verde e prova fisica
+  restano due livelli distinti.
+
+### P0-B — Design piu ricco ma economico
+
+- Chat con tabelle Markdown **native e scorrevoli**, titoli, evidenziazioni,
+  elenchi, codice e link leggibili; mantenere testo, copia, cronologia e TTS.
+  Inserire piccole icone comprensibili (documento, successo, errore,
+  avvertenza, copia) solo se sostenute da uno stato realmente verificato.
+- Condividere, quando tecnicamente fattibile, lo stesso linguaggio visivo e
+  componenti riutilizzabili fra Android, Windows, Linux, macOS e Web.
+  Non chiedere a un piccolo modello locale di disegnare l'interfaccia:
+  l'app interpreta output strutturati e sceglie componenti nativi.
+- Stato al 29/10: PR #931 **integrata** in `main` con sei workflow
+  multipiattaforma PASS. Riconoscimento di tabelle Markdown esplicite nel
+  renderer; breve istruzione per il formato solo se l'utente lo richiede.
+  **Collaudo fisico delle nuove tabelle su S24 e ASUS ancora da effettuare**;
+  non dichiarare l'esperienza completa sulla base della sola CI.
+- Ordine incremento UX: tabelle (#931) -> tipografia e piccoli simboli di
+  stato verificati -> blocchi codice/link/copia -> eventuali grafici o schede
+  leggere. Ogni incremento deve avere test visuali e di regressione.
+
+### Vincolo non negoziabile — Non peggiorare le prestazioni
+
+- **Congelare temporaneamente nuove iniziative di ricerca della velocita**.
+  Riprendere le ottimizzazioni delle prestazioni quando la modalita Work
+  sara nuovamente disponibile. Non ripristinare vecchi colli di bottiglia.
+- Nel frattempo le prestazioni **non sono congelate verso il basso**:
+  non introdurre regressioni in latenza percepita, memoria, fluidita chat,
+  apertura delle conversazioni, tempo al primo token e reattivita durante
+  inferenza locale. Confrontare con la build stabile precedente su S24 FE
+  e ASUS con test comparabili.
+- Preferire widget nativi, rendering lazy/on-demand, isolamento dei messaggi,
+  niente animazioni continue o librerie pesanti per semplici icone/tabelle;
+  rispettare la pressione RAM di Phi. Se un cambiamento grafico rallenta,
+  correggerlo o rinunciarvi prima della distribuzione.
+- Conservare la possibilita di rollback e non cancellare chat, modelli o
+  dati dell'utente durante gli aggiornamenti.
+
+### P2 — Avanzamento reale delle attivita: **roadmap futura, non P0**
+
+- Indicatori di fasi, checklist e percentuali **solo quando il Cantiere o gli
+  strumenti pubblicano eventi reali e verificabili**. Mai simulare azioni,
+  inventare progressi o affermare che una build/PR/ricerca e completata
+  senza prova. Non mettere questa funzione davanti ad affidabilita,
+  contesto e formattazione della chat.
+- Gate futuro: tracciamento persistente verificato, annullamento/ripresa
+  reali, UI reattiva senza costi rilevanti sulla inferenza.
+
+### Metodo e prossima verifica
+
+1. Stabilire un piccolo benchmark ripetibile su S24 e ASUS prima/dopo ciascun
+   intervento grafico, senza avviare nuove campagne di ottimizzazione.
+2. Collaudare la tabella della PR #931 chiedendo esplicitamente una tabella
+   Markdown dei dati gia presenti nel PDF; osservare generazione,
+   visualizzazione, scorrimento orizzontale e continuita offline.
+3. Proseguire con affidabilita delle risposte e micro-componenti visivi in
+   cambiamenti piccoli, CI pertinente e test su dispositivo, senza aprire
+   un secondo percorso di lavoro concorrente sul performance tuning.
