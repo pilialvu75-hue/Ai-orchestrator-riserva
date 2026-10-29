@@ -284,6 +284,39 @@ void main() {
     expect(saved.length, greaterThan(2));
   });
 
+  test('PDF follow-up asks Tazza quantity without reattaching the file',
+      () async {
+    final pdf = await attachment('AIVEXUS_Test_PDF_S24.pdf', '%PDF-fake', 'pdf1');
+    final pdfFiles = ChatFileContextService(
+      indexService: LocalDocumentIndexService(databaseHelper: helper),
+      databaseHelper: helper,
+      pdfReader: _PdfStub('[Pagina 1/1]\n'
+          'ARTICOLO Q.TÀ PREZZO CODICE\n'
+          'Thé vert 2 4,50 € TV-02\n'
+          'Tazza blu 1 8,90 € TZ-19\n'
+          'Teiera rossa 1 24,00 € TR-07'),
+    );
+    final first = await pdfFiles.buildContext(
+      sessionId: 'fresh-chat',
+      userPrompt: 'Prezzo e codice della teiera rossa',
+      attachments: <ChatAttachment>[pdf],
+      compactForLocal: true,
+    );
+    expect(first!.prompt, contains('Teiera rossa 1 24,00 € TR-07'));
+
+    final second = await pdfFiles.buildContext(
+      sessionId: 'fresh-chat',
+      userPrompt: 'Qual è la quantità e il codice della Tazza blu?',
+      compactForLocal: true,
+    );
+    expect(second, isNotNull);
+    expect(second!.prompt, contains('Articolo: Tazza blu; Quantità: 1; '
+        'Prezzo: 8,90 €; Codice: TZ-19.'));
+    expect(second.prompt, contains('Pagina del documento: [Pagina 1/1]'));
+    expect(second.prompt, isNot(contains('Quantità: 2;')));
+    expect(second.prompt.length, lessThan(1500));
+  });
+
   test('selected PDF ignores old attachments in the same chat', () async {
     final first = await attachment('old.pdf', '%PDF-a', 'first');
     final second = await attachment('new.pdf', '%PDF-b', 'second');
