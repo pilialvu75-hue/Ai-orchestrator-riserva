@@ -148,8 +148,33 @@ class ChatFileContextService {
     if (compactForLocal) {
       // The native GGUF budget trims conversation turns but cannot shorten
       // this base prompt. Keep only short, directly observed evidence.
+      // The page-1 marker lives in the first SQLite chunk, which may
+      // not be retrieved for a table near the end of a document. Scan all
+      // indexed chunks of this session's selected file for single-page
+      // provenance, without expanding the inference prompt or reading files.
+      String? verifiedSinglePage;
+      final sourceIds = scoped
+          .map((row) => row[AppConstants.colDocumentId] as String? ?? '')
+          .toSet();
+      if (sourceIds.length == 1) {
+        final pageMarkers = <String>{};
+        final pagePattern = RegExp(
+          r'\[Pagina\s+(\d+)/(\d+)\]', caseSensitive: false,
+        );
+        for (final row in scoped) {
+          final raw = row[AppConstants.colChunkText] as String? ?? '';
+          for (final match in pagePattern.allMatches(raw)) {
+            pageMarkers.add('${match.group(1)}/${match.group(2)}');
+          }
+        }
+        if (pageMarkers.length == 1 && pageMarkers.single == '1/1') {
+          verifiedSinglePage = '[Pagina 1/1]';
+        }
+      }
       final excerpt = ChatLocalDocumentExcerpt.render(
-        question, candidates,
+        question,
+        candidates,
+        verifiedSinglePage: verifiedSinglePage,
       );
       if (excerpt.isEmpty) return null;
       final task = question.isEmpty

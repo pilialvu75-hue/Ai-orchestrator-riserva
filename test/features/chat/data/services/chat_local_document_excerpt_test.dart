@@ -31,11 +31,50 @@ void main() {
     expect(excerpt, contains('[Pagina 1/1]'));
     expect(excerpt, contains('AIVEXUS_Test_PDF_S24.pdf'));
     expect(excerpt, contains('Teiera rossa 1 24,00 € TR-07'));
+    expect(excerpt, contains('Quantità: 1; Prezzo: 24,00 €; Codice: TR-07'));
+    expect(excerpt, contains('Pagina del documento: [Pagina 1/1]'));
     expect(excerpt, isNot(contains('124,00 €')));
     expect(excerpt, isNot(contains('Pagina 5/6')));
     expect(excerpt.length, lessThanOrEqualTo(
       ChatLocalDocumentExcerpt.maxEvidenceChars,
     ));
+  });
+
+  test('restores page 1/1 when relevant table chunk lost header page', () {
+    final excerpt = ChatLocalDocumentExcerpt.render(
+      'Qual è il prezzo della teiera rossa, la quantità e il codice? Cita la pagina.',
+      [
+        chunk('AIVEXUS_Test_PDF_S24.pdf',
+            '04 / TABELLA DI CONTROLLO\n'
+            'ARTICOLO Q.TÀ PREZZO CODICE\n'
+            'Teiera rossa 1 24,00 € TR-07'),
+      ],
+      verifiedSinglePage: '[Pagina 1/1]',
+    );
+    expect(excerpt, startsWith('Pagina del documento: [Pagina 1/1]'));
+    expect(excerpt, contains('Articolo: Teiera rossa; Quantità: 1; '
+        'Prezzo: 24,00 €; Codice: TR-07.'));
+    expect(excerpt.length,
+        lessThanOrEqualTo(ChatLocalDocumentExcerpt.maxEvidenceChars));
+  });
+
+  test('missing table header never infers quantity labels', () {
+    final excerpt = ChatLocalDocumentExcerpt.render(
+      'Quanto costa la teiera rossa? Qual è la quantità?',
+      [chunk('file.txt', 'Teiera rossa 1 24,00 € TR-07')],
+    );
+    expect(excerpt, contains('Teiera rossa 1 24,00 € TR-07'));
+    expect(excerpt, isNot(contains('Quantità: 1')));
+  });
+
+  test('a selected page 2/6 is not attributed to the entire PDF', () {
+    final excerpt = ChatLocalDocumentExcerpt.render(
+      'Prezzo teiera rossa?',
+      [chunk('multi.pdf', '[Pagina 2/6]\n'
+          'ARTICOLO Q.TÀ PREZZO CODICE\n'
+          'Teiera rossa 1 24,00 € TR-07')],
+    );
+    expect(excerpt, isNot(contains('Pagina del documento:')));
   });
 
   test('keeps observed ambiguous characters verbatim without repair', () {
