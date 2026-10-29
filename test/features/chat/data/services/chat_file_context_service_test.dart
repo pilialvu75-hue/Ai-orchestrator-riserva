@@ -299,7 +299,7 @@ void main() {
 
     final formatted = await files.buildContext(
       sessionId: 'table-chat',
-      userPrompt: 'Riporta i dati in una tabella Markdown.',
+      userPrompt: 'Riporta i dati della Tazza blu in una tabella Markdown.',
       compactForLocal: true,
     );
     expect(formatted, isNotNull);
