@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.d
 import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/assistant_message_content.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -97,15 +98,23 @@ class ChatBubble extends StatelessWidget {
                         ),
                       ],
                       if (message.content.trim().isNotEmpty)
-                        Text(
-                          message.content,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize:
-                                _isUser ? 15 : assistantTextSize.fontSize,
-                            height: 1.45,
-                          ),
-                        )
+                        _isUser
+                            ? Text(
+                                message.content,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  height: 1.45,
+                                ),
+                              )
+                            : AssistantMessageContent(
+                                content: message.content,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: assistantTextSize.fontSize,
+                                  height: 1.45,
+                                ),
+                              )
                       else if (!_isUser && message.isPending)
                         // Show animated typing dots while the assistant
                         // placeholder has no content yet (pre-first-token
