@@ -284,6 +284,31 @@ void main() {
     expect(saved.length, greaterThan(2));
   });
 
+  test('explicit table formatting request adds compact Markdown instruction',
+      () async {
+    final file = await attachment('tabella.txt',
+        'ARTICOLO Q.TÀ PREZZO CODICE\n'
+        'Tazza blu 1 8,90 € TZ-19', 'table');
+    final normal = await files.buildContext(
+      sessionId: 'table-chat',
+      userPrompt: 'Qual è il prezzo della Tazza blu?',
+      attachments: [file],
+      compactForLocal: true,
+    );
+    expect(normal!.prompt, isNot(contains('Formato richiesto:')));
+
+    final formatted = await files.buildContext(
+      sessionId: 'table-chat',
+      userPrompt: 'Riporta i dati della Tazza blu in una tabella Markdown.',
+      compactForLocal: true,
+    );
+    expect(formatted, isNotNull);
+    expect(formatted!.prompt, contains('Formato richiesto: tabella Markdown'));
+    expect(formatted.prompt, contains('non inventare celle'));
+    expect(formatted.prompt, contains('Tazza blu 1 8,90 € TZ-19'));
+    expect(formatted.prompt.length, lessThan(1500));
+  });
+
   test('PDF follow-up asks Tazza quantity without reattaching the file',
       () async {
     final pdf = await attachment('AIVEXUS_Test_PDF_S24.pdf', '%PDF-fake', 'pdf1');
