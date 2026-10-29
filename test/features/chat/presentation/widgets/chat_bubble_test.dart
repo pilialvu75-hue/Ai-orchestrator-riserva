@@ -38,6 +38,80 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('S24 Phi flattened table shows all five headers and three rows',
+        (tester) async {
+      // Literal output from the offline 103532 physical test, not a
+      // synthetic correctly formatted table.
+      const answer = '| Articolo | Quantità | Prezzo | Codice | Pagina '
+          '||---------------|---------|---------|--------|-------'
+          '|| Thé vert |2 | €4,50 | TV-02 |1 '
+          '|| Tazza blu |1 | €8,90 | TZ-19 |1 '
+          '|| Teiera rossa |1 | €24,00 | TR-07 |1 |';
+      await tester.pumpWidget(_host(const ChatMessage(
+        id: 'phi-flat-table',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: answer,
+        timestamp: 6,
+        provider: 'local',
+      )));
+      expect(find.byType(DataTable), findsOneWidget);
+      expect(find.text('Pagina'), findsOneWidget);
+      expect(find.text('Thé vert'), findsOneWidget);
+      expect(find.text('Tazza blu'), findsOneWidget);
+      expect(find.text('Teiera rossa'), findsOneWidget);
+      expect(find.text('TZ-19'), findsOneWidget);
+      expect(find.text('TR-07'), findsOneWidget);
+      expect(find.byWidgetPredicate((w) =>
+          w is SingleChildScrollView &&
+          w.scrollDirection == Axis.horizontal), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('recovers only a complete single-line markdown fenced table',
+        (tester) async {
+      const answer = '```markdown| Articolo | Quantità | Prezzo | Codice '
+          '||----------|----------|---------|--------'
+          '|| Thé vert |2 | €4,50 | TV-02 '
+          '|| Tazza blu |1 | €8,90 | TZ-19 '
+          '|| Teiera rossa |1 | €24,00 | TR-07 |```';
+      await tester.pumpWidget(_host(const ChatMessage(
+        id: 'phi-fenced-table',
+        sessionId: 'session-1',
+        role: 'assistant',
+        content: answer,
+        timestamp: 7,
+        provider: 'local',
+      )));
+      expect(find.byType(DataTable), findsOneWidget);
+      expect(find.text('Teiera rossa'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('rejects ambiguous, incomplete or embedded prose tables',
+        (tester) async {
+      const badAnswers = [
+        '| A | B || --- | --- || row | good || last |',
+        '| A | B || --- | --- || row || other |',
+        '| A | B || --- | --- |',
+        'La risposta è | A | B || --- | --- || 1 | 2 |',
+        '| A | B || --- | --- || 1 | 2 | fine.',
+      ];
+      for (var i = 0; i < badAnswers.length; i++) {
+        await tester.pumpWidget(_host(ChatMessage(
+          id: 'invalid-$i',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: badAnswers[i],
+          timestamp: 8 + i,
+          provider: 'local',
+        )));
+        expect(find.byType(DataTable), findsNothing);
+        expect(find.text(badAnswers[i]), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }
+    });
+
     testWidgets('preserves normal answers as plain text', (tester) async {
       const answer = 'Quantità:1, Prezzo:8,90 €, Codice: TZ-19.';
       await tester.pumpWidget(_host(const ChatMessage(
