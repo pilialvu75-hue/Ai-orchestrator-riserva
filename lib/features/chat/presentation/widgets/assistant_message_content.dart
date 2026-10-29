@@ -194,7 +194,7 @@ List<String>? _pipeCells(String line) {
   final buffer = StringBuffer();
   for (var i = 0; i < raw.length; i++) {
     final char = raw[i];
-    if (char == r'\' && i + 1 < raw.length && raw[i + 1] == '|') {
+    if (char.codeUnitAt(0) == 92 && i + 1 < raw.length && raw[i + 1] == '|') {
       buffer.write('|');
       i++;
     } else if (char == '|') {
