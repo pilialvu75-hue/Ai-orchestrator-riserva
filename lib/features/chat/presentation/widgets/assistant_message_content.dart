@@ -113,6 +113,13 @@ class _MarkdownTable {
 }
 
 List<_ContentSegment> _splitContent(String content) {
+  // Small LOCAL models sometimes emit the complete Markdown table on a
+  // single logical line, using '||' in place of row boundaries. This only
+  // changes rendering; the raw answer remains untouched for copy and TTS.
+  final collapsed = _parseCollapsedTable(content);
+  if (collapsed != null) {
+    return <_ContentSegment>[_ContentSegment.table(collapsed)];
+  }
   final lines = content.replaceAll('\r\n', '\n').split('\n');
   final segments = <_ContentSegment>[];
   final plain = <String>[];
@@ -185,6 +192,44 @@ _MarkdownTable? _parseTable(List<String> lines, int start) {
   // Do not turn an unfinished streamed table header into a broken widget.
   if (rows.isEmpty) return null;
   return _MarkdownTable(headers, rows, i);
+}
+
+/// Recover only a complete and unambiguous pipe table flattened into one
+/// line. A separator row and exactly matching cell counts are mandatory.
+/// Deliberately no general-purpose Markdown repair or source inference.
+/// Reject partial streaming, embedded prose, escaped pipes and empty cells.
+_MarkdownTable? _parseCollapsedTable(String source) {
+  if (source.length > 2500 ||
+      source.contains('\n') ||
+      !source.contains('||')) {
+    return null;
+  }
+  var text = source.trim();
+  // Phi may wrap its entire table in a one-line markdown fence.
+  // Never unwrap a multiline code sample or a fence embedded in prose.
+  if (text.startsWith('```markdown')) {
+    if (!text.endsWith('```')) return null;
+    text = text.substring('```markdown'.length, text.length - 3).trim();
+  }
+  if (!text.startsWith('|') ||
+      !text.endsWith('|') ||
+      text.contains('```') ||
+      text.contains('~~~') ||
+      text.contains(r'\|') ||
+      text.contains('|||')) {
+    return null;
+  }
+
+  final parts = text.split(RegExp(r'\|\s*\|'));
+  if (parts.length < 3 || parts.length > 32) return null;
+  final table = _parseTable(parts, 0);
+  if (table == null || table.endIndex != parts.length) return null;
+  // A true empty cell also looks like '||'; we must not guess whether it
+  // was intended as an empty cell or a row boundary.
+  if (table.rows.any((row) => row.any((cell) => cell.isEmpty))) {
+    return null;
+  }
+  return table;
 }
 
 List<String>? _pipeCells(String line) {

@@ -190,7 +190,7 @@ class ChatFileContextService {
         caseSensitive: false,
       ).hasMatch(question);
       final formatInstruction = wantsMarkdownTable
-          ? 'Formato richiesto: tabella Markdown con intestazione e separatore |---|; non inventare celle.\n'
+          ? 'Tabella Markdown: a capo dopo ogni riga, senza blocchi di codice; intestazione e separatore; non inventare celle.\n'
           : '';
 
       return ChatFileContext(
