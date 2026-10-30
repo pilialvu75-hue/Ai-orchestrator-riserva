@@ -198,7 +198,11 @@ void main() {
       updatedAt: 9999,
     );
 
-    final accepted = await confirmed();
+    final accepted = await service.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: userScope,
+      limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+    );
     expect(accepted, hasLength(AssistantDurableMemoryPolicy.maxRecordsPerScope));
     expect(accepted.map((item) => item.recordKey).toSet(),
         containsAll(<String>['accepted.0', 'accepted.63']));
