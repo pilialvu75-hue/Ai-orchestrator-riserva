@@ -1302,7 +1302,9 @@ class _WideLayout
       children: [
         SizedBox(
           width: 220,
-          child: Container(
+          // The desktop sidebar is outside the chat body's Scaffold.
+          // Its ListTiles need their own Material surface and text defaults.
+          child: Material(
             color:
                 const Color(0xFF1A1A1A),
             child: SafeArea(
