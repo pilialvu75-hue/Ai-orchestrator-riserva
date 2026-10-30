@@ -28,7 +28,8 @@ class AssistantDurableMemoryService {
     String? after,
     String? reason,
   }) {
-    if (source == AssistantMemorySource.modelCandidate) {
+    if (source == AssistantMemorySource.modelCandidate ||
+        source == AssistantMemorySource.userStatement) {
       throw ArgumentError(
         'Confirmed durable memory requires a non-model confirmation source.',
       );
@@ -123,6 +124,24 @@ class AssistantDurableMemoryService {
     );
   }
 
+  /// Review a specific user-stated candidate snapshot; never a model guess.
+  ///
+  /// The store compares the snapshot with current SQLite content inside its
+  /// per-scope write queue before approving, correcting or rejecting it.
+  Future<bool> resolveUserStatementCandidate({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    required int reviewedAt,
+    String? approvedContent,
+  }) {
+    return _store.resolveUserStatementCandidate(
+      reviewed: reviewed,
+      approve: approve,
+      reviewedAt: reviewedAt,
+      approvedContent: approvedContent,
+    );
+  }
+
   Future<bool> confirmCandidate({
     required AssistantMemoryScope scope,
     required String scopeId,
@@ -130,7 +149,8 @@ class AssistantDurableMemoryService {
     required int confirmedAt,
     required AssistantMemorySource confirmedSource,
   }) {
-    if (confirmedSource == AssistantMemorySource.modelCandidate) {
+    if (confirmedSource == AssistantMemorySource.modelCandidate ||
+        confirmedSource == AssistantMemorySource.userStatement) {
       throw ArgumentError(
         'Candidate confirmation requires an external confirmation source.',
       );
