@@ -94,87 +94,7 @@ final class AssistantDurableMemoryCaptureService {
   // No model output, imported content or arbitrary personal details.
   static final RegExp _answerPreference = RegExp(
     r'^preferisco (?:le )?risposte '
-    r'(brevi|dettagliate|in italiano|in francese|in inglese|in spagnolo)[.!]?
-    required String sessionId,
-    required String userPrompt,
-  }) async {
-    final input = userPrompt.trim();
-    if (input.isEmpty ||
-        input.length > 550 ||
-        input.contains('\n') ||
-        input.contains('\r') ||
-        _secrets.hasMatch(input)) {
-      return false;
-    }
-
-    var scope = AssistantMemoryScope.user;
-    var scopeId = AssistantDurableMemoryContextService.localUserScopeId;
-    final inChat = _saveInConversation.firstMatch(input);
-    if (inChat != null) {
-      if (sessionId.trim().isEmpty) return false;
-      scope = AssistantMemoryScope.conversation;
-      scopeId = sessionId.trim();
-    }
-
-    final save = inChat ?? _save.firstMatch(input);
-    if (save != null) {
-      final assignment = _parseAssignment(save.group(1)!);
-      if (assignment == null) return false;
-      await _memoryService.recordConfirmed(
-        recordKey: assignment.key,
-        scope: scope,
-        scopeId: scopeId,
-        kind: AssistantMemoryKind.fact,
-        content: assignment.content,
-        source: AssistantMemorySource.userExplicit,
-        updatedAt: _now(),
-      );
-      return true;
-    }
-
-    final forget = _forget.firstMatch(input);
-    if (forget != null) {
-      final subject = forget.group(1)!.trim();
-      final assignment = _parseAssignment(subject);
-      final key = assignment?.key ?? _keyFromSubject(subject);
-      if (key == null) return false;
-      return _memoryService.remove(
-        scope: AssistantMemoryScope.user,
-        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
-        recordKey: key,
-      );
-    }
-
-    return false;
-  }
-
-  ({String key, String content})? _parseAssignment(String input) {
-    final fact = input.trim().replaceFirst(RegExp(r'[.!]$'), '').trim();
-    if (fact.endsWith('?') ||
-        fact.contains('://') ||
-        fact.contains(String.fromCharCode(96))) {
-      return null;
-    }
-    final match = _assignment.firstMatch(fact);
-    if (match == null) return null;
-    final subject = match.group(1)!.trim();
-    final value = match.group(2)!.trim();
-    if (value.isEmpty || _secrets.hasMatch(value)) return null;
-    final key = _keyFromSubject(subject);
-    if (key == null) return null;
-    return (key: key, content: fact);
-  }
-
-  String? _keyFromSubject(String subject) {
-    final normalized = subject
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9à-öø-ÿ]+'), '_')
-        .replaceAll(RegExp(r'^_+|_+$'), '');
-    if (normalized.isEmpty || normalized.length > 100) return null;
-    return 'explicit.$normalized';
-  }
-}
-,
+    r'(brevi|dettagliate|in italiano|in francese|in inglese|in spagnolo)[.!]?$',
     caseSensitive: false,
   );
 
@@ -195,8 +115,8 @@ final class AssistantDurableMemoryCaptureService {
       if (_resetInProgress) return false;
       final input = userPrompt.trim();
       if (input.length > 110 ||
-          input.contains('\\n') ||
-          input.contains('\\r') ||
+          input.contains('\n') ||
+          input.contains('\r') ||
           _secrets.hasMatch(input)) {
         return false;
       }
@@ -212,87 +132,7 @@ final class AssistantDurableMemoryCaptureService {
         scope: AssistantMemoryScope.user,
         scopeId: AssistantDurableMemoryContextService.localUserScopeId,
         kind: AssistantMemoryKind.preference,
-        content: input.replaceFirst(RegExp(r'[.!]
-    required String sessionId,
-    required String userPrompt,
-  }) async {
-    final input = userPrompt.trim();
-    if (input.isEmpty ||
-        input.length > 550 ||
-        input.contains('\n') ||
-        input.contains('\r') ||
-        _secrets.hasMatch(input)) {
-      return false;
-    }
-
-    var scope = AssistantMemoryScope.user;
-    var scopeId = AssistantDurableMemoryContextService.localUserScopeId;
-    final inChat = _saveInConversation.firstMatch(input);
-    if (inChat != null) {
-      if (sessionId.trim().isEmpty) return false;
-      scope = AssistantMemoryScope.conversation;
-      scopeId = sessionId.trim();
-    }
-
-    final save = inChat ?? _save.firstMatch(input);
-    if (save != null) {
-      final assignment = _parseAssignment(save.group(1)!);
-      if (assignment == null) return false;
-      await _memoryService.recordConfirmed(
-        recordKey: assignment.key,
-        scope: scope,
-        scopeId: scopeId,
-        kind: AssistantMemoryKind.fact,
-        content: assignment.content,
-        source: AssistantMemorySource.userExplicit,
-        updatedAt: _now(),
-      );
-      return true;
-    }
-
-    final forget = _forget.firstMatch(input);
-    if (forget != null) {
-      final subject = forget.group(1)!.trim();
-      final assignment = _parseAssignment(subject);
-      final key = assignment?.key ?? _keyFromSubject(subject);
-      if (key == null) return false;
-      return _memoryService.remove(
-        scope: AssistantMemoryScope.user,
-        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
-        recordKey: key,
-      );
-    }
-
-    return false;
-  }
-
-  ({String key, String content})? _parseAssignment(String input) {
-    final fact = input.trim().replaceFirst(RegExp(r'[.!]$'), '').trim();
-    if (fact.endsWith('?') ||
-        fact.contains('://') ||
-        fact.contains(String.fromCharCode(96))) {
-      return null;
-    }
-    final match = _assignment.firstMatch(fact);
-    if (match == null) return null;
-    final subject = match.group(1)!.trim();
-    final value = match.group(2)!.trim();
-    if (value.isEmpty || _secrets.hasMatch(value)) return null;
-    final key = _keyFromSubject(subject);
-    if (key == null) return null;
-    return (key: key, content: fact);
-  }
-
-  String? _keyFromSubject(String subject) {
-    final normalized = subject
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9à-öø-ÿ]+'), '_')
-        .replaceAll(RegExp(r'^_+|_+$'), '');
-    if (normalized.isEmpty || normalized.length > 100) return null;
-    return 'explicit.$normalized';
-  }
-}
-), ''),
+        content: input.replaceFirst(RegExp(r'[.!]$'), ''),
         updatedAt: _now(),
       );
       return true;
