@@ -1,0 +1,162 @@
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/assistant_memory_review_page.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+class _MemoryPersistence implements AssistantDurableMemoryPersistence {
+  final Map<String, String> values = <String, String>{};
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String value) async {
+    values[key] = value;
+  }
+}
+
+void main() {
+  late AssistantDurableMemoryService memory;
+  late AssistantDurableMemoryCaptureService capture;
+
+  Future<void> showPage(WidgetTester tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: AssistantMemoryReviewPage(captureService: capture),
+    ));
+    await tester.pumpAndSettle();
+  }
+
+  setUp(() {
+    memory = AssistantDurableMemoryService(
+      store: AssistantDurableMemoryStore(
+        persistence: _MemoryPersistence(),
+      ),
+    );
+    capture = AssistantDurableMemoryCaptureService(
+      memoryService: memory,
+    );
+  });
+
+  testWidgets('no proposal is written without per-action consent',
+      (tester) async {
+    await showPage(tester);
+    expect(find.text('Nessuna proposta in attesa.'), findsOneWidget);
+    await tester.enterText(
+      find.byType(TextField).first,
+      'Preferisco risposte brevi',
+    );
+    expect(
+      tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Proponi per revisione'),
+      ).onPressed,
+      isNull,
+    );
+    expect(
+      await memory.loadCandidates(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ),
+      isEmpty,
+    );
+  });
+
+  testWidgets('explicit proposal and approval confirm local memory',
+      (tester) async {
+    await showPage(tester);
+    await tester.enterText(
+      find.byType(TextField).first,
+      'Preferisco risposte brevi',
+    );
+    await tester.tap(find.text('Autorizzo questa singola proposta di prova'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Proponi per revisione'));
+    await tester.tap(find.text('Proponi per revisione'));
+    await tester.pumpAndSettle();
+
+    // The single-action consent does not stay enabled.
+    expect(
+      tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+      isFalse,
+    );
+    final pending = await memory.loadCandidates(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    );
+    expect(pending, hasLength(1));
+    expect(pending.single.status, AssistantMemoryStatus.candidate);
+    expect(
+      await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ),
+      isEmpty,
+    );
+
+    await tester.ensureVisible(find.text('Approva'));
+    await tester.tap(find.text('Approva'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confermi il ricordo?'), findsOneWidget);
+    await tester.tap(find.text('Conferma'));
+    await tester.pumpAndSettle();
+
+    final accepted = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    );
+    expect(accepted, hasLength(1));
+    expect(accepted.single.content, 'Preferisco risposte brevi');
+    expect(find.text('Nessuna proposta in attesa.'), findsOneWidget);
+  });
+
+  testWidgets('reject requires confirmation and preserves other facts',
+      (tester) async {
+    await capture.proposeUserPreferenceCandidate(
+      userPrompt: 'Preferisco risposte dettagliate',
+      consentEnabled: true,
+    );
+    await memory.recordConfirmed(
+      recordKey: 'existing',
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      kind: AssistantMemoryKind.fact,
+      content: 'Ricordo già confermato',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 10,
+    );
+    await showPage(tester);
+    await tester.ensureVisible(find.text('Scarta'));
+    await tester.tap(find.text('Scarta'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Annulla'));
+    await tester.pumpAndSettle();
+    expect(
+      await memory.loadCandidates(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ),
+      hasLength(1),
+    );
+
+    await tester.tap(find.text('Scarta'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Scarta').last);
+    await tester.pumpAndSettle();
+    expect(
+      await memory.loadCandidates(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ),
+      isEmpty,
+    );
+    final accepted = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    );
+    expect(accepted.single.content, 'Ricordo già confermato');
+  });
+}
