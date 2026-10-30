@@ -31,13 +31,44 @@ class SqliteAssistantDurableMemoryPersistence
 /// deterministic/verified records; model-generated candidates remain
 /// [AssistantMemoryStatus.candidate] until explicitly promoted.
 class AssistantDurableMemoryStore {
-  const AssistantDurableMemoryStore({
+  AssistantDurableMemoryStore({
     required AssistantDurableMemoryPersistence persistence,
   }) : _persistence = persistence;
 
   static const String storagePrefix = 'assistant.durable_memory.v1:';
 
   final AssistantDurableMemoryPersistence _persistence;
+
+  // Serialize read-modify-write operations by scope within the production
+  // singleton. A single JSON preference contains all records for a scope;
+  // overlapping updates otherwise overwrite each other. This is deliberately
+  // local-only: it does not enable distributed synchronization.
+  final Map<String, Future<void>> _pendingScopeWrites = <String, Future<void>>{};
+
+  Future<T> _withScopeWriteLock<T>(
+    AssistantMemoryScope scope,
+    String scopeId,
+    Future<T> Function() action,
+  ) {
+    final key = _storageKey(scope, scopeId);
+    final predecessor = _pendingScopeWrites[key] ?? Future<void>.value();
+    final result = predecessor.then((_) => action());
+
+    // A failed write must fail its own caller, but must not poison the next
+    // write in this scope. Remove an idle tail so the map cannot grow forever.
+    final tail = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    _pendingScopeWrites[key] = tail;
+    tail.then((_) {
+      if (identical(_pendingScopeWrites[key], tail)) {
+        _pendingScopeWrites.remove(key);
+      }
+    });
+    return result;
+  }
+
 
   Future<List<AssistantDurableMemoryRecord>> load({
     required AssistantMemoryScope scope,
@@ -90,21 +121,27 @@ class AssistantDurableMemoryStore {
 
   Future<void> upsert(AssistantDurableMemoryRecord record) async {
     final normalized = _validateAndNormalize(record);
-    final existing = await load(
-      scope: normalized.scope,
-      scopeId: normalized.scopeId,
-      confirmedOnly: false,
-    );
-
-    final next = <AssistantDurableMemoryRecord>[
-      normalized,
-      ...existing.where((item) => item.recordKey != normalized.recordKey),
-    ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-
-    await _write(
+    await _withScopeWriteLock(
       normalized.scope,
       normalized.scopeId,
-      next.take(AssistantDurableMemoryPolicy.maxRecordsPerScope).toList(),
+      () async {
+        final existing = await load(
+          scope: normalized.scope,
+          scopeId: normalized.scopeId,
+          confirmedOnly: false,
+        );
+
+        final next = <AssistantDurableMemoryRecord>[
+          normalized,
+          ...existing.where((item) => item.recordKey != normalized.recordKey),
+        ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
+        await _write(
+          normalized.scope,
+          normalized.scopeId,
+          next.take(AssistantDurableMemoryPolicy.maxRecordsPerScope).toList(),
+        );
+      },
     );
   }
 
@@ -121,25 +158,28 @@ class AssistantDurableMemoryStore {
       );
     }
 
-    final records = await load(
-      scope: scope,
-      scopeId: scopeId,
-      confirmedOnly: false,
-    );
-    final index = records.indexWhere((item) => item.recordKey == recordKey);
-    if (index < 0) return false;
+    final normalizedScopeId = scopeId.trim();
+    return await _withScopeWriteLock(scope, normalizedScopeId, () async {
+      final records = await load(
+        scope: scope,
+        scopeId: normalizedScopeId,
+        confirmedOnly: false,
+      );
+      final index = records.indexWhere((item) => item.recordKey == recordKey);
+      if (index < 0) return false;
 
-    final next = records.toList(growable: true);
-    next[index] = _validateAndNormalize(
-      next[index].copyWith(
-        status: AssistantMemoryStatus.confirmed,
-        source: confirmedSource,
-        updatedAt: confirmedAt,
-      ),
-    );
-    next.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    await _write(scope, scopeId.trim(), next);
-    return true;
+      final next = records.toList(growable: true);
+      next[index] = _validateAndNormalize(
+        next[index].copyWith(
+          status: AssistantMemoryStatus.confirmed,
+          source: confirmedSource,
+          updatedAt: confirmedAt,
+        ),
+      );
+      next.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _write(scope, normalizedScopeId, next);
+      return true;
+    });
   }
 
   Future<bool> remove({
@@ -147,16 +187,19 @@ class AssistantDurableMemoryStore {
     required String scopeId,
     required String recordKey,
   }) async {
-    final records = await load(
-      scope: scope,
-      scopeId: scopeId,
-      confirmedOnly: false,
-    );
-    final next =
-        records.where((item) => item.recordKey != recordKey).toList();
-    if (next.length == records.length) return false;
-    await _write(scope, scopeId.trim(), next);
-    return true;
+    final normalizedScopeId = scopeId.trim();
+    return _withScopeWriteLock(scope, normalizedScopeId, () async {
+      final records = await load(
+        scope: scope,
+        scopeId: normalizedScopeId,
+        confirmedOnly: false,
+      );
+      final next =
+          records.where((item) => item.recordKey != recordKey).toList();
+      if (next.length == records.length) return false;
+      await _write(scope, normalizedScopeId, next);
+      return true;
+    });
   }
 
   Future<void> _write(

@@ -55,4 +55,5 @@ jobs:
           test/core/runtime/inference/nemotron_prompt_template_test.dart
           test/core/runtime/inference/local_prompt_templates_test.dart
           test/core/runtime/inference/inference_service_test.dart
+          test/core/memory/assistant_durable_memory_store_test.dart
           test/core/system/update
