@@ -30,7 +30,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  setUp(() {
+  setUp(() async {
     memory = AssistantDurableMemoryService(
       store: AssistantDurableMemoryStore(
         persistence: _MemoryPersistence(),
@@ -39,6 +39,9 @@ void main() {
     capture = AssistantDurableMemoryCaptureService(
       memoryService: memory,
     );
+    // Drain the real-zone initialization futures before testWidgets enters
+    // FakeAsync. Otherwise the capture queue cannot progress under pump.
+    await capture.loadReviewablePreferenceCandidates();
   });
 
   testWidgets('no proposal is written without per-action consent',
