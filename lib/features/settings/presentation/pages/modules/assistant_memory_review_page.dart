@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:flutter/material.dart';
+import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 
 /// Explicit, developer-only preview for reviewing local memory proposals.
 ///
@@ -28,6 +29,9 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
   bool _busy = false;
   bool _manualConsent = false;
 
+  String _t(String key) =>
+      AppLocalizations(Localizations.localeOf(context)).t('memory_review_$key');
+
   @override
   void initState() {
     super.initState();
@@ -49,16 +53,16 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       if (!mounted) return;
       setState(() => _pending = pending);
     } on Object catch (_) {
-      _message('Impossibile leggere le proposte locali.');
+      _message('read_error');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _message(String message) {
+  void _message(String key) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(content: Text(_t(key))),
     );
   }
 
@@ -74,13 +78,13 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       if (ok) {
         _text.clear();
         setState(() => _manualConsent = false);
-        _message('Proposta salvata solo per revisione.');
+        _message('saved');
       } else {
-        _message('Frase non riconosciuta: nessun ricordo salvato.');
+        _message('unrecognized');
       }
       await _refresh();
     } on Object catch (_) {
-      _message('Salvataggio della proposta non riuscito.');
+      _message('save_error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -93,25 +97,25 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     return showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Correggi la proposta'),
+        title: Text(_t('edit_title')),
         content: TextFormField(
           initialValue: record.content,
           onChanged: (value) => proposed = value,
           maxLines: 2,
           maxLength: 110,
-          decoration: const InputDecoration(
-            helperText: 'Sono ammesse solo preferenze sulle risposte.',
+          decoration: InputDecoration(
+            helperText: _t('allowed'),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Annulla'),
+            child: Text(_t('cancel')),
           ),
           FilledButton(
             onPressed: () =>
                 Navigator.pop(dialogContext, proposed.trim()),
-            child: const Text('Continua'),
+            child: Text(_t('continue')),
           ),
         ],
       ),
@@ -127,20 +131,20 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(approve ? 'Confermi il ricordo?' : 'Scartare la proposta?'),
+        title: Text(approve ? _t('confirm_title') : _t('reject_title')),
         content: Text(
           approve
               ? (correctedContent ?? record.content)
-              : 'Questa proposta verrà eliminata, senza toccare altri ricordi.',
+              : _t('reject_body'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Annulla'),
+            child: Text(_t('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(approve ? 'Conferma' : 'Scarta'),
+            child: Text(approve ? _t('confirm') : _t('reject')),
           ),
         ],
       ),
@@ -156,11 +160,11 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       );
       if (!mounted) return;
       _message(changed
-          ? (approve ? 'Ricordo confermato.' : 'Proposta scartata.')
-          : 'La proposta è cambiata: ricarica prima di decidere.');
+          ? (approve ? 'confirmed' : 'rejected')
+          : 'stale');
       await _refresh();
     } on Object catch (_) {
-      _message('Operazione non completata: nessun esito confermato.');
+      _message('operation_error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -169,30 +173,29 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Revisione memoria (test)')),
+      appBar: AppBar(title: Text(_t('title'))),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text(
-              'Anteprima sviluppatore, soltanto su questo dispositivo. '
-              'Nessuna conversazione viene analizzata automaticamente. '
-              'Le proposte non sono usate nelle risposte finché non le confermi.',
+            Text(
+              _t('intro'),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Prova manuale facoltativa',
-              style: TextStyle(fontWeight: FontWeight.bold),
+            Text(
+              _t('manual'),
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _text,
               enabled: !_busy,
               maxLength: 110,
-              decoration: const InputDecoration(
-                labelText: 'La tua preferenza',
-                hintText: 'Preferisco risposte brevi',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: _t('preference'),
+                hintText: _t('hint'),
+                helperText: _t('italian_only'),
+                border: const OutlineInputBorder(),
               ),
             ),
             CheckboxListTile(
@@ -200,29 +203,29 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
               onChanged: _busy
                   ? null
                   : (v) => setState(() => _manualConsent = v ?? false),
-              title: const Text('Autorizzo questa singola proposta di prova'),
-              subtitle: const Text(
-                'Il consenso non rimane attivo per le prossime proposte.',
+              title: Text(_t('consent')),
+              subtitle: Text(
+                _t('consent_note'),
               ),
               controlAffinity: ListTileControlAffinity.leading,
               contentPadding: EdgeInsets.zero,
             ),
             FilledButton(
               onPressed: _busy || !_manualConsent ? null : _propose,
-              child: const Text('Proponi per revisione'),
+              child: Text(_t('propose')),
             ),
             const Divider(height: 32),
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Ricordi proposti',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    _t('pending'),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
                 IconButton(
                   onPressed: _busy || _loading ? null : _refresh,
-                  tooltip: 'Aggiorna proposte',
+                  tooltip: _t('refresh'),
                   icon: const Icon(Icons.refresh),
                 ),
               ],
@@ -230,9 +233,9 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
             if (_loading)
               const Center(child: CircularProgressIndicator())
             else if (_pending.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('Nessuna proposta in attesa.'),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text(_t('empty')),
               )
             else
               for (final record in _pending)
@@ -252,7 +255,7 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
                               onPressed: _busy
                                   ? null
                                   : () => _resolve(record, approve: true),
-                              child: const Text('Approva'),
+                              child: Text(_t('approve')),
                             ),
                             OutlinedButton(
                               onPressed: _busy
@@ -266,13 +269,13 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
                                         correctedContent: corrected,
                                       );
                                     },
-                              child: const Text('Correggi'),
+                              child: Text(_t('edit')),
                             ),
                             TextButton(
                               onPressed: _busy
                                   ? null
                                   : () => _resolve(record, approve: false),
-                              child: const Text('Scarta'),
+                              child: Text(_t('reject')),
                             ),
                           ],
                         ),
@@ -281,11 +284,9 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
                   ),
                 ),
             const SizedBox(height: 12),
-            const Text(
-              'Il test usa solo la memoria SQLite locale. '
-              'Il reset selettivo è disponibile nella Danger Zone. '
-              'Non abilitare questa anteprima su dispositivi condivisi.',
-              style: TextStyle(fontSize: 12),
+            Text(
+              _t('footer'),
+              style: const TextStyle(fontSize: 12),
             ),
           ],
         ),
