@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
@@ -21,6 +23,14 @@ class _MemoryPersistence implements AssistantDurableMemoryPersistence {
   }
 }
 
+class _PendingReadPersistence implements AssistantDurableMemoryPersistence {
+  final readResult = Completer<String?>();
+  @override
+  Future<String?> read(String key) => readResult.future;
+  @override
+  Future<void> write(String key, String value) async {}
+}
+
 void main() {
   late AssistantDurableMemoryService memory;
   late AssistantDurableMemoryCaptureService capture;
@@ -41,10 +51,10 @@ void main() {
   }
 
   // Construct queued Futures in the widget test's own FakeAsync zone.
-  void initializeMemory() {
+  void initializeMemory({AssistantDurableMemoryPersistence? persistence}) {
     memory = AssistantDurableMemoryService(
       store: AssistantDurableMemoryStore(
-        persistence: _MemoryPersistence(),
+        persistence: persistence ?? _MemoryPersistence(),
       ),
     );
     capture = AssistantDurableMemoryCaptureService(
@@ -246,5 +256,19 @@ void main() {
       expect(await capture.loadReviewablePreferenceCandidates(), hasLength(1));
     });
   }
+
+  testWidgets('late storage error after leaving review does not use disposed context',
+      (tester) async {
+    final persistence = _PendingReadPersistence();
+    initializeMemory(persistence: persistence);
+    await tester.pumpWidget(MaterialApp(
+      home: AssistantMemoryReviewPage(captureService: capture),
+    ));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    persistence.readResult.completeError(StateError('synthetic read failure'));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
 
 }

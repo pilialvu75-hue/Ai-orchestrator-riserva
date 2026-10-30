@@ -53,16 +53,16 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       if (!mounted) return;
       setState(() => _pending = pending);
     } on Object catch (_) {
-      _message(_t('read_error'));
+      _message('read_error');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _message(String message) {
+  void _message(String key) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(content: Text(_t(key))),
     );
   }
 
@@ -78,13 +78,13 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       if (ok) {
         _text.clear();
         setState(() => _manualConsent = false);
-        _message(_t('saved'));
+        _message('saved');
       } else {
-        _message(_t('unrecognized'));
+        _message('unrecognized');
       }
       await _refresh();
     } on Object catch (_) {
-      _message(_t('save_error'));
+      _message('save_error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -160,11 +160,11 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       );
       if (!mounted) return;
       _message(changed
-          ? (approve ? _t('confirmed') : _t('rejected'))
-          : _t('stale'));
+          ? (approve ? 'confirmed' : 'rejected')
+          : 'stale');
       await _refresh();
     } on Object catch (_) {
-      _message(_t('operation_error'));
+      _message('operation_error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
