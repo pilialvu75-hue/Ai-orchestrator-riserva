@@ -10,6 +10,134 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 void main() {
   group('WorkshopProposalWorkspaceStager', () {
+    test('missing relative main import is rejected before workspace mutation',
+        () async {
+      final gateway = _RecordingGateway(files: {'lib/main.dart': 'old'});
+      final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'missing-relative-main',
+            title: 'Repair',
+            instruction: 'Repair main',
+            targetFiles: ['lib/main.dart'],
+          ),
+          gateway: gateway);
+      await session.initialize();
+      expect(
+          () => const WorkshopProposalWorkspaceStager().stage(
+              session: session,
+              responseText: jsonEncode({
+                'explanation': 'repair',
+                'changes': [
+                  {
+                    'path': 'lib/main.dart',
+                    'type': 'modification',
+                    'content': "import '../main.dart'; void main() {}"
+                  }
+                ]
+              })),
+          throwsFormatException);
+      expect(session.workspace.read('lib/main.dart'), 'old');
+      expect(session.hasChanges, isFalse);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('test may import real app from the parent lib folder', () async {
+      final gateway = _RecordingGateway(files: {
+        'lib/main.dart': 'class App {}',
+        'test/app_test.dart': 'old',
+      });
+      final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'valid-parent-import',
+            title: 'Test',
+            instruction: 'Test app',
+            targetFiles: ['test/app_test.dart'],
+          ),
+          gateway: gateway);
+      await session.initialize();
+      const WorkshopProposalWorkspaceStager().stage(
+          session: session,
+          responseText: jsonEncode({
+            'explanation': 'test real app',
+            'changes': [
+              {
+                'path': 'test/app_test.dart',
+                'type': 'modification',
+                'content': "import '../lib/main.dart'; void main() {}"
+              }
+            ]
+          }));
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('relative dependency added in the same proposal is available',
+        () async {
+      final gateway = _RecordingGateway(files: {});
+      final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'same-proposal-import',
+            title: 'App',
+            instruction: 'Create app',
+            targetFiles: ['lib/main.dart', 'lib/helper.dart'],
+          ),
+          gateway: gateway);
+      await session.initialize();
+      const WorkshopProposalWorkspaceStager().stage(
+          session: session,
+          responseText: jsonEncode({
+            'explanation': 'app with helper',
+            'changes': [
+              {
+                'path': 'lib/main.dart',
+                'type': 'addition',
+                'content': "import 'helper.dart'; void main() {}"
+              },
+              {
+                'path': 'lib/helper.dart',
+                'type': 'addition',
+                'content': 'class Helper {}'
+              }
+            ]
+          }));
+      expect(session.status, WorkspaceSessionStatus.review);
+      expect(gateway.writeCalls, 0);
+    });
+
+    test('a deleted relative dependency cannot satisfy a changed source import',
+        () async {
+      final gateway = _RecordingGateway(files: {
+        'lib/main.dart': 'old',
+        'lib/helper.dart': 'class Helper {}',
+      });
+      final session = WorkspaceSession(
+          request: const WorkshopRequest(
+            id: 'deleted-dependency',
+            title: 'App',
+            instruction: 'Modify app',
+            targetFiles: ['lib/main.dart', 'lib/helper.dart'],
+          ),
+          gateway: gateway);
+      await session.initialize();
+      expect(
+          () => const WorkshopProposalWorkspaceStager().stage(
+              session: session,
+              responseText: jsonEncode({
+                'explanation': 'bad deletion',
+                'changes': [
+                  {
+                    'path': 'lib/main.dart',
+                    'type': 'modification',
+                    'content': "import 'helper.dart'; void main() {}"
+                  },
+                  {'path': 'lib/helper.dart', 'type': 'deletion'}
+                ]
+              })),
+          throwsFormatException);
+      expect(session.workspace.contains('lib/helper.dart'), isTrue);
+      expect(session.hasChanges, isFalse);
+    });
+
     test(
         'decodes Engineer output into VirtualWorkspace and enters review without remote writes',
         () async {
@@ -364,7 +492,12 @@ void main() {
     ]) {
       test('keeps import-looking text in comments/strings legal: $harmlessCode',
           () async {
-        final gateway = _RecordingGateway(files: <String, String>{});
+        final gateway = _RecordingGateway(files: <String, String>{
+          'lib/stub.dart': 'class Stub {}',
+          'lib/io.dart': 'class Io {}',
+          'lib/web.dart': 'class Web {}',
+          'lib/widgets/star.dart': 'class Star {}',
+        });
         final session = WorkspaceSession(
           request: const WorkshopRequest(
             id: 'ignore-non-directive-import',
@@ -549,7 +682,10 @@ void main() {}''',
     ]) {
       test('does not classify interpolations or legal conditional URIs: $interpolationSource',
           () async {
-        final gateway = _RecordingGateway(files: <String, String>{});
+        final gateway = _RecordingGateway(files: <String, String>{
+          'lib/stub.dart': 'class Stub {}',
+          'lib/io_stub.dart': 'class IoStub {}',
+        });
         final session = WorkspaceSession(
           request: const WorkshopRequest(
             id: 'interpolated-source',
