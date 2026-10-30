@@ -20,6 +20,7 @@ enum AssistantMemoryStatus {
 
 enum AssistantMemorySource {
   userExplicit,
+  userStatement,
   appState,
   verifiedTest,
   projectEvent,
