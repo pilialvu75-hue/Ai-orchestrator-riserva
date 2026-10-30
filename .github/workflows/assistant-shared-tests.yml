@@ -7,6 +7,7 @@ on:
       - 'lib/core/**'
       - 'lib/native/runtime/windows/**'
       - 'test/core/**'
+      - 'test/features/settings/presentation/pages/modules/memory_review_page_test.dart'
       - 'pubspec.*'
       - '.github/workflows/assistant-shared-tests.yml'
   pull_request:
@@ -15,6 +16,7 @@ on:
       - 'lib/core/**'
       - 'lib/native/runtime/windows/**'
       - 'test/core/**'
+      - 'test/features/settings/presentation/pages/modules/memory_review_page_test.dart'
       - 'pubspec.*'
       - '.github/workflows/assistant-shared-tests.yml'
   workflow_dispatch:
@@ -58,4 +60,5 @@ jobs:
           test/core/memory/assistant_durable_memory_store_test.dart
           test/core/memory/assistant_memory_sqlite_restart_integration_test.dart
           test/core/memory/assistant_memory_preference_candidate_test.dart
+          test/features/settings/presentation/pages/modules/memory_review_page_test.dart
           test/core/system/update
