@@ -112,6 +112,43 @@ void main() {
     expect(find.text('Nessuna proposta in attesa.'), findsOneWidget);
   });
 
+  testWidgets('correction requires review and saves only approved text',
+      (tester) async {
+    await capture.proposeUserPreferenceCandidate(
+      userPrompt: 'Preferisco risposte brevi',
+      consentEnabled: true,
+    );
+    await showPage(tester);
+    await tester.ensureVisible(find.text('Correggi'));
+    await tester.tap(find.text('Correggi'));
+    await tester.pumpAndSettle();
+    expect(find.text('Correggi la proposta'), findsOneWidget);
+
+    await tester.enterText(
+      find.byType(TextFormField),
+      'Preferisco le risposte dettagliate',
+    );
+    await tester.tap(find.text('Continua'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confermi il ricordo?'), findsOneWidget);
+    expect(
+      await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ),
+      isEmpty,
+    );
+    await tester.tap(find.text('Conferma'));
+    await tester.pumpAndSettle();
+
+    final accepted = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    );
+    expect(accepted.single.content, 'Preferisco le risposte dettagliate');
+    expect(find.text('Nessuna proposta in attesa.'), findsOneWidget);
+  });
+
   testWidgets('reject requires confirmation and preserves other facts',
       (tester) async {
     await capture.proposeUserPreferenceCandidate(
