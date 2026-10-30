@@ -57,4 +57,5 @@ jobs:
           test/core/runtime/inference/inference_service_test.dart
           test/core/memory/assistant_durable_memory_store_test.dart
           test/core/memory/assistant_memory_sqlite_restart_integration_test.dart
+          test/core/memory/assistant_memory_preference_candidate_test.dart
           test/core/system/update

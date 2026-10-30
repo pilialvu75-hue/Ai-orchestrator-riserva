@@ -131,15 +131,43 @@ class AssistantDurableMemoryStore {
           confirmedOnly: false,
         );
 
+        // A tentative suggestion must never replace an accepted fact
+        // with the same logical key, even if it has a newer timestamp.
+        // Out-of-order tentative callbacks must not replace newer drafts.
+        if (normalized.status == AssistantMemoryStatus.candidate) {
+          for (final previous in existing) {
+            if (previous.recordKey == normalized.recordKey &&
+                (previous.status == AssistantMemoryStatus.confirmed ||
+                 previous.updatedAt > normalized.updatedAt)) {
+              return;
+            }
+          }
+        }
+
         final next = <AssistantDurableMemoryRecord>[
           normalized,
           ...existing.where((item) => item.recordKey != normalized.recordKey),
         ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
+        // A stream of unconfirmed suggestions must not evict established
+        // memories from the bounded per-scope SQLite record set.
+        final accepted = next
+            .where((item) => item.status == AssistantMemoryStatus.confirmed)
+            .take(AssistantDurableMemoryPolicy.maxRecordsPerScope)
+            .toList();
+        final pending = next
+            .where((item) => item.status == AssistantMemoryStatus.candidate)
+            .take(AssistantDurableMemoryPolicy.maxRecordsPerScope -
+                accepted.length);
+        final bounded = <AssistantDurableMemoryRecord>[
+          ...accepted,
+          ...pending,
+        ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
         await _write(
           normalized.scope,
           normalized.scopeId,
-          next.take(AssistantDurableMemoryPolicy.maxRecordsPerScope).toList(),
+          bounded,
         );
       },
     );

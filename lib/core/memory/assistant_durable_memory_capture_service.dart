@@ -90,6 +90,61 @@ final class AssistantDurableMemoryCaptureService {
     return operation;
   }
 
+  // A deliberately closed vocabulary for a future opt-in review surface.
+  // No model output, imported content or arbitrary personal details.
+  static final RegExp _answerPreference = RegExp(
+    r'^preferisco (?:le )?risposte '
+    r'(brevi|dettagliate|in italiano|in francese|in inglese|in spagnolo)[.!]?$',
+    caseSensitive: false,
+  );
+
+  /// Stage a small user-stated preference as a *candidate*, never confirmed.
+  ///
+  /// Disabled by default. A future user-facing consent/review flow may call
+  /// this for direct, attachment-free ordinary user prompts; it must not
+  /// pass model output, documents or a system/worker prompt.
+  Future<bool> proposeUserPreferenceCandidate({
+    required String userPrompt,
+    bool consentEnabled = false,
+  }) {
+    if (!consentEnabled || _resetInProgress) {
+      return Future<bool>.value(false);
+    }
+
+    final operation = _pendingWrites.then((_) async {
+      if (_resetInProgress) return false;
+      final input = userPrompt.trim();
+      if (input.length > 110 ||
+          input.contains('\n') ||
+          input.contains('\r') ||
+          _secrets.hasMatch(input)) {
+        return false;
+      }
+      final match = _answerPreference.firstMatch(input);
+      if (match == null) return false;
+
+      final preference = match.group(1)!.toLowerCase();
+      final language = preference.startsWith('in ');
+      await _memoryService.recordUserCandidate(
+        recordKey: language
+            ? 'suggestion.answer_language'
+            : 'suggestion.answer_length',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.preference,
+        content: input.replaceFirst(RegExp(r'[.!]$'), ''),
+        updatedAt: _now(),
+      );
+      return true;
+    });
+
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
   Future<bool> _applyExplicitUserInstruction({
     required String sessionId,
     required String userPrompt,
