@@ -30,7 +30,8 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  setUp(() async {
+  // Construct queued Futures in the widget test's own FakeAsync zone.
+  void initializeMemory() {
     memory = AssistantDurableMemoryService(
       store: AssistantDurableMemoryStore(
         persistence: _MemoryPersistence(),
@@ -39,13 +40,11 @@ void main() {
     capture = AssistantDurableMemoryCaptureService(
       memoryService: memory,
     );
-    // Drain the real-zone initialization futures before testWidgets enters
-    // FakeAsync. Otherwise the capture queue cannot progress under pump.
-    await capture.loadReviewablePreferenceCandidates();
-  });
+  }
 
   testWidgets('no proposal is written without per-action consent',
       (tester) async {
+    initializeMemory();
     await showPage(tester);
     expect(find.text('Nessuna proposta in attesa.'), findsOneWidget);
     await tester.enterText(
@@ -69,6 +68,7 @@ void main() {
 
   testWidgets('explicit proposal and approval confirm local memory',
       (tester) async {
+    initializeMemory();
     await showPage(tester);
     await tester.enterText(
       find.byType(TextField).first,
@@ -117,6 +117,7 @@ void main() {
 
   testWidgets('correction requires review and saves only approved text',
       (tester) async {
+    initializeMemory();
     await capture.proposeUserPreferenceCandidate(
       userPrompt: 'Preferisco risposte brevi',
       consentEnabled: true,
@@ -154,6 +155,7 @@ void main() {
 
   testWidgets('reject requires confirmation and preserves other facts',
       (tester) async {
+    initializeMemory();
     await capture.proposeUserPreferenceCandidate(
       userPrompt: 'Preferisco risposte dettagliate',
       consentEnabled: true,
