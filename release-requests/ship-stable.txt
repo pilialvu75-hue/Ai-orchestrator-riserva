@@ -1,2 +1,2 @@
 channel=stable
-main_sha=71497e37e6e0fc17816e3fc2b381112f25505dfa
+main_sha=6ce4b5a3860309b09e2b5ecf128696cc02cd967c
