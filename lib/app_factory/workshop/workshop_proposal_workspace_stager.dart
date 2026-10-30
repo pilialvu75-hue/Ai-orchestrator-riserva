@@ -1,3 +1,5 @@
+import 'package:path/path.dart' as p;
+
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_change_proposal_decoder.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
@@ -37,6 +39,7 @@ final class WorkshopProposalWorkspaceStager {
       proposal: proposal,
     );
     _validateDartNativeImports(proposal);
+    _validateRelativeDartImports(session, proposal);
 
     final alreadyHasStagedChanges = session.hasChanges;
     if (proposal.isNotEmpty &&
@@ -60,6 +63,40 @@ final class WorkshopProposalWorkspaceStager {
     }
 
     return proposal;
+  }
+
+  // Resolve against the proposed workspace before mutating it. A model verdict
+  // cannot make a missing relative source file available to the compiler.
+  static void _validateRelativeDartImports(
+      WorkspaceSession session, WorkshopChangeProposal proposal) {
+    final paths = session.workspace.paths.toSet();
+    for (final change in proposal.changes) {
+      if (change.isDeletion) {
+        paths.remove(change.path);
+      } else {
+        paths.add(change.path);
+      }
+    }
+    for (final change in proposal.changes) {
+      if (change.isDeletion || !change.path.endsWith('.dart')) continue;
+      for (final raw in _dartImportUris(change.afterContent ?? '')) {
+        final uri = Uri.tryParse(raw);
+        if (uri == null || uri.hasScheme || !uri.path.endsWith('.dart')) {
+          continue;
+        }
+        final resolved = p.posix
+            .normalize(p.posix.join(p.posix.dirname(change.path), uri.path));
+        if (p.posix.isAbsolute(resolved) ||
+            resolved == '..' ||
+            resolved.startsWith('../') ||
+            !paths.contains(resolved)) {
+          throw FormatException(
+              'Workshop Dart relative import "$raw" from "${change.path}" '
+              'does not resolve to an available proposed workspace file.',
+              change.path);
+        }
+      }
+    }
   }
 
   // Token-aware, bounded lexical scan: reject only actual Dart import
