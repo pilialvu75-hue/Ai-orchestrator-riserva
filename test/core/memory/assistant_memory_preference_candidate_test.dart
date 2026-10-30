@@ -177,6 +177,34 @@ void main() {
         'Preferisco risposte dettagliate');
   });
 
+  test('unconfirmed candidate flood cannot evict confirmed facts', () async {
+    for (var i = 0; i < AssistantDurableMemoryPolicy.maxRecordsPerScope; i++) {
+      await service.recordConfirmed(
+        recordKey: 'accepted.$i',
+        scope: AssistantMemoryScope.user,
+        scopeId: userScope,
+        kind: AssistantMemoryKind.fact,
+        content: 'Verified fact $i',
+        source: AssistantMemorySource.verifiedTest,
+        updatedAt: i,
+      );
+    }
+    await service.recordUserCandidate(
+      recordKey: 'suggestion.answer_length',
+      scope: AssistantMemoryScope.user,
+      scopeId: userScope,
+      kind: AssistantMemoryKind.preference,
+      content: 'Preferisco risposte brevi',
+      updatedAt: 9999,
+    );
+
+    final accepted = await confirmed();
+    expect(accepted, hasLength(AssistantDurableMemoryPolicy.maxRecordsPerScope));
+    expect(accepted.map((item) => item.recordKey).toSet(),
+        containsAll(<String>['accepted.0', 'accepted.63']));
+    expect(await candidates(), isEmpty);
+  });
+
   test('only an external user approval can promote the candidate', () async {
     await capture.proposeUserPreferenceCandidate(
       userPrompt: 'Preferisco risposte brevi',
