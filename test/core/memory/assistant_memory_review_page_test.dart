@@ -6,6 +6,8 @@ import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart'
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/assistant_memory_review_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 
 class _MemoryPersistence implements AssistantDurableMemoryPersistence {
   final Map<String, String> values = <String, String>{};
@@ -23,8 +25,16 @@ void main() {
   late AssistantDurableMemoryService memory;
   late AssistantDurableMemoryCaptureService capture;
 
-  Future<void> showPage(WidgetTester tester) async {
+  Future<void> showPage(WidgetTester tester, {String language = 'it'}) async {
     await tester.pumpWidget(MaterialApp(
+      locale: Locale(language),
+      supportedLocales: const [Locale('it'), Locale('en'), Locale('fr'), Locale('es')],
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       home: AssistantMemoryReviewPage(captureService: capture),
     ));
     await tester.pumpAndSettle();
@@ -201,4 +211,40 @@ void main() {
     );
     expect(accepted.single.content, 'Ricordo già confermato');
   });
+  for (final language in ['it', 'en', 'fr', 'es']) {
+    testWidgets('review labels and explicit Italian input in $language',
+        (tester) async {
+      initializeMemory();
+      final strings = AppLocalizations(Locale(language));
+      await showPage(tester, language: language);
+      expect(find.text(strings.t('memory_review_title')), findsOneWidget);
+      expect(find.text(strings.t('memory_review_italian_only')), findsOneWidget);
+      final submit = find.widgetWithText(
+        FilledButton, strings.t('memory_review_propose'),
+      );
+      expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+      await tester.enterText(find.byType(TextField).first,
+          'Preferisco risposte brevi');
+      await tester.tap(find.text(strings.t('memory_review_consent')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(submit);
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+      expect(tester.widget<CheckboxListTile>(
+          find.byType(CheckboxListTile)).value, isFalse);
+      expect(await capture.loadReviewablePreferenceCandidates(), hasLength(1));
+      expect(await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ), isEmpty);
+      await tester.ensureVisible(find.text(strings.t('memory_review_approve')));
+      await tester.tap(find.text(strings.t('memory_review_approve')));
+      await tester.pumpAndSettle();
+      expect(find.text(strings.t('memory_review_confirm_title')), findsOneWidget);
+      await tester.tap(find.text(strings.t('memory_review_cancel')));
+      await tester.pumpAndSettle();
+      expect(await capture.loadReviewablePreferenceCandidates(), hasLength(1));
+    });
+  }
+
 }

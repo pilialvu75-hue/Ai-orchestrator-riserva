@@ -394,8 +394,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 if (_developerMode) ...[
                   _ModuleCard(
                     icon: Icons.fact_check_outlined,
-                    title: 'Revisione memoria (test)',
-                    subtitle: 'Approva, correggi o scarta proposte locali',
+                    title: l10n.t('memory_review_title'),
+                    subtitle: l10n.t('memory_review_subtitle'),
                     onTap: () {
                       Navigator.push(
                         context,
