@@ -119,9 +119,9 @@ class AssistantDurableMemoryStore {
     );
   }
 
-  Future<void> upsert(AssistantDurableMemoryRecord record) {
+  Future<void> upsert(AssistantDurableMemoryRecord record) async {
     final normalized = _validateAndNormalize(record);
-    return _withScopeWriteLock(
+    await _withScopeWriteLock(
       normalized.scope,
       normalized.scopeId,
       () async {
@@ -151,7 +151,7 @@ class AssistantDurableMemoryStore {
     required String recordKey,
     required int confirmedAt,
     required AssistantMemorySource confirmedSource,
-  }) {
+  }) async {
     if (confirmedSource == AssistantMemorySource.modelCandidate) {
       throw ArgumentError(
         'confirmedSource must represent an external confirmation',
@@ -159,7 +159,7 @@ class AssistantDurableMemoryStore {
     }
 
     final normalizedScopeId = scopeId.trim();
-    return _withScopeWriteLock(scope, normalizedScopeId, () async {
+    return await _withScopeWriteLock(scope, normalizedScopeId, () async {
       final records = await load(
         scope: scope,
         scopeId: normalizedScopeId,
@@ -186,7 +186,7 @@ class AssistantDurableMemoryStore {
     required AssistantMemoryScope scope,
     required String scopeId,
     required String recordKey,
-  }) {
+  }) async {
     final normalizedScopeId = scopeId.trim();
     return _withScopeWriteLock(scope, normalizedScopeId, () async {
       final records = await load(
