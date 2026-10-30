@@ -131,6 +131,19 @@ class AssistantDurableMemoryStore {
           confirmedOnly: false,
         );
 
+        // A tentative suggestion must never replace an accepted fact
+        // with the same logical key, even if it has a newer timestamp.
+        // Out-of-order tentative callbacks must not replace newer drafts.
+        if (normalized.status == AssistantMemoryStatus.candidate) {
+          for (final previous in existing) {
+            if (previous.recordKey == normalized.recordKey &&
+                (previous.status == AssistantMemoryStatus.confirmed ||
+                 previous.updatedAt > normalized.updatedAt)) {
+              return;
+            }
+          }
+        }
+
         final next = <AssistantDurableMemoryRecord>[
           normalized,
           ...existing.where((item) => item.recordKey != normalized.recordKey),
