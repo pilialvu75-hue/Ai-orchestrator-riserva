@@ -149,10 +149,25 @@ class AssistantDurableMemoryStore {
           ...existing.where((item) => item.recordKey != normalized.recordKey),
         ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
+        // A stream of unconfirmed suggestions must not evict established
+        // memories from the bounded per-scope SQLite record set.
+        final accepted = next
+            .where((item) => item.status == AssistantMemoryStatus.confirmed)
+            .take(AssistantDurableMemoryPolicy.maxRecordsPerScope)
+            .toList();
+        final pending = next
+            .where((item) => item.status == AssistantMemoryStatus.candidate)
+            .take(AssistantDurableMemoryPolicy.maxRecordsPerScope -
+                accepted.length);
+        final bounded = <AssistantDurableMemoryRecord>[
+          ...accepted,
+          ...pending,
+        ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
         await _write(
           normalized.scope,
           normalized.scopeId,
-          next.take(AssistantDurableMemoryPolicy.maxRecordsPerScope).toList(),
+          bounded,
         );
       },
     );
