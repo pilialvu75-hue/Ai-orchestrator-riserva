@@ -14,6 +14,8 @@ import 'package:ai_orchestrator/features/settings/presentation/pages/modules/ai_
 import 'package:ai_orchestrator/features/settings/data/services/assistant_data_reset_service.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/diagnostics_console_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/danger_zone_page.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/memory_review_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/language_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/model_management_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/models_page.dart';
@@ -361,6 +363,25 @@ class _SettingsPageState extends State<SettingsPage> {
                       MaterialPageRoute<void>(
                         builder: (_) =>
                             const SystemPromptPage(),
+                      ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 12),
+
+                _ModuleCard(
+                  icon: Icons.fact_check_outlined,
+                  title: 'Proposte di memoria',
+                  subtitle: 'Approva, correggi o scarta i ricordi suggeriti',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => MemoryReviewPage(
+                          captureService:
+                              di.sl<AssistantDurableMemoryCaptureService>(),
+                        ),
                       ),
                     );
                   },
