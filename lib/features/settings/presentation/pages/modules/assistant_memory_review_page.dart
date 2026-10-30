@@ -86,37 +86,36 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     }
   }
 
-  Future<String?> _edit(AssistantDurableMemoryRecord record) async {
-    final controller = TextEditingController(text: record.content);
-    try {
-      return await showDialog<String>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Correggi la proposta'),
-          content: TextField(
-            controller: controller,
-            maxLines: 2,
-            maxLength: 110,
-            decoration: const InputDecoration(
-              helperText: 'Sono ammesse solo preferenze sulle risposte.',
-            ),
+  Future<String?> _edit(AssistantDurableMemoryRecord record) {
+    // Use the field's own lifecycle instead of disposing a controller while
+    // the dialog dismissal animation may still be rendering its last frame.
+    var proposed = record.content;
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Correggi la proposta'),
+        content: TextFormField(
+          initialValue: record.content,
+          onChanged: (value) => proposed = value,
+          maxLines: 2,
+          maxLength: 110,
+          decoration: const InputDecoration(
+            helperText: 'Sono ammesse solo preferenze sulle risposte.',
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Annulla'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, controller.text.trim()),
-              child: const Text('Continua'),
-            ),
-          ],
         ),
-      );
-    } finally {
-      controller.dispose();
-    }
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Annulla'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, proposed.trim()),
+            child: const Text('Continua'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _resolve(
