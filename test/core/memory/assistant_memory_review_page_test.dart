@@ -271,4 +271,119 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+
+  // Confirmed facts are below the manual proposal form in a lazy ListView.
+  // A widget test's small viewport must scroll far enough to build each row.
+  Future<void> revealConfirmed(WidgetTester tester, Finder textFinder) async {
+    await tester.scrollUntilVisible(
+      textFinder,
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.ensureVisible(textFinder);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('confirmed memory needs consent to forget, others survive',
+      (tester) async {
+    initializeMemory();
+    const id = AssistantDurableMemoryContextService.localUserScopeId;
+    await memory.recordConfirmed(
+      recordKey: 'budget',
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+      kind: AssistantMemoryKind.fact,
+      content: 'Il budget è 420',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 21,
+    );
+    await memory.recordConfirmed(
+      recordKey: 'moto',
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+      kind: AssistantMemoryKind.fact,
+      content: 'La moto è rossa',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 22,
+    );
+    await showPage(tester);
+    await revealConfirmed(tester, find.text('Il budget è 420'));
+    expect(find.text('Il budget è 420'), findsOneWidget);
+    final tile = find.ancestor(
+      of: find.text('Il budget è 420'),
+      matching: find.byType(ListTile),
+    );
+    final forgetBudget =
+        find.descendant(of: tile, matching: find.text('Dimentica'));
+    await tester.ensureVisible(forgetBudget);
+    await tester.tap(forgetBudget);
+    await tester.pumpAndSettle();
+    expect(find.text('Dimenticare questo ricordo confermato?'), findsOneWidget);
+    await tester.tap(find.text('Annulla'));
+    await tester.pumpAndSettle();
+    expect(await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+    ), hasLength(2));
+    // Forget only budget by selecting the same reviewed tile.
+    await revealConfirmed(tester, find.text('Il budget è 420'));
+    await tester.ensureVisible(forgetBudget);
+    await tester.tap(forgetBudget);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dimentica').last);
+    await tester.pumpAndSettle();
+    final saved = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+    );
+    expect(saved.map((item) => item.recordKey), <String>['moto']);
+    await revealConfirmed(tester, find.text('La moto è rossa'));
+    expect(find.text('La moto è rossa'), findsOneWidget);
+    expect(find.text('Il budget è 420'), findsNothing);
+  });
+
+  testWidgets('stale displayed fact cannot delete a newer correction',
+      (tester) async {
+    initializeMemory();
+    const id = AssistantDurableMemoryContextService.localUserScopeId;
+    await memory.recordConfirmed(
+      recordKey: 'budget',
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+      kind: AssistantMemoryKind.fact,
+      content: 'Il budget è 420',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 21,
+    );
+    await showPage(tester);
+    await memory.recordConfirmed(
+      recordKey: 'budget',
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+      kind: AssistantMemoryKind.fact,
+      content: 'Il budget è 680',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 22,
+    );
+    await revealConfirmed(tester, find.text('Il budget è 420'));
+    final tile = find.ancestor(
+      of: find.text('Il budget è 420'),
+      matching: find.byType(ListTile),
+    );
+    final forgetBudget =
+        find.descendant(of: tile, matching: find.text('Dimentica'));
+    await tester.ensureVisible(forgetBudget);
+    await tester.tap(forgetBudget);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dimentica').last);
+    await tester.pumpAndSettle();
+    expect((await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+    )).single.content, 'Il budget è 680');
+    await revealConfirmed(tester, find.text('Il budget è 680'));
+    expect(find.text('Il budget è 680'), findsOneWidget);
+  });
+
+
 }

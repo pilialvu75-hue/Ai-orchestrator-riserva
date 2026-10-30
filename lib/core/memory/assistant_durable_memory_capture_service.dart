@@ -227,6 +227,43 @@ final class AssistantDurableMemoryCaptureService {
         : 'suggestion.answer_length');
   }
 
+  /// Developer review of confirmed local-user facts; never other scopes.
+  Future<List<AssistantDurableMemoryRecord>>
+      loadReviewableConfirmedUserMemory() {
+    return _memoryService.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+    );
+  }
+
+  /// Never erase a newer correction using an older displayed record.
+  /// Every deletion requires an explicit per-action user confirmation.
+  Future<bool> forgetReviewedConfirmedUserMemory({
+    required AssistantDurableMemoryRecord reviewed,
+    bool userConfirmed = false,
+  }) {
+    if (!userConfirmed ||
+        _resetInProgress ||
+        reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.scopeId !=
+            AssistantDurableMemoryContextService.localUserScopeId ||
+        reviewed.status != AssistantMemoryStatus.confirmed) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) {
+      if (_resetInProgress) return Future<bool>.value(false);
+      return _memoryService.removeReviewedConfirmedUserMemory(
+        reviewed: reviewed,
+      );
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
   Future<bool> _applyExplicitUserInstruction({
     required String sessionId,
     required String userPrompt,

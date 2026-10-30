@@ -25,6 +25,8 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
   final TextEditingController _text = TextEditingController();
   List<AssistantDurableMemoryRecord> _pending =
       const <AssistantDurableMemoryRecord>[];
+  List<AssistantDurableMemoryRecord> _confirmedMemories =
+      const <AssistantDurableMemoryRecord>[];
   bool _loading = true;
   bool _busy = false;
   bool _manualConsent = false;
@@ -50,8 +52,13 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     try {
       final pending =
           await widget.captureService.loadReviewablePreferenceCandidates();
+      final confirmed =
+          await widget.captureService.loadReviewableConfirmedUserMemory();
       if (!mounted) return;
-      setState(() => _pending = pending);
+      setState(() {
+        _pending = pending;
+        _confirmedMemories = confirmed;
+      });
     } on Object catch (_) {
       _message('read_error');
     } finally {
@@ -170,6 +177,52 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     }
   }
 
+  /// Explicitly confirm the precise version before forgetting.
+  Future<void> _forgetConfirmed(AssistantDurableMemoryRecord record) async {
+    if (_busy || _loading) return;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_t('forget_title')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(_t('forget_body')),
+            const SizedBox(height: 12),
+            Text(record.content),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(_t('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(_t('forget')),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final deleted =
+          await widget.captureService.forgetReviewedConfirmedUserMemory(
+        reviewed: record,
+        userConfirmed: true,
+      );
+      if (!mounted) return;
+      _message(deleted ? 'forgotten' : 'forget_stale');
+      await _refresh();
+    } on Object catch (_) {
+      _message('operation_error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -280,6 +333,30 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
                           ],
                         ),
                       ],
+                    ),
+                  ),
+                ),
+            const Divider(height: 32),
+            Text(
+              _t('saved_title'),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            if (_loading)
+              const Center(child: CircularProgressIndicator())
+            else if (_confirmedMemories.isEmpty)
+              Text(_t('saved_empty'))
+            else
+              for (final record in _confirmedMemories)
+                Card(
+                  key: ValueKey<String>(record.recordKey),
+                  child: ListTile(
+                    title: Text(record.content),
+                    trailing: TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => _forgetConfirmed(record),
+                      child: Text(_t('forget')),
                     ),
                   ),
                 ),

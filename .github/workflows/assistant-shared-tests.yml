@@ -58,5 +58,6 @@ jobs:
           test/core/memory/assistant_durable_memory_store_test.dart
           test/core/memory/assistant_memory_sqlite_restart_integration_test.dart
           test/core/memory/assistant_memory_preference_candidate_test.dart
+          test/core/memory/assistant_memory_selective_forget_test.dart
           test/core/memory/assistant_memory_review_page_test.dart
           test/core/system/update
