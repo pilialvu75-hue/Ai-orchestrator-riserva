@@ -14,6 +14,8 @@ import 'package:ai_orchestrator/features/settings/presentation/pages/modules/ai_
 import 'package:ai_orchestrator/features/settings/data/services/assistant_data_reset_service.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/diagnostics_console_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/danger_zone_page.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/assistant_memory_review_page.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/language_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/model_management_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/models_page.dart';
@@ -386,6 +388,28 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
 
                 const SizedBox(height: 12),
+
+                // Explicit test-only page; not displayed to normal users.
+                // This does not turn on conversational memory extraction.
+                if (_developerMode) ...[
+                  _ModuleCard(
+                    icon: Icons.fact_check_outlined,
+                    title: 'Revisione memoria (test)',
+                    subtitle: 'Approva, correggi o scarta proposte locali',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => AssistantMemoryReviewPage(
+                            captureService:
+                                di.sl<AssistantDurableMemoryCaptureService>(),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
 
                 // ── Developer Tools ────────────────────────────────────────────
                 _ModuleCard(
