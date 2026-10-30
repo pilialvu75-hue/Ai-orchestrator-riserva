@@ -272,6 +272,47 @@ class AssistantDurableMemoryStore {
     });
   }
 
+  /// Deletes only the exact confirmed user-memory snapshot reviewed.
+  /// Concurrent writes in this store serialize through the same scope lock.
+  Future<bool> removeReviewedConfirmedUserMemory({
+    required AssistantDurableMemoryRecord reviewed,
+  }) {
+    if (reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.status != AssistantMemoryStatus.confirmed ||
+        reviewed.scopeId.trim().isEmpty) {
+      return Future<bool>.value(false);
+    }
+    return _withScopeWriteLock(reviewed.scope, reviewed.scopeId.trim(),
+        () async {
+      final records = await load(
+        scope: reviewed.scope,
+        scopeId: reviewed.scopeId.trim(),
+        confirmedOnly: false,
+      );
+      final index = records.indexWhere(
+        (item) => item.recordKey == reviewed.recordKey,
+      );
+      if (index < 0) return false;
+      final current = records[index];
+      // Include content, source, transitions and time: timestamp alone can
+      // collide with another write in the same millisecond.
+      if (current.status != AssistantMemoryStatus.confirmed ||
+          current.scopeId != reviewed.scopeId ||
+          current.kind != reviewed.kind ||
+          current.source != reviewed.source ||
+          current.updatedAt != reviewed.updatedAt ||
+          current.content != reviewed.content ||
+          current.before != reviewed.before ||
+          current.after != reviewed.after ||
+          current.reason != reviewed.reason) {
+        return false;
+      }
+      final next = records.toList(growable: true)..removeAt(index);
+      await _write(reviewed.scope, reviewed.scopeId.trim(), next);
+      return true;
+    });
+  }
+
   Future<bool> remove({
     required AssistantMemoryScope scope,
     required String scopeId,
