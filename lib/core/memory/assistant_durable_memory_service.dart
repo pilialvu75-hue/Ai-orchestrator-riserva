@@ -51,6 +51,50 @@ class AssistantDurableMemoryService {
     );
   }
 
+  /// User-originated suggestion, not an instruction to remember permanently.
+  ///
+  /// The suggestion stays invisible to confirmed-memory retrieval until
+  /// a separate, explicit user review confirms it.
+  Future<void> recordUserCandidate({
+    required String recordKey,
+    required AssistantMemoryScope scope,
+    required String scopeId,
+    required AssistantMemoryKind kind,
+    required String content,
+    required int updatedAt,
+  }) {
+    return _store.upsert(
+      AssistantDurableMemoryRecord(
+        recordKey: recordKey,
+        scope: scope,
+        scopeId: scopeId,
+        kind: kind,
+        content: content,
+        source: AssistantMemorySource.userStatement,
+        updatedAt: updatedAt,
+        status: AssistantMemoryStatus.candidate,
+      ),
+    );
+  }
+
+  /// Review-only read; ordinary inference must continue using loadConfirmed.
+  Future<List<AssistantDurableMemoryRecord>> loadCandidates({
+    required AssistantMemoryScope scope,
+    required String scopeId,
+    int limit = defaultReadLimit,
+  }) async {
+    if (limit <= 0) return const <AssistantDurableMemoryRecord>[];
+    final records = await _store.load(
+      scope: scope,
+      scopeId: scopeId,
+      confirmedOnly: false,
+    );
+    return List<AssistantDurableMemoryRecord>.unmodifiable(
+      records.where((item) => item.status == AssistantMemoryStatus.candidate)
+          .take(limit),
+    );
+  }
+
   Future<void> recordModelCandidate({
     required String recordKey,
     required AssistantMemoryScope scope,
