@@ -185,6 +185,13 @@ class AssistantDurableMemoryService {
     );
   }
 
+  /// Owner-reviewed, compare-and-delete of a specific confirmed fact.
+  Future<bool> removeReviewedConfirmedUserMemory({
+    required AssistantDurableMemoryRecord reviewed,
+  }) {
+    return _store.removeReviewedConfirmedUserMemory(reviewed: reviewed);
+  }
+
   Future<bool> remove({
     required AssistantMemoryScope scope,
     required String scopeId,
