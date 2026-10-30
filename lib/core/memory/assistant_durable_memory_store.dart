@@ -173,6 +173,68 @@ class AssistantDurableMemoryStore {
     );
   }
 
+  /// Atomically resolve the exact user-stated proposal shown for review.
+  ///
+  /// A stale decision, unrelated/model candidate or already-confirmed record
+  /// must not be modified. The same per-scope queue protects concurrent
+  /// proposal updates and review actions in this store instance.
+  Future<bool> resolveUserStatementCandidate({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    required int reviewedAt,
+    String? approvedContent,
+  }) async {
+    if (reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.status != AssistantMemoryStatus.candidate ||
+        reviewed.source != AssistantMemorySource.userStatement ||
+        reviewed.kind != AssistantMemoryKind.preference ||
+        reviewedAt < 0 ||
+        (approve && (approvedContent == null ||
+            approvedContent.trim().isEmpty))) {
+      return false;
+    }
+
+    final scopeId = reviewed.scopeId.trim();
+    if (scopeId.isEmpty) return false;
+
+    return _withScopeWriteLock(reviewed.scope, scopeId, () async {
+      final records = await load(
+        scope: reviewed.scope,
+        scopeId: scopeId,
+        confirmedOnly: false,
+      );
+      final index = records.indexWhere(
+        (item) => item.recordKey == reviewed.recordKey,
+      );
+      if (index < 0) return false;
+
+      final current = records[index];
+      if (current.status != AssistantMemoryStatus.candidate ||
+          current.source != AssistantMemorySource.userStatement ||
+          current.kind != AssistantMemoryKind.preference ||
+          current.updatedAt != reviewed.updatedAt ||
+          current.content != reviewed.content ||
+          reviewedAt < current.updatedAt) {
+        return false;
+      }
+
+      final next = records.toList(growable: true);
+      if (approve) {
+        next[index] = _validateAndNormalize(current.copyWith(
+          status: AssistantMemoryStatus.confirmed,
+          source: AssistantMemorySource.userExplicit,
+          content: approvedContent!.trim(),
+          updatedAt: reviewedAt,
+        ));
+      } else {
+        next.removeAt(index);
+      }
+      next.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _write(reviewed.scope, scopeId, next);
+      return true;
+    });
+  }
+
   Future<bool> confirm({
     required AssistantMemoryScope scope,
     required String scopeId,
@@ -272,10 +334,11 @@ class AssistantDurableMemoryStore {
     if (record.updatedAt < 0) {
       throw ArgumentError.value(record.updatedAt, 'updatedAt');
     }
-    if (record.source == AssistantMemorySource.modelCandidate &&
-        record.status == AssistantMemoryStatus.confirmed) {
+    if (record.status == AssistantMemoryStatus.confirmed &&
+        (record.source == AssistantMemorySource.modelCandidate ||
+         record.source == AssistantMemorySource.userStatement)) {
       throw ArgumentError(
-        'modelCandidate memories cannot be persisted as confirmed',
+        'Tentative/model memories cannot be persisted as confirmed.',
       );
     }
 

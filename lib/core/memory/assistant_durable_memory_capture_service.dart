@@ -145,6 +145,88 @@ final class AssistantDurableMemoryCaptureService {
     return operation;
   }
 
+  /// Only display *reviewable* local-user preferences, not model candidates.
+  /// This does not connect a UI or enable automatic collection.
+  Future<List<AssistantDurableMemoryRecord>>
+      loadReviewablePreferenceCandidates() async {
+    final pending = await _memoryService.loadCandidates(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+    );
+    return List<AssistantDurableMemoryRecord>.unmodifiable(
+      pending.where((item) =>
+          item.source == AssistantMemorySource.userStatement &&
+          item.kind == AssistantMemoryKind.preference &&
+          _validPreferenceForKey(item.content, item.recordKey)),
+    );
+  }
+
+  /// Called only after the owner actively chooses approve/edit/reject in a
+  /// future review screen. No silent self-promotion is permitted.
+  ///
+  /// The reset barrier also covers this queue, preventing approvals from
+  /// resurrecting data during Danger Zone reset.
+  Future<bool> reviewUserPreferenceCandidate({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    bool userConfirmed = false,
+    String? correctedContent,
+  }) {
+    if (!userConfirmed || _resetInProgress ||
+        reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.scopeId !=
+            AssistantDurableMemoryContextService.localUserScopeId ||
+        reviewed.status != AssistantMemoryStatus.candidate ||
+        reviewed.source != AssistantMemorySource.userStatement ||
+        reviewed.kind != AssistantMemoryKind.preference ||
+        !_validPreferenceForKey(reviewed.content, reviewed.recordKey)) {
+      return Future<bool>.value(false);
+    }
+
+    final finalText = (correctedContent ?? reviewed.content).trim();
+    if (approve && !_validPreferenceForKey(
+        finalText, reviewed.recordKey)) {
+      return Future<bool>.value(false);
+    }
+    if (!approve && correctedContent != null) {
+      return Future<bool>.value(false);
+    }
+
+    final operation = _pendingWrites.then((_) {
+      if (_resetInProgress) return Future<bool>.value(false);
+      return _memoryService.resolveUserStatementCandidate(
+        reviewed: reviewed,
+        approve: approve,
+        approvedContent: approve ? finalText : null,
+        reviewedAt: _now(),
+      );
+    });
+
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  bool _validPreferenceForKey(String input, String recordKey) {
+    final normalized = input.trim();
+    if (normalized.isEmpty ||
+        normalized.length > 110 ||
+        normalized.contains('\n') ||
+        normalized.contains('\r') ||
+        _secrets.hasMatch(normalized)) {
+      return false;
+    }
+    final match = _answerPreference.firstMatch(normalized);
+    if (match == null) return false;
+    final language = match.group(1)!.toLowerCase().startsWith('in ');
+    return recordKey == (language
+        ? 'suggestion.answer_language'
+        : 'suggestion.answer_length');
+  }
+
   Future<bool> _applyExplicitUserInstruction({
     required String sessionId,
     required String userPrompt,

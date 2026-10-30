@@ -202,4 +202,55 @@ void main() {
     expect(prompt, isNot(contains('4:44')));
     expect(prompt, isNot(contains('CONFIRMED DURABLE MEMORY')));
   });
+  test('approved and corrected candidate survives SQLite reopen',
+      () async {
+    final staged = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+    );
+    expect(
+      await staged.proposeUserPreferenceCandidate(
+        userPrompt: 'Preferisco risposte brevi',
+        consentEnabled: true,
+      ),
+      isTrue,
+    );
+
+    await reopen();
+    final review = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+    );
+    final before = await promptFor(
+      makeMemory(),
+      sessionId: 'other-chat',
+      question: 'Quali risposte preferisco?',
+    );
+    expect(before, isNot(contains('CONFIRMED DURABLE MEMORY')));
+    final pending = (await review.loadReviewablePreferenceCandidates()).single;
+    expect(
+      await review.reviewUserPreferenceCandidate(
+        reviewed: pending,
+        approve: true,
+        correctedContent: 'Preferisco risposte dettagliate',
+        userConfirmed: true,
+      ),
+      isTrue,
+    );
+
+    await reopen();
+    final accepted = await promptFor(
+      makeMemory(),
+      sessionId: 'third-chat',
+      question: 'Quali risposte preferisco?',
+    );
+    expect(accepted, contains('Preferisco risposte dettagliate'));
+    expect(accepted, isNot(contains('Preferisco risposte brevi')));
+    expect(
+      await AssistantDurableMemoryCaptureService(
+        memoryService: makeMemory(),
+      ).loadReviewablePreferenceCandidates(),
+      isEmpty,
+    );
+  });
+
+
 }
