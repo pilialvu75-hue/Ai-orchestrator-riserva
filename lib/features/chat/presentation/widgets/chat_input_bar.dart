@@ -491,37 +491,22 @@ class _ChatInputBarState extends State<ChatInputBar> {
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
-          14,
-          10,
-          14,
-          18,
+          12,
+          6,
+          12,
+          8,
         ),
         child: Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 6,
+          ),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                const Color(0xFF171F32)
-                    .withValues(alpha: 0.98),
-                const Color(0xFF0F131D)
-                    .withValues(alpha: 0.98),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(30),
+            color: const Color(0xFF1D2532),
+            borderRadius: BorderRadius.circular(26),
             border: Border.all(
-              color: const Color(0xFF8AB4F8)
-                  .withValues(alpha: 0.24),
+              color: Colors.white.withValues(alpha: 0.12),
             ),
-            boxShadow: const <BoxShadow>[
-              BoxShadow(
-                color: Color(0x1F60A5FA),
-                blurRadius: 26,
-                spreadRadius: 2,
-                offset: Offset(0, 14),
-              ),
-            ],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -568,59 +553,36 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   const SizedBox(width: 8),
 
                   Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white
-                            .withValues(alpha: 0.04),
-                        borderRadius:
-                            BorderRadius.circular(22),
-                        border: Border.all(
-                          color: Colors.white
-                              .withValues(alpha: 0.06),
+                    child: TextField(
+                      controller: _controller,
+                      autofocus: _isEditing,
+                      enabled: !widget.isLoading,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                      ),
+                      maxLines: 5,
+                      minLines: 1,
+                      textInputAction: TextInputAction.newline,
+                      decoration: InputDecoration(
+                        hintText: _isEditing
+                            ? 'Modifica il messaggio...'
+                            : l10n.t('message_hint'),
+                        hintStyle: const TextStyle(
+                          color: Colors.white38,
+                        ),
+                        isDense: true,
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 12,
                         ),
                       ),
-                      padding:
-                          const EdgeInsets.symmetric(
-                        horizontal: 4,
-                      ),
-                      child: TextField(
-                        controller: _controller,
-                        autofocus: _isEditing,
-                        enabled: !widget.isLoading,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                        ),
-                        maxLines: 5,
-                        minLines: 1,
-                        textInputAction:
-                            TextInputAction.newline,
-                        decoration: InputDecoration(
-                          hintText: _isEditing
-                              ? 'Modifica il messaggio...'
-                              : l10n.t(
-                                  'message_hint',
-                                ),
-                          hintStyle:
-                              const TextStyle(
-                            color: Colors.white38,
-                          ),
-                          border:
-                              InputBorder.none,
-                          contentPadding:
-                              const EdgeInsets
-                                  .symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                        ),
-                        onSubmitted: (_) =>
-                            _submit(),
-                      ),
+                      onSubmitted: (_) => _submit(),
                     ),
                   ),
 
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
 
                   Row(
                     mainAxisSize:
@@ -854,44 +816,22 @@ class _EditingBanner extends StatelessWidget {
   }
 }
 
-class _MultimodalMenuButton
-    extends StatelessWidget {
-  const _MultimodalMenuButton({
-    required this.onTap,
-  });
+class _MultimodalMenuButton extends StatelessWidget {
+  const _MultimodalMenuButton({required this.onTap});
 
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius:
-          BorderRadius.circular(20),
-      child: Ink(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              const Color(0xFF1D2740)
-                  .withValues(alpha: 0.98),
-              const Color(0xFF151B28)
-                  .withValues(alpha: 0.98),
-            ],
-          ),
-          borderRadius:
-              BorderRadius.circular(20),
-          border: Border.all(
-            color: const Color(0xFF8AB4F8)
-                .withValues(alpha: 0.22),
-          ),
-        ),
-        child: const Icon(
-          Icons.add,
-          color: Colors.white70,
-        ),
+    return IconButton(
+      onPressed: onTap,
+      tooltip: 'Allegati',
+      style: IconButton.styleFrom(
+        minimumSize: const Size(42, 42),
+        maximumSize: const Size(42, 42),
+        foregroundColor: Colors.white70,
       ),
+      icon: const Icon(Icons.add_rounded, size: 27),
     );
   }
 }
