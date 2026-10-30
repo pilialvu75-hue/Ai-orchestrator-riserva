@@ -271,4 +271,98 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+
+  testWidgets('confirmed memory needs consent to forget, others survive',
+      (tester) async {
+    initializeMemory();
+    const id = AssistantDurableMemoryContextService.localUserScopeId;
+    await memory.recordConfirmed(
+      recordKey: 'budget',
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+      kind: AssistantMemoryKind.fact,
+      content: 'Il budget è 420',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 21,
+    );
+    await memory.recordConfirmed(
+      recordKey: 'moto',
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+      kind: AssistantMemoryKind.fact,
+      content: 'La moto è rossa',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 22,
+    );
+    await showPage(tester);
+    expect(find.text('Ricordi locali confermati'), findsOneWidget);
+    expect(find.text('Il budget è 420'), findsOneWidget);
+    expect(find.text('La moto è rossa'), findsOneWidget);
+    await tester.ensureVisible(find.text('Dimentica').first);
+    await tester.tap(find.text('Dimentica').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Dimenticare questo ricordo confermato?'), findsOneWidget);
+    await tester.tap(find.text('Annulla'));
+    await tester.pumpAndSettle();
+    expect(await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+    ), hasLength(2));
+    // Forget only budget by selecting its tile, not another memory.
+    final tile = find.ancestor(
+      of: find.text('Il budget è 420'),
+      matching: find.byType(ListTile),
+    );
+    await tester.ensureVisible(tile);
+    await tester.tap(
+      find.descendant(of: tile, matching: find.text('Dimentica')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dimentica').last);
+    await tester.pumpAndSettle();
+    final saved = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+    );
+    expect(saved.map((item) => item.recordKey), <String>['moto']);
+    expect(find.text('La moto è rossa'), findsOneWidget);
+    expect(find.text('Il budget è 420'), findsNothing);
+  });
+
+  testWidgets('stale displayed fact cannot delete a newer correction',
+      (tester) async {
+    initializeMemory();
+    const id = AssistantDurableMemoryContextService.localUserScopeId;
+    await memory.recordConfirmed(
+      recordKey: 'budget',
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+      kind: AssistantMemoryKind.fact,
+      content: 'Il budget è 420',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 21,
+    );
+    await showPage(tester);
+    await memory.recordConfirmed(
+      recordKey: 'budget',
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+      kind: AssistantMemoryKind.fact,
+      content: 'Il budget è 680',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 22,
+    );
+    await tester.ensureVisible(find.text('Dimentica'));
+    await tester.tap(find.text('Dimentica'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dimentica').last);
+    await tester.pumpAndSettle();
+    expect((await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: id,
+    )).single.content, 'Il budget è 680');
+    expect(find.text('Il budget è 680'), findsOneWidget);
+  });
+
+
 }
