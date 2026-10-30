@@ -407,8 +407,8 @@ void main() {
 
   test('user statement provenance cannot directly claim confirmed status',
       () async {
-    await expectLater(
-      service.recordConfirmed(
+    expect(
+      () => service.recordConfirmed(
         recordKey: 'fake',
         scope: AssistantMemoryScope.user,
         scopeId: userScope,
@@ -423,8 +423,8 @@ void main() {
       userPrompt: 'Preferisco risposte brevi',
       consentEnabled: true,
     );
-    await expectLater(
-      service.confirmCandidate(
+    expect(
+      () => service.confirmCandidate(
         scope: AssistantMemoryScope.user,
         scopeId: userScope,
         recordKey: 'suggestion.answer_length',
