@@ -44,8 +44,10 @@ final class AssistantDurableMemoryCaptureService {
 
   static int _clock() => DateTime.now().millisecondsSinceEpoch;
 
+  // "Ricorda il budget e' 732" is explicit without the extra "che".
+  // Parsing still requires a subject and value, never implicit chat capture.
   static final RegExp _save = RegExp(
-    r'^(?:ricorda che|memorizza che|remember that)\s+(.+)$',
+    r'^(?:ricorda(?: che)?|memorizza(?: che)?|remember that)\s+(.+)$',
     caseSensitive: false,
   );
   static final RegExp _saveInConversation = RegExp(

@@ -72,6 +72,57 @@ void main() {
     expect(records.single.content, 'il budget è 680');
   });
 
+  test('natural explicit remember phrasing updates user facts without che', () async {
+    for (final prompt in <String>[
+      'Ricorda che il budget prova Windows è 731',
+      'ricorda il budget prova Windows è 732',
+      'Ricorda che il budget prova Mac è 842',
+      'ricorda il budget prova Mac è 843',
+    ]) {
+      expect(
+        await capture.applyExplicitUserInstruction(
+          sessionId: 'one',
+          userPrompt: prompt,
+        ),
+        isTrue,
+        reason: prompt,
+      );
+    }
+
+    final records = await userRecords();
+    expect(records, hasLength(2));
+    expect(
+      records.any((record) => record.content == 'il budget prova Windows è 732'),
+      isTrue,
+    );
+    expect(
+      records.any((record) => record.content == 'il budget prova Mac è 843'),
+      isTrue,
+    );
+    expect(records.any((record) => record.content.contains('731')), isFalse);
+    expect(records.any((record) => record.content.contains('842')), isFalse);
+  });
+
+  test('nonexplicit or unsafe abbreviated remember instructions are rejected', () async {
+    for (final prompt in <String>[
+      'Ricorda il budget',
+      'Ricorda tutto questo',
+      'Ricorda la password è segreta',
+      'Ricorda il budget è 4?',
+      'Ricorda solo in questa chat che il budget è 20?',
+    ]) {
+      expect(
+        await capture.applyExplicitUserInstruction(
+          sessionId: 'test-suite',
+          userPrompt: prompt,
+        ),
+        isFalse,
+        reason: prompt,
+      );
+    }
+    expect(await userRecords(), isEmpty);
+  });
+
   test('ordinary benchmark chat does not produce permanent memories', () async {
     for (final prompt in <String>[
       'Il budget è 420',

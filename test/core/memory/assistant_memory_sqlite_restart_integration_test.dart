@@ -144,6 +144,39 @@ void main() {
     expect(prompt, isNot(contains('420')));
   });
 
+  test('natural remember phrasing survives SQLite reopen and replaces stale value',
+      () async {
+    final initialCapture = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+    );
+    expect(
+      await initialCapture.applyExplicitUserInstruction(
+        sessionId: 'windows-chat',
+        userPrompt: 'Ricorda che il budget prova Windows è 731',
+      ),
+      isTrue,
+    );
+    await reopen();
+    final nextCapture = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+    );
+    expect(
+      await nextCapture.applyExplicitUserInstruction(
+        sessionId: 'windows-chat',
+        userPrompt: 'ricorda il budget prova Windows è 732',
+      ),
+      isTrue,
+    );
+    await reopen();
+    final prompt = await promptFor(
+      makeMemory(),
+      sessionId: 'other-chat',
+      question: 'Qual è il budget prova Windows?',
+    );
+    expect(prompt, contains('il budget prova Windows è 732'));
+    expect(prompt, isNot(contains('il budget prova Windows è 731')));
+  });
+
   test('conversation-only memory survives restart but never leaks to others',
       () async {
     final memory = makeMemory();
