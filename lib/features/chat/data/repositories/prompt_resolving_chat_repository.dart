@@ -1,4 +1,6 @@
+import 'package:ai_orchestrator/core/config/ai/assistant_reply_language_policy.dart';
 import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.dart';
+import 'package:ai_orchestrator/core/config/ai/system_prompt_config.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
@@ -74,13 +76,24 @@ class PromptResolvingChatRepository implements ChatRepository {
     }
 
     final resolvedPrompt = _systemPromptService.resolveForIncoming(systemPrompt);
-    final effectivePrompt = isOrdinary
+    final promptWithMemory = isOrdinary
         ? await _durableMemoryContextService.augmentSystemPrompt(
             baseSystemPrompt: resolvedPrompt,
             sessionId: sessionId,
             userPrompt: userPrompt,
           )
         : resolvedPrompt;
+
+    // Hint only the stock conversational Assistant. Never override a
+    // user-authored fixed-language prompt or specialized worker instructions.
+    // This is a per-turn hint, not a stored user preference.
+    final effectivePrompt = isOrdinary &&
+            _systemPromptService.currentPrompt == SystemPromptConfig.defaultPrompt
+        ? AssistantReplyLanguagePolicy.withCurrentTurnHint(
+            systemPrompt: promptWithMemory,
+            userPrompt: userPrompt,
+          )
+        : promptWithMemory;
 
     return _delegate.sendMessage(
       sessionId: sessionId,
