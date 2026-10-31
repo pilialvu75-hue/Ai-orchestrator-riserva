@@ -269,12 +269,59 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
     switch (action) {
       case _AttachmentPickerAction.image:
-        final file = await _imageService.pickFromGallery();
-
-        if (file != null && mounted) {
-          _addAttachment(
-            _buildImageAttachment(file),
+        try {
+          final file = await _imageService.pickFromGallery();
+          if (!mounted || file == null) break; // Gallery canceled.
+          final errorMessage = await ImageService.validateChatImageFile(file);
+          if (!mounted) break;
+          if (errorMessage != null) {
+            RuntimeEventLog.instance.emit(
+              '[IMAGE_PICKER_INVALID] reason=invalid_or_unreadable_file',
+            );
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(errorMessage)),
+            );
+            break;
+          }
+          _addAttachment(_buildImageAttachment(file));
+        } on PlatformException catch (error) {
+          RuntimeEventLog.instance.emit(
+            '[IMAGE_PICKER_FAILURE] code=${error.code}',
           );
+          if (mounted) {
+            final code = error.code.toLowerCase();
+            final denied = code.contains('denied') ||
+                code.contains('restricted');
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  denied
+                      ? 'Accesso alle foto negato. Verifica i permessi '
+                          'nelle impostazioni del dispositivo.'
+                      : 'Galleria non disponibile. Riprova a scegliere la foto.',
+                ),
+              ),
+            );
+          }
+        } on UnsupportedError {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Selezione immagini non supportata su questo dispositivo.'),
+              ),
+            );
+          }
+        } catch (error) {
+          RuntimeEventLog.instance.emit(
+            '[IMAGE_PICKER_FAILURE] error_type=${error.runtimeType}',
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Impossibile aprire la galleria. Riprova.'),
+              ),
+            );
+          }
         }
         break;
 
