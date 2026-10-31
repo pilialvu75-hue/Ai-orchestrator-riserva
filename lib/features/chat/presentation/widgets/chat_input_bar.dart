@@ -9,6 +9,8 @@ import 'package:ai_orchestrator/features/multimodal/data/services/image_service.
 import 'package:ai_orchestrator/features/multimodal/data/services/screen_vision_service.dart';
 import 'package:ai_orchestrator/features/voice/presentation/widgets/voice_input_button.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/dictation_draft.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_composer_text_field.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_composer_layout.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -61,6 +63,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
   late final VoiceInputService _voiceInputService;
 
   bool _hasText = false;
+  bool _hasLongDraft = false;
+  final GlobalKey _composerFieldKey = GlobalKey();
   final DictationDraftBuffer _dictationDraft = DictationDraftBuffer();
   String? _loadedEditingText;
 
@@ -93,13 +97,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
     if (!mounted) return;
 
     final hasText = _controller.text.trim().isNotEmpty;
-
-    if (hasText == _hasText) {
+    final hasLongDraft = _controller.text.length >= 64 ||
+        _controller.text.contains('\n');
+    if (hasText == _hasText && hasLongDraft == _hasLongDraft) {
       return;
     }
 
     setState(() {
       _hasText = hasText;
+      _hasLongDraft = hasLongDraft;
     });
   }
 
@@ -551,166 +557,124 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 const SizedBox(height: 12),
               ],
 
-              Row(
-                crossAxisAlignment:
-                    CrossAxisAlignment.end,
-                children: [
-                  _MultimodalMenuButton(
-                    onTap:
-                        _openAttachmentSheet,
-                  ),
-
-                  const SizedBox(width: 8),
-
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      autofocus: _isEditing,
-                      enabled: !widget.isLoading,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
+              ChatComposerLayout(
+                wideDraft: _hasLongDraft,
+                menuButton: _MultimodalMenuButton(
+                  onTap: _openAttachmentSheet,
+                ),
+                messageField: ChatComposerTextField(
+                  key: _composerFieldKey,
+                  controller: _controller,
+                  autofocus: _isEditing,
+                  enabled: !widget.isLoading,
+                  hintText: _isEditing
+                      ? 'Modifica il messaggio...'
+                      : l10n.t('message_hint'),
+                  onSubmitted: (_) => _submit(),
+                ),
+                voiceButton: VoiceInputButton(
+                  voiceInputService: _voiceInputService,
+                  size: 42,
+                  onRecordingStarted: () {
+                    _dictationDraft.begin(_controller.text);
+                  },
+                  onRecordingStopped: () {
+                    _dictationDraft.stop(_controller.text);
+                  },
+                  onResult: (text, isFinal) {
+                    if (!mounted) return;
+                    final merged = _dictationDraft.accept(
+                      currentText: _controller.text,
+                      transcript: text,
+                      isFinal: isFinal,
+                    );
+                    _controller.value = TextEditingValue(
+                      text: merged,
+                      selection: TextSelection.collapsed(
+                        offset: merged.length,
                       ),
-                      maxLines: 5,
-                      minLines: 1,
-                      textInputAction: TextInputAction.newline,
-                      decoration: InputDecoration(
-                        hintText: _isEditing
-                            ? 'Modifica il messaggio...'
-                            : l10n.t('message_hint'),
-                        hintStyle: const TextStyle(
-                          color: Colors.white38,
-                        ),
-                        isDense: true,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 12,
-                        ),
-                      ),
-                      onSubmitted: (_) => _submit(),
-                    ),
-                  ),
-
-                  const SizedBox(width: 6),
-
-                  Row(
-                    mainAxisSize:
-                        MainAxisSize.min,
-                    crossAxisAlignment:
-                        CrossAxisAlignment.end,
-                    children: [
-                      // Keep dictation in a fixed position, including when
-                      // the composer is empty. Live remains accessible in '+'.
-                      VoiceInputButton(
-                        voiceInputService: _voiceInputService,
-                        size: 42,
-                        onRecordingStarted: () {
-                          _dictationDraft.begin(_controller.text);
-                        },
-                        onRecordingStopped: () {
-                          _dictationDraft.stop(_controller.text);
-                        },
-                        onResult: (text, isFinal) {
-                          if (!mounted) return;
-                          final merged = _dictationDraft.accept(
-                            currentText: _controller.text,
-                            transcript: text,
-                            isFinal: isFinal,
-                          );
-                          _controller.value = TextEditingValue(
-                            text: merged,
-                            selection: TextSelection.collapsed(
-                              offset: merged.length,
+                    );
+                  },
+                ),
+                sendButton: widget.isLoading
+                    ? const SizedBox(
+                        width: 42,
+                        height: 42,
+                        child:
+                            Padding(
+                          padding:
+                              EdgeInsets.all(
+                            9,
+                          ),
+                          child:
+                              CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color:
+                                Color(
+                              0xFF8AB4F8,
                             ),
-                          );
-                        },
-                      ),
-
-                      const SizedBox(width: 6),
-
-                      widget.isLoading
-                          ? const SizedBox(
-                              width: 42,
-                              height: 42,
-                              child:
-                                  Padding(
-                                padding:
-                                    EdgeInsets.all(
-                                  9,
-                                ),
-                                child:
-                                    CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color:
-                                      Color(
-                                    0xFF8AB4F8,
-                                  ),
-                                ),
+                          ),
+                        ),
+                      )
+                    : Tooltip(
+                        message: _canSubmit
+                            ? l10n.t(
+                                'send_message',
+                              )
+                            : l10n.t(
+                                'enter_message_to_send',
                               ),
-                            )
-                          : Tooltip(
-                              message: _canSubmit
-                                  ? l10n.t(
-                                      'send_message',
-                                    )
-                                  : l10n.t(
-                                      'enter_message_to_send',
-                                    ),
-                              child:
-                                  IconButton(
-                                style:
-                                    IconButton.styleFrom(
-                                  backgroundColor:
-                                      _canSubmit
-                                          ? const Color(
-                                              0xFF8AB4F8,
-                                            )
-                                          : Colors
-                                              .white
-                                              .withValues(
-                                              alpha: 0.08,
-                                            ),
-                                  foregroundColor:
-                                      _canSubmit
-                                          ? Colors.black
-                                          : Colors.white30,
-                                  shadowColor:
-                                      const Color(
-                                    0xFF8AB4F8,
-                                  ).withValues(
-                                    alpha: 0.34,
-                                  ),
-                                  elevation:
-                                      _canSubmit
-                                          ? 12
-                                          : 0,
-                                  minimumSize:
-                                      const Size(
-                                    42,
-                                    42,
-                                  ),
-                                  maximumSize:
-                                      const Size(
-                                    42,
-                                    42,
-                                  ),
-                                ),
-                                onPressed:
-                                    _canSubmit
-                                        ? _submit
-                                        : null,
-                                icon:
-                                    const Icon(
-                                  Icons
-                                      .arrow_upward,
-                                  size: 20,
-                                ),
-                              ),
+                        child:
+                            IconButton(
+                          style:
+                              IconButton.styleFrom(
+                            backgroundColor:
+                                _canSubmit
+                                    ? const Color(
+                                        0xFF8AB4F8,
+                                      )
+                                    : Colors
+                                        .white
+                                        .withValues(
+                                        alpha: 0.08,
+                                      ),
+                            foregroundColor:
+                                _canSubmit
+                                    ? Colors.black
+                                    : Colors.white30,
+                            shadowColor:
+                                const Color(
+                              0xFF8AB4F8,
+                            ).withValues(
+                              alpha: 0.34,
                             ),
-                    ],
-                  ),
-                ],
+                            elevation:
+                                _canSubmit
+                                    ? 12
+                                    : 0,
+                            minimumSize:
+                                const Size(
+                              42,
+                              42,
+                            ),
+                            maximumSize:
+                                const Size(
+                              42,
+                              42,
+                            ),
+                          ),
+                          onPressed:
+                              _canSubmit
+                                  ? _submit
+                                  : null,
+                          icon:
+                              const Icon(
+                            Icons
+                                .arrow_upward,
+                            size: 20,
+                          ),
+                        ),
+                      ),
               ),
             ],
           ),
