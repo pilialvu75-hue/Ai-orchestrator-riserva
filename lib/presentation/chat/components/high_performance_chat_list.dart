@@ -216,7 +216,7 @@ class HighPerformanceChatList extends StatelessWidget {
       padding: const EdgeInsets.only(
         left: 12,
         top: 2,
-        bottom: 4,
+        bottom: 2,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -263,7 +263,7 @@ class HighPerformanceChatList extends StatelessWidget {
       scrollCacheExtent: const ScrollCacheExtent.pixels(1200.0),
       keyboardDismissBehavior:
           ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: messages.length,
       itemBuilder: (context, index) {
         final message = messages[index];
@@ -297,22 +297,27 @@ class HighPerformanceChatList extends StatelessWidget {
             children: [
               bubble,
               Padding(
-                padding: const EdgeInsets.only(right: 16),
+                padding: const EdgeInsets.only(
+                  right: 12,
+                  top: 2,
+                  bottom: 2,
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(
+                    _MessageActionButton(
+                      icon: Icons.copy_outlined,
                       tooltip: 'Copia messaggio',
-                      icon: const Icon(Icons.copy_rounded,
-                          size: 20, color: Colors.white70),
-                      onPressed: () => _copyToClipboard(context,
-                          message.content, 'Messaggio copiato negli appunti!'),
+                      onPressed: () => _copyToClipboard(
+                        context,
+                        message.content,
+                        'Messaggio copiato negli appunti!',
+                      ),
                     ),
                     if (onEditUserMessage != null)
-                      IconButton(
+                      _MessageActionButton(
+                        icon: Icons.edit_outlined,
                         tooltip: 'Modifica messaggio',
-                        icon: const Icon(Icons.edit_rounded,
-                            size: 20, color: Colors.white70),
                         onPressed: () => onEditUserMessage!(message),
                       ),
                   ],
@@ -357,15 +362,16 @@ class _MessageActionButton extends StatelessWidget {
     return IconButton(
       onPressed: onPressed,
       tooltip: tooltip,
-      splashRadius: 18,
-      padding: const EdgeInsets.all(7),
+      splashRadius: 20,
+      padding: const EdgeInsets.all(6),
+      visualDensity: VisualDensity.compact,
       constraints: const BoxConstraints(
-        minWidth: 34,
-        minHeight: 34,
+        minWidth: 40,
+        minHeight: 40,
       ),
       icon: Icon(
         icon,
-        size: 19,
+        size: 18,
         color: onPressed == null
             ? const Color(0xFF55585B)
             : const Color(0xFF8E9194),
