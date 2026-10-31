@@ -30,8 +30,14 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    final copy = tester.widget<IconButton>(find.byTooltip('Copia messaggio'));
-    final edit = tester.widget<IconButton>(find.byTooltip('Modifica messaggio'));
+    final copy = tester.widget<IconButton>(
+      find.byWidgetPredicate((widget) =>
+          widget is IconButton && widget.tooltip == 'Copia messaggio'),
+    );
+    final edit = tester.widget<IconButton>(
+      find.byWidgetPredicate((widget) =>
+          widget is IconButton && widget.tooltip == 'Modifica messaggio'),
+    );
     expect(copy.constraints?.minWidth, 40);
     expect(copy.constraints?.minHeight, 40);
     expect(edit.constraints?.minWidth, 40);
@@ -74,8 +80,14 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    final voice = tester.widget<IconButton>(find.byTooltip('Ascolta'));
-    final copy = tester.widget<IconButton>(find.byTooltip('Copia'));
+    final voice = tester.widget<IconButton>(
+      find.byWidgetPredicate((widget) =>
+          widget is IconButton && widget.tooltip == 'Ascolta'),
+    );
+    final copy = tester.widget<IconButton>(
+      find.byWidgetPredicate((widget) =>
+          widget is IconButton && widget.tooltip == 'Copia'),
+    );
     expect(voice.constraints?.minWidth, 40);
     expect(copy.constraints?.minWidth, 40);
     await tester.tap(find.byTooltip('Ascolta'));
