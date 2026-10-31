@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/features/multimodal/data/services/file_attachmen
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/screen_vision_service.dart';
 import 'package:ai_orchestrator/features/voice/presentation/widgets/voice_input_button.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/dictation_draft.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -60,6 +61,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   late final VoiceInputService _voiceInputService;
 
   bool _hasText = false;
+  final DictationDraftBuffer _dictationDraft = DictationDraftBuffer();
   String? _loadedEditingText;
 
   bool get _isEditing => widget.editingText != null;
@@ -409,6 +411,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
         }
         break;
 
+      case _AttachmentPickerAction.live:
+        if (widget.liveSessionEnabled) {
+          widget.onStartLiveSession?.call();
+        }
+        break;
+
       case _AttachmentPickerAction.video:
         final file =
             await _fileAttachmentService.pickVideo();
@@ -478,6 +486,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
         return _AttachmentPickerSheet(
           onSelected: _pickAttachment,
           screenVisionEnabled: _screenVisionService.isSupported,
+          liveSessionEnabled:
+              widget.liveSessionEnabled && widget.onStartLiveSession != null,
         );
       },
     );
@@ -590,75 +600,32 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     crossAxisAlignment:
                         CrossAxisAlignment.end,
                     children: [
-                      if (!_hasText)
-                        Tooltip(
-                          message:
-                              'Sessione Live',
-                          child: IconButton(
-                            style:
-                                IconButton.styleFrom(
-                              backgroundColor:
-                                  widget
-                                          .liveSessionEnabled
-                                      ? const Color(
-                                          0xFF1F2A44,
-                                        )
-                                      : Colors.white
-                                          .withValues(
-                                          alpha: 0.08,
-                                        ),
-                              foregroundColor:
-                                  widget
-                                          .liveSessionEnabled
-                                      ? Colors.white
-                                      : Colors.white30,
-                              minimumSize:
-                                  const Size(
-                                42,
-                                42,
-                              ),
-                              maximumSize:
-                                  const Size(
-                                42,
-                                42,
-                              ),
+                      // Keep dictation in a fixed position, including when
+                      // the composer is empty. Live remains accessible in '+'.
+                      VoiceInputButton(
+                        voiceInputService: _voiceInputService,
+                        size: 42,
+                        onRecordingStarted: () {
+                          _dictationDraft.begin(_controller.text);
+                        },
+                        onRecordingStopped: () {
+                          _dictationDraft.stop(_controller.text);
+                        },
+                        onResult: (text, isFinal) {
+                          if (!mounted) return;
+                          final merged = _dictationDraft.accept(
+                            currentText: _controller.text,
+                            transcript: text,
+                            isFinal: isFinal,
+                          );
+                          _controller.value = TextEditingValue(
+                            text: merged,
+                            selection: TextSelection.collapsed(
+                              offset: merged.length,
                             ),
-                            onPressed:
-                                widget
-                                        .liveSessionEnabled
-                                    ? widget
-                                        .onStartLiveSession
-                                    : null,
-                            icon:
-                                const Icon(
-                              Icons
-                                  .graphic_eq_rounded,
-                              size: 20,
-                            ),
-                          ),
-                        )
-                      else
-                        VoiceInputButton(
-                          voiceInputService:
-                              _voiceInputService,
-                          size: 42,
-                          onResult:
-                              (text, _) {
-                            final value =
-                                TextEditingValue(
-                              text: text,
-                              selection:
-                                  TextSelection
-                                      .collapsed(
-                                offset:
-                                    text.length,
-                              ),
-                            );
-
-                            _controller
-                                .value = value;
-                          },
-                        ),
+                          );
+                        },
+                      ),
 
                       const SizedBox(width: 6),
 
@@ -1025,6 +992,7 @@ enum _AttachmentPickerAction {
   screen,
   file,
   video,
+  live,
 }
 
 class _AttachmentPickerSheet
@@ -1032,11 +1000,13 @@ class _AttachmentPickerSheet
   const _AttachmentPickerSheet({
     required this.onSelected,
     required this.screenVisionEnabled,
+    required this.liveSessionEnabled,
   });
 
   final ValueChanged<
       _AttachmentPickerAction> onSelected;
   final bool screenVisionEnabled;
+  final bool liveSessionEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1098,7 +1068,7 @@ class _AttachmentPickerSheet
           ),
           const SizedBox(height: 18),
           const Text(
-            'Attach',
+            'Allegati e strumenti',
             style: TextStyle(
               color: Colors.white,
               fontSize: 16,
@@ -1111,6 +1081,14 @@ class _AttachmentPickerSheet
             spacing: 12,
             runSpacing: 12,
             children: [
+              if (liveSessionEnabled)
+                _AttachmentActionTile(
+                  icon: Icons.graphic_eq_rounded,
+                  label: 'Live',
+                  onTap: () => onSelected(
+                    _AttachmentPickerAction.live,
+                  ),
+                ),
               _AttachmentActionTile(
                 icon:
                     Icons.image_outlined,

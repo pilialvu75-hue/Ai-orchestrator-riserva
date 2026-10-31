@@ -10,6 +10,8 @@ class VoiceInputButton extends StatefulWidget {
     super.key,
     required this.voiceInputService,
     required this.onResult,
+    this.onRecordingStarted,
+    this.onRecordingStopped,
     this.size = 56,
   });
 
@@ -18,6 +20,10 @@ class VoiceInputButton extends StatefulWidget {
   /// Called with each recognised phrase. [isFinal] is `true` on the final
   /// result for the current utterance.
   final void Function(String text, bool isFinal) onResult;
+
+  /// Notify the composer so it can preserve any typed draft.
+  final VoidCallback? onRecordingStarted;
+  final VoidCallback? onRecordingStopped;
 
   /// Diameter of the button in logical pixels.
   final double size;
@@ -53,26 +59,50 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
 
   Future<void> _toggle() async {
     if (_listening) {
-      await widget.voiceInputService.stopListening();
-      _pulse.stop();
-      setState(() => _listening = false);
-    } else {
+      try {
+        await widget.voiceInputService.stopListening();
+      } finally {
+        if (mounted) {
+          _pulse.stop();
+          setState(() => _listening = false);
+          widget.onRecordingStopped?.call();
+        }
+      }
+      return;
+    }
+
+    widget.onRecordingStarted?.call();
+    var receivedFinalResult = false;
+    try {
       await widget.voiceInputService.startListening(
         onResult: (text, isFinal) {
+          if (!mounted) return;
           widget.onResult(text, isFinal);
           if (isFinal) {
+            receivedFinalResult = true;
             _pulse.stop();
-            if (mounted) setState(() => _listening = false);
+            setState(() => _listening = false);
+            widget.onRecordingStopped?.call();
           }
         },
       );
-      final started = widget.voiceInputService.isListening;
+      if (!mounted) return;
+      final started =
+          widget.voiceInputService.isListening && !receivedFinalResult;
       if (started) {
         _pulse.repeat(reverse: true);
       } else {
         _pulse.stop();
+        widget.onRecordingStopped?.call();
       }
       setState(() => _listening = started);
+    } catch (_) {
+      if (mounted) {
+        _pulse.stop();
+        setState(() => _listening = false);
+        widget.onRecordingStopped?.call();
+      }
+      rethrow;
     }
   }
 
