@@ -106,7 +106,6 @@ abstract final class AssistantWebSearchPolicy {
     return const <String>{
       'recherche en internet',
       'recherche sur internet',
-      'recherche en internet',
       'recherche sur le web',
       'cherche sur internet',
       'cherche sur le web',
@@ -346,6 +345,7 @@ abstract final class AssistantWebSearchPolicy {
       'cherche en ligne',
       'recherche en ligne',
       'recherche sur internet',
+      'recherche en internet',
       'recherche sur le web',
       'cherche sur internet',
       'cherche sur le web',
