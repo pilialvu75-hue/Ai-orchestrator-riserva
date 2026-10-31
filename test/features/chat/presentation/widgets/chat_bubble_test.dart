@@ -4,6 +4,41 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  group('Compact chat presentation', () {
+    testWidgets('uses a small user avatar without changing message text',
+        (tester) async {
+      await tester.pumpWidget(_host(const ChatMessage(
+        id: 'compact-user',
+        sessionId: 'compact-chat',
+        role: 'user',
+        content: 'Messaggio di prova',
+        timestamp: 1,
+      )));
+      expect(tester.getSize(find.byType(CircleAvatar)), const Size(24, 24));
+      expect(find.text('Messaggio di prova'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('shows a readable assistant message in narrow layouts',
+        (tester) async {
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(_host(const ChatMessage(
+        id: 'compact-assistant',
+        sessionId: 'compact-chat',
+        role: 'assistant',
+        content: 'Una risposta breve e leggibile anche su telefono.',
+        timestamp: 2,
+        provider: 'local',
+      )));
+      expect(
+        find.text('Una risposta breve e leggibile anche su telefono.'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   group('Assistant Markdown table display', () {
     testWidgets('renders a complete pipe table with horizontal scrolling',
         (tester) async {
