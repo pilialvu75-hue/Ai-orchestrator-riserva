@@ -251,6 +251,18 @@ void main() {
     );
   });
 
+
+  test('explicit French Recherche sur Internet triggers lookup and query stripping', () {
+    const input = 'Recherche sur Internet les résultats des matchs PSG contre Auxerre en 2003. Donne les scores et les sources.';
+    expect(AssistantWebSearchPolicy.shouldSearch(input), isTrue);
+    expect(
+      AssistantWebSearchPolicy.extractQuery(input),
+      'les résultats des matchs PSG contre Auxerre en 2003. Donne les scores et les sources.',
+    );
+    expect(AssistantWebSearchPolicy.shouldSearch(
+      "N'utilise pas internet. $input"), isFalse);
+  });
+
   test('extractQuery still removes explicit search prefixes', () {
     expect(
       AssistantWebSearchPolicy.extractQuery(
