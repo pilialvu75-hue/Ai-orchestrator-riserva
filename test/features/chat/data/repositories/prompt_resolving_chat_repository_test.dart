@@ -253,6 +253,49 @@ void main() {
       );
     });
 
+    test('ordinary Assistant follows a French to Italian turn switch',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: _emptyMemoryContext(),
+      );
+
+      await repository.sendMessage(
+        sessionId: 'same-conversation',
+        userPrompt: "comment s'appelle mon pote?",
+      );
+      expect(delegate.lastSystemPrompt, contains('write in French'));
+
+      await repository.sendMessage(
+        sessionId: 'same-conversation',
+        userPrompt: 'come mi chiamo?',
+      );
+      expect(delegate.lastSystemPrompt, contains('write in Italian'));
+      expect(delegate.lastSystemPrompt, isNot(contains('write in French')));
+    });
+
+    test('custom fixed-language prompt remains authoritative', () async {
+      const fixedItalian = 'Always answer in Italian.';
+      final fixture = await createService(<String, Object>{
+        AppConstants.prefDirectionalPrompt: fixedItalian,
+      });
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: _emptyMemoryContext(),
+      );
+
+      await repository.sendMessage(
+        sessionId: 'custom-language-session',
+        userPrompt: "comment s'appelle mon pote?",
+      );
+      expect(delegate.lastSystemPrompt, fixedItalian);
+    });
+
     test('preserves explicit specialized system prompt', () async {
       final fixture = await createService(<String, Object>{
         AppConstants.prefDirectionalPrompt: 'Custom assistant identity.',
