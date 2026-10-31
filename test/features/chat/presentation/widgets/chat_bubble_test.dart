@@ -161,6 +161,72 @@ void main() {
     });
   });
 
+
+  group('Compact visual chat bubbles', () {
+    testWidgets('user and assistant have solid compact surfaces', (tester) async {
+      const user = ChatMessage(
+        id: 'user-visual', sessionId: 'chat', role: 'user',
+        content: 'Una domanda semplice', timestamp: 1000,
+      );
+      const assistant = ChatMessage(
+        id: 'assistant-visual', sessionId: 'chat', role: 'assistant',
+        content: 'Una risposta leggibile.', timestamp: 2000, provider: 'local',
+      );
+      await tester.pumpWidget(_host(user));
+      expect(find.text(user.content), findsOneWidget);
+      expect(
+        find.byWidgetPredicate((w) =>
+            w is Container &&
+            w.decoration is BoxDecoration &&
+            (w.decoration! as BoxDecoration).color ==
+                const Color(0xFF244666)),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(_host(assistant));
+      expect(find.text(assistant.content), findsOneWidget);
+      expect(
+        find.byWidgetPredicate((w) =>
+            w is Container &&
+            w.decoration is BoxDecoration &&
+            (w.decoration! as BoxDecoration).color ==
+                const Color(0xFF192330)),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('long reply fits a narrow phone with larger text', (tester) async {
+      tester.view.physicalSize = const Size(320, 760);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      const reply = ChatMessage(
+        id: 'assistant-small', sessionId: 'chat', role: 'assistant',
+        content: 'Questa è una risposta molto lunga che deve andare a capo '
+            'correttamente anche su uno schermo stretto senza nascondere '
+            'il contenuto e senza modificare il testo originale.',
+        timestamp: 3000, provider: 'local',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MediaQuery(
+              data: const MediaQueryData(
+                size: Size(320, 760),
+                textScaler: TextScaler.linear(1.4),
+              ),
+              child: const ChatBubble(message: reply),
+            ),
+          ),
+        ),
+      );
+      expect(find.text(reply.content), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   group('ChatBubble Cloud provider label', () {
     testWidgets(
       'shows canonical provider name for pending and final Cloud messages',

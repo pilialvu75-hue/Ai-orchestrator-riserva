@@ -27,14 +27,16 @@ class ChatBubble extends StatelessWidget {
         _isUser ? null : _cloudProviderDisplayName(message.provider);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(
         mainAxisAlignment:
             _isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (!_isUser) _Avatar(provider: message.provider),
-          const SizedBox(width: 10),
+          if (!_isUser) ...[
+            _Avatar(provider: message.provider),
+            const SizedBox(width: 8),
+          ],
           Flexible(
             child: Column(
               crossAxisAlignment: _isUser
@@ -43,30 +45,23 @@ class ChatBubble extends StatelessWidget {
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
+                    horizontal: 12,
+                    vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: _isUser
-                          ? [
-                              const Color(0xFF21416B),
-                              const Color(0xFF17273A),
-                            ]
-                          : [
-                              const Color(0xFF171D29),
-                              const Color(0xFF12161F),
-                            ],
-                    ),
+                    // Quiet, solid surfaces align with the compact composer.
+                    color: _isUser
+                        ? const Color(0xFF244666)
+                        : const Color(0xFF192330),
                     borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(22),
-                      topRight: const Radius.circular(22),
-                      bottomLeft: Radius.circular(_isUser ? 22 : 8),
-                      bottomRight: Radius.circular(_isUser ? 8 : 22),
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(_isUser ? 16 : 6),
+                      bottomRight: Radius.circular(_isUser ? 6 : 16),
                     ),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.06),
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -81,14 +76,14 @@ class ChatBubble extends StatelessWidget {
                             height: 1.2,
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 4),
                       ],
                       if (message.attachments.isNotEmpty) ...[
                         Column(
                           children: message.attachments
                               .map(
                                 (attachment) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.only(bottom: 6),
                                   child: _AttachmentBubbleCard(
                                     attachment: attachment,
                                   ),
@@ -104,7 +99,7 @@ class ChatBubble extends StatelessWidget {
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,
-                                  height: 1.45,
+                                  height: 1.4,
                                 ),
                               )
                             : AssistantMessageContent(
@@ -112,7 +107,7 @@ class ChatBubble extends StatelessWidget {
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: assistantTextSize.fontSize,
-                                  height: 1.45,
+                                  height: 1.4,
                                 ),
                               )
                       else if (!_isUser && message.isPending)
@@ -125,23 +120,24 @@ class ChatBubble extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   DateFormat('HH:mm').format(
                     DateTime.fromMillisecondsSinceEpoch(message.timestamp),
                   ),
-                  style: const TextStyle(color: Colors.white30, fontSize: 11),
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          if (_isUser)
+          if (_isUser) ...[
+            const SizedBox(width: 8),
             const CircleAvatar(
-              radius: 14,
+              radius: 12,
               backgroundColor: Color(0xFF8AB4F8),
-              child: Icon(Icons.person, color: Colors.black, size: 16),
+              child: Icon(Icons.person, color: Colors.black, size: 14),
             ),
+          ],
         ],
       ),
     );
@@ -178,17 +174,17 @@ class _AttachmentBubbleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(minWidth: 180, maxWidth: 280),
-      padding: const EdgeInsets.all(10),
+      constraints: const BoxConstraints(maxWidth: 260),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Row(
         children: [
           _AttachmentThumb(attachment: attachment),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,11 +236,11 @@ class _AttachmentThumb extends StatelessWidget {
   Widget build(BuildContext context) {
     if (attachment.isImage && attachment.thumbnailPath != null) {
       return ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(10),
         child: Image.file(
           File(attachment.thumbnailPath!),
-          width: 52,
-          height: 52,
+          width: 44,
+          height: 44,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => _fallbackIcon(),
         ),
@@ -260,11 +256,11 @@ class _AttachmentThumb extends StatelessWidget {
       ChatAttachmentType.file => Icons.description_outlined,
     };
     return Container(
-      width: 52,
-      height: 52,
+      width: 44,
+      height: 44,
       decoration: BoxDecoration(
         color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Icon(icon, color: const Color(0xFF8AB4F8)),
     );
@@ -279,8 +275,8 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 30,
-      height: 30,
+      width: 24,
+      height: 24,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: LinearGradient(
@@ -297,7 +293,7 @@ class _Avatar extends StatelessWidget {
           _cloudProviderDisplayName(provider)?.substring(0, 1).toUpperCase() ?? 'AI',
           style: const TextStyle(
             color: Color(0xFF8AB4F8),
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: FontWeight.bold,
           ),
         ),
