@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/features/multimodal/data/services/file_attachmen
 import 'package:ai_orchestrator/features/multimodal/data/services/image_service.dart';
 import 'package:ai_orchestrator/features/multimodal/data/services/screen_vision_service.dart';
 import 'package:ai_orchestrator/features/voice/presentation/widgets/voice_input_button.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/dictation_draft.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -60,6 +61,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   late final VoiceInputService _voiceInputService;
 
   bool _hasText = false;
+  final DictationDraftBuffer _dictationDraft = DictationDraftBuffer();
   String? _loadedEditingText;
 
   bool get _isEditing => widget.editingText != null;
@@ -603,12 +605,23 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       VoiceInputButton(
                         voiceInputService: _voiceInputService,
                         size: 42,
-                        onResult: (text, _) {
+                        onRecordingStarted: () {
+                          _dictationDraft.begin(_controller.text);
+                        },
+                        onRecordingStopped: () {
+                          _dictationDraft.stop(_controller.text);
+                        },
+                        onResult: (text, isFinal) {
                           if (!mounted) return;
+                          final merged = _dictationDraft.accept(
+                            currentText: _controller.text,
+                            transcript: text,
+                            isFinal: isFinal,
+                          );
                           _controller.value = TextEditingValue(
-                            text: text,
+                            text: merged,
                             selection: TextSelection.collapsed(
-                              offset: text.length,
+                              offset: merged.length,
                             ),
                           );
                         },
