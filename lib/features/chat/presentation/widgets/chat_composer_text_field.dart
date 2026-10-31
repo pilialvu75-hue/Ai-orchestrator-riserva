@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Two visible lines at most, including with large accessibility text.
-/// Longer dictations and pasted drafts scroll INSIDE the editor instead of
-/// expanding the composer over the conversation. This widget never truncates
-/// or mutates the text stored in [controller].
+/// Shared multiline editor. ChatComposerLayout gives long drafts extra
+/// horizontal space on narrow screens, without changing the original
+/// five-line input behavior or mutating the controller's text.
 class ChatComposerTextField extends StatelessWidget {
   const ChatComposerTextField({
     super.key,
@@ -28,12 +27,10 @@ class ChatComposerTextField extends StatelessWidget {
       enabled: enabled,
       style: const TextStyle(
         color: Colors.white,
-        fontSize: 15,
-        height: 1.3,
+        fontSize: 16,
       ),
       minLines: 1,
-      maxLines: 2,
-      scrollPhysics: const ClampingScrollPhysics(),
+      maxLines: 5,
       textInputAction: TextInputAction.newline,
       decoration: InputDecoration(
         hintText: hintText,
@@ -41,8 +38,8 @@ class ChatComposerTextField extends StatelessWidget {
         isDense: true,
         border: InputBorder.none,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 8,
-          vertical: 8,
+          horizontal: 10,
+          vertical: 12,
         ),
       ),
       onSubmitted: onSubmitted,
