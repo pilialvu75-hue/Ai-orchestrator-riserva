@@ -203,6 +203,54 @@ void main() {
     });
   });
 
+  test('French historical PSG/Auxerre result triggers a Web lookup', () {
+    const question = 'résultat du match de championnat psg Auxerre en 2003';
+    expect(AssistantWebSearchPolicy.isSportsResultQuery(question), isTrue);
+    expect(AssistantWebSearchPolicy.shouldSearch(question), isTrue);
+    expect(
+      AssistantWebSearchPolicy.shouldSearch('résultat de ce calcul'),
+      isFalse,
+    );
+    expect(
+      AssistantWebSearchPolicy.shouldSearch('Explique les règles du championnat'),
+      isFalse,
+    );
+    expect(
+      AssistantWebSearchPolicy.shouldSearch('sans internet: $question'),
+      isFalse,
+    );
+  });
+
+  test('short French sports follow-up requires a safe preceding user match', () {
+    const match = 'résultat du match de championnat psg Auxerre en 2003';
+    const followUp = "c'est quoi le résultat donc?";
+    expect(AssistantWebSearchPolicy.shouldSearch(followUp), isFalse);
+    expect(AssistantWebSearchPolicy.isSportsResultFollowUp(followUp), isTrue);
+    expect(
+      AssistantWebSearchPolicy.sportsResultFollowUpQuery(followUp, match),
+      match,
+    );
+    expect(
+      AssistantWebSearchPolicy.sportsResultFollowUpQuery(followUp, null),
+      isNull,
+    );
+    expect(
+      AssistantWebSearchPolicy.sportsResultFollowUpQuery(
+        followUp, 'mon pote est Jérôme'),
+      isNull,
+    );
+    expect(
+      AssistantWebSearchPolicy.sportsResultFollowUpQuery(
+        followUp, 'Sans internet, résultat du match de championnat psg Auxerre en 2003'),
+      isNull,
+    );
+    expect(
+      AssistantWebSearchPolicy.sportsResultFollowUpQuery(
+        followUp, '$match\nPrivate line'),
+      isNull,
+    );
+  });
+
   test('extractQuery still removes explicit search prefixes', () {
     expect(
       AssistantWebSearchPolicy.extractQuery(
