@@ -321,6 +321,74 @@ void main() {
     verifyNever(() => cloud.shouldPreferCloudFor(any()));
   });
 
+  test('exact S24 sequence retains match context through bare Web instruction',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(
+        toolId: 'web_search',
+        output: 'SYNTHETIC sports archive https://example.test/match',
+      ),
+    );
+    const initial = 'résultat du match psg Auxerre en 2003';
+    const finalQuestion =
+        'résultat du match de championnat psg Auxerre en 2003';
+    const afterInitial = <ChatTurn>[
+      ChatTurn(role: ChatRole.user, content: initial),
+      ChatTurn(role: ChatRole.assistant, content: 'Unable to find it.'),
+    ];
+    const afterSearch = <ChatTurn>[
+      ...afterInitial,
+      ChatTurn(role: ChatRole.user, content: 'recherche en internet'),
+      ChatTurn(role: ChatRole.assistant,
+        content: 'Unverified assistant sentence.'),
+    ];
+
+    final orchestrator = build();
+    await orchestrator.handleStream(initial, sessionId: 's24-sequence').drain<void>();
+    await orchestrator.handleStream('recherche en internet',
+      sessionId: 's24-sequence', context: afterInitial).drain<void>();
+    await orchestrator.handleStream("c'est quoi le résultat donc?",
+      sessionId: 's24-sequence', context: afterSearch).drain<void>();
+    await orchestrator.handleStream(finalQuestion,
+      sessionId: 's24-sequence',
+      context: <ChatTurn>[
+        ...afterSearch,
+        ChatTurn(role: ChatRole.user,
+          content: "c'est quoi le résultat donc?"),
+        ChatTurn(role: ChatRole.assistant,
+          content: 'Assistant previously guessed a different competition.'),
+      ]).drain<void>();
+
+    final queries = verify(() => webSearch.execute(captureAny())).captured
+        .cast<Map<String, dynamic>>();
+    expect(queries, hasLength(4));
+    expect(queries.map((item) => item['query']).toList(),
+      <String>[initial, initial, initial, finalQuestion]);
+    final requests = verify(() => inference.stream(captureAny())).captured
+        .cast<InferenceRequest>();
+    expect(requests, hasLength(4));
+    expect(requests[1].prompt, initial);
+    expect(requests[2].prompt, initial);
+    expect(requests[3].prompt, finalQuestion);
+    expect(requests[2].systemPrompt, contains('[WEB SEARCH RESULTS]'));
+    verifyNever(() => cloud.shouldPreferCloudFor(any()));
+  });
+
+  test('intervening unrelated user message blocks contextual sports lookup',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    await build().handleStream("c'est quoi le résultat donc?",
+      sessionId: 'separate-topic',
+      context: const <ChatTurn>[
+        ChatTurn(role: ChatRole.user,
+          content: 'résultat du match psg Auxerre en 2003'),
+        ChatTurn(role: ChatRole.user,
+          content: 'Parlons de cuisine maintenant.'),
+      ]).drain<void>();
+    verifyNever(() => webSearch.execute(any()));
+  });
+
   test('French result follow-up searches the prior user match, not assistant text',
       () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);

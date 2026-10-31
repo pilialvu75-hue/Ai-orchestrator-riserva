@@ -203,6 +203,26 @@ void main() {
     });
   });
 
+  test('exact French bare Web command is contextual and not a score', () {
+    expect(
+      AssistantWebSearchPolicy.isContextualWebRequest('recherche en internet'),
+      isTrue,
+    );
+    expect(
+      AssistantWebSearchPolicy.isContextualWebRequest('recherche sur internet'),
+      isTrue,
+    );
+    expect(
+      AssistantWebSearchPolicy.isContextualWebRequest(
+        'recherche en internet résultat psg Auxerre'),
+      isFalse,
+    );
+    expect(
+      AssistantWebSearchPolicy.isSportsResultQuery('recherche en internet'),
+      isFalse,
+    );
+  });
+
   test('French historical PSG/Auxerre result triggers a Web lookup', () {
     const question = 'résultat du match de championnat psg Auxerre en 2003';
     expect(AssistantWebSearchPolicy.isSportsResultQuery(question), isTrue);

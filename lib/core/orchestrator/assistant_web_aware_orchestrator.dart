@@ -138,8 +138,23 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
         tokensGenerated: 0, providerId: 'web_search_sources');
       return;
     }
+    // Keep the user's original turn in SQLite. For a short Web instruction
+    // or score follow-up, the actual inference topic is the last public
+    // sports question in this same conversation, not the short instruction.
+    final previousSportsQuestion = !isOffline &&
+            !AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) &&
+            _runtimeSettingsService.runtimeMode == AiRuntimeMode.local
+        ? _contextualSportsTopic(input, context)
+        : null;
+    final inferenceTopic = previousSportsQuestion ?? input;
+    if (previousSportsQuestion != null) {
+      RuntimeEventLog.instance.emit(
+        '[ASSISTANT_WEB_CONTEXTUAL] mode=local action=resolve_user_sports_topic',
+      );
+    }
+
     final effectiveSystemPrompt = await _enrichIfNeeded(
-      input: input,
+      input: inferenceTopic,
       sessionId: sessionId,
       context: context,
       systemPrompt: systemPrompt,
@@ -148,14 +163,15 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       temperature: temperature,
     );
 
-    final unavailable = _unverifiedFreshFact(input, effectiveSystemPrompt, isOffline);
+    final unavailable =
+        _unverifiedFreshFact(inferenceTopic, effectiveSystemPrompt, isOffline);
     if (unavailable != null) {
       yield unavailable;
       return;
     }
 
     yield* super.handleStream(
-      input,
+      inferenceTopic,
       sessionId: sessionId,
       context: context,
       systemPrompt: effectiveSystemPrompt,
@@ -163,6 +179,33 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       maxTokens: maxTokens,
       temperature: temperature,
     );
+  }
+
+  /// No assistant assertions or cross-chat searches; the caller provides
+  /// only this session's turns. A small bridge budget spans the user's
+  /// intervening "recherche en internet" and "c'est quoi le résultat donc?".
+  String? _contextualSportsTopic(String prompt, List<ChatTurn> context) {
+    if (!AssistantWebSearchPolicy.isContextualWebRequest(prompt) &&
+        !AssistantWebSearchPolicy.isSportsResultFollowUp(prompt)) {
+      return null;
+    }
+
+    var bridgeCount = 0;
+    for (final turn in context.reversed) {
+      if (turn.role != ChatRole.user) continue;
+      if (turn.excludeFromContext) return null;
+      final userText = turn.content.trim();
+      if (AssistantWebSearchPolicy.isSportsResultQuery(userText)) {
+        return userText;
+      }
+      if (AssistantWebSearchPolicy.isContextualWebRequest(userText) ||
+          AssistantWebSearchPolicy.isSportsResultFollowUp(userText)) {
+        bridgeCount++;
+        if (bridgeCount <= 3) continue;
+      }
+      return null;
+    }
+    return null;
   }
 
   Future<String?> _enrichIfNeeded({
