@@ -29,6 +29,7 @@ void main() {
     int? remoteBuild = 103480,
     String remoteAppVersion = '1.0.15',
     bool androidBetaComparison = true,
+    int? olderOrNewerStableBuild,
   }) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final preferences = await SharedPreferences.getInstance();
@@ -36,6 +37,24 @@ void main() {
       if (request.url.host == 'api.github.com') {
         return http.Response(
           jsonEncode(<Map<String, Object>>[
+            if (olderOrNewerStableBuild != null)
+              <String, Object>{
+                'tag_name': 'v$remoteAppVersion+$olderOrNewerStableBuild',
+                'prerelease': false,
+                'draft': false,
+                'body': 'Older or newer stable build',
+                'assets': <Map<String, Object>>[
+                  <String, Object>{
+                    'name': 'app-release.apk',
+                    'browser_download_url':
+                        'https://github.com/pilialvu75-hue/'
+                        'Ai-orchestrator-riserva/releases/download/'
+                        'v$remoteAppVersion%2B$olderOrNewerStableBuild/'
+                        'app-release.apk',
+                    'size': 203029315,
+                  },
+                ],
+              },
             <String, Object>{
               'tag_name': remoteBuild == null
                   ? 'v$remoteAppVersion-beta'
@@ -110,6 +129,49 @@ void main() {
         'v1.0.15.103480-beta');
     expect(updater.state.value.latestManifest?.apkUrl, releaseUrl);
     expect(updater.hasDetectedNewerVersion(updater.state.value), isTrue);
+  });
+
+  test('S24 Beta opt-in chooses 103581 over older stable 103569',
+      () async {
+    final updater = await manager(
+      installedVersion: '1.0.15+103569',
+      preferredChannel: ReleaseChannel.beta,
+      remoteBuild: 103581,
+      olderOrNewerStableBuild: 103569,
+    );
+    await updater.checkForUpdates(allowCachedFallback: false);
+    expect(updater.state.value.status, UpdateStatus.updateAvailable);
+    expect(updater.state.value.latestManifest?.version,
+        'v1.0.15.103581-beta');
+    expect(updater.hasDetectedNewerVersion(updater.state.value), isTrue);
+  });
+
+  test('S24 opted-in Beta never replaces newer stable with older beta',
+      () async {
+    final updater = await manager(
+      installedVersion: '1.0.15+103581',
+      preferredChannel: ReleaseChannel.beta,
+      remoteBuild: 103575,
+      olderOrNewerStableBuild: 103581,
+    );
+    await updater.checkForUpdates(allowCachedFallback: false);
+    expect(updater.state.value.status, UpdateStatus.upToDate);
+    expect(updater.state.value.latestManifest?.version,
+        'v1.0.15.103581');
+  });
+
+  test('S24 Stable channel ignores newer beta when a stable is present',
+      () async {
+    final updater = await manager(
+      installedVersion: '1.0.15+103569',
+      preferredChannel: ReleaseChannel.stable,
+      remoteBuild: 103581,
+      olderOrNewerStableBuild: 103569,
+    );
+    await updater.checkForUpdates(allowCachedFallback: false);
+    expect(updater.state.value.status, UpdateStatus.upToDate);
+    expect(updater.state.value.latestManifest?.version,
+        'v1.0.15.103569');
   });
 
   test('same beta build is never offered as an update', () async {
