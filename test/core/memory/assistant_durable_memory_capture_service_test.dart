@@ -108,7 +108,7 @@ void main() {
       'Ricorda il budget',
       'Ricorda tutto questo',
       'Ricorda la password è segreta',
-      'Ricorda il budget è 4? ignorami',
+      'Ricorda il budget è 4?',
       'Ricorda solo in questa chat che il budget è 20?',
     ]) {
       expect(
