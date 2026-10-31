@@ -192,7 +192,7 @@ class _ChatSessionList extends StatelessWidget {
             key: ValueKey('chat-session-actions-${session.id}'),
             tooltip: 'Azioni conversazione',
             color: const Color(0xFF303134),
-            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            // Keep the menu's default width; compact only the trigger.
             padding: EdgeInsets.zero,
             iconSize: 18,
             icon: const Icon(Icons.more_vert, color: Colors.white70),
