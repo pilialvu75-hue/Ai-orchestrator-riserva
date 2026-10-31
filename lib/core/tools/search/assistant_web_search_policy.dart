@@ -79,16 +79,81 @@ abstract final class AssistantWebSearchPolicy {
     return extractQuery(topic);
   }
 
-  /// Competition results need evidence even when a year is supplied.
+  /// Competition and match results need evidence, including historical scores
+  /// in French. A generic request for the result of a calculation is not a
+  /// sports lookup and must not trigger public Web access.
   static bool isSportsResultQuery(String prompt) {
-    final value = prompt.toLowerCase();
+    final value = prompt.toLowerCase().replaceAll('’', "'");
     final competition = RegExp(
-      r'\b(?:mondial[ei]|world cup|champions league|olimpiadi|olympics|torneo|tournament|campionato|championship|super bowl)\b',
+      r'\b(?:mondial[ei]|world cup|champions league|olimpiadi|olympics|'
+      r'torneo|tournament|campionato|championnat|championnats|championship|'
+      r'super bowl|match|matches|partita|partido|liga|ligue|football)\b',
     );
     final result = RegExp(
-      r'\b(?:vinto|vincitore|vincitrice|risultato|risultati|won|winner|winners|score|results)\b',
+      r'\b(?:vinto|vincitore|vincitrice|risultato|risultati|'
+      r'résultat|résultats|resultat|resultats|'
+      r'won|winner|winners|score|scores|results|'
+      r'gagné|gagnant|ganador|resultado|resultados)\b',
     );
     return competition.hasMatch(value) && result.hasMatch(value);
+  }
+
+  /// Bare Web commands can refer to a prior user request in the same chat.
+  static bool isContextualWebRequest(String prompt) {
+    final normalized = prompt.trim().toLowerCase().replaceAll('’', "'")
+        .replaceAll(RegExp(r'[.!?…]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ').trim();
+    return const <String>{
+      'recherche en internet',
+      'recherche sur internet',
+      'recherche sur le web',
+      'cherche sur internet',
+      'cherche sur le web',
+      'cherche en ligne',
+      'cerca su internet',
+      'cerca sul web',
+      'cerca online',
+      'search on the internet',
+      'search the web',
+      'busca en internet',
+    }.contains(normalized);
+  }
+
+  /// Short sports follow-ups may use only a preceding user match question.
+  static bool isSportsResultFollowUp(String prompt) {
+    final value = prompt.trim().toLowerCase().replaceAll('’', "'")
+        .replaceAll(RegExp(r'[.?!…]+'), '').trim();
+    return const <String>{
+      "c'est quoi le résultat donc",
+      "c'est quoi le résultat",
+      "alors c'est quoi le résultat",
+      'et le résultat',
+      'quel est le score donc',
+      'alors quel est le score',
+      'quindi qual è il risultato',
+      'e il risultato',
+      'e il punteggio',
+      "so what's the score",
+      'what was the score then',
+      'and the score',
+      'y el resultado',
+      'y cuál fue el resultado',
+    }.contains(value);
+  }
+
+  static String? sportsResultFollowUpQuery(
+    String userPrompt,
+    String? precedingUserPrompt,
+  ) {
+    if (!isSportsResultFollowUp(userPrompt)) return null;
+    final previous = precedingUserPrompt?.trim();
+    if (previous == null || previous.isEmpty || previous.length > 300 ||
+        previous.contains('\n') || previous.contains('\r') ||
+        _explicitNoWebIntent(previous.toLowerCase().replaceAll('’', "'")) ||
+        !isSportsResultQuery(previous)) {
+      return null;
+    }
+    return extractQuery(previous);
   }
 
   /// Present-tense identity questions need fresh evidence even without "today".
@@ -169,6 +234,10 @@ abstract final class AssistantWebSearchPolicy {
       'look up ',
       'cherche en ligne ',
       'recherche en ligne ',
+      'recherche sur internet ',
+      'recherche sur le web ',
+      'cherche sur internet ',
+      'cherche sur le web ',
       'cherche ',
       'busca online ',
       'buscar online ',
@@ -275,6 +344,11 @@ abstract final class AssistantWebSearchPolicy {
       'look up online',
       'cherche en ligne',
       'recherche en ligne',
+      'recherche sur internet',
+      'recherche en internet',
+      'recherche sur le web',
+      'cherche sur internet',
+      'cherche sur le web',
       'busca online',
       'buscar online',
       'su internet',
