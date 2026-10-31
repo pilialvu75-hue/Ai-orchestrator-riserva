@@ -308,7 +308,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
           AssistantWebSearchPolicy.isSportsResultQuery(input) ||
           (!offline && AssistantWebSearchPolicy.isSportsResultFollowUp(input)))) return null;
     final french = RegExp(
-      r'\b(?:résultat|resultat|championnat|quel|est|donc|score)\b',
+      r'\b(?:résultat|resultat|championnat|quel|est|donc)\b',
       caseSensitive: false,
     ).hasMatch(input.toLowerCase());
     final italian = !french && RegExp(r'\b(?:chi|quale|qual|vinto|president[ei]|mondiali|risultato)\b', caseSensitive: false).hasMatch(input);
