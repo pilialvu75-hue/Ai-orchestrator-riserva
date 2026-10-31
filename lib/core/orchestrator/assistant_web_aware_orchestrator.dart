@@ -363,7 +363,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
           : italian
               ? (offline
                   ? 'La verifica Web è disattivata per questa richiesta. Non posso confermare il dato.'
-                  : 'La ricerca Web non ha fornito fonti utilizzabili per verificare il dato. Riprova più tardi.')
+                  : 'La ricerca non ha fornito fonti aggiornate utilizzabili per verificare questo dato. Riprova tra poco.')
               : (offline
                   ? 'Web verification is disabled for this request. I cannot confirm this result.'
                   : 'Search did not provide usable sources to verify this result. Please try again later.'),
