@@ -383,12 +383,45 @@ class UpdateChecker {
 
       if (!_supportsTarget(manifest)) continue;
       if (best == null ||
-          _comparator.compare(manifest.version, best.version) > 0) {
+          _isNewerReleaseForChannel(manifest, best, preferredChannel)) {
         best = manifest;
       }
     }
 
     return best;
+  }
+
+  /// Android's official beta APK has a monotonically increasing build code,
+  /// but PackageInfo drops the beta suffix. With explicit Beta opt-in,
+  /// 1.0.15-beta+103581 must outrank older 1.0.15+103569 even though
+  /// conventional SemVer ranks every stable above every beta of that base.
+  /// Limit this exception to known numeric four-segment *Android* releases
+  /// with the same major/minor/patch. Other platforms and versions continue
+  /// to follow SemVer. Never pick an older build or a malformed tag.
+  bool _isNewerReleaseForChannel(
+    UpdateManifest candidate,
+    UpdateManifest current,
+    ReleaseChannel preferredChannel,
+  ) {
+    if (targetPlatform == UpdateTargetPlatform.android &&
+        preferredChannel == ReleaseChannel.beta) {
+      final a = _comparator.parse(candidate.version);
+      final b = _comparator.parse(current.version);
+      if (a != null &&
+          b != null &&
+          a.numericSegments.length == 4 &&
+          b.numericSegments.length == 4 &&
+          (a.channel == ReleaseChannel.beta ||
+              a.channel == ReleaseChannel.stable) &&
+          (b.channel == ReleaseChannel.beta ||
+              b.channel == ReleaseChannel.stable) &&
+          a.numericSegments[0] == b.numericSegments[0] &&
+          a.numericSegments[1] == b.numericSegments[1] &&
+          a.numericSegments[2] == b.numericSegments[2]) {
+        return a.numericSegments[3] > b.numericSegments[3];
+      }
+    }
+    return _comparator.compare(candidate.version, current.version) > 0;
   }
 
   ReleaseChannel _releaseChannelFromGitHubRelease(
