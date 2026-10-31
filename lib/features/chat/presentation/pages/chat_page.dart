@@ -41,6 +41,7 @@ import 'package:uuid/uuid.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_overlay.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_session_tile.dart';
 import 'package:ai_orchestrator/presentation/chat/components/high_performance_chat_list.dart';
 import 'package:ai_orchestrator/presentation/chat/components/live_voice_overlay.dart';
 import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_widget.dart';
@@ -183,28 +184,17 @@ class _ChatSessionList extends StatelessWidget {
       itemCount: navigation.sessions.length,
       itemBuilder: (context, index) {
         final session = navigation.sessions[index];
-        return ListTile(
-          dense: true,
+        return ChatSessionTile(
+          title: session.title,
+          pinned: session.pinned,
           selected: session.id == navigation.sessionId,
-          selectedTileColor: Colors.white10,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          leading: Icon(
-            session.pinned ? Icons.push_pin : Icons.chat_bubble_outline,
-            color: session.pinned ? const Color(0xFF8AB4F8) : Colors.white60,
-            size: 18,
-          ),
-          title: Text(
-            session.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
-          ),
           trailing: PopupMenuButton<_ChatSessionAction>(
             key: ValueKey('chat-session-actions-${session.id}'),
             tooltip: 'Azioni conversazione',
             color: const Color(0xFF303134),
+            // Keep the menu's default width; compact only the trigger.
+            padding: EdgeInsets.zero,
+            iconSize: 18,
             icon: const Icon(Icons.more_vert, color: Colors.white70),
             onSelected: (action) => _runAction(action, session),
             itemBuilder: (_) => [
