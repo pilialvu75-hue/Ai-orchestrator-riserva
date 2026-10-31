@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/features/multimodal/data/services/image_service.
 import 'package:ai_orchestrator/features/multimodal/data/services/screen_vision_service.dart';
 import 'package:ai_orchestrator/features/voice/presentation/widgets/voice_input_button.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/dictation_draft.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_composer_text_field.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -563,31 +564,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   const SizedBox(width: 8),
 
                   Expanded(
-                    child: TextField(
+                    child: ChatComposerTextField(
                       controller: _controller,
                       autofocus: _isEditing,
                       enabled: !widget.isLoading,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                      ),
-                      maxLines: 5,
-                      minLines: 1,
-                      textInputAction: TextInputAction.newline,
-                      decoration: InputDecoration(
-                        hintText: _isEditing
-                            ? 'Modifica il messaggio...'
-                            : l10n.t('message_hint'),
-                        hintStyle: const TextStyle(
-                          color: Colors.white38,
-                        ),
-                        isDense: true,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 12,
-                        ),
-                      ),
+                      hintText: _isEditing
+                          ? 'Modifica il messaggio...'
+                          : l10n.t('message_hint'),
                       onSubmitted: (_) => _submit(),
                     ),
                   ),
