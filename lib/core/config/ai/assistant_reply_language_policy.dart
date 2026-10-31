@@ -31,7 +31,7 @@ abstract final class AssistantReplyLanguagePolicy {
     final text = userPrompt.trim().toLowerCase();
     if (text.isEmpty) return null;
     final words = RegExp(
-      r"[\\p{L}]+(?:['’][\\p{L}]+)?",
+      r"[\p{L}]+(?:['’][\p{L}]+)?",
       unicode: true,
     ).allMatches(text).map((match) => match.group(0)!).toList();
     if (words.isEmpty) return null;
@@ -58,7 +58,7 @@ abstract final class AssistantReplyLanguagePolicy {
   }) {
     final language = detect(userPrompt);
     if (language == null) return systemPrompt;
-    return '$systemPrompt\\n\\nFor this response, write in $language. '
+    return '$systemPrompt\n\nFor this response, write in $language. '
         'The latest user message determines the reply language, even when '
         'earlier messages used another language. Preserve proper names.';
   }
