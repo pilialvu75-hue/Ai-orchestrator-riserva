@@ -31,6 +31,8 @@ import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_downlo
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/ai_mode_page.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_runtime_mode_shortcut.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/orchestrator_state_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart';
@@ -1631,60 +1633,31 @@ class _ChatBodyState
   }
 
   Widget _buildRuntimeModePill(Color surfaceColor) {
-    return GestureDetector(
-      onTap:
-          _appearanceViewModel
-              .handleSecretPatternClick,
-      child: Container(
-        padding:
-            const EdgeInsets
-                .symmetric(
-          horizontal: 14,
-          vertical: 6,
-        ),
-        decoration:
-            BoxDecoration(
-          color:
-              surfaceColor,
-          borderRadius:
-              BorderRadius.circular(
-            20,
-          ),
-          border:
-              Border.all(
-            color:
-                Colors.white12,
-          ),
-        ),
-        child: Row(
-          mainAxisSize:
-              MainAxisSize.min,
-          children: [
-            Text(
-              widget
-                  .runtimeModeName
-                  .toUpperCase(),
-              style:
-                  const TextStyle(
-                color:
-                    Colors.white70,
-                fontSize: 13,
-                fontWeight:
-                    FontWeight.w600,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: surfaceColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: ChatRuntimeModeShortcut(
+        // This is the *configured routing policy*, not a claim about which
+        // provider executed the last message.
+        modeName: _runtimeSettingsService.runtimeMode.name,
+        settingsTooltip: context.l10n.t('ai_mode'),
+        // Preserve the pre-existing seven-tap developer gesture on the label.
+        onDeveloperTap: _appearanceViewModel.handleSecretPatternClick,
+        // The former down-arrow looked interactive, but changed no AI mode.
+        // Open the existing real mode controls instead; Save is still required.
+        onOpenSettings: () {
+          Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => AiModePage(
+                settingsService: _runtimeSettingsService,
               ),
             ),
-            const SizedBox(
-              width: 4,
-            ),
-            const Icon(
-              Icons
-                  .arrow_drop_down,
-              color:
-                  Colors.white38,
-              size: 16,
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
