@@ -296,6 +296,98 @@ void main() {
     verifyNever(() => cloud.shouldPreferCloudFor(any()));
   });
 
+  test('French historical PSG Auxerre result uses Web without a Cloud model',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(
+        toolId: 'web_search',
+        output: 'SYNTHETIC fixture: match archive https://example.test/football/2003',
+      ),
+    );
+    const question = 'résultat du match de championnat psg Auxerre en 2003';
+    final chunks = await build().handleStream(
+      question, sessionId: 'fresh-french-local',
+    ).toList();
+
+    expect(chunks.single.text, 'ok');
+    final args = verify(() => webSearch.execute(captureAny())).captured.single
+        as Map<String, dynamic>;
+    expect(args['query'], question);
+    final request = verify(() => inference.stream(captureAny())).captured.single
+        as InferenceRequest;
+    expect(request.systemPrompt, contains('[WEB SEARCH RESULTS]'));
+    expect(request.systemPrompt, contains('https://example.test/football/2003'));
+    verifyNever(() => cloud.shouldPreferCloudFor(any()));
+  });
+
+  test('French result follow-up searches the prior user match, not assistant text',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(
+        toolId: 'web_search',
+        output: 'SYNTHETIC score fixture https://example.test/sports',
+      ),
+    );
+    const question = 'résultat du match de championnat psg Auxerre en 2003';
+    const history = <ChatTurn>[
+      ChatTurn(role: ChatRole.user, content: question),
+      ChatTurn(role: ChatRole.assistant,
+        content: 'Invented score and misleading destination.'),
+    ];
+    final chunks = await build().handleStream(
+      "c'est quoi le résultat donc?",
+      sessionId: 'same-french-conversation',
+      context: history,
+    ).toList();
+
+    expect(chunks.single.text, 'ok');
+    final args = verify(() => webSearch.execute(captureAny())).captured.single
+        as Map<String, dynamic>;
+    expect(args['query'], question);
+    expect(args['query'], isNot(contains('Invented score')));
+    final request = verify(() => inference.stream(captureAny())).captured.single
+        as InferenceRequest;
+    expect(request.context, history);
+    expect(request.systemPrompt, contains('https://example.test/sports'));
+  });
+
+  test('sports follow-up without user match does not search or infer a topic',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    await build().handleStream(
+      "c'est quoi le résultat donc?",
+      sessionId: 'unrelated-french-conversation',
+      context: const <ChatTurn>[
+        ChatTurn(role: ChatRole.assistant,
+          content: 'PSG Auxerre 2003 is a match.'),
+        ChatTurn(role: ChatRole.user, content: 'Explique un calcul simple.'),
+      ],
+    ).drain<void>();
+
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('French sports lookup failure is transparent and does not invent score',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(
+        toolId: 'web_search',
+        output: '',
+        success: false,
+      ),
+    );
+    final chunks = await build().handleStream(
+      'résultat du match de championnat psg Auxerre en 2003',
+      sessionId: 'french-search-failure',
+    ).toList();
+    expect(chunks.single.providerId, 'web_verification_unavailable');
+    expect(chunks.single.text, startsWith('La recherche Web'));
+    verifyNever(() => inference.stream(any()));
+  });
+
   test('device clock avoids model and search for simple time questions', () async {
     final chunks = await build().handleStream('che ore sono?', sessionId: 'clock').toList();
     expect(chunks.single.providerId, 'device_clock');
