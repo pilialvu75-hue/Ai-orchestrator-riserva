@@ -176,7 +176,8 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
   }) async {
     final local = _runtimeSettingsService.runtimeMode == AiRuntimeMode.local;
     String? previousUserPrompt;
-    if (AssistantWebSearchPolicy.isAnswerVerification(input)) {
+    if (AssistantWebSearchPolicy.isAnswerVerification(input) ||
+        AssistantWebSearchPolicy.isSportsResultFollowUp(input)) {
       for (final turn in context.reversed) {
         if (turn.role != ChatRole.user) continue;
         // An excluded latest topic is a boundary, not permission to reuse an older one.
@@ -194,10 +195,14 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     final verificationQuery = AssistantWebSearchPolicy.answerVerificationQuery(
       input, previousUserPrompt,
     );
+    final sportsFollowUpQuery = AssistantWebSearchPolicy.sportsResultFollowUpQuery(
+      input, previousUserPrompt,
+    );
     if (isOffline || AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) ||
         (!local && _runtimeSettingsService.runtimeMode != AiRuntimeMode.hybrid) ||
         AssistantWebSearchPolicy.hasInjectedContext(prompt: input, systemPrompt: systemPrompt) ||
-        (!AssistantWebSearchPolicy.shouldSearch(input) && verificationQuery == null)) {
+        (!AssistantWebSearchPolicy.shouldSearch(input) &&
+            verificationQuery == null && sportsFollowUpQuery == null)) {
       return systemPrompt;
     }
 
@@ -233,7 +238,9 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       return systemPrompt;
     }
 
-    final query = verificationQuery ?? AssistantWebSearchPolicy.extractQuery(input);
+    // Only prior user-supplied public sports topics may resolve short follow-ups.
+    final query = verificationQuery ?? sportsFollowUpQuery ??
+        AssistantWebSearchPolicy.extractQuery(input);
     RuntimeEventLog.instance.emit(
       '[ASSISTANT_WEB_ENRICH] session=$sessionId mode=${local ? 'local' : 'hybrid'} '
       'action=search query_chars=${query.length}',
@@ -298,16 +305,25 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     if (_runtimeSettingsService.runtimeMode != AiRuntimeMode.local ||
         (!offline && !(systemPrompt?.contains('[WEB SEARCH UNAVAILABLE]') ?? false)) ||
         !(AssistantWebSearchPolicy.isPresentOfficeHolderQuery(input) ||
-          AssistantWebSearchPolicy.isSportsResultQuery(input))) return null;
-    final italian = RegExp(r'\b(?:chi|quale|qual|vinto|president[ei]|mondiali)\b', caseSensitive: false).hasMatch(input);
+          AssistantWebSearchPolicy.isSportsResultQuery(input) ||
+          (!offline && AssistantWebSearchPolicy.isSportsResultFollowUp(input)))) return null;
+    final french = RegExp(
+      r'\b(?:résultat|resultat|championnat|quel|est|donc|score)\b',
+      caseSensitive: false,
+    ).hasMatch(input.toLowerCase());
+    final italian = !french && RegExp(r'\b(?:chi|quale|qual|vinto|president[ei]|mondiali|risultato)\b', caseSensitive: false).hasMatch(input);
     return InferenceResponse.finalChunk(
-      text: italian
+      text: french
           ? (offline
-              ? 'La verifica web è disattivata per questa richiesta. Non posso confermare il dato attuale.'
-              : 'La ricerca non ha fornito fonti aggiornate utilizzabili per verificare questo dato. Riprova tra poco.')
-          : (offline
-              ? 'Web verification is disabled for this request. I cannot confirm the current fact.'
-              : 'Search did not provide usable current sources to verify this fact. Please try again shortly.'),
+              ? "La recherche Web est désactivée pour cette demande. Je ne peux pas confirmer ce résultat."
+              : "La recherche Web n'a fourni aucune source exploitable pour confirmer ce résultat. Réessayez plus tard.")
+          : italian
+              ? (offline
+                  ? 'La verifica Web è disattivata per questa richiesta. Non posso confermare il dato.'
+                  : 'La ricerca Web non ha fornito fonti utilizzabili per verificare il dato. Riprova più tardi.')
+              : (offline
+                  ? 'Web verification is disabled for this request. I cannot confirm this result.'
+                  : 'Search did not provide usable sources to verify this result. Please try again later.'),
       tokensGenerated: 0,
       providerId: 'web_verification_unavailable',
     );
