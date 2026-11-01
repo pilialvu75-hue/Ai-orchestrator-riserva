@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Controls backed by VoiceOutputService. AudioStreamPlayer currently supports
-/// stop, not sample-accurate pause or seek: "Ricomincia" always starts at 0.
-/// This UI deliberately does not display fabricated timestamps or progress.
+/// Compact voice mini-player styled like a waveform pill.
+/// The waveform is decorative: mp_audio_stream has no native seek/pause
+/// API. Real time/progress will be added with the background media player.
 class ChatAudioPlaybackBar extends StatelessWidget {
   const ChatAudioPlaybackBar({
     super.key,
@@ -21,73 +21,95 @@ class ChatAudioPlaybackBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status = isBusy
-        ? 'Preparazione audio'
-        : isPlaying
-            ? 'Riproduzione vocale'
-            : 'Lettura interrotta';
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        height: 62,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFF1B293C),
+          color: const Color(0xFF303236),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: Colors.white12),
         ),
         child: Row(
           children: [
-            if (isBusy)
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Color(0xFF8AB4F8),
-                ),
-              )
-            else
-              Icon(
-                isPlaying ? Icons.graphic_eq_rounded : Icons.volume_off_outlined,
-                size: 20,
-                color: const Color(0xFF8AB4F8),
+            IconButton(
+              tooltip: isPlaying ? 'Interrompi lettura' : 'Ricomincia dall’inizio',
+              onPressed: isBusy ? null : (isPlaying ? onStop : onRestart),
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+                minimumSize: const Size(42, 42),
+                maximumSize: const Size(42, 42),
               ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                status,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
+              icon: Icon(
+                isBusy
+                    ? Icons.hourglass_top_rounded
+                    : isPlaying
+                        ? Icons.stop_rounded
+                        : Icons.play_arrow_rounded,
+                size: 24,
               ),
             ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 47,
+              child: Text(
+                isBusy ? 'Audio…' : isPlaying ? 'Ascolto' : 'Fermo',
+                style: const TextStyle(color: Colors.white, fontSize: 11),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Expanded(child: _WaveformDecoration()),
             IconButton(
               tooltip: 'Ricomincia dall’inizio',
               onPressed: isBusy ? null : onRestart,
-              icon: const Icon(Icons.replay_rounded),
-              iconSize: 20,
+              icon: const Icon(Icons.replay_rounded, size: 19),
+              color: Colors.white70,
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-              color: Colors.white,
-            ),
-            IconButton(
-              tooltip: 'Interrompi lettura',
-              onPressed: isBusy || !isPlaying ? null : onStop,
-              icon: const Icon(Icons.stop_circle_outlined),
-              iconSize: 21,
-              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-              color: Colors.white,
             ),
             IconButton(
               tooltip: 'Chiudi lettore',
               onPressed: onClose,
-              icon: const Icon(Icons.close_rounded),
-              iconSize: 21,
+              icon: const Icon(Icons.close_rounded, size: 24),
+              color: Colors.white,
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-              color: Colors.white70,
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Decorative bars only, not measured audio samples or playback progress.
+class _WaveformDecoration extends StatelessWidget {
+  const _WaveformDecoration();
+  static const heights = <double>[
+    12, 26, 17, 30, 13, 23, 27, 15, 32, 18, 24, 12,
+    27, 19, 31, 16, 23, 28, 14, 30, 20, 13, 26, 17,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeSemantics(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          for (final height in heights)
+            Flexible(
+              child: Container(
+                width: 2,
+                height: height,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -22,7 +22,7 @@ void main() {
         ),
       ),
     ));
-    expect(find.text('Riproduzione vocale'), findsOneWidget);
+    expect(find.text('Ascolto'), findsOneWidget);
     await tester.tap(find.byTooltip('Ricomincia dall’inizio'));
     await tester.tap(find.byTooltip('Interrompi lettura'));
     await tester.tap(find.byTooltip('Chiudi lettore'));
@@ -48,16 +48,12 @@ void main() {
     );
 
     await tester.pumpWidget(app(false, false));
-    expect(find.text('Lettura interrotta'), findsOneWidget);
-    final stoppedButton = tester.widget<IconButton>(
-      find.byWidgetPredicate((widget) =>
-          widget is IconButton && widget.tooltip == 'Interrompi lettura'),
-    );
-    expect(stoppedButton.onPressed, isNull);
+    expect(find.text('Fermo'), findsOneWidget);
+    expect(find.byTooltip('Interrompi lettura'), findsNothing);
 
     await tester.pumpWidget(app(false, true));
-    expect(find.text('Preparazione audio'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('Audio…'), findsOneWidget);
+    expect(find.byIcon(Icons.hourglass_top_rounded), findsOneWidget);
     final restartButton = tester.widget<IconButton>(
       find.byWidgetPredicate((widget) =>
           widget is IconButton && widget.tooltip == 'Ricomincia dall’inizio'),
