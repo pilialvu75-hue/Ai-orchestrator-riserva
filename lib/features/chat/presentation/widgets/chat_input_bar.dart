@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/features/voice/presentation/widgets/voice_input_
 import 'package:ai_orchestrator/features/chat/presentation/widgets/dictation_draft.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_composer_text_field.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_composer_layout.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_live_button.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -417,12 +418,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
         }
         break;
 
-      case _AttachmentPickerAction.live:
-        if (widget.liveSessionEnabled) {
-          widget.onStartLiveSession?.call();
-        }
-        break;
-
       case _AttachmentPickerAction.video:
         final file =
             await _fileAttachmentService.pickVideo();
@@ -492,8 +487,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
         return _AttachmentPickerSheet(
           onSelected: _pickAttachment,
           screenVisionEnabled: _screenVisionService.isSupported,
-          liveSessionEnabled:
-              widget.liveSessionEnabled && widget.onStartLiveSession != null,
         );
       },
     );
@@ -596,7 +589,14 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     );
                   },
                 ),
-                sendButton: widget.isLoading
+                sendButton: !widget.isLoading &&
+                        !_canSubmit &&
+                        widget.onStartLiveSession != null
+                    ? ChatLiveButton(
+                        enabled: widget.liveSessionEnabled,
+                        onPressed: widget.onStartLiveSession,
+                      )
+                    : widget.isLoading
                     ? const SizedBox(
                         width: 42,
                         height: 42,
@@ -956,7 +956,6 @@ enum _AttachmentPickerAction {
   screen,
   file,
   video,
-  live,
 }
 
 class _AttachmentPickerSheet
@@ -964,14 +963,11 @@ class _AttachmentPickerSheet
   const _AttachmentPickerSheet({
     required this.onSelected,
     required this.screenVisionEnabled,
-    required this.liveSessionEnabled,
   });
 
   final ValueChanged<
       _AttachmentPickerAction> onSelected;
   final bool screenVisionEnabled;
-  final bool liveSessionEnabled;
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -1045,14 +1041,6 @@ class _AttachmentPickerSheet
             spacing: 12,
             runSpacing: 12,
             children: [
-              if (liveSessionEnabled)
-                _AttachmentActionTile(
-                  icon: Icons.graphic_eq_rounded,
-                  label: 'Live',
-                  onTap: () => onSelected(
-                    _AttachmentPickerAction.live,
-                  ),
-                ),
               _AttachmentActionTile(
                 icon:
                     Icons.image_outlined,
