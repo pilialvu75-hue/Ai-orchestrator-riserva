@@ -95,6 +95,25 @@ void main() {
     });
   });
 
+  group('Italian person names are conversational, never device commands', () {
+    test('the two physical S24 declarations are chat', () {
+      expect(analyzer.analyze('Per questa prova, il mio amico si chiama Étienne.'),
+          TaskType.chat);
+      expect(analyzer.analyze('il nome del mio collega è Mika'), TaskType.chat);
+      expect(analyzer.analyze('ed è un idiota'), TaskType.chat);
+      expect(analyzer.analyze('come si chiama il mio collega?'), TaskType.chat);
+      expect(analyzer.analyze('Come si chiama il mio amico?'), TaskType.chat);
+      expect(analyzer.analyze('e che cosa è Mika?'), TaskType.chat);
+    });
+
+    test('real device actions still route to executor', () {
+      expect(analyzer.analyze('chiama Mario'), TaskType.command);
+      expect(analyzer.analyze('apri la fotocamera'), TaskType.command);
+      expect(analyzer.analyze('per favore chiama Mario'), TaskType.command);
+      expect(analyzer.analyze('lancia la app'), TaskType.command);
+    });
+  });
+
   group('IntentAnalyzer – chat fallback', () {
     test('general question → chat', () {
       expect(analyzer.analyze('what is the weather today?'), TaskType.chat);
