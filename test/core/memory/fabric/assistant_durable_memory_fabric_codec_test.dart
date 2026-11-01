@@ -60,6 +60,33 @@ void main() {
     expect(restored.updatedAt, legacy.updatedAt);
   });
 
+  test('verified procedure round-trips as provider-neutral knowledge', () {
+    final procedure = AssistantDurableMemoryRecord(
+      recordKey: 'procedure.android.diagnostics',
+      scope: AssistantMemoryScope.user,
+      scopeId: 'local-user',
+      kind: AssistantMemoryKind.procedure,
+      content: 'Diagnostica Android verificata tramite test riproducibile.',
+      source: AssistantMemorySource.verifiedTest,
+      updatedAt: DateTime.utc(2026, 11, 1, 18).millisecondsSinceEpoch,
+      status: AssistantMemoryStatus.confirmed,
+    );
+    final fabric = AssistantDurableMemoryFabricCodec.toFabric(
+      procedure,
+      privacyLevel: MemoryFabricPrivacyLevel.deviceOnly,
+    );
+    expect(fabric.type, MemoryFabricType.knowledge);
+    expect(fabric.privacyLevel, MemoryFabricPrivacyLevel.deviceOnly);
+    expect(fabric.checksumValid, isTrue);
+    final wire = MemoryFabricRecord.fromJson(fabric.toJson());
+    final restored = AssistantDurableMemoryFabricCodec.tryFromFabric(wire);
+    expect(restored, isNotNull);
+    expect(restored!.kind, AssistantMemoryKind.procedure);
+    expect(restored.source, AssistantMemorySource.verifiedTest);
+    expect(restored.content, procedure.content);
+    expect(restored.scope, AssistantMemoryScope.user);
+  });
+
   test('non-assistant fabric records are not decoded as legacy memory', () {
     final record = MemoryFabricRecord.create(
       namespace: 'airlab.project',

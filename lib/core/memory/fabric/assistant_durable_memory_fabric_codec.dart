@@ -99,6 +99,7 @@ abstract final class AssistantDurableMemoryFabricCodec {
   static MemoryFabricType _typeFor(AssistantDurableMemoryRecord record) {
     return switch (record.kind) {
       AssistantMemoryKind.fact => MemoryFabricType.longTermFact,
+      AssistantMemoryKind.procedure => MemoryFabricType.knowledge,
       AssistantMemoryKind.preference => MemoryFabricType.userPreference,
       AssistantMemoryKind.decision => MemoryFabricType.decisionLog,
       AssistantMemoryKind.state when record.scope == AssistantMemoryScope.project =>

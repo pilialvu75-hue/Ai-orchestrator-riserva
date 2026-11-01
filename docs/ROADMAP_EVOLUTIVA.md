@@ -462,3 +462,72 @@ raggiunta e un requisito da preservare, non una nuova corsa all'ottimizzazione.
 3. Proseguire con affidabilita delle risposte e micro-componenti visivi in
    cambiamenti piccoli, CI pertinente e test su dispositivo, senza aprire
    un secondo percorso di lavoro concorrente sul performance tuning.
+
+
+## 16. Patrimonio condiviso Aivexus — modelli, esperienze e piattaforme (1 novembre 2026)
+
+Questa sezione aggiorna la visione delle sezioni 10, 14 e 15; non crea una seconda
+roadmap. Obiettivo: **il modello e il provider sono esecutori sostituibili**,
+mentre i fatti e le esperienze verificati appartengono al core Aivexus.
+L'utente può passare da Qwen a Phi, Nemotron o a un provider Cloud autorizzato
+senza ripartire da zero. Tutte le piattaforme supportate devono utilizzare il
+medesimo contratto, con copie personali sincronizzate solo dopo pairing e
+consenso esplicito.
+
+### Stato reale (non estendere i PASS)
+
+- `AssistantDurableMemoryRecord`, `AssistantDurableMemoryStore` e
+  `AssistantDurableMemoryContextService` esistono e sono indipendenti dal
+  model ID. Il decorator ordinario di chat recupera memorie **confirmed-only**.
+- L'acquisizione produttiva oggi supporta istruzioni esplicite `Ricorda che...`;
+  non è una capacità di apprendimento semantico generale dalla conversazione.
+- S24 FE beta 103627: il recupero di un nome nella stessa chat anche dopo
+  uscita/rientro è stato verificato; NON è prova di memoria user-wide fra chat,
+  né di trasferimento fra modelli o dispositivi.
+- `MemoryFabric` e un adapter CRDT sono presenti nel codice ma la facciata non
+  risulta ancora collegata alla DI di produzione: non dichiarare attivo il sync.
+- Le test fixture di handoff fra modelli e per procedure verificate sono una
+  verifica del core condiviso, **non un test fisico di provider o sincronizzazione**.
+
+### Ordine di realizzazione (P0-A/F1 → F2)
+
+1. **Gate M1 — stesso device, modelli diversi:** record confermato/scope user
+   scritto da modello A, letto da modello B tramite il gateway comune; nessun
+   replay della chat, candidate invisibili, correzioni e dimenticanza coerenti.
+   Distinguere memorie di sessione e memorie di proprietario. Coprire LOCAL e
+   provider Cloud soltanto con controlli espliciti della privacy.
+2. **Gate M2 — esperienza trasferibile:** introdurre il tipo `procedure` solo
+   per esperienze verificate e tracciabili. Un risultato proposto da un modello
+   non può auto-certificarsi. Recupero leggibile e non eseguibile per default;
+   i moduli della Libreria restano soggetti ai loro gate di test/licenza/sicurezza.
+3. **Gate M3 — comprensione e retrieval semantici multilingue:** usare le capacità
+   linguistiche del modello e un retrieval multilingue offline dove supportato,
+   senza catalogare infinite domande regex. Verificare parafrasi in it/fr/en/es,
+   disambiguazione di persone/oggetti e nomi propri, con fallback trasparente.
+4. **Gate M4 — memoria personale cross-chat:** acquisizione di candidati con
+   provenienza, controllo/promozione dell'utente, rilevanza, deduplica,
+   correzioni, cancellazione e isolamento owner/account, preservando SQLite e
+   il contesto minimo sullo smartphone.
+5. **Gate M5 — dispositivi:** S24 → ASUS Windows → Mac → Linux/Web compatibili;
+   schema/versione portabili, export/import cifrato e pairing autorizzato,
+   sync verificata, cache offline e propagazione di revoche/tombstone.
+   Riferimenti #899 e #911, senza duplicare la Libreria o il Cantiere.
+6. **Gate M6 — apprendimento esterno:** conoscenza Web con fonti e data,
+   autorizzazione a rete/Cloud distinta dalla memoria privata, verifica delle
+   fonti, protezione prompt injection. Memorizzare conoscenza validata e skill,
+   non promettere fine-tuning dei pesi automatico.
+
+### Invarianti e prove
+
+- Nessun modello, plugin o servizio remoto diventa proprietario dei ricordi.
+- Niente upload automatico di chat/ricordi personali per farli leggere a un
+  modello Cloud. Uso di un Cloud AI ≠ consenso per sincronizzare su storage.
+- Nessun modello può promuovere la propria risposta a procedura verificata senza
+  prova indipendente. Il richiamo di una procedura non abilita l'esecuzione.
+- Memoria presente offline, isolata da altre persone/owner e consultabile,
+  correggibile e dimenticabile; riferimenti originali non riscritti.
+- Misurare S24 FE: RAM/TTFT, finestra token, batteria e regressioni;
+  preservare le prestazioni attuali e non aggiungere carichi per ogni token.
+- CI condivisa e QA delle piattaforme sono necessari, ma una CI verde non
+  sostituisce un test fisico. Distribuzione Android solo tramite
+  **Impostazioni → Aggiornamenti**, senza reinstallazione né reset delle chat.

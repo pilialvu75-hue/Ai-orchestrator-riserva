@@ -11,6 +11,8 @@ enum AssistantMemoryKind {
   state,
   transition,
   unresolvedTask,
+  // A reusable procedure backed by a verified test, not a model suggestion.
+  procedure,
 }
 
 enum AssistantMemoryStatus {
