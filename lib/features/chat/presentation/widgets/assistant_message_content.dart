@@ -1,36 +1,151 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Renders explicit Markdown pipe tables from assistant messages as accessible,
 /// horizontally scrollable Flutter tables. Everything else remains plain text.
 ///
 /// It does not invent cells, infer tables from prose, contact a service, or
 /// modify the original message (copy, persistence and TTS use the raw text).
-class AssistantMessageContent extends StatelessWidget {
+class AssistantMessageContent extends StatefulWidget {
   const AssistantMessageContent({
     super.key,
     required this.content,
     required this.style,
+    this.openLink,
   });
-
   final String content;
   final TextStyle style;
+  /// Optional test hook; production links open in the system browser.
+  final Future<bool> Function(Uri)? openLink;
+
+  @override
+  State<AssistantMessageContent> createState() =>
+      _AssistantMessageContentState();
+}
+
+class _AssistantMessageContentState extends State<AssistantMessageContent> {
+  static final RegExp _links = RegExp(
+    r'\[([^\]\n]{1,100})\]\((https?:\/\/[^\s()<>{}]+)\)',
+    caseSensitive: false,
+  );
+  final Map<String, TapGestureRecognizer> _taps = {};
+
+  void _disposeTaps() {
+    for (final tap in _taps.values) {
+      tap.dispose();
+    }
+    _taps.clear();
+  }
+
+  @override
+  void didUpdateWidget(covariant AssistantMessageContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.content != widget.content) _disposeTaps();
+  }
+
+  @override
+  void dispose() {
+    _disposeTaps();
+    super.dispose();
+  }
+
+  Future<void> _openLink(Uri uri) async {
+    try {
+      final opened = await (widget.openLink?.call(uri) ??
+          launchUrl(uri, mode: LaunchMode.externalApplication));
+      if (opened) return;
+    } catch (_) {
+      // Preserve the message when there is no browser available.
+    }
+    if (mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('Impossibile aprire il collegamento.')),
+      );
+    }
+  }
+
+  Widget _renderText(String raw) {
+    if (!raw.contains('](')) return Text(raw, style: widget.style);
+    final spans = <InlineSpan>[];
+    final backtickFence = String.fromCharCodes([96, 96, 96]);
+    var fenced = false;
+    String? fenceType;
+    var hasLink = false;
+    final lines = raw.split('\n');
+    for (var index = 0; index < lines.length; index++) {
+      if (index > 0) spans.add(const TextSpan(text: '\n'));
+      final line = lines[index];
+      final trimmed = line.trimLeft();
+      if (trimmed.startsWith(backtickFence) || trimmed.startsWith('~~~')) {
+        final marker = trimmed.substring(0, 3);
+        if (!fenced) {
+          fenced = true;
+          fenceType = marker;
+        } else if (fenceType == marker) {
+          fenced = false;
+          fenceType = null;
+        }
+        spans.add(TextSpan(text: line));
+        continue;
+      }
+      if (fenced) {
+        spans.add(TextSpan(text: line));
+        continue;
+      }
+      var cursor = 0;
+      for (final match in _links.allMatches(line)) {
+        final title = match.group(1)!;
+        final url = match.group(2)!;
+        final uri = Uri.tryParse(url);
+        if (uri == null ||
+            (uri.scheme != 'http' && uri.scheme != 'https') ||
+            uri.host.isEmpty ||
+            uri.userInfo.isNotEmpty ||
+            url.length > 2048) {
+          continue;
+        }
+        if (cursor < match.start) {
+          spans.add(TextSpan(text: line.substring(cursor, match.start)));
+        }
+        final key = '$title|$url';
+        final tap = _taps.putIfAbsent(
+          key,
+          () => TapGestureRecognizer()..onTap = () => _openLink(uri),
+        );
+        spans.add(TextSpan(
+          text: title,
+          style: widget.style.copyWith(
+            color: const Color(0xFF9CCBFF),
+            decoration: TextDecoration.underline,
+            decorationColor: const Color(0xFF9CCBFF),
+          ),
+          recognizer: tap,
+        ));
+        hasLink = true;
+        cursor = match.end;
+      }
+      if (cursor < line.length) {
+        spans.add(TextSpan(text: line.substring(cursor)));
+      }
+    }
+    if (!hasLink) return Text(raw, style: widget.style);
+    return Text.rich(TextSpan(children: spans), style: widget.style);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final segments = _splitContent(content);
+    final segments = _splitContent(widget.content);
     if (segments.length == 1 && segments.single.table == null) {
-      return Text(content, style: style);
+      return _renderText(widget.content);
     }
-
     final widgets = <Widget>[];
     for (final segment in segments) {
-      if (widgets.isNotEmpty) {
-        widgets.add(const SizedBox(height: 8));
-      }
+      if (widgets.isNotEmpty) widgets.add(const SizedBox(height: 8));
       if (segment.table != null) {
         widgets.add(_buildTable(segment.table!));
       } else {
-        widgets.add(Text(segment.text!, style: style));
+        widgets.add(_renderText(segment.text!));
       }
     }
     return Column(
@@ -41,8 +156,8 @@ class AssistantMessageContent extends StatelessWidget {
   }
 
   Widget _buildTable(_MarkdownTable table) {
-    final tableStyle = style.copyWith(
-      fontSize: (style.fontSize ?? 15).clamp(11.0, 14.0).toDouble(),
+    final tableStyle = widget.style.copyWith(
+      fontSize: (widget.style.fontSize ?? 15).clamp(11.0, 14.0).toDouble(),
       height: 1.35,
     );
     return ClipRRect(
