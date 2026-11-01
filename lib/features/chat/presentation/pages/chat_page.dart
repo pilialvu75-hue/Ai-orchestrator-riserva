@@ -13,7 +13,6 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/chat_ui_preferences_service.dart';
@@ -43,6 +42,8 @@ import 'package:ai_orchestrator/features/chat/presentation/debug/debug_overlay.d
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_session_tile.dart';
 import 'package:ai_orchestrator/presentation/chat/components/high_performance_chat_list.dart';
+import 'package:ai_orchestrator/presentation/chat/components/chat_audio_playback_bar.dart';
+import 'package:ai_orchestrator/presentation/chat/controllers/chat_audio_playback_controller.dart';
 import 'package:ai_orchestrator/presentation/chat/components/live_voice_overlay.dart';
 import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_widget.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/chat_deadlock_controller.dart';
@@ -1503,6 +1504,9 @@ class _ChatBodyState
   ChatMessage?
       _editingUserMessage;
 
+  final ChatAudioPlaybackController _audioPlayback =
+      ChatAudioPlaybackController.shared;
+
   bool get _isEditingUserMessage =>
       _editingUserMessage != null;
 
@@ -1534,11 +1538,17 @@ class _ChatBodyState
       _handleRuntimeSettingsChanged,
     );
 
+    _audioPlayback.addListener(_refreshAudio);
     _loadAssistantTextSize();
+  }
+
+  void _refreshAudio() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _audioPlayback.removeListener(_refreshAudio);
     _runtimeNoticePresenter.dispose();
     _debugLabController
         .removeListener(
@@ -1565,6 +1575,7 @@ class _ChatBodyState
     super.didUpdateWidget(oldWidget);
     if (oldWidget.chatNavigation.sessionId != widget.chatNavigation.sessionId) {
       _editingUserMessage = null;
+      // The audio transport is shared across conversations.
     }
   }
 
@@ -1973,20 +1984,8 @@ class _ChatBodyState
     );
   }
 
-  Future<void>
-      _speakAssistantResponse(
-    String text,
-  ) async {
-    try {
-      await di
-          .sl<VoiceOutputService>()
-          .speak(text);
-    } catch (error) {
-      debugPrint(
-        'TTS playback failed: $error',
-      );
-    }
-  }
+  Future<void> _speakAssistantResponse(ChatMessage message) =>
+      _audioPlayback.play(message.content);
 
   String? _runtimeMessageForState(
     ChatState state,
@@ -2171,10 +2170,7 @@ class _ChatBodyState
                                   onSpeakAssistantMessage:
                                       (message) {
                                     unawaited(
-                                      _speakAssistantResponse(
-                                        message
-                                            .content,
-                                      ),
+                                      _speakAssistantResponse(message),
                                     );
                                   },
                                 ),
@@ -2226,6 +2222,15 @@ class _ChatBodyState
                 ],
               ),
             ),
+
+            if (_audioPlayback.isOpen)
+              ChatAudioPlaybackBar(
+                isPlaying: _audioPlayback.isPlaying,
+                isBusy: _audioPlayback.isBusy,
+                onStop: () => unawaited(_audioPlayback.stop()),
+                onRestart: () => unawaited(_audioPlayback.restart()),
+                onClose: _audioPlayback.close,
+              ),
 
             ChatInputBar(
               key: ValueKey(widget.chatNavigation.sessionId),
