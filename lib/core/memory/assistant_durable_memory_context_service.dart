@@ -115,7 +115,8 @@ class AssistantDurableMemoryContextService {
     if (overlap == 0) return 0;
     var score = overlap * 10;
     if (record.kind == AssistantMemoryKind.decision ||
-        record.kind == AssistantMemoryKind.unresolvedTask) score += 2;
+        record.kind == AssistantMemoryKind.unresolvedTask ||
+        record.kind == AssistantMemoryKind.procedure) score += 2;
     if (record.kind == AssistantMemoryKind.preference) score += 1;
     return score;
   }
