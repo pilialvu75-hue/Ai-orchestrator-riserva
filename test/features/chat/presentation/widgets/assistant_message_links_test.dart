@@ -29,7 +29,7 @@ void main() {
     expect(visible, contains('Footballdatabase.eu'));
     expect(visible, contains('Histoiredupsg.fr'));
     expect(visible, isNot(contains('](https://')));
-    final links = rich.textSpan!.children!
+    final links = (rich.textSpan! as TextSpan).children!
         .whereType<TextSpan>()
         .where((span) => span.recognizer is TapGestureRecognizer)
         .toList();
@@ -59,7 +59,7 @@ void main() {
         contains('[Bad](javascript:alert(1))'));
     expect(rich.textSpan!.toPlainText(),
         contains('[Example](https://example.com)'));
-    final links = rich.textSpan!.children!
+    final links = (rich.textSpan! as TextSpan).children!
         .whereType<TextSpan>()
         .where((span) => span.recognizer is TapGestureRecognizer)
         .toList();
