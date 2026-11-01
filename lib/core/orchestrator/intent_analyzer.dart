@@ -9,9 +9,13 @@ import 'package:ai_orchestrator/core/orchestrator/task_type.dart';
 class IntentAnalyzer {
   const IntentAnalyzer();
 
-  static const Set<String> _commandKeywords = {
-    'apri', 'chiama', 'lancia',
-  };
+  // Device actions are explicit imperatives, not verbs inside ordinary chat.
+  // In Italian, 'si chiama' describes someone's name and must stay chat.
+  static final RegExp _deviceCommand = RegExp(
+    r'^\s*(?:(?:per favore|per piacere|please)\s+)?'
+    r'(?:apri|chiama|lancia)\b',
+    caseSensitive: false,
+  );
 
   static const Set<String> _planKeywords = {
     'pianifica', 'decomponi', 'orchestrate',
@@ -48,7 +52,7 @@ class IntentAnalyzer {
   TaskType analyze(String input) {
     final tokens = input.toLowerCase().split(RegExp(r'\s+'));
 
-    if (tokens.any(_commandKeywords.contains)) return TaskType.command;
+    if (_deviceCommand.hasMatch(input)) return TaskType.command;
     if (tokens.any(_planKeywords.contains)) return TaskType.plan;
     if (tokens.any(_codingKeywords.contains)) return TaskType.coding;
     // "codice" is often a product/document reference, not a coding task.

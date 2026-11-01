@@ -13,11 +13,40 @@ abstract final class AssistantConversationRecall {
   );
 
   static final RegExp _friendDeclaration = RegExp(
-    r"^(?:[Mm]on (?:pote|ami|copain)|[Mm]a (?:pote|copine)|"
+    r"^(?:[Pp]er questa prova[,;:\s]+)?"
+    r"(?:[Mm]on (?:pote|ami|copain)|[Mm]a (?:pote|copine)|"
     r"[Ii]l mio amico|[Ll]a mia amica)\s+"
     r"(?:s'appelle|est|si chiama)\s+"
     r"([\p{Lu}][\p{L}'’-]*)(?=\s|[.,;!?]|$)",
     unicode: true,
+  );
+
+  // Recall only statements made by the user in the current chat.
+  static final RegExp _colleagueDeclaration = RegExp(
+    r"^(?:[Ii]l nome del mio collega [èÈeE]|"
+    r"[Ii]l mio collega si chiama|[Ll]a mia collega si chiama)\s+"
+    r"([\p{Lu}][\p{L}'’-]*)(?=\s|[.,;!?]|$)",
+    unicode: true,
+  );
+
+  static final RegExp _colleagueDescription = RegExp(
+    r"^(?:[Ee]d?|[Ll]ui|[Ll]ei)\s+(?:[Ll]ui\s+|[Ll]ei\s+)?"
+    r"(?:è|È|e')\s+(.+?)[.!?]*$",
+  );
+
+  static const Set<String> _colleagueNameQuestions = <String>{
+    'come si chiama il mio collega',
+    'come si chiama la mia collega',
+    'qual è il nome del mio collega',
+    'quale è il nome del mio collega',
+    'qual e il nome del mio collega',
+    'quale e il nome del mio collega',
+    'qual è il nome della mia collega',
+    'quale e il nome della mia collega',
+  };
+
+  static final RegExp _colleagueDescriptionQuestion = RegExp(
+    r'^(?:e\s+)?(?:che cosa|cosa|che cos)\s+(?:è|e)(?:\s+(.+))?$',
   );
 
   static const Set<String> _selfQuestions = <String>{
@@ -49,6 +78,8 @@ abstract final class AssistantConversationRecall {
 
   static String? answer(String prompt, List<ChatTurn> context) {
     final question = _normalize(prompt);
+    final colleagueAnswer = _answerColleague(question, context);
+    if (colleagueAnswer != null) return colleagueAnswer;
     final isSelfQuestion = _selfQuestions.contains(question);
     final isFriendQuestion = _friendQuestions.contains(question);
     if (!isSelfQuestion && !isFriendQuestion) return null;
@@ -72,6 +103,59 @@ abstract final class AssistantConversationRecall {
     }
 
     return null;
+  }
+
+  static String? _answerColleague(String question, List<ChatTurn> context) {
+    final isNameQuestion = _colleagueNameQuestions.contains(question);
+    final descriptionQuestion = _colleagueDescriptionQuestion.firstMatch(question);
+    if (!isNameQuestion && descriptionQuestion == null) return null;
+
+    String? colleagueName;
+    String? userDescription;
+    bool colleagueIsCurrentTopic = false;
+    for (final turn in context) {
+      if (turn.excludeFromContext) {
+        colleagueName = null;
+        userDescription = null;
+        colleagueIsCurrentTopic = false;
+        continue;
+      }
+      if (turn.role != ChatRole.user) continue;
+      final text = turn.content.trim();
+      final declaration = _colleagueDeclaration.firstMatch(text);
+      if (declaration != null) {
+        colleagueName = declaration.group(1);
+        userDescription = null;
+        colleagueIsCurrentTopic = true;
+        continue;
+      }
+      final description = _colleagueDescription.firstMatch(text);
+      if (colleagueIsCurrentTopic && colleagueName != null &&
+          description != null) {
+        userDescription = description.group(1)?.trim();
+        continue;
+      }
+      final normalized = _normalize(text);
+      if (_colleagueNameQuestions.contains(normalized) ||
+          _colleagueDescriptionQuestion.hasMatch(normalized)) {
+        colleagueIsCurrentTopic = true;
+      } else {
+        colleagueIsCurrentTopic = false;
+      }
+    }
+    if (colleagueName == null) return null;
+
+    if (isNameQuestion) return 'Il tuo collega si chiama $colleagueName.';
+    final mentionedSubject = descriptionQuestion?.group(1)?.trim();
+    if (mentionedSubject != null && mentionedSubject.isNotEmpty &&
+        mentionedSubject.toLowerCase() != colleagueName.toLowerCase() &&
+        mentionedSubject != 'il mio collega' &&
+        mentionedSubject != 'il tuo collega' &&
+        mentionedSubject != 'la mia collega') {
+      return null;
+    }
+    if (userDescription == null || userDescription.isEmpty) return null;
+    return 'Hai detto che il tuo collega $colleagueName è $userDescription.';
   }
 
   static String _normalize(String prompt) => prompt

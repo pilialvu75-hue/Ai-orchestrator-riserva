@@ -62,6 +62,60 @@ void main() {
     );
   });
 
+  test('S24 colleague Mika: names, user description and follow-up topic', () {
+    const history = <ChatTurn>[
+      ChatTurn(role: ChatRole.user, content: 'il nome del mio collega è Mika'),
+      ChatTurn(role: ChatRole.assistant, content: 'Il tuo collega si chiama Mika.'),
+      ChatTurn(role: ChatRole.user, content: 'ed è un idiota'),
+      ChatTurn(role: ChatRole.assistant, content: 'Commento ricevuto.'),
+      ChatTurn(role: ChatRole.user, content: 'come si chiama il mio collega?'),
+      ChatTurn(role: ChatRole.assistant,
+          content: 'Nessuna app riconosciuta nel comando.'),
+      ChatTurn(role: ChatRole.user,
+          content: 'quale e il nome del mio collega?'),
+      ChatTurn(role: ChatRole.assistant,
+          content: 'Il nome del tuo collega è Mika.'),
+    ];
+    expect(AssistantConversationRecall.answer('Come si chiama il mio collega?', history),
+        'Il tuo collega si chiama Mika.');
+    expect(AssistantConversationRecall.answer('e che cosa è?', history),
+        'Hai detto che il tuo collega Mika è un idiota.');
+    expect(AssistantConversationRecall.answer('e che cosa è Mika?', history),
+        'Hai detto che il tuo collega Mika è un idiota.');
+    expect(AssistantConversationRecall.answer('e che cosa è Luca?', history),
+        isNull);
+    expect(AssistantConversationRecall.answer('Chi è il presidente?', history),
+        isNull);
+  });
+
+  test('opinions are user-attributed; never learned from assistant guesses', () {
+    expect(AssistantConversationRecall.answer('e che cosa è Mika?', const [
+      ChatTurn(role: ChatRole.user, content: 'il nome del mio collega è Mika'),
+      ChatTurn(role: ChatRole.assistant, content: 'Mika è un idiota'),
+    ]), isNull);
+    expect(AssistantConversationRecall.answer('e che cosa è?', const [
+      ChatTurn(role: ChatRole.user, content: 'il nome del mio collega è Mika'),
+      ChatTurn(role: ChatRole.user, content: 'ed è un idiota',
+        excludeFromContext: true),
+    ]), isNull);
+    expect(AssistantConversationRecall.answer('e che cosa è?', const [
+      ChatTurn(role: ChatRole.user, content: 'il nome del mio collega è Mika'),
+      ChatTurn(role: ChatRole.user, content: 'ed è un idiota'),
+      ChatTurn(role: ChatRole.user, content: 'Il mio collega si chiama Luca'),
+    ]), isNull);
+  });
+
+  test('friend test preamble survives Italian to French language switch', () {
+    const history = <ChatTurn>[
+      ChatTurn(role: ChatRole.user,
+        content: 'Per questa prova, il mio amico si chiama Étienne.'),
+    ];
+    expect(AssistantConversationRecall.answer("Comment s'appelle mon ami ?", history),
+      "Ton ami s'appelle Étienne.");
+    expect(AssistantConversationRecall.answer('Come si chiama il mio amico?', history),
+      'Il tuo amico si chiama Étienne.');
+  });
+
   test('reproduces French friend recall and Italian language switch', () {
     const history = <ChatTurn>[
       ChatTurn(role: ChatRole.user, content: 'mon pote est Jérôme'),
