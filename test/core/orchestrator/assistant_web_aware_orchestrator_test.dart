@@ -69,6 +69,42 @@ void main() {
   }
 
 
+  test('S24 name and description stay in LOCAL across repeat questions', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    const declaration = 'il nome del mio collega è Mika';
+    const opinion = 'ed è un idiota';
+    const history = <ChatTurn>[
+      ChatTurn(role: ChatRole.user, content: declaration),
+      ChatTurn(role: ChatRole.assistant,
+        content: 'Il tuo collega si chiama Mika.'),
+      ChatTurn(role: ChatRole.user, content: opinion),
+      ChatTurn(role: ChatRole.assistant,
+        content: 'Hai espresso un giudizio sul collega.'),
+    ];
+
+    final assistant = build();
+    final first = await assistant.handleStream(declaration,
+      sessionId: 's24-colleague').toList();
+    expect(first.single.text, 'ok');
+    final second = await assistant.handleStream(
+      'come si chiama il mio collega?', sessionId: 's24-colleague',
+      context: history).toList();
+    expect(second.single.text, 'Il tuo collega si chiama Mika.');
+    final third = await assistant.handleStream(
+      'e che cosa è Mika?', sessionId: 's24-colleague',
+      context: history).toList();
+    expect(third.single.text,
+      'Hai detto che il tuo collega Mika è un idiota.');
+    final fourth = await assistant.handleStream(
+      'e che cosa è?', sessionId: 's24-colleague',
+      context: history).toList();
+    expect(fourth.single.text,
+      'Hai detto che il tuo collega Mika è un idiota.');
+    verifyNever(() => executor.execute(any()));
+    verifyNever(() => webSearch.execute(any()));
+    verifyNever(() => cloud.shouldPreferCloudFor(any()));
+  });
+
   test('PDF RAG excerpt is data, never plan, command or web search', () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
     const document = 'Qual è il prezzo della teiera rossa, la quantità e '
