@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_conversation_recall.dart';
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
@@ -105,6 +106,41 @@ List<ChatMessage> _completeExchanges(String sessionId, int count) {
 }
 
 void main() {
+  test('reloaded same-session history reaches LOCAL recall without embeddings',
+      () async {
+    final service = _createService(
+      semanticIndex: _FailIfQueriedSemanticIndex(),
+      embeddingService: const _FailIfQueriedEmbeddingService(),
+    );
+    const messages = <ChatMessage>[
+      ChatMessage(id: 'etienne-user', sessionId: 'etienne-session',
+          role: 'user', content: 'Per questa prova, il mio amico si chiama Étienne.',
+          timestamp: 1),
+      ChatMessage(id: 'etienne-answer', sessionId: 'etienne-session',
+          role: 'assistant', content: 'Capito. Il tuo amico si chiama Étienne.',
+          timestamp: 2),
+      ChatMessage(id: 'etienne-french', sessionId: 'etienne-session',
+          role: 'user', content: "Comment s'appelle mon ami ?",
+          timestamp: 3),
+      ChatMessage(id: 'etienne-french-answer', sessionId: 'etienne-session',
+          role: 'assistant', content: "Ton ami s'appelle Étienne.",
+          timestamp: 4),
+    ];
+    const question = 'Ti ricordi come si chiama il mio amico?';
+    // Simulate reopening the session: there is no in-memory chat history.
+    // The source of truth is the stored chronological message list.
+    final context = await service.buildContext(
+      sessionId: 'etienne-session', messages: messages, userPrompt: question);
+    expect(AssistantConversationRecall.answer(question, context),
+        'Il tuo amico si chiama Étienne.');
+    expect(context.first.content, contains('Étienne'));
+    // The same question against a distinct empty session must not leak.
+    final otherContext = await service.buildContext(
+      sessionId: 'mika-session', messages: const <ChatMessage>[],
+      userPrompt: question);
+    expect(AssistantConversationRecall.answer(question, otherContext), isNull);
+  });
+
   test('buildContext keeps semantic recall off the response hot path', () async {
     final service = _createService(
       semanticIndex: _FailIfQueriedSemanticIndex(),
