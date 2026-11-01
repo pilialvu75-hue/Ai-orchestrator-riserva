@@ -1,2 +1,2 @@
 channel=beta
-main_sha=fda96a9b9e9b51761a0d1b4d589efba0c249a439
+main_sha=704b9f271335e344888c5c92b513e9cffffd80ca
