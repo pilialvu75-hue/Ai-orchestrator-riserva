@@ -157,7 +157,7 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
 
   Widget _buildTable(_MarkdownTable table) {
     final tableStyle = widget.style.copyWith(
-      fontSize: (style.fontSize ?? 15).clamp(11.0, 14.0).toDouble(),
+      fontSize: (widget.style.fontSize ?? 15).clamp(11.0, 14.0).toDouble(),
       height: 1.35,
     );
     return ClipRRect(
