@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_ser
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
@@ -97,6 +98,7 @@ void main() {
       });
       final delegate = _RecordingChatRepository();
       final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: delegate,
         systemPromptService: fixture.service,
         durableMemoryContextService: _emptyMemoryContext(),
@@ -119,6 +121,7 @@ void main() {
       });
       final delegate = _RecordingChatRepository();
       final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: delegate,
         systemPromptService: fixture.service,
         durableMemoryContextService: _emptyMemoryContext(),
@@ -151,6 +154,7 @@ void main() {
       );
       final delegate = _RecordingChatRepository();
       final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: delegate,
         systemPromptService: fixture.service,
         durableMemoryContextService: AssistantDurableMemoryContextService(
@@ -169,6 +173,65 @@ void main() {
       expect(delegate.lastSystemPrompt, contains('La bici attuale è quella nuova.'));
     });
 
+    test('confirmed private memory is local-only without Cloud consent',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final persistence = _PromptMemoryPersistence();
+      final memoryService = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: persistence),
+      );
+      await memoryService.recordConfirmed(
+        recordKey: 'private.test.fact',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: 'Il codice personale di prova è 731.',
+        source: AssistantMemorySource.userExplicit,
+        updatedAt: 42,
+      );
+      var selectedMode = AiRuntimeMode.local;
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memoryService,
+        ),
+        runtimeMode: () => selectedMode,
+      );
+
+      await repository.sendMessage(
+        sessionId: 'local-conversation',
+        userPrompt: 'Qual è il codice personale di prova?',
+      );
+      expect(delegate.lastSystemPrompt, contains('codice personale di prova è 731'));
+
+      selectedMode = AiRuntimeMode.cloud;
+      await repository.sendMessage(
+        sessionId: 'cloud-conversation',
+        userPrompt: 'Qual è il codice personale di prova?',
+      );
+      expect(delegate.lastSystemPrompt,
+          isNot(contains('CONFIRMED DURABLE MEMORY')));
+      expect(delegate.lastSystemPrompt,
+          isNot(contains('codice personale di prova è 731')));
+
+      selectedMode = AiRuntimeMode.hybrid;
+      await repository.sendMessage(
+        sessionId: 'hybrid-conversation',
+        userPrompt: 'Qual è il codice personale di prova?',
+      );
+      expect(delegate.lastSystemPrompt,
+          isNot(contains('CONFIRMED DURABLE MEMORY')));
+
+      selectedMode = AiRuntimeMode.local;
+      await repository.sendMessage(
+        sessionId: 'new-local-conversation',
+        userPrompt: 'Qual è il codice personale di prova?',
+      );
+      expect(delegate.lastSystemPrompt, contains('codice personale di prova è 731'));
+    });
+
     test('explicit memory is updated, recalled across chats and forgotten',
         () async {
       final fixture = await createService(const <String, Object>{});
@@ -178,6 +241,7 @@ void main() {
       );
       final delegate = _RecordingChatRepository();
       final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: delegate,
         systemPromptService: fixture.service,
         durableMemoryContextService: AssistantDurableMemoryContextService(
@@ -231,6 +295,7 @@ void main() {
       );
       final qwenRuntime = _RecordingChatRepository();
       final qwen = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: qwenRuntime,
         systemPromptService: fixture.service,
         durableMemoryContextService: AssistantDurableMemoryContextService(
@@ -255,6 +320,7 @@ void main() {
       );
       final phiRuntime = _RecordingChatRepository();
       final phi = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: phiRuntime,
         systemPromptService: fixture.service,
         durableMemoryContextService: AssistantDurableMemoryContextService(
@@ -352,6 +418,7 @@ void main() {
 
       final phiRuntime = _RecordingChatRepository();
       final phi = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: phiRuntime,
         systemPromptService: fixture.service,
         durableMemoryContextService: AssistantDurableMemoryContextService(
@@ -410,6 +477,7 @@ void main() {
         now: () => 501,
       );
       final qwen = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: _RecordingChatRepository(),
         systemPromptService: fixture.service,
         durableMemoryContextService: AssistantDurableMemoryContextService(
@@ -419,6 +487,7 @@ void main() {
       );
       final phiRuntime = _RecordingChatRepository();
       final phi = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: phiRuntime,
         systemPromptService: fixture.service,
         durableMemoryContextService: AssistantDurableMemoryContextService(
@@ -452,6 +521,7 @@ void main() {
         store: AssistantDurableMemoryStore(persistence: persistence),
       );
       final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: _RecordingChatRepository(),
         systemPromptService: fixture.service,
         durableMemoryContextService: AssistantDurableMemoryContextService(
@@ -481,6 +551,7 @@ void main() {
       final fixture = await createService(const <String, Object>{});
       final delegate = _RecordingChatRepository();
       final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: delegate,
         systemPromptService: fixture.service,
         durableMemoryContextService: _emptyMemoryContext(),
@@ -507,6 +578,7 @@ void main() {
       });
       final delegate = _RecordingChatRepository();
       final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: delegate,
         systemPromptService: fixture.service,
         durableMemoryContextService: _emptyMemoryContext(),
@@ -525,6 +597,7 @@ void main() {
       });
       final delegate = _RecordingChatRepository();
       final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
         delegate: delegate,
         systemPromptService: fixture.service,
         durableMemoryContextService: _emptyMemoryContext(),

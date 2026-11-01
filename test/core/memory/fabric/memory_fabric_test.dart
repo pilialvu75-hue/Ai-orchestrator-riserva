@@ -64,6 +64,31 @@ void main() {
     expect((await fabric.read(record.id))?.id, record.id);
   });
 
+  test('private memory cannot use Cloud by default', () {
+    const policy = MemoryFabricRoutingPolicy();
+    expect(
+      policy.allows(
+        privacy: MemoryFabricPrivacyLevel.private,
+        location: 'cloud',
+      ),
+      isFalse,
+    );
+    expect(
+      policy.allows(
+        privacy: MemoryFabricPrivacyLevel.private,
+        location: 'device',
+      ),
+      isTrue,
+    );
+    expect(
+      const MemoryFabricRoutingPolicy(allowPrivateOnCloud: true).allows(
+        privacy: MemoryFabricPrivacyLevel.private,
+        location: 'cloud',
+      ),
+      isTrue,
+    );
+  });
+
   test('cloud-only provider cannot accept device-only or secret records', () async {
     final cloud = _MapProvider(
       'cloud',
@@ -292,7 +317,7 @@ void main() {
     expect(nas.rows.containsKey(secret.id), isTrue);
   });
 
-  test('private cloud routing can be disabled centrally', () async {
+  test('private cloud routing requires explicit opt-in', () async {
     final cloud = _MapProvider(
       'cloud',
       location: 'cloud',
@@ -311,17 +336,7 @@ void main() {
       privacyLevel: MemoryFabricPrivacyLevel.private,
     );
 
-    final normal = MemoryFabric(<MemoryFabricNode>[
-      MemoryFabricNode(
-        provider: cloud,
-        role: MemoryFabricNodeRole.primary,
-      ),
-    ]);
-    await normal.write(record);
-    expect(cloud.rows.containsKey(record.id), isTrue);
-
-    cloud.rows.clear();
-    final localOnlyPrivate = MemoryFabric(
+    final authorizedCloud = MemoryFabric(
       <MemoryFabricNode>[
         MemoryFabricNode(
           provider: cloud,
@@ -329,9 +344,19 @@ void main() {
         ),
       ],
       routingPolicy: const MemoryFabricRoutingPolicy(
-        allowPrivateOnCloud: false,
+        allowPrivateOnCloud: true,
       ),
     );
+    await authorizedCloud.write(record);
+    expect(cloud.rows.containsKey(record.id), isTrue);
+
+    cloud.rows.clear();
+    final localOnlyPrivate = MemoryFabric(<MemoryFabricNode>[
+      MemoryFabricNode(
+        provider: cloud,
+        role: MemoryFabricNodeRole.primary,
+      ),
+    ]);
     await expectLater(
       localOnlyPrivate.write(record),
       throwsA(isA<MemoryFabricPolicyException>()),
