@@ -116,6 +116,61 @@ void main() {
       'Il tuo amico si chiama Étienne.');
   });
 
+  test('S24 103627: returning to Étienne chat accepts natural phrasing', () {
+    // This context is rehydrated from the same session's stored user turns.
+    const etienneChat = <ChatTurn>[
+      ChatTurn(role: ChatRole.user,
+        content: 'Per questa prova, il mio amico si chiama Étienne.'),
+      ChatTurn(role: ChatRole.assistant,
+        content: 'Capito. Il tuo amico si chiama Étienne.'),
+      ChatTurn(role: ChatRole.user, content: "Comment s'appelle mon ami ?"),
+      ChatTurn(role: ChatRole.assistant,
+        content: "Ton ami s'appelle Étienne."),
+      ChatTurn(role: ChatRole.user, content: 'Come si chiama il mio amico?'),
+      ChatTurn(role: ChatRole.assistant,
+        content: 'Il tuo amico si chiama Étienne.'),
+    ];
+    expect(
+      AssistantConversationRecall.answer(
+        'Ti ricordi come si chiama il mio amico?', etienneChat),
+      'Il tuo amico si chiama Étienne.',
+    );
+    expect(
+      AssistantConversationRecall.answer(
+        'Est que tu connais Étienne?', etienneChat),
+      "Tu m'as dit que ton ami s'appelle Étienne, "
+          "mais je ne le connais pas personnellement.",
+    );
+    expect(
+      AssistantConversationRecall.answer(
+        'Est-ce que tu connais Étienne ?', etienneChat),
+      "Tu m'as dit que ton ami s'appelle Étienne, "
+          "mais je ne le connais pas personnellement.",
+    );
+    expect(AssistantConversationRecall.answer(
+      'Est-ce que tu connais Luca ?', etienneChat), isNull);
+    // Mika was declared in a different chat, never leak across sessions.
+    expect(AssistantConversationRecall.answer(
+      'e come si chiama il mio collega?', etienneChat), isNull);
+  });
+
+  test('S24 103627: colleague question prefix works only in Mika session', () {
+    const mikaChat = <ChatTurn>[
+      ChatTurn(role: ChatRole.user,
+        content: 'Il nome del mio collega è Mika.'),
+      ChatTurn(role: ChatRole.assistant,
+        content: 'Capito. Parliamo di Mika.'),
+    ];
+    expect(AssistantConversationRecall.answer(
+      'e come si chiama il mio collega?', mikaChat),
+      'Il tuo collega si chiama Mika.');
+    expect(AssistantConversationRecall.answer(
+      'Ti ricordi come si chiama il mio collega?', mikaChat),
+      'Il tuo collega si chiama Mika.');
+    expect(AssistantConversationRecall.answer(
+      'e come si chiama il mio collega?', const <ChatTurn>[]), isNull);
+  });
+
   test('reproduces French friend recall and Italian language switch', () {
     const history = <ChatTurn>[
       ChatTurn(role: ChatRole.user, content: 'mon pote est Jérôme'),
