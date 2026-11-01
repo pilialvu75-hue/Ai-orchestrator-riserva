@@ -21,8 +21,7 @@ abstract final class AssistantConversationRecall {
     unicode: true,
   );
 
-  // Only the user's own statements can supply these conversational facts.
-  // Do not infer an identity or a description from assistant messages or Web.
+  // Recall only statements made by the user in the current chat.
   static final RegExp _colleagueDeclaration = RegExp(
     r"^(?:[Ii]l nome del mio collega [èÈeE]|"
     r"[Ii]l mio collega si chiama|[Ll]a mia collega si chiama)\s+"
@@ -47,7 +46,10 @@ abstract final class AssistantConversationRecall {
   };
 
   static final RegExp _colleagueDescriptionQuestion = RegExp(
-    r'^(?:e\s+)?(?:che cosa|cosa|che cos)\s+(?:è|e)(?:\s+(.+))?
+    r'^(?:e\s+)?(?:che cosa|cosa|che cos)\s+(?:è|e)(?:\s+(.+))?$',
+  );
+
+  static const Set<String> _selfQuestions = <String>{
     'come mi chiamo',
     'qual è il mio nome',
     'quale è il mio nome',
@@ -113,7 +115,6 @@ abstract final class AssistantConversationRecall {
     bool colleagueIsCurrentTopic = false;
     for (final turn in context) {
       if (turn.excludeFromContext) {
-        // Do not reconstruct memory from deliberately excluded turns.
         colleagueName = null;
         userDescription = null;
         colleagueIsCurrentTopic = false;
@@ -155,77 +156,6 @@ abstract final class AssistantConversationRecall {
     }
     if (userDescription == null || userDescription.isEmpty) return null;
     return 'Hai detto che il tuo collega $colleagueName è $userDescription.';
-  }
-
-  static String _normalize(String prompt) => prompt
-      .toLowerCase()
-      .replaceAll('’', "'")
-      .replaceAll(RegExp(r'[?!.,;:]+'), '')
-      .replaceAll("'", ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-
-  static bool _isFrench(String question) =>
-      question.startsWith('comment ') || question.startsWith('quel ');
-  static bool _isEnglish(String question) => question.startsWith('what ');
-  static bool _isSpanish(String question) =>
-      question.startsWith('como ') || question.startsWith('cómo ');
-}
-,
-  );
-
-  static const Set<String> _selfQuestions = <String>{
-    'come mi chiamo',
-    'qual è il mio nome',
-    'quale è il mio nome',
-    'qual é il mio nome',
-    'ricordi il mio nome',
-    'comment je m appelle',
-    'quel est mon nom',
-    'comment je me nomme',
-    'what is my name',
-    'what s my name',
-    'como me llamo',
-    'cómo me llamo',
-  };
-
-  static const Set<String> _friendQuestions = <String>{
-    'comment s appelle mon pote',
-    'comment s appelle mon ami',
-    'comment s appelle mon copain',
-    'comment s appelle ma copine',
-    'comment se nomme mon pote',
-    'come si chiama il mio amico',
-    'come si chiama la mia amica',
-    'what is my friend s name',
-    'cómo se llama mi amigo',
-  };
-
-  static String? answer(String prompt, List<ChatTurn> context) {
-    final question = _normalize(prompt);
-    final isSelfQuestion = _selfQuestions.contains(question);
-    final isFriendQuestion = _friendQuestions.contains(question);
-    if (!isSelfQuestion && !isFriendQuestion) return null;
-
-    final declaration = isSelfQuestion ? _selfDeclaration : _friendDeclaration;
-    for (final turn in context.reversed) {
-      if (turn.role != ChatRole.user || turn.excludeFromContext) continue;
-      final name = declaration.firstMatch(turn.content.trim())?.group(1);
-      if (name == null) continue;
-
-      if (isSelfQuestion) {
-        if (_isFrench(question)) return "Tu t'appelles $name.";
-        if (_isEnglish(question)) return 'Your name is $name.';
-        if (_isSpanish(question)) return 'Te llamas $name.';
-        return 'Ti chiami $name.';
-      }
-      if (_isFrench(question)) return "Ton ami s'appelle $name.";
-      if (_isEnglish(question)) return "Your friend's name is $name.";
-      if (_isSpanish(question)) return 'Tu amigo se llama $name.';
-      return 'Il tuo amico si chiama $name.';
-    }
-
-    return null;
   }
 
   static String _normalize(String prompt) => prompt
