@@ -64,6 +64,31 @@ void main() {
     expect((await fabric.read(record.id))?.id, record.id);
   });
 
+  test('private memory cannot use Cloud by default', () {
+    const policy = MemoryFabricRoutingPolicy();
+    expect(
+      policy.allows(
+        privacy: MemoryFabricPrivacyLevel.private,
+        location: 'cloud',
+      ),
+      isFalse,
+    );
+    expect(
+      policy.allows(
+        privacy: MemoryFabricPrivacyLevel.private,
+        location: 'device',
+      ),
+      isTrue,
+    );
+    expect(
+      const MemoryFabricRoutingPolicy(allowPrivateOnCloud: true).allows(
+        privacy: MemoryFabricPrivacyLevel.private,
+        location: 'cloud',
+      ),
+      isTrue,
+    );
+  });
+
   test('cloud-only provider cannot accept device-only or secret records', () async {
     final cloud = _MapProvider(
       'cloud',
