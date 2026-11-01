@@ -34,7 +34,11 @@ class ChatAudioPlaybackBar extends StatelessWidget {
         child: Row(
           children: [
             IconButton(
-              tooltip: isPlaying ? 'Interrompi lettura' : 'Ricomincia dall’inizio',
+              tooltip: isBusy
+                  ? 'Preparazione audio'
+                  : isPlaying
+                      ? 'Interrompi lettura'
+                      : 'Riproduci dall’inizio',
               onPressed: isBusy ? null : (isPlaying ? onStop : onRestart),
               style: IconButton.styleFrom(
                 backgroundColor: Colors.white,
