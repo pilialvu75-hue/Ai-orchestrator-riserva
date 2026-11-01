@@ -76,12 +76,35 @@ abstract final class AssistantConversationRecall {
     'cómo se llama mi amigo',
   };
 
+  // Remove only conversational leading words, not arbitrary question text.
+  // This covers "Ti ricordi come si chiama..." after reentering a chat and
+  // "E come si chiama..." without introducing a new intent classifier.
+  static String _questionBody(String question) {
+    final withoutAnd = question.startsWith('e ')
+        ? question.substring(2)
+        : question;
+    if (withoutAnd.startsWith('ti ricordi ')) {
+      return withoutAnd.substring('ti ricordi '.length);
+    }
+    return withoutAnd;
+  }
+
+  // A question about a named person is not permission to search the Web or
+  // claim to know them; answer only if the user named this friend in this chat.
+  static final RegExp _namedFriendQuestion = RegExp(
+    r"^(?:est ce que|est que) tu connais ([\p{L}][\p{L}'’-]*)$",
+    unicode: true,
+  );
+
   static String? answer(String prompt, List<ChatTurn> context) {
     final question = _normalize(prompt);
-    final colleagueAnswer = _answerColleague(question, context);
+    final questionBody = _questionBody(question);
+    final colleagueAnswer = _answerColleague(questionBody, context);
     if (colleagueAnswer != null) return colleagueAnswer;
-    final isSelfQuestion = _selfQuestions.contains(question);
-    final isFriendQuestion = _friendQuestions.contains(question);
+    final isSelfQuestion = _selfQuestions.contains(questionBody);
+    final namedFriend = _namedFriendQuestion.firstMatch(questionBody)?.group(1);
+    final isFriendQuestion =
+        _friendQuestions.contains(questionBody) || namedFriend != null;
     if (!isSelfQuestion && !isFriendQuestion) return null;
 
     final declaration = isSelfQuestion ? _selfDeclaration : _friendDeclaration;
@@ -91,12 +114,17 @@ abstract final class AssistantConversationRecall {
       if (name == null) continue;
 
       if (isSelfQuestion) {
-        if (_isFrench(question)) return "Tu t'appelles $name.";
+        if (_isFrench(questionBody)) return "Tu t'appelles $name.";
         if (_isEnglish(question)) return 'Your name is $name.';
         if (_isSpanish(question)) return 'Te llamas $name.';
         return 'Ti chiami $name.';
       }
-      if (_isFrench(question)) return "Ton ami s'appelle $name.";
+      if (namedFriend != null) {
+        if (namedFriend != name.toLowerCase()) return null;
+        return "Tu m'as dit que ton ami s'appelle $name, "
+            "mais je ne le connais pas personnellement.";
+      }
+      if (_isFrench(questionBody)) return "Ton ami s'appelle $name.";
       if (_isEnglish(question)) return "Your friend's name is $name.";
       if (_isSpanish(question)) return 'Tu amigo se llama $name.';
       return 'Il tuo amico si chiama $name.';
