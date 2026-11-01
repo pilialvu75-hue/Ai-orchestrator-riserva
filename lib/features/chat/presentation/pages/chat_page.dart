@@ -1573,7 +1573,10 @@ class _ChatBodyState
     super.didUpdateWidget(oldWidget);
     if (oldWidget.chatNavigation.sessionId != widget.chatNavigation.sessionId) {
       _editingUserMessage = null;
-      _speechPlayback.close();
+      // Avoid notifying the AnimatedBuilder while its ancestor is rebuilding.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _speechPlayback.close();
+      });
     }
   }
 
