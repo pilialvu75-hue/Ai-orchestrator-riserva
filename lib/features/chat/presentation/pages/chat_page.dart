@@ -1563,7 +1563,6 @@ class _ChatBodyState
     );
 
     _appearanceViewModel.dispose();
-    _speechPlayback.close();
     _speechPlayback.dispose();
 
     super.dispose();
