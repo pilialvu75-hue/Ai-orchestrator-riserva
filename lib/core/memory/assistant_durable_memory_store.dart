@@ -382,6 +382,15 @@ class AssistantDurableMemoryStore {
         'Tentative/model memories cannot be persisted as confirmed.',
       );
     }
+    // Reusable procedures are trusted only after a reproducible test.
+    // A confident model response or unverified user statement is not proof.
+    if (record.kind == AssistantMemoryKind.procedure &&
+        record.status == AssistantMemoryStatus.confirmed &&
+        record.source != AssistantMemorySource.verifiedTest) {
+      throw ArgumentError(
+        'Confirmed reusable procedures require a verified test.',
+      );
+    }
 
     return AssistantDurableMemoryRecord(
       recordKey: key,
