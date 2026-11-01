@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/core/config/ai/system_prompt_config.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
@@ -19,15 +20,18 @@ class PromptResolvingChatRepository implements ChatRepository {
     required ChatRepository delegate,
     required AssistantSystemPromptService systemPromptService,
     required AssistantDurableMemoryContextService durableMemoryContextService,
+    required AiRuntimeMode Function() runtimeMode,
     AssistantDurableMemoryCaptureService? durableMemoryCaptureService,
   })  : _delegate = delegate,
         _systemPromptService = systemPromptService,
         _durableMemoryContextService = durableMemoryContextService,
+        _runtimeMode = runtimeMode,
         _durableMemoryCaptureService = durableMemoryCaptureService;
 
   final ChatRepository _delegate;
   final AssistantSystemPromptService _systemPromptService;
   final AssistantDurableMemoryContextService _durableMemoryContextService;
+  final AiRuntimeMode Function() _runtimeMode;
   final AssistantDurableMemoryCaptureService? _durableMemoryCaptureService;
 
   @override
@@ -76,7 +80,10 @@ class PromptResolvingChatRepository implements ChatRepository {
     }
 
     final resolvedPrompt = _systemPromptService.resolveForIncoming(systemPrompt);
-    final promptWithMemory = isOrdinary
+    // Personal confirmed memories stay on device by default. Cloud and
+    // hybrid routing can forward system prompts to external providers;
+    // do not include private memory there before a separate consent gate.
+    final promptWithMemory = isOrdinary && _runtimeMode() == AiRuntimeMode.local
         ? await _durableMemoryContextService.augmentSystemPrompt(
             baseSystemPrompt: resolvedPrompt,
             sessionId: sessionId,
