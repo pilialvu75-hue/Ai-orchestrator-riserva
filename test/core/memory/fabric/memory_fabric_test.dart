@@ -317,7 +317,7 @@ void main() {
     expect(nas.rows.containsKey(secret.id), isTrue);
   });
 
-  test('private cloud routing can be disabled centrally', () async {
+  test('private cloud routing requires explicit opt-in', () async {
     final cloud = _MapProvider(
       'cloud',
       location: 'cloud',
@@ -336,17 +336,7 @@ void main() {
       privacyLevel: MemoryFabricPrivacyLevel.private,
     );
 
-    final normal = MemoryFabric(<MemoryFabricNode>[
-      MemoryFabricNode(
-        provider: cloud,
-        role: MemoryFabricNodeRole.primary,
-      ),
-    ]);
-    await normal.write(record);
-    expect(cloud.rows.containsKey(record.id), isTrue);
-
-    cloud.rows.clear();
-    final localOnlyPrivate = MemoryFabric(
+    final authorizedCloud = MemoryFabric(
       <MemoryFabricNode>[
         MemoryFabricNode(
           provider: cloud,
@@ -354,9 +344,19 @@ void main() {
         ),
       ],
       routingPolicy: const MemoryFabricRoutingPolicy(
-        allowPrivateOnCloud: false,
+        allowPrivateOnCloud: true,
       ),
     );
+    await authorizedCloud.write(record);
+    expect(cloud.rows.containsKey(record.id), isTrue);
+
+    cloud.rows.clear();
+    final localOnlyPrivate = MemoryFabric(<MemoryFabricNode>[
+      MemoryFabricNode(
+        provider: cloud,
+        role: MemoryFabricNodeRole.primary,
+      ),
+    ]);
     await expectLater(
       localOnlyPrivate.write(record),
       throwsA(isA<MemoryFabricPolicyException>()),
