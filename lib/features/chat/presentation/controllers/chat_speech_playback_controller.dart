@@ -150,6 +150,7 @@ class ChatSpeechPlaybackController extends ChangeNotifier {
   void dispose() {
     ++_generation;
     _poller?.cancel();
+    unawaited(_stopAudio());
     super.dispose();
   }
 }
