@@ -372,8 +372,8 @@ void main() {
 
       // A suggestion cannot be labeled as a reusable verified skill by a
       // model without the independent test evidence.
-      await expectLater(
-        qwenKnowledge.recordConfirmed(
+      expect(
+        () => qwenKnowledge.recordConfirmed(
           recordKey: 'procedure.diagnostics.guess',
           scope: AssistantMemoryScope.user,
           scopeId: AssistantDurableMemoryContextService.localUserScopeId,
