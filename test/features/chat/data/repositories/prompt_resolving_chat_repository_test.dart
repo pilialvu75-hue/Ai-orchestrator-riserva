@@ -320,6 +320,72 @@ void main() {
           isNot(contains('CONFIRMED DURABLE MEMORY')));
     });
 
+    test('tested procedure survives model replacement but model guess does not',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final disk = _PromptMemoryPersistence();
+      final qwenKnowledge = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: disk),
+      );
+
+      // A validated result, not a free-form model answer, can be promoted
+      // into the shared knowledge store under a stable Aivexus identity.
+      await qwenKnowledge.recordConfirmed(
+        recordKey: 'procedure.diagnostics.android',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.procedure,
+        content: 'Procedura verificata diagnostica Android: leggere i log '
+            'locali prima di proporre cambiamenti.',
+        source: AssistantMemorySource.verifiedTest,
+        updatedAt: 42,
+      );
+      await qwenKnowledge.recordModelCandidate(
+        recordKey: 'procedure.diagnostics.guess',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.procedure,
+        content: 'Procedura non verificata diagnostica Android: '
+            'cancellare tutti i dati.',
+        updatedAt: 43,
+      );
+
+      final phiRuntime = _RecordingChatRepository();
+      final phi = PromptResolvingChatRepository(
+        delegate: phiRuntime,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: AssistantDurableMemoryService(
+            store: AssistantDurableMemoryStore(persistence: disk),
+          ),
+        ),
+      );
+      await phi.sendMessage(
+        sessionId: 'new-model-phi',
+        userPrompt: 'Quale procedura diagnostica Android abbiamo verificato?',
+      );
+      expect(phiRuntime.lastSystemPrompt, contains('origin=verifiedTest'));
+      expect(phiRuntime.lastSystemPrompt,
+          contains('Procedura verificata diagnostica Android'));
+      expect(phiRuntime.lastSystemPrompt,
+          isNot(contains('cancellare tutti i dati')));
+
+      // A suggestion cannot be labeled as a reusable verified skill by a
+      // model without the independent test evidence.
+      expect(
+        () => qwenKnowledge.recordConfirmed(
+          recordKey: 'procedure.diagnostics.guess',
+          scope: AssistantMemoryScope.user,
+          scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+          kind: AssistantMemoryKind.procedure,
+          content: 'Procedura non testata',
+          source: AssistantMemorySource.modelCandidate,
+          updatedAt: 44,
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test('conversation-only facts never become global at model handoff',
         () async {
       final fixture = await createService(const <String, Object>{});
