@@ -95,7 +95,8 @@ final class HybridCheckpointLedger {
   HybridCheckpointLedger({
     required this.executionId,
     required this.totalCheckpoints,
-  }) {
+  })  : _completed = <HybridCompletedCheckpoint>[],
+        _generation = 0 {
     if (executionId.trim().isEmpty ||
         totalCheckpoints <= 0 ||
         totalCheckpoints > 10000) {
@@ -114,10 +115,9 @@ final class HybridCheckpointLedger {
   static const int schemaVersion = 1;
   final String executionId;
   final int totalCheckpoints;
-  final List<HybridCompletedCheckpoint> _completed =
-      <HybridCompletedCheckpoint>[];
+  final List<HybridCompletedCheckpoint> _completed;
 
-  int _generation = 0;
+  int _generation;
   HybridAttemptLease? _activeLease;
   int? _inFlightCheckpoint;
 
@@ -158,7 +158,9 @@ final class HybridCheckpointLedger {
     if (isComplete || _inFlightCheckpoint != null) {
       throw StateError('Checkpoint already running or work already complete');
     }
-    return _inFlightCheckpoint = nextCheckpoint;
+    final checkpoint = nextCheckpoint;
+    _inFlightCheckpoint = checkpoint;
+    return checkpoint;
   }
 
   /// Commits exactly one completed step; duplicate/out-of-order/stale results
