@@ -29,6 +29,8 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
     r'\[([^\]\n]{1,100})\]\((https?:\/\/[^\s()<>{}]+)\)',
     caseSensitive: false,
   );
+  static final RegExp _heading = RegExp(r'^(#{1,3})\s+(.+)$');
+  static final RegExp _bold = RegExp(r'\*\*([^*\n]+)\*\*');
   final Map<String, TapGestureRecognizer> _taps = {};
 
   void _disposeTaps() {
@@ -65,8 +67,37 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
     }
   }
 
+  /// Plain text bypasses Markdown work. Only explicit markers get spans.
+  void _appendInlineText(
+    List<InlineSpan> spans,
+    String raw,
+    TextStyle lineStyle,
+  ) {
+    var cursor = 0;
+    for (final match in _bold.allMatches(raw)) {
+      if (cursor < match.start) {
+        spans.add(TextSpan(
+          text: raw.substring(cursor, match.start),
+          style: lineStyle,
+        ));
+      }
+      spans.add(TextSpan(
+        text: match.group(1),
+        style: lineStyle.copyWith(fontWeight: FontWeight.w700),
+      ));
+      cursor = match.end;
+    }
+    if (cursor < raw.length) {
+      spans.add(TextSpan(text: raw.substring(cursor), style: lineStyle));
+    }
+  }
+
   Widget _renderText(String raw) {
-    if (!raw.contains('](')) return Text(raw, style: widget.style);
+    if (!raw.contains('](') &&
+        !raw.contains('**') &&
+        !raw.contains('# ')) {
+      return Text(raw, style: widget.style);
+    }
     final spans = <InlineSpan>[];
     final backtickFence = String.fromCharCodes([96, 96, 96]);
     var fenced = false;
@@ -93,8 +124,19 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
         spans.add(TextSpan(text: line));
         continue;
       }
+      final heading = _heading.firstMatch(line);
+      final displayedLine = heading?.group(2) ?? line;
+      final lineStyle = heading == null
+          ? widget.style
+          : widget.style.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: (widget.style.fontSize ?? 16) *
+                  (heading.group(1)!.length == 1 ? 1.16 : 1.08),
+              height: 1.35,
+            );
+      if (heading != null) hasLink = true;
       var cursor = 0;
-      for (final match in _links.allMatches(line)) {
+      for (final match in _links.allMatches(displayedLine)) {
         final title = match.group(1)!;
         final url = match.group(2)!;
         final uri = Uri.tryParse(url);
@@ -106,7 +148,11 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
           continue;
         }
         if (cursor < match.start) {
-          spans.add(TextSpan(text: line.substring(cursor, match.start)));
+          _appendInlineText(
+            spans,
+            displayedLine.substring(cursor, match.start),
+            lineStyle,
+          );
         }
         final key = '$title|$url';
         final tap = _taps.putIfAbsent(
@@ -115,7 +161,7 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
         );
         spans.add(TextSpan(
           text: title,
-          style: widget.style.copyWith(
+          style: lineStyle.copyWith(
             color: const Color(0xFF9CCBFF),
             decoration: TextDecoration.underline,
             decorationColor: const Color(0xFF9CCBFF),
@@ -125,9 +171,10 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
         hasLink = true;
         cursor = match.end;
       }
-      if (cursor < line.length) {
-        spans.add(TextSpan(text: line.substring(cursor)));
+      if (cursor < displayedLine.length) {
+        _appendInlineText(spans, displayedLine.substring(cursor), lineStyle);
       }
+      if (!hasLink && _bold.hasMatch(displayedLine)) hasLink = true;
     }
     if (!hasLink) return Text(raw, style: widget.style);
     return Text.rich(TextSpan(children: spans), style: widget.style);
