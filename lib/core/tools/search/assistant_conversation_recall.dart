@@ -13,7 +13,8 @@ abstract final class AssistantConversationRecall {
   );
 
   static final RegExp _friendDeclaration = RegExp(
-    r"^(?:[Mm]on (?:pote|ami|copain)|[Mm]a (?:pote|copine)|"
+    r"^(?:[Pp]er questa prova[,;:\s]+)?"
+    r"(?:[Mm]on (?:pote|ami|copain)|[Mm]a (?:pote|copine)|"
     r"[Ii]l mio amico|[Ll]a mia amica)\s+"
     r"(?:s'appelle|est|si chiama)\s+"
     r"([\p{Lu}][\p{L}'’-]*)(?=\s|[.,;!?]|$)",
