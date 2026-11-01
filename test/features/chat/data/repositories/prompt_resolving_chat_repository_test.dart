@@ -372,8 +372,8 @@ void main() {
 
       // A suggestion cannot be labeled as a reusable verified skill by a
       // model without the independent test evidence.
-      expect(
-        () => qwenKnowledge.recordConfirmed(
+      await expectLater(
+        qwenKnowledge.recordConfirmed(
           recordKey: 'procedure.diagnostics.guess',
           scope: AssistantMemoryScope.user,
           scopeId: AssistantDurableMemoryContextService.localUserScopeId,
@@ -381,6 +381,18 @@ void main() {
           content: 'Procedura non testata',
           source: AssistantMemorySource.modelCandidate,
           updatedAt: 44,
+        ),
+        throwsArgumentError,
+      );
+      await expectLater(
+        qwenKnowledge.recordConfirmed(
+          recordKey: 'procedure.diagnostics.unchecked',
+          scope: AssistantMemoryScope.user,
+          scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+          kind: AssistantMemoryKind.procedure,
+          content: 'Istruzione non verificata',
+          source: AssistantMemorySource.userExplicit,
+          updatedAt: 45,
         ),
         throwsArgumentError,
       );
