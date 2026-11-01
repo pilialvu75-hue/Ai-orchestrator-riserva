@@ -41,6 +41,8 @@ import 'package:uuid/uuid.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_overlay.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
+import 'package:ai_orchestrator/features/chat/presentation/controllers/chat_speech_playback_controller.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_speech_playback_bar.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_session_tile.dart';
 import 'package:ai_orchestrator/presentation/chat/components/high_performance_chat_list.dart';
 import 'package:ai_orchestrator/presentation/chat/components/live_voice_overlay.dart';
@@ -1494,6 +1496,8 @@ class _ChatBodyState
   late final AiRuntimeSettingsService
       _runtimeSettingsService;
 
+  late final ChatSpeechPlaybackController _speechPlayback;
+
   String? _manualCloudProvider;
 
   // ------------------------------------------------------------
@@ -1519,6 +1523,9 @@ class _ChatBodyState
 
     _runtimeSettingsService =
         di.sl<AiRuntimeSettingsService>();
+    _speechPlayback = ChatSpeechPlaybackController(
+      di.sl<VoiceOutputService>(),
+    );
     _manualCloudProvider =
         _runtimeSettingsService.manualCloudProvider;
 
@@ -1556,6 +1563,7 @@ class _ChatBodyState
     );
 
     _appearanceViewModel.dispose();
+    _speechPlayback.dispose();
 
     super.dispose();
   }
@@ -1565,6 +1573,10 @@ class _ChatBodyState
     super.didUpdateWidget(oldWidget);
     if (oldWidget.chatNavigation.sessionId != widget.chatNavigation.sessionId) {
       _editingUserMessage = null;
+      // Avoid notifying the AnimatedBuilder while its ancestor is rebuilding.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _speechPlayback.close();
+      });
     }
   }
 
@@ -1973,19 +1985,8 @@ class _ChatBodyState
     );
   }
 
-  Future<void>
-      _speakAssistantResponse(
-    String text,
-  ) async {
-    try {
-      await di
-          .sl<VoiceOutputService>()
-          .speak(text);
-    } catch (error) {
-      debugPrint(
-        'TTS playback failed: $error',
-      );
-    }
+  void _openAssistantPlayback(ChatMessage message) {
+    _speechPlayback.start(message.content);
   }
 
   String? _runtimeMessageForState(
@@ -2169,14 +2170,7 @@ class _ChatBodyState
                                   onEditUserMessage:
                                       _startEditingUserMessage,
                                   onSpeakAssistantMessage:
-                                      (message) {
-                                    unawaited(
-                                      _speakAssistantResponse(
-                                        message
-                                            .content,
-                                      ),
-                                    );
-                                  },
+                                      _openAssistantPlayback,
                                 ),
                               ),
                   ),
@@ -2227,6 +2221,12 @@ class _ChatBodyState
               ),
             ),
 
+            AnimatedBuilder(
+              animation: _speechPlayback,
+              builder: (context, _) => _speechPlayback.visible
+                  ? ChatSpeechPlaybackBar(controller: _speechPlayback)
+                  : const SizedBox.shrink(),
+            ),
             ChatInputBar(
               key: ValueKey(widget.chatNavigation.sessionId),
               onSend:
