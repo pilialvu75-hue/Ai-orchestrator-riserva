@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/features/voice/presentation/widgets/voice_input_
 import 'package:ai_orchestrator/features/chat/presentation/widgets/dictation_draft.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_composer_text_field.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_composer_layout.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_composer_primary_action.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -417,12 +418,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
         }
         break;
 
-      case _AttachmentPickerAction.live:
-        if (widget.liveSessionEnabled) {
-          widget.onStartLiveSession?.call();
-        }
-        break;
-
       case _AttachmentPickerAction.video:
         final file =
             await _fileAttachmentService.pickVideo();
@@ -492,8 +487,6 @@ class _ChatInputBarState extends State<ChatInputBar> {
         return _AttachmentPickerSheet(
           onSelected: _pickAttachment,
           screenVisionEnabled: _screenVisionService.isSupported,
-          liveSessionEnabled:
-              widget.liveSessionEnabled && widget.onStartLiveSession != null,
         );
       },
     );
@@ -596,85 +589,17 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     );
                   },
                 ),
-                sendButton: widget.isLoading
-                    ? const SizedBox(
-                        width: 42,
-                        height: 42,
-                        child:
-                            Padding(
-                          padding:
-                              EdgeInsets.all(
-                            9,
-                          ),
-                          child:
-                              CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color:
-                                Color(
-                              0xFF8AB4F8,
-                            ),
-                          ),
-                        ),
-                      )
-                    : Tooltip(
-                        message: _canSubmit
-                            ? l10n.t(
-                                'send_message',
-                              )
-                            : l10n.t(
-                                'enter_message_to_send',
-                              ),
-                        child:
-                            IconButton(
-                          style:
-                              IconButton.styleFrom(
-                            backgroundColor:
-                                _canSubmit
-                                    ? const Color(
-                                        0xFF8AB4F8,
-                                      )
-                                    : Colors
-                                        .white
-                                        .withValues(
-                                        alpha: 0.08,
-                                      ),
-                            foregroundColor:
-                                _canSubmit
-                                    ? Colors.black
-                                    : Colors.white30,
-                            shadowColor:
-                                const Color(
-                              0xFF8AB4F8,
-                            ).withValues(
-                              alpha: 0.34,
-                            ),
-                            elevation:
-                                _canSubmit
-                                    ? 12
-                                    : 0,
-                            minimumSize:
-                                const Size(
-                              42,
-                              42,
-                            ),
-                            maximumSize:
-                                const Size(
-                              42,
-                              42,
-                            ),
-                          ),
-                          onPressed:
-                              _canSubmit
-                                  ? _submit
-                                  : null,
-                          icon:
-                              const Icon(
-                            Icons
-                                .arrow_upward,
-                            size: 20,
-                          ),
-                        ),
-                      ),
+                sendButton: ChatComposerPrimaryAction(
+                  hasDraft: _canSubmit,
+                  isLoading: widget.isLoading,
+                  liveEnabled: widget.liveSessionEnabled &&
+                      widget.onStartLiveSession != null &&
+                      !_isEditing,
+                  onSend: _submit,
+                  onLive: widget.onStartLiveSession,
+                  sendTooltip: l10n.t('send_message'),
+                  emptyTooltip: l10n.t('enter_message_to_send'),
+                ),
               ),
             ],
           ),
@@ -956,7 +881,6 @@ enum _AttachmentPickerAction {
   screen,
   file,
   video,
-  live,
 }
 
 class _AttachmentPickerSheet
@@ -964,13 +888,11 @@ class _AttachmentPickerSheet
   const _AttachmentPickerSheet({
     required this.onSelected,
     required this.screenVisionEnabled,
-    required this.liveSessionEnabled,
   });
 
   final ValueChanged<
       _AttachmentPickerAction> onSelected;
   final bool screenVisionEnabled;
-  final bool liveSessionEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1045,14 +967,6 @@ class _AttachmentPickerSheet
             spacing: 12,
             runSpacing: 12,
             children: [
-              if (liveSessionEnabled)
-                _AttachmentActionTile(
-                  icon: Icons.graphic_eq_rounded,
-                  label: 'Live',
-                  onTap: () => onSelected(
-                    _AttachmentPickerAction.live,
-                  ),
-                ),
               _AttachmentActionTile(
                 icon:
                     Icons.image_outlined,
