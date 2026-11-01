@@ -43,6 +43,7 @@ import 'package:ai_orchestrator/features/chat/presentation/debug/debug_overlay.d
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_session_tile.dart';
 import 'package:ai_orchestrator/presentation/chat/components/high_performance_chat_list.dart';
+import 'package:ai_orchestrator/presentation/chat/components/chat_audio_playback_bar.dart';
 import 'package:ai_orchestrator/presentation/chat/components/live_voice_overlay.dart';
 import 'package:ai_orchestrator/presentation/chat/components/runtime_metrics_widget.dart';
 import 'package:ai_orchestrator/presentation/chat/controllers/chat_deadlock_controller.dart';
@@ -1503,6 +1504,14 @@ class _ChatBodyState
   ChatMessage?
       _editingUserMessage;
 
+  ChatMessage? _audioPlaybackMessage;
+  bool _audioPlaying = false;
+  bool _audioBusy = false;
+  Timer? _audioPoll;
+  int _audioEpoch = 0;
+
+  VoiceOutputService get _voiceOutput => di.sl<VoiceOutputService>();
+
   bool get _isEditingUserMessage =>
       _editingUserMessage != null;
 
@@ -1539,6 +1548,10 @@ class _ChatBodyState
 
   @override
   void dispose() {
+    _audioPoll?.cancel();
+    if (_audioPlaybackMessage != null) {
+      unawaited(_voiceOutput.stopSpeaking().catchError((Object _) {}));
+    }
     _runtimeNoticePresenter.dispose();
     _debugLabController
         .removeListener(
@@ -1565,6 +1578,14 @@ class _ChatBodyState
     super.didUpdateWidget(oldWidget);
     if (oldWidget.chatNavigation.sessionId != widget.chatNavigation.sessionId) {
       _editingUserMessage = null;
+      _audioEpoch++;
+      _audioPoll?.cancel();
+      if (_audioPlaybackMessage != null) {
+        unawaited(_voiceOutput.stopSpeaking().catchError((Object _) {}));
+      }
+      _audioPlaybackMessage = null;
+      _audioPlaying = false;
+      _audioBusy = false;
     }
   }
 
@@ -1973,19 +1994,85 @@ class _ChatBodyState
     );
   }
 
-  Future<void>
-      _speakAssistantResponse(
-    String text,
+  void _watchAudioState() {
+    _audioPoll?.cancel();
+    _audioPoll = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      if (!mounted || _audioPlaybackMessage == null) {
+        _audioPoll?.cancel();
+        return;
+      }
+      final speaking = _voiceOutput.isSpeaking;
+      if (!_audioBusy && speaking != _audioPlaying) {
+        setState(() => _audioPlaying = speaking);
+      }
+    });
+  }
+
+  Future<void> _applyAudioCommand(
+    int token,
+    Future<void> Function() command,
   ) async {
     try {
-      await di
-          .sl<VoiceOutputService>()
-          .speak(text);
+      await command();
+      if (!mounted || token != _audioEpoch) return;
+      setState(() {
+        _audioPlaying = _voiceOutput.isSpeaking;
+        _audioBusy = false;
+      });
     } catch (error) {
-      debugPrint(
-        'TTS playback failed: $error',
+      debugPrint('TTS playback failed: $error');
+      if (!mounted || token != _audioEpoch) return;
+      setState(() {
+        _audioBusy = false;
+        _audioPlaying = false;
+      });
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('Riproduzione vocale non disponibile.')),
       );
     }
+  }
+
+  Future<void> _speakAssistantResponse(ChatMessage message) async {
+    final token = ++_audioEpoch;
+    setState(() {
+      _audioPlaybackMessage = message;
+      _audioBusy = true;
+    });
+    _watchAudioState();
+    await _applyAudioCommand(
+      token,
+      () => _voiceOutput.speak(message.content),
+    );
+  }
+
+  void _stopAudioPlayback() {
+    if (_audioPlaybackMessage == null) return;
+    final token = ++_audioEpoch;
+    setState(() => _audioBusy = true);
+    unawaited(_applyAudioCommand(token, _voiceOutput.stopSpeaking));
+  }
+
+  void _restartAudioPlayback() {
+    final message = _audioPlaybackMessage;
+    if (message == null) return;
+    final token = ++_audioEpoch;
+    setState(() => _audioBusy = true);
+    unawaited(_applyAudioCommand(token, () async {
+      await _voiceOutput.stopSpeaking();
+      await _voiceOutput.speak(message.content);
+    }));
+  }
+
+  void _closeAudioPlayback() {
+    if (_audioPlaybackMessage == null) return;
+    _audioEpoch++;
+    _audioPoll?.cancel();
+    setState(() {
+      _audioPlaybackMessage = null;
+      _audioPlaying = false;
+      _audioBusy = false;
+    });
+    unawaited(_voiceOutput.stopSpeaking().catchError((Object _) {}));
   }
 
   String? _runtimeMessageForState(
@@ -2171,10 +2258,7 @@ class _ChatBodyState
                                   onSpeakAssistantMessage:
                                       (message) {
                                     unawaited(
-                                      _speakAssistantResponse(
-                                        message
-                                            .content,
-                                      ),
+                                      _speakAssistantResponse(message),
                                     );
                                   },
                                 ),
@@ -2226,6 +2310,15 @@ class _ChatBodyState
                 ],
               ),
             ),
+
+            if (_audioPlaybackMessage != null)
+              ChatAudioPlaybackBar(
+                isPlaying: _audioPlaying,
+                isBusy: _audioBusy,
+                onStop: _stopAudioPlayback,
+                onRestart: _restartAudioPlayback,
+                onClose: _closeAudioPlayback,
+              ),
 
             ChatInputBar(
               key: ValueKey(widget.chatNavigation.sessionId),
