@@ -92,7 +92,7 @@ abstract final class AssistantConversationRecall {
   // A question about a named person is not permission to search the Web or
   // claim to know them; answer only if the user named this friend in this chat.
   static final RegExp _namedFriendQuestion = RegExp(
-    r"^(?:est ce que|est que) tu connais ([\p{L}][\p{L}'’-]*)$",
+    r"^(?:est(?:-|\s)ce que|est que) tu connais ([\p{L}][\p{L}'’-]*)$",
     unicode: true,
   );
 
