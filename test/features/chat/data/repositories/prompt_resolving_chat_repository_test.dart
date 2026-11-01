@@ -221,6 +221,151 @@ void main() {
       expect(delegate.lastSystemPrompt, isNot(contains('CONFIRMED DURABLE MEMORY')));
     });
 
+    test('Qwen to Phi handoff keeps confirmed user facts across sessions',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      // The same local durable store belongs to Aivexus, never to an LLM.
+      final disk = _PromptMemoryPersistence();
+      final writerMemory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: disk),
+      );
+      final qwenRuntime = _RecordingChatRepository();
+      final qwen = PromptResolvingChatRepository(
+        delegate: qwenRuntime,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: writerMemory,
+        ),
+        durableMemoryCaptureService: AssistantDurableMemoryCaptureService(
+          memoryService: writerMemory,
+          now: () => 101,
+        ),
+      );
+
+      await qwen.sendMessage(
+        sessionId: 'qwen-session',
+        userPrompt: 'Ricorda che il numero di prova è 731',
+      );
+      expect(qwenRuntime.lastSystemPrompt, contains('numero di prova è 731'));
+
+      // A new repository, memory service and chat session simulate a model
+      // switch or an app restart. Only storage is shared, not model state.
+      final phiMemory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: disk),
+      );
+      final phiRuntime = _RecordingChatRepository();
+      final phi = PromptResolvingChatRepository(
+        delegate: phiRuntime,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: phiMemory,
+        ),
+        durableMemoryCaptureService: AssistantDurableMemoryCaptureService(
+          memoryService: phiMemory,
+          now: () => 102,
+        ),
+      );
+      await phi.sendMessage(
+        sessionId: 'phi-session',
+        userPrompt: 'Quanto vale il numero di prova?',
+      );
+      expect(phiRuntime.lastSystemPrompt, contains('numero di prova è 731'));
+      expect(phiRuntime.lastSystemPrompt, contains('origin=userExplicit'));
+
+      // An unverified model suggestion must not leak into another model's
+      // confirmed memory, even though it is in the very same SQLite scope.
+      await phiMemory.recordModelCandidate(
+        recordKey: 'numero.di.prova.suggerito',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: 'numero di prova è 999',
+        updatedAt: 103,
+      );
+      await phi.sendMessage(
+        sessionId: 'phi-session',
+        userPrompt: 'Quanto vale il numero di prova?',
+      );
+      expect(phiRuntime.lastSystemPrompt, contains('numero di prova è 731'));
+      expect(phiRuntime.lastSystemPrompt,
+          isNot(contains('numero di prova è 999')));
+
+      // A confirmed correction written while Phi is selected immediately
+      // becomes available to the next model, without retraining or replay.
+      await phi.sendMessage(
+        sessionId: 'phi-session',
+        userPrompt: 'Ricorda che il numero di prova è 732',
+      );
+      await qwen.sendMessage(
+        sessionId: 'qwen-new-session',
+        userPrompt: 'Quanto vale il numero di prova?',
+      );
+      expect(qwenRuntime.lastSystemPrompt, contains('numero di prova è 732'));
+      expect(qwenRuntime.lastSystemPrompt,
+          isNot(contains('numero di prova è 731')));
+
+      // Forgetting is global to this user's approved memory, irrespective
+      // of the model that recorded or consumed it.
+      await qwen.sendMessage(
+        sessionId: 'qwen-new-session',
+        userPrompt: 'Dimentica il numero di prova',
+      );
+      await phi.sendMessage(
+        sessionId: 'phi-new-session',
+        userPrompt: 'Quanto vale il numero di prova?',
+      );
+      expect(phiRuntime.lastSystemPrompt,
+          isNot(contains('numero di prova è 732')));
+      expect(phiRuntime.lastSystemPrompt,
+          isNot(contains('CONFIRMED DURABLE MEMORY')));
+    });
+
+    test('conversation-only facts never become global at model handoff',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final disk = _PromptMemoryPersistence();
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: disk),
+      );
+      final capture = AssistantDurableMemoryCaptureService(
+        memoryService: memory,
+        now: () => 501,
+      );
+      final qwen = PromptResolvingChatRepository(
+        delegate: _RecordingChatRepository(),
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: capture,
+      );
+      final phiRuntime = _RecordingChatRepository();
+      final phi = PromptResolvingChatRepository(
+        delegate: phiRuntime,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: AssistantDurableMemoryService(
+            store: AssistantDurableMemoryStore(persistence: disk),
+          ),
+        ),
+      );
+      await qwen.sendMessage(
+        sessionId: 'private-chat',
+        userPrompt: 'Ricorda solo in questa chat che il budget è 420',
+      );
+      await phi.sendMessage(
+        sessionId: 'other-chat',
+        userPrompt: 'Qual è il budget?',
+      );
+      expect(phiRuntime.lastSystemPrompt,
+          isNot(contains('il budget è 420')));
+      await phi.sendMessage(
+        sessionId: 'private-chat',
+        userPrompt: 'Qual è il budget?',
+      );
+      expect(phiRuntime.lastSystemPrompt, contains('il budget è 420'));
+    });
+
     test('specialized Assistant requests cannot create durable user facts',
         () async {
       final fixture = await createService(const <String, Object>{});
