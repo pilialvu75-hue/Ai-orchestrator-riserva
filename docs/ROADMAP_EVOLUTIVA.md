@@ -517,6 +517,40 @@ consenso esplicito.
    fonti, protezione prompt injection. Memorizzare conoscenza validata e skill,
    non promettere fine-tuning dei pesi automatico.
 
+### Gate M4-C — Consenso per l'effettiva divulgazione Cloud in HYBRID
+
+- **Conoscenza Aivexus, decisione dell'utente.** Il modello LOCAL che esegue
+  realmente un passaggio HYBRID recupera le memorie pertinenti e confermate
+  autorizzate sul dispositivo; la protezione #972 che le escludeva in HYBRID
+  prima del routing resta un gate TEMPORANEO fino al collegamento sicuro.
+- La modalità Cloud/HYBRID **non equivale** a consenso implicito per tutti i
+  ricordi. Prima di qualsiasi invio l'utente deve sapere il provider/account
+  destinatario, l'esatto testo del payload, il motivo, la fonte (domanda,
+  cronologia, memoria, RAG, documenti/allegati, strumenti, istruzioni) e il
+  livello di riservatezza. Non soltanto i ricordi SQLite possono essere privati.
+- Per ogni categoria e provider: **solo questa volta**, **sempre per questa
+  categoria con questo destinatario**, **approva ora e chiedi ogni volta in
+  futuro**, **nega questa volta**, **non condividere (persistente)**.
+  Memorizzazione protetta, dashboard Impostazioni per revisione/revoca,
+  propagazione delle cancellazioni/forget e nessuna replica automatica.
+  I contenuti non classificati non ottengono permessi automatici permanenti.
+- Se una sezione non è autorizzata, impedire l'invio dell'intero vecchio
+  payload; ricomporre un prompt senza quella sezione oppure proseguire Local
+  e chiedere il consenso pertinente. Nessun fallimento nascosto né dati
+  classificati inventati da un modello: serve un assemblatore trusted che
+  certifichi che i segmenti coprono **esattamente** il testo inviato.
+- Mantenere **LOCAL rigorosamente offline quando scelto**: verificare che Web,
+  tool, download, sync e fallback non comunichino in rete senza consenso.
+  La presenza di Internet non deve cambiare silenziosamente la scelta Local.
+- PR #977 introduce un **contratto source-only con test**, non la UI e non il
+  routing produttivo; PR #975 resta il percorso checkpoint sperimentale separato.
+  #899 governa la memoria, #973 HYBRID, #948 OTA. La verifica richiede
+  integrazione reale del consent manager e provider/account/payload al dispatch,
+  UI IT/FR/EN/ES, test privacy, CI e S24 FE fisico; non dichiarare il prodotto
+  completo per il solo merge di un contratto.
+- Massimizzare completezza e accuratezza con verifica e fonti senza promettere
+  risposte **esaustive al 100%**, impossibili da garantire.
+
 ### Invarianti e prove
 
 - Nessun modello, plugin o servizio remoto diventa proprietario dei ricordi.

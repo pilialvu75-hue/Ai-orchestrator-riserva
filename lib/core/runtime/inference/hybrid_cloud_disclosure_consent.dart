@@ -198,79 +198,105 @@ final class HybridCloudDisclosureConsent {
   final Future<bool> Function(String ownerId, String sessionId)
       _authorizeOwnerSession;
   Future<void> _tail = Future<void>.value();
+  int _revocationRevision = 0;
 
   static const String _prefix = 'hybrid_cloud_consent_v1_';
 
+  /// The dialog intentionally runs OUTSIDE the protected-storage queue.
+  /// Otherwise a settings revocation during a visible consent dialog could
+  /// deadlock or be delayed until AFTER an outbound approval.
   Future<bool> authorize({
     required HybridCloudDisclosure disclosure,
     Future<Map<HybridDisclosureScope, HybridCloudConsentChoice>> Function(
       HybridCloudConsentReview review,
     )? requestConsent,
-  }) => _serialize(() async {
-        if (!await _authorizeOwnerSession(
+  }) async {
+    final revision = _revocationRevision;
+    if (!await _authorizeOwnerSession(
+      disclosure.ownerId, disclosure.sessionId,
+    )) {
+      return false;
+    }
+
+    // Read rules in storage order, but never hold this lock while awaiting
+    // the user's decision. Null indicates a persistent deny on any segment.
+    final unapproved = await _serialize<List<HybridDisclosureScope>?>(() async {
+      final pending = <HybridDisclosureScope>[];
+      for (final scope in disclosure.scopes) {
+        final rule = await _readRule(
+          disclosure.ownerId, disclosure.providerId, scope,
+        );
+        if (rule == HybridCloudStoredConsent.neverShare) return null;
+        if (rule != HybridCloudStoredConsent.allowAlways ||
+            scope.sensitivity == HybridDisclosureSensitivity.unknown) {
+          pending.add(scope);
+        }
+      }
+      return pending;
+    });
+    if (unapproved == null || revision != _revocationRevision) return false;
+    if (unapproved.isEmpty) {
+      return await _authorizeOwnerSession(
+        disclosure.ownerId, disclosure.sessionId,
+      ) && revision == _revocationRevision;
+    }
+    if (requestConsent == null) return false;
+
+    final decisions = await requestConsent(HybridCloudConsentReview(
+      disclosure: disclosure,
+      needsConsent: List<HybridDisclosureScope>.unmodifiable(unapproved),
+    ));
+    if (revision != _revocationRevision ||
+        !await _authorizeOwnerSession(
           disclosure.ownerId, disclosure.sessionId,
         )) {
+      return false;
+    }
+    if (decisions.length != unapproved.length ||
+        !unapproved.every(decisions.containsKey)) {
+      return false;
+    }
+    // A review may have changed another category's rule while the dialog
+    // was open. Never override a newly persisted "never share" rule.
+    return _serialize(() async {
+      if (revision != _revocationRevision ||
+          !await _authorizeOwnerSession(
+            disclosure.ownerId, disclosure.sessionId,
+          )) {
+        return false;
+      }
+      for (final scope in disclosure.scopes) {
+        if (await _readRule(disclosure.ownerId, disclosure.providerId, scope) ==
+            HybridCloudStoredConsent.neverShare) {
           return false;
         }
-
-        final unapproved = <HybridDisclosureScope>[];
-        for (final scope in disclosure.scopes) {
-          final rule = await _readRule(disclosure.ownerId,
-              disclosure.providerId, scope);
-          if (rule == HybridCloudStoredConsent.neverShare) return false;
-          if (rule != HybridCloudStoredConsent.allowAlways ||
-              scope.sensitivity == HybridDisclosureSensitivity.unknown) {
-            unapproved.add(scope);
-          }
+      }
+      var canSend = true;
+      for (final scope in unapproved) {
+        final decision = decisions[scope]!;
+        switch (decision) {
+          case HybridCloudConsentChoice.allowOnce:
+            break;
+          case HybridCloudConsentChoice.allowAlways:
+            if (scope.sensitivity == HybridDisclosureSensitivity.unknown) {
+              return false; // Unknown content cannot be auto-allowed.
+            }
+            await _writeRule(disclosure.ownerId, disclosure.providerId,
+                scope, HybridCloudStoredConsent.allowAlways);
+          case HybridCloudConsentChoice.allowAndAskNextTime:
+            await _writeRule(disclosure.ownerId, disclosure.providerId,
+                scope, HybridCloudStoredConsent.askEveryTime);
+          case HybridCloudConsentChoice.denyOnce:
+            canSend = false;
+          case HybridCloudConsentChoice.neverShare:
+            await _writeRule(disclosure.ownerId, disclosure.providerId,
+                scope, HybridCloudStoredConsent.neverShare);
+            canSend = false;
         }
-        if (unapproved.isEmpty) return true;
-        if (requestConsent == null) return false;
-
-        // A user dialog can suspend for arbitrarily long. Revalidate session
-        // ownership afterward, before recording rules or allowing any send.
-        final decisions = await requestConsent(HybridCloudConsentReview(
-          disclosure: disclosure,
-          needsConsent: List<HybridDisclosureScope>.unmodifiable(unapproved),
-        ));
-        if (!await _authorizeOwnerSession(
-          disclosure.ownerId, disclosure.sessionId,
-        )) {
-          return false;
-        }
-        if (decisions.length != unapproved.length ||
-            !unapproved.every(decisions.containsKey)) {
-          return false; // Incomplete UI responses never imply approval.
-        }
-
-        var canSend = true;
-        for (final scope in unapproved) {
-          final decision = decisions[scope]!;
-          switch (decision) {
-            case HybridCloudConsentChoice.allowOnce:
-              break;
-            case HybridCloudConsentChoice.allowAlways:
-              if (scope.sensitivity == HybridDisclosureSensitivity.unknown) {
-                return false; // Unclassified context must be reviewed anew.
-              }
-              await _writeRule(disclosure.ownerId,
-                  disclosure.providerId, scope,
-                  HybridCloudStoredConsent.allowAlways);
-            case HybridCloudConsentChoice.allowAndAskNextTime:
-              await _writeRule(disclosure.ownerId,
-                  disclosure.providerId, scope,
-                  HybridCloudStoredConsent.askEveryTime);
-            case HybridCloudConsentChoice.denyOnce:
-              canSend = false;
-            case HybridCloudConsentChoice.neverShare:
-              await _writeRule(disclosure.ownerId,
-                  disclosure.providerId, scope,
-                  HybridCloudStoredConsent.neverShare);
-              canSend = false;
-          }
-        }
-        // All consent choices are scoped to THIS exact outbound disclosure.
-        return canSend;
-      });
+      }
+      return canSend && revision == _revocationRevision;
+    });
+  }
 
   /// Used by a settings/consent-management UI. Explicit user action only.
   /// Revocation changes a remembered allow to no automatic consent.
@@ -279,16 +305,21 @@ final class HybridCloudDisclosureConsent {
     required String sessionId,
     required String providerId,
     required HybridDisclosureScope scope,
-  }) => _serialize(() async {
-        if (!await _authorizeOwnerSession(ownerId, sessionId)) {
-          throw StateError('HYBRID consent owner/session is not authorized');
-        }
-        final key = _key(ownerId, providerId, scope);
-        await _backend.delete(key);
-        if (await _backend.read(key) != null) {
-          throw StateError('HYBRID Cloud consent revocation not confirmed');
-        }
-      });
+  }) {
+    // Invalidate outstanding dialogs synchronously. No UI callback needs to
+    // wait for the revocation's protected storage operation to complete.
+    _revocationRevision++;
+    return _serialize(() async {
+      if (!await _authorizeOwnerSession(ownerId, sessionId)) {
+        throw StateError('HYBRID consent owner/session is not authorized');
+      }
+      final key = _key(ownerId, providerId, scope);
+      await _backend.delete(key);
+      if (await _backend.read(key) != null) {
+        throw StateError('HYBRID Cloud consent revocation not confirmed');
+      }
+    });
+  }
 
   Future<HybridCloudStoredConsent?> storedPreference({
     required String ownerId,

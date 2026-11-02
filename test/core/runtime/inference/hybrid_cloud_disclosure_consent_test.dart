@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_disclosure_consent.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -245,6 +247,36 @@ void main() {
           decideAll(r, HybridCloudConsentChoice.allowOnce),
     ), isTrue);
     expect(backend.values, isEmpty);
+  });
+
+  test('revoking during an open dialog invalidates consent without deadlock',
+      () async {
+    final outbound = disclosure(parts: const <HybridDisclosureSegment>[
+      HybridDisclosureSegment(text: 'Private memory', scope: memory),
+    ]);
+    final entered = Completer<void>();
+    final finishReview = Completer<void>();
+    final pending = consent.authorize(
+      disclosure: outbound,
+      requestConsent: (r) async {
+        entered.complete();
+        await finishReview.future;
+        return decideAll(r, HybridCloudConsentChoice.allowAlways);
+      },
+    );
+    await entered.future;
+    // Unlike a storage queue held during the dialog, this completes even
+    // while the user's consent callback is still suspended.
+    await consent.revoke(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', scope: memory,
+    );
+    finishReview.complete();
+    expect(await pending, isFalse);
+    expect(await consent.storedPreference(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', scope: memory,
+    ), isNull);
   });
 
   test('revoke persistent allow; next Cloud use must request consent',
