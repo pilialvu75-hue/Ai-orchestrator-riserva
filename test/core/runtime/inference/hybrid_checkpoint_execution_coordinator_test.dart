@@ -29,7 +29,9 @@ final class _ProtectedBackend implements HybridProtectedSnapshotBackend {
   }
 
   @override
-  Future<void> delete(String key) async => values.remove(key);
+  Future<void> delete(String key) async {
+    values.remove(key);
+  }
 }
 
 CloudRuntimeProvider _provider() => CloudRuntimeProvider(
