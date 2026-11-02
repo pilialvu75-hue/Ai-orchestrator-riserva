@@ -39,12 +39,13 @@ class InstallPlatformIconsTest(unittest.TestCase):
             z.writestr(PREFIX + "Windows/app_icon.ico", b"windows")
             z.writestr(PREFIX + "macOS/AppIcon.appiconset/Contents.json", b'{"images":[]}')
             z.writestr(PREFIX + "Web_PWA/icons/Icon-192.png", b"web")
+            z.writestr(PREFIX + "Web_PWA/favicon-32x32.png", b"web-favicon")
         self.digest = hashlib.sha256(self.pack.read_bytes()).hexdigest()
 
     def test_dry_run_never_writes_assets_or_color(self):
         before = self.colors.read_bytes()
         items = MODULE.install(self.pack, self.root, apply=False, expected_digest=self.digest)
-        self.assertEqual(len(items), 6)  # Five assets plus Android color
+        self.assertEqual(len(items), 7)  # Six assets plus Android color
         self.assertEqual(self.colors.read_bytes(), before)
         self.assertFalse((self.root / "windows/runner/resources/app_icon.ico").exists())
 
