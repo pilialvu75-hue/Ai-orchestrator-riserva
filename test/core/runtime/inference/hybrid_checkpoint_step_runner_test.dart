@@ -1,3 +1,10 @@
+import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
+import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
+import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
@@ -39,9 +46,128 @@ CloudRuntimeProvider _cloud({bool available = true, bool allowed = true}) =>
       automaticUseAllowedForTask: (_, __) => allowed,
     );
 
+final class _FakeLocalInferenceProvider extends LocalRuntimeProvider {
+  _FakeLocalInferenceProvider(this.onInfer);
+  final void Function() onInfer;
+
+  @override
+  bool supportsModel(AiModel model) => true;
+
+  @override
+  TokenStream streamInference({
+    required InferenceRequest request,
+    required CancellationToken cancellationToken,
+  }) async* {
+    onInfer();
+    yield InferenceResponse.finalChunk(
+      text: 'LOCAL finished planned step',
+      tokensGenerated: 4,
+      model: 'test-local',
+    );
+  }
+}
+
 void main() {
   const owner = 'test-owner';
   const session = 'test-session';
+
+  test('opt-in runner uses the production DirectiveAwareInferenceService',
+      () async {
+    const selected = AiModel(
+      id: 'test_local_2b',
+      displayName: 'Local test',
+      fileName: 'test.gguf',
+      downloadUrl: 'https://example.test/model.gguf',
+      version: '1',
+      sizeBytes: 123,
+      description: 'Synthetic validated model',
+      isDownloaded: true,
+      localPath: '/tmp/test.gguf',
+      validationStatus: ModelValidationStatus.validatedOk,
+    );
+    var cloudCalls = 0;
+    var localCalls = 0;
+    final cloud = CloudRuntimeProvider(
+      sendQuery: (String providerId, AiRequest request) async {
+        cloudCalls++;
+        expect(providerId, 'gemini');
+        return AiResponse(
+          text: 'CLOUD finished planned step',
+          model: 'synthetic-cloud',
+          tokensUsed: 7,
+          timestamp: 0,
+        );
+      },
+      supportedProviders: () => const ['gemini'],
+      isProviderAvailable: (_) => true,
+      providerDisplayName: ([provider]) => provider ?? 'gemini',
+      automaticUseAllowedForTask: (_, __) => true,
+    );
+    final inference = DirectiveAwareInferenceService(
+      loadSelectedModel: () async => selected,
+      loadRuntimeMode: () async => AiRuntimeMode.hybrid,
+      runtimeProvider: _FakeLocalInferenceProvider(() => localCalls++),
+      cloudRuntimeProvider: cloud,
+      sessionManager: RuntimeSessionManager(),
+    );
+
+    final store =
+        HybridCheckpointSnapshotStore(backend: _MemorySecureBackend());
+    final ledger = HybridCheckpointLedger(
+      executionId: 'real-directive-adapter',
+      totalCheckpoints: 2,
+    );
+    await store.saveSnapshot(ownerId: owner, snapshot: ledger.toJson());
+
+    final runner = HybridCheckpointStepRunner(
+      snapshotStore: store,
+      cloudRuntimeProvider: cloud,
+      streamInference: inference.stream,
+    );
+    final cloudLease = ledger.beginAttempt(
+      attemptId: 'cloud-attempt',
+      executor: HybridCheckpointExecutor.cloud,
+    );
+    final cloudResult = await runner.executeNext(
+      ownerId: owner,
+      ledger: ledger,
+      lease: cloudLease,
+      sessionId: 'real-inference-session',
+      stepInstruction: 'Correggi il codice Dart',
+      isOffline: false,
+      authorizeCloudText: (_) async => true,
+      validateResult: (text) async =>
+          text == 'CLOUD finished planned step',
+    );
+    expect(cloudResult, 'CLOUD finished planned step');
+    expect(cloudCalls, 1);
+    expect(localCalls, 0);
+
+    ledger.interruptAttempt(cloudLease);
+    final localLease = ledger.beginAttempt(
+      attemptId: 'local-attempt',
+      executor: HybridCheckpointExecutor.local,
+    );
+    final localResult = await runner.executeNext(
+      ownerId: owner,
+      ledger: ledger,
+      lease: localLease,
+      sessionId: 'real-inference-session',
+      stepInstruction: 'Completa il passaggio finale',
+      isOffline: true,
+      validateResult: (text) async =>
+          text == 'LOCAL finished planned step',
+    );
+    expect(localResult, 'LOCAL finished planned step');
+    expect(cloudCalls, 1);
+    expect(localCalls, 1);
+    expect(ledger.isComplete, isTrue);
+    final recovered = await store.load(
+      ownerId: owner,
+      executionId: 'real-directive-adapter',
+    );
+    expect(recovered?.completedCount, 2);
+  });
 
   test('real inference boundary: Cloud 1-3, Local 4-7, reconnection Local 8-10',
       () async {
