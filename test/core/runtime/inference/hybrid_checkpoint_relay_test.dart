@@ -561,7 +561,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
-      authorizeOwnerSession: (_, __) async => ++authorizationChecks <= 2,
+      authorizeOwnerSession: (_, __) async => ++authorizationChecks <= 3,
       isNetworkAvailable: () async => false,
       isLocalReady: () async => true,
       isConnectivityFailure: (_) => false,
@@ -574,7 +574,7 @@ void main() {
       ),
       throwsStateError,
     );
-    expect(authorizationChecks, 3);
+    expect(authorizationChecks, 4);
     expect(modelCalls, 1);
     final restored = await coordinator.resume(
       ownerId: owner, executionId: 'gallery',
@@ -583,6 +583,50 @@ void main() {
     expect(restored?.nextCheckpoint, 2);
     expect(await HybridCheckpointAttemptJournal(backend: backend)
         .pendingCheckpoint(ownerId: owner, executionId: 'gallery'), isNull);
+  });
+
+  test('owner authorization revoked during Cloud consent blocks inference',
+      () async {
+    final backend = _Backend();
+    var calls = 0;
+    var authorized = true;
+    var permissionChecks = 0;
+    final coordinator = _coordinator(backend, (request) async* {
+      calls++;
+      yield InferenceResponse.finalChunk(
+        text: 'should not be sent', tokensGenerated: 1,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async {
+        permissionChecks++;
+        return authorized;
+      },
+      isNetworkAvailable: () async => true,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: true,
+        authorizeCloudText: (_) async {
+          authorized = false; // E.g., logout during consent.
+          return true;
+        },
+        validateResult: (_, __) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(permissionChecks, 3);
+    expect(calls, 0);
+    expect(await HybridCheckpointAttemptJournal(backend: backend)
+        .pendingCheckpoint(ownerId: owner, executionId: 'gallery'), isNull);
+    expect((await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
   });
 
   test('Cloud consent denial never leaves a false pending intent', () async {

@@ -238,9 +238,17 @@ final class HybridCheckpointRelay {
           isOffline: !online,
           validateResult: (output) => validateResult(step, output),
           authorizeCloudText: authorizeCloudText,
-          markBeforeInference: () => _attemptJournal.markBeforeInference(
-            ownerId: ownerId, executionId: executionId, checkpoint: step,
-          ),
+          markBeforeInference: () async {
+            // Authentication can be revoked during the Cloud consent dialog.
+            // Check again after consent and before any protected marker or
+            // remote inference starts.
+            if (!await _authorizeOwnerSession(ownerId, sessionId)) {
+              throw StateError('HYBRID owner/session authorization was revoked');
+            }
+            await _attemptJournal.markBeforeInference(
+              ownerId: ownerId, executionId: executionId, checkpoint: step,
+            );
+          },
         );
         await _attemptJournal.clearAfterCommit(
           ownerId: ownerId, executionId: executionId,
