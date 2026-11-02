@@ -60,6 +60,7 @@ jobs:
           command -v gh >/dev/null
           grep -Eq '^version:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?[[:space:]]*$' pubspec.yaml
           grep -q 'AI-Orchestrator-macOS.dmg' .github/workflows/macos-release-publish.yml
+          python3 scripts/check_android_release_gate.py .github/workflows/build.yml .github/workflows/macos-release-publish.yml .github/workflows/linux-release-publish.yml .github/workflows/windows-release-publish.yml
           echo 'macOS release publisher contract is valid.'
 
   publish-macos:
