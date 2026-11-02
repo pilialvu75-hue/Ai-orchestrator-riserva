@@ -338,12 +338,15 @@ void main() {
   });
 }
 
-Stream<InferenceResponse> runnerStream(List<InferenceRequest> calls)(
-    InferenceRequest request) async* {
-  calls.add(request);
-  yield InferenceResponse.finalChunk(
-    text: 'Verified output ${request.checkpointId}',
-    tokensGenerated: 4,
-    model: 'local',
-  );
+Stream<InferenceResponse> Function(InferenceRequest) runnerStream(
+  List<InferenceRequest> calls,
+) {
+  return (InferenceRequest request) async* {
+    calls.add(request);
+    yield InferenceResponse.finalChunk(
+      text: 'Verified output ${request.checkpointId}',
+      tokensGenerated: 4,
+      model: 'local',
+    );
+  };
 }
