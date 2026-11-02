@@ -45,6 +45,7 @@ class InferenceRequest {
     this.routeDirective = InferenceRouteDirective.runtimeDefault,
     this.cloudProviderId,
     this.allowCloudProviderFailover = true,
+    this.requireAutomaticCloudPolicy = false,
     this.firstTokenTimeoutOverride,
   });
 
@@ -100,6 +101,14 @@ class InferenceRequest {
   /// automatic. Hybrid orchestration normally sets it false because Hannibal
   /// owns provider replacement and checkpoint/resume decisions.
   final bool allowCloudProviderFailover;
+
+  /// For orchestrated HYBRID Cloud work, force the automatic access/spending
+  /// policy to be checked again by the provider *at dispatch time*, even when
+  /// the chosen Cloud provider is pinned and failover is disabled. A pinned
+  /// provider alone is not consent to a paid/manual Cloud invocation.
+  ///
+  /// Explicit user-selected Cloud chat remains unchanged (default: false).
+  final bool requireAutomaticCloudPolicy;
 
   /// Optional local-runtime first-token deadline override.
   ///
@@ -218,6 +227,7 @@ class InferenceRequest {
     InferenceRouteDirective? routeDirective,
     String? cloudProviderId,
     bool? allowCloudProviderFailover,
+    bool? requireAutomaticCloudPolicy,
     Duration? firstTokenTimeoutOverride,
   }) {
     return InferenceRequest(
@@ -246,6 +256,8 @@ class InferenceRequest {
       cloudProviderId: cloudProviderId ?? this.cloudProviderId,
       allowCloudProviderFailover:
           allowCloudProviderFailover ?? this.allowCloudProviderFailover,
+      requireAutomaticCloudPolicy:
+          requireAutomaticCloudPolicy ?? this.requireAutomaticCloudPolicy,
       firstTokenTimeoutOverride:
           firstTokenTimeoutOverride ?? this.firstTokenTimeoutOverride,
     );

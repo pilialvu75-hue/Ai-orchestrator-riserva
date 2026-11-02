@@ -232,7 +232,8 @@ void main() {
     expect(calls.take(3).every((r) =>
         r.routeDirective == InferenceRouteDirective.cloudOnly &&
         r.cloudProviderId == 'gemini' &&
-        !r.allowCloudProviderFailover), isTrue);
+        !r.allowCloudProviderFailover &&
+        r.requireAutomaticCloudPolicy), isTrue);
 
     // The Cloud connection is lost, and Local takes over after a restart.
     store = HybridCheckpointSnapshotStore(backend: backend);
@@ -280,6 +281,78 @@ void main() {
     // Every continuation contains previously completed *explicit* results.
     expect(calls[3].prompt, contains('Checkpoint 3 completed by cloud'));
     expect(calls[7].prompt, contains('Checkpoint 7 completed by local'));
+  });
+
+  test('HYBRID provider dispatch rechecks AUTO policy after approval',
+      () async {
+    // Simulate the user revoking AUTO access between provider recommendation
+    // and the actual CloudRuntimeProvider send. A pinned Cloud provider must
+    // NOT turn an automatic HYBRID route into a manual paid Cloud request.
+    var autoAllowed = true;
+    var outboundCalls = 0;
+    final cloud = CloudRuntimeProvider(
+      sendQuery: (String providerId, AiRequest request) async {
+        outboundCalls++;
+        return AiResponse(
+          text: 'Unexpected remote request',
+          model: 'remote',
+          tokensUsed: 1,
+          timestamp: 0,
+        );
+      },
+      supportedProviders: () => const ['gemini'],
+      isProviderAvailable: (_) => true,
+      providerDisplayName: ([provider]) => provider ?? 'gemini',
+      automaticUseAllowedForTask: (_, __) => autoAllowed,
+    );
+    final service = DirectiveAwareInferenceService(
+      loadSelectedModel: () async => null,
+      loadRuntimeMode: () async => AiRuntimeMode.hybrid,
+      runtimeProvider: _FakeLocalInferenceProvider(() {}),
+      cloudRuntimeProvider: cloud,
+      sessionManager: RuntimeSessionManager(),
+    );
+    final store = HybridCheckpointSnapshotStore(
+      backend: _MemorySecureBackend(),
+    );
+    final ledger = HybridCheckpointLedger(
+      executionId: 'automatic-policy-revoked',
+      totalCheckpoints: 1,
+    );
+    await store.saveSnapshot(ownerId: owner, snapshot: ledger.toJson());
+    final lease = ledger.beginAttempt(
+      attemptId: 'cloud-a',
+      executor: HybridCheckpointExecutor.cloud,
+    );
+    final runner = HybridCheckpointStepRunner(
+      snapshotStore: store,
+      cloudRuntimeProvider: cloud,
+      streamInference: service.stream,
+    );
+
+    await expectLater(
+      runner.executeNext(
+        ownerId: owner,
+        ledger: ledger,
+        lease: lease,
+        sessionId: session,
+        stepInstruction: 'Correggi questo codice Dart',
+        isOffline: false,
+        validateResult: (_) async => true,
+        authorizeCloudText: (_) async {
+          autoAllowed = false; // Changed before provider execution.
+          return true;
+        },
+      ),
+      throwsStateError,
+    );
+    expect(outboundCalls, 0);
+    expect(ledger.completedCount, 0);
+    final restored = await store.load(
+      ownerId: owner,
+      executionId: 'automatic-policy-revoked',
+    );
+    expect(restored?.nextCheckpoint, 1);
   });
 
   test('Cloud requires both task-aware AUTO policy and consent to full text',

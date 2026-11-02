@@ -114,6 +114,8 @@ final class HybridCheckpointStepRunner {
           : InferenceRouteDirective.cloudOnly,
       cloudProviderId: approvedCloudProvider,
       allowCloudProviderFailover: false,
+      requireAutomaticCloudPolicy:
+          lease.executor == HybridCheckpointExecutor.cloud,
     );
 
     final assigned = ledger.startCheckpoint(lease);
