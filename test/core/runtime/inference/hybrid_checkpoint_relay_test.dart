@@ -348,6 +348,10 @@ void main() {
     expect((await coordinator.resume(
       ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
 
+    // The network is restored before a separate explicit resume attempt.
+    // Its Cloud request then fails again; the classifier must not allow the
+    // second interrupted checkpoint to run locally without approval.
+    online = true;
     // A trusted caller explicitly declines replay when side effects are
     // possible. Rejection retains the same checkpoint for later inspection.
     await expectLater(
