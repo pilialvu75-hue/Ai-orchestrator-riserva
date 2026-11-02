@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:uuid/uuid.dart';
 
 import 'hybrid_checkpoint_execution_coordinator.dart';
@@ -57,6 +59,12 @@ final class HybridCheckpointRelay {
   final bool Function(Object error) _isConnectivityFailure;
   static const Uuid _uuid = Uuid();
 
+  // Only serializes opt-in relays inside this Dart isolate/process. It is NOT
+  // a cross-process or cross-device transactional lease; the protected store
+  // still needs a proper CAS/lease before enabling background multi-process
+  // execution or sync.
+  static final Set<String> _activeExecutions = <String>{};
+
   /// Executes a previously registered, protected plan step by step.
   ///
   /// Network reconnection does NOT automatically transfer an active Local
@@ -68,6 +76,13 @@ final class HybridCheckpointRelay {
   ///
   /// The caller may stop the workflow between checkpoints using [keepRunning].
   /// Stopping does not delete protected plans or results.
+  ///
+  /// Only one relay for the same owner+execution can run within this Dart
+  /// isolate at a time. An ambiguous transport failure does NOT automatically
+  /// replay the interrupted step unless [allowRetryAfterConnectionLoss]
+  /// explicitly certifies that the step can be retried without duplicating
+  /// external side effects. Without this approval, the protected checkpoint
+  /// remains unchanged for manual inspection/resume.
   Future<HybridResumableExecution> run({
     required String ownerId,
     required String executionId,
@@ -77,6 +92,38 @@ final class HybridCheckpointRelay {
         validateResult,
     Future<bool> Function(String outboundText)? authorizeCloudText,
     Future<bool> Function()? keepRunning,
+    Future<bool> Function(int checkpoint)? allowRetryAfterConnectionLoss,
+  }) async {
+    final claim = jsonEncode(<String>[ownerId, executionId]);
+    if (!_activeExecutions.add(claim)) {
+      throw StateError('HYBRID execution already has an active relay');
+    }
+    try {
+      return await _runClaimed(
+        ownerId: ownerId,
+        executionId: executionId,
+        sessionId: sessionId,
+        preferCloudAtStart: preferCloudAtStart,
+        validateResult: validateResult,
+        authorizeCloudText: authorizeCloudText,
+        keepRunning: keepRunning,
+        allowRetryAfterConnectionLoss: allowRetryAfterConnectionLoss,
+      );
+    } finally {
+      _activeExecutions.remove(claim);
+    }
+  }
+
+  Future<HybridResumableExecution> _runClaimed({
+    required String ownerId,
+    required String executionId,
+    required String sessionId,
+    required bool preferCloudAtStart,
+    required Future<bool> Function(int checkpoint, String result)
+        validateResult,
+    Future<bool> Function(String outboundText)? authorizeCloudText,
+    Future<bool> Function()? keepRunning,
+    Future<bool> Function(int checkpoint)? allowRetryAfterConnectionLoss,
   }) async {
     final restored = await _coordinator.resume(
       ownerId: ownerId,
@@ -153,6 +200,13 @@ final class HybridCheckpointRelay {
                 error.terminalState == InferenceTerminalState.cancelled) ||
             !_isConnectivityFailure(error) ||
             await _isNetworkAvailable()) {
+          rethrow;
+        }
+        if (allowRetryAfterConnectionLoss == null ||
+            !await allowRetryAfterConnectionLoss(step)) {
+          // Interrupted Cloud work could have triggered a side effect before
+          // the transport failed. A new Local attempt is allowed only when a
+          // trusted caller attests to an idempotent/safe retry for this step.
           rethrow;
         }
         if (!await _isLocalReady()) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
@@ -219,6 +220,7 @@ void main() {
       sessionId: session,
       preferCloudAtStart: true,
       authorizeCloudText: (_) async => true,
+      allowRetryAfterConnectionLoss: (_) async => true,
       validateResult: (step, output) async => output == 'local verified',
     );
     expect(result.isComplete, isTrue);
@@ -263,6 +265,7 @@ void main() {
       sessionId: session,
       preferCloudAtStart: true,
       authorizeCloudText: (_) async => true,
+      allowRetryAfterConnectionLoss: (_) async => true,
       validateResult: (_, output) async =>
           output == 'verified Local result',
     );
@@ -309,6 +312,126 @@ void main() {
     expect(calls.length, 1);
     expect((await coordinator.resume(
       ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
+  });
+
+  test('transport failure is not replayed without explicit idempotency approval',
+      () async {
+    final backend = _Backend();
+    final calls = <InferenceRequest>[];
+    var online = true;
+    final coordinator = _coordinator(backend, (request) async* {
+      calls.add(request);
+      online = false;
+      yield InferenceResponse.error('Cloud network unavailable.');
+    });
+    await register(coordinator, steps: 1);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      isNetworkAvailable: () async => online,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (e) =>
+          e is HybridCheckpointStreamFailure &&
+          e.providerError == 'Cloud network unavailable.',
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner,
+        executionId: 'gallery',
+        sessionId: session,
+        preferCloudAtStart: true,
+        authorizeCloudText: (_) async => true,
+        validateResult: (_, __) async => true,
+      ),
+      throwsA(isA<HybridCheckpointStreamFailure>()),
+    );
+    expect(calls, hasLength(1));
+    expect((await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
+
+    // A trusted caller explicitly declines replay when side effects are
+    // possible. Rejection retains the same checkpoint for later inspection.
+    await expectLater(
+      relay.run(
+        ownerId: owner,
+        executionId: 'gallery',
+        sessionId: session,
+        preferCloudAtStart: true,
+        authorizeCloudText: (_) async => true,
+        validateResult: (_, __) async => true,
+        allowRetryAfterConnectionLoss: (_) async => false,
+      ),
+      throwsA(isA<HybridCheckpointStreamFailure>()),
+    );
+    expect(calls, hasLength(2));
+    expect(calls.every((r) =>
+        r.routeDirective == InferenceRouteDirective.cloudOnly), isTrue);
+  });
+
+  test('two relays cannot concurrently claim one owner and execution',
+      () async {
+    final backend = _Backend();
+    final entered = Completer<void>();
+    final completeFirst = Completer<void>();
+    var inferenceCalls = 0;
+    final coordinator = _coordinator(backend, (request) async* {
+      inferenceCalls++;
+      if (!entered.isCompleted) entered.complete();
+      await completeFirst.future;
+      yield InferenceResponse.finalChunk(
+        text: 'validated single result',
+        tokensGenerated: 2,
+      );
+    });
+    await register(coordinator, steps: 1);
+    HybridCheckpointRelay relay() => HybridCheckpointRelay(
+          coordinator: _coordinator(backend, (request) async* {
+            inferenceCalls++;
+            if (!entered.isCompleted) entered.complete();
+            await completeFirst.future;
+            yield InferenceResponse.finalChunk(
+              text: 'validated single result',
+              tokensGenerated: 2,
+            );
+          }),
+          isNetworkAvailable: () async => false,
+          isLocalReady: () async => true,
+          isConnectivityFailure: (_) => false,
+        );
+
+    final first = relay().run(
+      ownerId: owner,
+      executionId: 'gallery',
+      sessionId: session,
+      preferCloudAtStart: false,
+      validateResult: (_, __) async => true,
+    );
+    await entered.future;
+    await expectLater(
+      relay().run(
+        ownerId: owner,
+        executionId: 'gallery',
+        sessionId: session,
+        preferCloudAtStart: false,
+        validateResult: (_, __) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(inferenceCalls, 1);
+    completeFirst.complete();
+    final done = await first;
+    expect(done.isComplete, isTrue);
+
+    // Re-entering after the first relay finishes is allowed. No new model
+    // call is made because the protected execution is already complete.
+    final alreadyDone = await relay().run(
+      ownerId: owner,
+      executionId: 'gallery',
+      sessionId: session,
+      preferCloudAtStart: false,
+      validateResult: (_, __) async => true,
+    );
+    expect(alreadyDone.isComplete, isTrue);
+    expect(inferenceCalls, 1);
   });
 
   test('ordinary model or validation failure never triggers Local replay',
