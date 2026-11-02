@@ -2,6 +2,7 @@ import 'package:uuid/uuid.dart';
 
 import 'hybrid_checkpoint_execution_coordinator.dart';
 import 'hybrid_checkpoint_ledger.dart';
+import 'hybrid_validated_connectivity.dart';
 import 'hybrid_checkpoint_step_runner.dart';
 import 'inference_response.dart';
 
@@ -29,6 +30,26 @@ final class HybridCheckpointRelay {
         _isNetworkAvailable = isNetworkAvailable,
         _isLocalReady = isLocalReady,
         _isConnectivityFailure = isConnectivityFailure;
+
+  /// Android-only adapter to the OS validated default network snapshot.
+  ///
+  /// No network traffic, polling, or app-wide Chat listener is installed.
+  /// The caller still supplies readiness, privacy/consent and trustworthy
+  /// error classification, and must explicitly invoke run().
+  factory HybridCheckpointRelay.android({
+    required HybridCheckpointExecutionCoordinator coordinator,
+    required Future<bool> Function() isLocalReady,
+    required bool Function(Object error) isConnectivityFailure,
+    HybridValidatedConnectivity? connectivity,
+  }) {
+    final network = connectivity ?? const HybridValidatedConnectivity();
+    return HybridCheckpointRelay(
+      coordinator: coordinator,
+      isNetworkAvailable: network.isNetworkAvailable,
+      isLocalReady: isLocalReady,
+      isConnectivityFailure: isConnectivityFailure,
+    );
+  }
 
   final HybridCheckpointExecutionCoordinator _coordinator;
   final Future<bool> Function() _isNetworkAvailable;

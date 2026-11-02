@@ -9,6 +9,9 @@ import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_plan_st
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_relay.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_snapshot_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_step_runner.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_validated_connectivity.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -60,6 +63,14 @@ HybridCheckpointExecutionCoordinator _coordinator(
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const connectivityChannel = MethodChannel('test/hybrid_relay_android');
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  tearDown(() {
+    messenger.setMockMethodCallHandler(connectivityChannel, null);
+  });
+
   const owner = 'tester';
   const session = 'hybrid-relay';
 
@@ -121,6 +132,59 @@ void main() {
         r.routeDirective == InferenceRouteDirective.localOnly &&
         r.cloudProviderId == null), isTrue);
     expect(calls[7].prompt, contains('Checkpoint 7 completed by local'));
+  });
+
+  test('Android OS network state drives relay only at checkpoint boundaries',
+      () async {
+    final backend = _Backend();
+    final calls = <InferenceRequest>[];
+    var validated = true;
+    var nativeChecks = 0;
+    messenger.setMockMethodCallHandler(connectivityChannel, (call) async {
+      expect(call.method, 'hasValidatedInternet');
+      nativeChecks++;
+      return validated;
+    });
+    final coordinator = _coordinator(backend, (request) async* {
+      calls.add(request);
+      final step = calls.length;
+      yield InferenceResponse.finalChunk(
+        text: 'validated $step',
+        tokensGenerated: 2,
+      );
+      if (step == 3) validated = false;
+      if (step == 7) validated = true;
+    });
+    await register(coordinator);
+    final relay = HybridCheckpointRelay.android(
+      coordinator: coordinator,
+      connectivity: const HybridValidatedConnectivity(
+        channel: connectivityChannel,
+        platformOverride: TargetPlatform.android,
+      ),
+      isLocalReady: () async => true,
+      isConnectivityFailure: (e) => e is SocketException,
+    );
+    expect(nativeChecks, 0); // Construction does not poll or phone home.
+
+    final result = await relay.run(
+      ownerId: owner,
+      executionId: 'gallery',
+      sessionId: session,
+      preferCloudAtStart: true,
+      authorizeCloudText: (_) async => true,
+      validateResult: (step, output) async =>
+          output == 'validated $step',
+    );
+    expect(result.ledger.completedCount, 10);
+    expect(calls.take(3).every(
+        (r) => r.routeDirective == InferenceRouteDirective.cloudOnly), isTrue);
+    expect(calls.skip(3).every(
+        (r) => r.routeDirective == InferenceRouteDirective.localOnly), isTrue);
+    // Initial preference + one on-demand OS snapshot per checkpoint; there
+    // is no timer, active provider probe, or continuous connectivity loop.
+    expect(nativeChecks, lessThanOrEqualTo(12));
+    expect(nativeChecks, greaterThanOrEqualTo(10));
   });
 
   test('Cloud stream loses network mid-step: restore and retry only Local',

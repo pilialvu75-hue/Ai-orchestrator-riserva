@@ -62,6 +62,7 @@ class MainActivity : FlutterActivity() {
         resourceTelemetry?.close()
         resourceTelemetry = ResourceTelemetry(applicationContext, flutterEngine)
         ProcessExitDiagnostics.register(this, flutterEngine)
+        HybridConnectivityBridge.register(applicationContext, flutterEngine)
         BackgroundDownloads.register(this, flutterEngine)
         ScreenVisionBridge.register(this, flutterEngine)
         // Image LOCAL now auto-registers through CantiereLocalImageVisionPlugin.
