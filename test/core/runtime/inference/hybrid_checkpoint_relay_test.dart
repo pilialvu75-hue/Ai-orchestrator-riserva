@@ -561,7 +561,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
-      authorizeOwnerSession: (_, __) async => ++authorizationChecks <= 3,
+      authorizeOwnerSession: (_, __) async => ++authorizationChecks <= 4,
       isNetworkAvailable: () async => false,
       isLocalReady: () async => true,
       isConnectivityFailure: (_) => false,
@@ -574,7 +574,7 @@ void main() {
       ),
       throwsStateError,
     );
-    expect(authorizationChecks, 4);
+    expect(authorizationChecks, 5);
     expect(modelCalls, 1);
     final restored = await coordinator.resume(
       ownerId: owner, executionId: 'gallery',
