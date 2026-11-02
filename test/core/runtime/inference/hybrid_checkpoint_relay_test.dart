@@ -498,6 +498,8 @@ void main() {
         sessionId: session,
         preferCloudAtStart: true,
         authorizeCloudText: (_) async => true,
+        // Even when retry is explicitly safe, Local readiness is required.
+        allowRetryAfterConnectionLoss: (_) async => true,
         validateResult: (step, text) async => true,
       ),
       throwsStateError,
