@@ -104,6 +104,7 @@ void main() {
       ownerId: owner,
       plan: HybridCheckpointPlan(
         executionId: 'gallery',
+        sessionId: session,
         instructions: List<String>.generate(
           steps,
           (index) => 'Validate step ${index + 1}',
@@ -504,6 +505,46 @@ void main() {
       throwsStateError,
     );
     expect(inferenceCalls, 0);
+    expect((await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
+  });
+
+  test('cross-chat relay cannot read a registered HYBRID execution',
+      () async {
+    final backend = _Backend();
+    final calls = <InferenceRequest>[];
+    final coordinator = _coordinator(backend, (request) async* {
+      calls.add(request);
+      yield InferenceResponse.finalChunk(
+        text: 'do not leak another chat', tokensGenerated: 3,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final journal = HybridCheckpointAttemptJournal(backend: backend);
+    var checks = 0;
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: journal,
+      authorizeOwnerSession: (_, __) async {
+        checks++;
+        return true; // Same owner authorized for both chat sessions.
+      },
+      isNetworkAvailable: () async => false,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner, executionId: 'gallery',
+        sessionId: 'another-chat', preferCloudAtStart: false,
+        validateResult: (_, __) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(checks, 1);
+    expect(calls, isEmpty);
+    expect(await journal.pendingCheckpoint(
+      ownerId: owner, executionId: 'gallery'), isNull);
     expect((await coordinator.resume(
       ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
   });

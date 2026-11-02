@@ -105,6 +105,8 @@ final class HybridCheckpointExecutionCoordinator {
     Future<bool> Function()? authorizeCheckpointCommit,
   }) async {
     execution.plan.verifyLedger(execution.ledger);
+    // Coordinator callers must not bypass the relay's session isolation.
+    execution.plan.verifySession(sessionId);
     return _runner.executeNext(
       ownerId: ownerId,
       ledger: execution.ledger,

@@ -101,6 +101,7 @@ void main() {
     final requests = <InferenceRequest>[];
     var coordinator = _coordinator(backend, requests);
     final plan = HybridCheckpointPlan(
+      sessionId: 'gallery-session',
       executionId: 'gallery-10',
       instructions: instructions,
     );
@@ -154,6 +155,7 @@ void main() {
     final backend = _ProtectedBackend();
     final plans = HybridCheckpointPlanStore(backend: backend);
     final first = HybridCheckpointPlan(
+      sessionId: 'gallery-session',
       executionId: 'same-execution',
       instructions: ['Verify evidence A', 'Verify evidence B'],
     );
@@ -164,6 +166,7 @@ void main() {
       plans.save(
         ownerId: owner,
         plan: HybridCheckpointPlan(
+          sessionId: 'gallery-session',
           executionId: 'same-execution',
           instructions: ['Maliciously changed plan', 'Delete all evidence'],
         ),
@@ -181,6 +184,7 @@ void main() {
     await plans.save(
       ownerId: owner,
       plan: HybridCheckpointPlan(
+        sessionId: 'gallery-session',
         executionId: 'private-plan',
         instructions: ['Private user instruction'],
       ),
@@ -202,6 +206,7 @@ void main() {
       () async {
     final backend = _ProtectedBackend();
     final plan = HybridCheckpointPlan(
+      sessionId: 'gallery-session',
       executionId: 'half-created',
       instructions: ['First checkpoint'],
     );
@@ -225,6 +230,7 @@ void main() {
     final backend = _ProtectedBackend();
     const executionId = 'different-plan-size';
     final plan = HybridCheckpointPlan(
+      sessionId: 'gallery-session',
       executionId: executionId,
       instructions: ['Step 1', 'Step 2'],
     );
@@ -244,12 +250,80 @@ void main() {
     );
   });
 
+  test('execution session is immutable and cannot be rebound', () async {
+    final backend = _ProtectedBackend();
+    final snapshots = HybridCheckpointSnapshotStore(backend: backend);
+    final plans = HybridCheckpointPlanStore(backend: backend);
+    final original = HybridCheckpointPlan(
+      executionId: 'scoped-execution',
+      sessionId: 'gallery-session',
+      instructions: ['Bound to the original chat'],
+    );
+    await plans.save(ownerId: owner, plan: original);
+    await expectLater(
+      plans.save(
+        ownerId: owner,
+        plan: HybridCheckpointPlan(
+          executionId: 'scoped-execution',
+          sessionId: 'different-session',
+          instructions: ['Bound to the original chat'],
+        ),
+      ),
+      throwsStateError,
+    );
+    final loaded = (await plans.load(
+      ownerId: owner, executionId: 'scoped-execution'))!;
+    expect(loaded.sessionId, 'gallery-session');
+    expect(() => loaded.verifySession('different-session'), throwsStateError);
+    final ledger = HybridCheckpointLedger(
+      executionId: 'scoped-execution', totalCheckpoints: 1,
+    );
+    await snapshots.saveSnapshot(ownerId: owner, snapshot: ledger.toJson());
+    final coordinator = _coordinator(backend, <InferenceRequest>[]);
+    final operation = (await coordinator.resume(
+      ownerId: owner, executionId: 'scoped-execution'))!;
+    final lease = operation.ledger.beginAttempt(
+      attemptId: 'wrong-session',
+      executor: HybridCheckpointExecutor.local,
+    );
+    await expectLater(
+      coordinator.executeNext(
+        ownerId: owner, execution: operation, lease: lease,
+        sessionId: 'different-session', isOffline: true,
+        validateResult: (_) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(operation.ledger.completedCount, 0);
+  });
+
+  test('unscoped legacy plan snapshots fail closed', () {
+    expect(
+      () => HybridCheckpointPlan.fromJson(<String, dynamic>{
+        'schemaVersion': 1,
+        'executionId': 'legacy',
+        'instructions': <String>['old plan'],
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => HybridCheckpointPlan.fromJson(<String, dynamic>{
+        'schemaVersion': 2,
+        'executionId': 'no-session',
+        'instructions': <String>['missing session'],
+      }),
+      throwsFormatException,
+    );
+  });
+
   test('bounded plan instructions reject empty or giant payloads', () async {
     expect(() => HybridCheckpointPlan(
+      sessionId: 'gallery-session',
       executionId: 'invalid',
       instructions: const ['   '],
     ), throwsArgumentError);
     final plan = HybridCheckpointPlan(
+      sessionId: 'gallery-session',
       executionId: 'giant',
       instructions: ['x' * (HybridCheckpointPlanStore.maxPlanBytes + 1)],
     );

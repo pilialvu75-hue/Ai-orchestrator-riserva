@@ -167,6 +167,9 @@ final class HybridCheckpointRelay {
     // The relay needs a non-nullable variable across the async loop. A new
     // snapshot is always loaded before ownership changes or retries.
     HybridResumableExecution operation = restored;
+    // Never expose completed steps from a different chat, even if the caller
+    // owns both conversations and passes an otherwise valid owner identity.
+    operation.plan.verifySession(sessionId);
     final pending = await _attemptJournal.pendingCheckpoint(
       ownerId: ownerId, executionId: executionId,
     );

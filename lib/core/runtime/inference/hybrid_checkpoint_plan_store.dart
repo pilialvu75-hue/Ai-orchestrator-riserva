@@ -14,11 +14,15 @@ import 'hybrid_checkpoint_snapshot_store.dart';
 final class HybridCheckpointPlan {
   HybridCheckpointPlan({
     required this.executionId,
+    required this.sessionId,
     required List<String> instructions,
   }) : instructions = List<String>.unmodifiable(instructions) {
     if (executionId.trim().isEmpty ||
         executionId.trim() != executionId ||
         executionId.length > 256 ||
+        sessionId.trim().isEmpty ||
+        sessionId.trim() != sessionId ||
+        sessionId.length > 256 ||
         instructions.isEmpty ||
         instructions.length > 10000 ||
         instructions.any((s) => s.trim().isEmpty)) {
@@ -26,9 +30,18 @@ final class HybridCheckpointPlan {
     }
   }
 
-  static const int schemaVersion = 1;
+  // This opt-in, unreleased contract adds immutable session ownership.
+  // Earlier experimental snapshots lacking the field fail closed.
+  static const int schemaVersion = 2;
   final String executionId;
+  final String sessionId;
   final List<String> instructions;
+
+  void verifySession(String requestedSessionId) {
+    if (sessionId != requestedSessionId) {
+      throw StateError('HYBRID execution belongs to a different session');
+    }
+  }
 
   int get totalCheckpoints => instructions.length;
 
@@ -49,15 +62,18 @@ final class HybridCheckpointPlan {
   Map<String, Object?> toJson() => <String, Object?>{
         'schemaVersion': schemaVersion,
         'executionId': executionId,
+        'sessionId': sessionId,
         'instructions': instructions,
       };
 
   factory HybridCheckpointPlan.fromJson(Map<String, dynamic> json) {
     final version = json['schemaVersion'];
     final executionId = json['executionId'];
+    final sessionId = json['sessionId'];
     final instructions = json['instructions'];
     if (version != schemaVersion ||
         executionId is! String ||
+        sessionId is! String ||
         instructions is! List ||
         instructions.any((x) => x is! String)) {
       throw const FormatException('Invalid HYBRID plan snapshot');
@@ -65,6 +81,7 @@ final class HybridCheckpointPlan {
     try {
       return HybridCheckpointPlan(
         executionId: executionId,
+        sessionId: sessionId,
         instructions: instructions.cast<String>(),
       );
     } on ArgumentError {
