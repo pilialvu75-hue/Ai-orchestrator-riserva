@@ -225,6 +225,29 @@ void main() {
     expect(await store.load(ownerId: 'user-A', executionId: 'private'), isNull);
   });
 
+  test('protected payload is bound to the authenticated owner', () async {
+    final backend = _FakeProtectedBackend();
+    final store = HybridCheckpointSnapshotStore(backend: backend);
+    final ledger = HybridCheckpointLedger(
+      executionId: 'owner-binding',
+      totalCheckpoints: 1,
+    );
+    await store.saveSnapshot(ownerId: owner, snapshot: ledger.toJson());
+
+    // Simulates a bad backup or corrupted secure-store entry associated with
+    // the correct key but the wrong owner fingerprint.
+    final key = backend.values.keys.single;
+    final envelope = jsonDecode(backend.values[key]!)
+        as Map<String, dynamic>;
+    envelope['ownerFingerprint'] = 'different-owner';
+    backend.values[key] = jsonEncode(envelope);
+
+    await expectLater(
+      store.load(ownerId: owner, executionId: 'owner-binding'),
+      throwsFormatException,
+    );
+  });
+
   test('out-of-order, rewritten and stale snapshots fail closed', () async {
     final backend = _FakeProtectedBackend();
     final store = HybridCheckpointSnapshotStore(backend: backend);
