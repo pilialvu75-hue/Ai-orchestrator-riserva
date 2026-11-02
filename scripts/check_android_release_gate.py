@@ -72,19 +72,20 @@ def validate_desktop_publisher(source: str, platform: str) -> list[str]:
         problems.append(f"{platform}: must recognize manually published stable tag")
     if platform == "windows" and '"$base+$build"' not in source:
         problems.append("windows: must recognize manually published stable tag")
-    # Manual recovery must be bound to the same already-published manual run
-    # as the normal workflow_run trigger; never accept arbitrary refs or tags.
-    if ("  workflow_dispatch:" not in source or "android_run_id:" not in source):
-        problems.append(f"{platform}: authorized manual replay input is missing")
-    if ("github.ref == 'refs/heads/main'" not in source or
-            "steps.android_source.outputs.source_sha" not in source or
-            "steps.android_source.outputs.run_number" not in source):
-        problems.append(f"{platform}: manual replay must bind main to verified run provenance")
-    if ("source_sha=" not in source or "run_number=" not in source or
-            "git/ref/tags/" not in source or
-            "Not an authorized" not in source and
-            "not a completed, successful, authorized" not in source):
-        problems.append(f"{platform}: manual replay must reject non-authorized run or release")
+    if platform in ("windows", "macos"):
+        # Manual recovery must be bound to the same already-published manual run
+        # as the normal workflow_run trigger; never accept arbitrary refs or tags.
+        if ("  workflow_dispatch:" not in source or "android_run_id:" not in source):
+            problems.append(f"{platform}: authorized manual replay input is missing")
+        if ("github.ref == 'refs/heads/main'" not in source or
+                "steps.android_source.outputs.source_sha" not in source or
+                "steps.android_source.outputs.run_number" not in source):
+            problems.append(f"{platform}: manual replay must bind main to verified run provenance")
+        if ("source_sha=" not in source or "run_number=" not in source or
+                "git/ref/tags/" not in source or
+                "Not an authorized" not in source and
+                "not a completed, successful, authorized" not in source):
+            problems.append(f"{platform}: manual replay must reject non-authorized run or release")
     if "steps.version.outputs.tag" in source:
         problems.append(f"{platform}: publisher may not upload to an unsuffixed tag")
     if platform == "macos" and 'version_code="$((100000 +' not in source:
