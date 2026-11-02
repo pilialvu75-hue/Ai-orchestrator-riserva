@@ -120,6 +120,7 @@ final class HybridCheckpointLedger {
   int _generation;
   HybridAttemptLease? _activeLease;
   int? _inFlightCheckpoint;
+  bool _durableCommitInProgress = false;
 
   int get completedCount => _completed.length;
   int? get inFlightCheckpoint => _inFlightCheckpoint;
@@ -138,7 +139,7 @@ final class HybridCheckpointLedger {
     if (attemptId.trim().isEmpty) {
       throw ArgumentError.value(attemptId, 'attemptId');
     }
-    if (_inFlightCheckpoint != null || isComplete) {
+    if (_inFlightCheckpoint != null || isComplete || _durableCommitInProgress) {
       throw StateError('Cannot switch executor during a checkpoint or after completion');
     }
     if (_activeLease?.attemptId == attemptId) {
@@ -155,7 +156,7 @@ final class HybridCheckpointLedger {
 
   int startCheckpoint(HybridAttemptLease lease) {
     _requireActive(lease);
-    if (isComplete || _inFlightCheckpoint != null) {
+    if (isComplete || _inFlightCheckpoint != null || _durableCommitInProgress) {
       throw StateError('Checkpoint already running or work already complete');
     }
     final checkpoint = nextCheckpoint;
@@ -173,13 +174,7 @@ final class HybridCheckpointLedger {
     required int checkpoint,
     required String result,
   }) {
-    _requireActive(lease);
-    if (_inFlightCheckpoint != checkpoint || checkpoint != nextCheckpoint) {
-      throw StateError('Checkpoint is not the one currently assigned');
-    }
-    if (result.trim().isEmpty) {
-      throw ArgumentError.value(result, 'result', 'No received result');
-    }
+    _validateCompletion(lease, checkpoint, result);
     _completed.add(
       HybridCompletedCheckpoint(
         number: checkpoint,
@@ -191,10 +186,61 @@ final class HybridCheckpointLedger {
     _inFlightCheckpoint = null;
   }
 
+  void _validateCompletion(HybridAttemptLease lease, int checkpoint, String result) {
+    _requireActive(lease);
+    if (_durableCommitInProgress) {
+      throw StateError('HYBRID checkpoint durability write is in progress');
+    }
+    if (_inFlightCheckpoint != checkpoint || checkpoint != nextCheckpoint) {
+      throw StateError('Checkpoint is not the one currently assigned');
+    }
+    if (result.trim().isEmpty) {
+      throw ArgumentError.value(result, 'result', 'No received result');
+    }
+  }
+
+  /// Persist the *candidate* snapshot before exposing a completed checkpoint.
+  /// A failed secure-store write leaves the step unfinished and recoverable.
+  /// During the write no executor can interrupt or reassign this ledger.
+  /// This is only durable when [persist] is backed by a protected store whose
+  /// write acknowledgement means the snapshot can be re-read after restart.
+  Future<void> completeCheckpointDurably({
+    required HybridAttemptLease lease,
+    required int checkpoint,
+    required String result,
+    required Future<void> Function(Map<String, Object?> snapshot) persist,
+  }) async {
+    _validateCompletion(lease, checkpoint, result);
+    _durableCommitInProgress = true;
+    final step = HybridCompletedCheckpoint(
+      number: checkpoint,
+      attemptId: lease.attemptId,
+      executor: lease.executor,
+      result: result,
+    );
+    try {
+      final candidate = <String, Object?>{
+        ...toJson(),
+        'completed': <Map<String, Object?>>[
+          ..._completed.map((item) => item.toJson()),
+          step.toJson(),
+        ],
+      };
+      await persist(candidate);
+      _completed.add(step);
+      _inFlightCheckpoint = null;
+    } finally {
+      _durableCommitInProgress = false;
+    }
+  }
+
   /// Network loss or cancellation fences off the old executor. Any unfinished
   /// step is discarded, and only the last committed checkpoint is retained.
   void interruptAttempt(HybridAttemptLease lease) {
     _requireActive(lease);
+    if (_durableCommitInProgress) {
+      throw StateError('Finish checkpoint persistence before handoff');
+    }
     _inFlightCheckpoint = null;
     _activeLease = null;
     ++_generation;
