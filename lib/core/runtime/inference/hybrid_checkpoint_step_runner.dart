@@ -45,6 +45,10 @@ final class HybridCheckpointStepRunner {
 
   static const int maxResumeCharacters = 16 * 1024;
 
+  /// A single verified step is intentionally small on 8 GiB mobile devices.
+  /// Prevent unbounded accumulation before secure storage's 64 KiB limit.
+  static const int maxCheckpointOutputCharacters = 16 * 1024;
+
   final HybridCheckpointSnapshotStore _store;
   final CloudRuntimeProvider _cloud;
   final TokenStream Function(InferenceRequest) _stream;
@@ -144,6 +148,12 @@ final class HybridCheckpointStepRunner {
       var output = '';
       var sawSuccess = false;
       await for (final chunk in _stream(request)) {
+        // A successful terminal result must be the final event. Otherwise an
+        // incorrectly implemented provider can append unverified text after
+        // the result has already been declared complete.
+        if (sawSuccess) {
+          throw StateError('HYBRID inference emitted data after final result');
+        }
         if (chunk.runtimeNotice != null) continue;
         if (chunk.isError ||
             (chunk.isFinal &&
@@ -154,11 +164,23 @@ final class HybridCheckpointStepRunner {
           );
         }
         if (chunk.text.isNotEmpty) {
-          output = mergeStreamedText(
+          // Check BEFORE combining text so a long streaming response cannot
+          // trigger avoidable large concatenations on a memory-limited phone.
+          if (chunk.text.length > maxCheckpointOutputCharacters ||
+              (!chunk.isFinal &&
+                  output.length + chunk.text.length >
+                      maxCheckpointOutputCharacters)) {
+            throw StateError('HYBRID checkpoint output exceeds the safe bound');
+          }
+          final merged = mergeStreamedText(
             currentText: output,
             incomingText: chunk.text,
             isFinalChunk: chunk.isFinal,
           );
+          if (merged.length > maxCheckpointOutputCharacters) {
+            throw StateError('HYBRID checkpoint output exceeds the safe bound');
+          }
+          output = merged;
         }
         if (chunk.isFinal) {
           sawSuccess = true;

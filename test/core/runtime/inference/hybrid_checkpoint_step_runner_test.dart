@@ -499,6 +499,138 @@ void main() {
     expect(recovered.completedCount, 1);
   });
 
+
+  test('oversized streaming text stops before independent validation and persistence',
+      () async {
+    final store =
+        HybridCheckpointSnapshotStore(backend: _MemorySecureBackend());
+    final ledger =
+        HybridCheckpointLedger(executionId: 'oversized-stream', totalCheckpoints: 1);
+    await store.saveSnapshot(ownerId: owner, snapshot: ledger.toJson());
+    final lease = ledger.beginAttempt(
+      attemptId: 'local-stream',
+      executor: HybridCheckpointExecutor.local,
+    );
+    var validated = 0;
+    var emitted = 0;
+    final runner = HybridCheckpointStepRunner(
+      snapshotStore: store,
+      cloudRuntimeProvider: _cloud(),
+      streamInference: (request) async* {
+        for (var i = 0; i < 50; i++) {
+          emitted++;
+          yield InferenceResponse.token(text: 'x' * 1024);
+        }
+        yield InferenceResponse.finalChunk(
+          text: 'should never finish', tokensGenerated: 3,
+        );
+      },
+    );
+    await expectLater(
+      runner.executeNext(
+        ownerId: owner,
+        ledger: ledger,
+        lease: lease,
+        sessionId: session,
+        stepInstruction: 'Summarize only one verified step',
+        isOffline: true,
+        validateResult: (_) async {
+          validated++;
+          return true;
+        },
+      ),
+      throwsStateError,
+    );
+    expect(emitted, lessThan(50)); // Stops stream without consuming the rest.
+    expect(validated, 0);
+    expect(ledger.completedCount, 0);
+    expect((await store.load(
+      ownerId: owner, executionId: 'oversized-stream'))?.nextCheckpoint, 1);
+  });
+
+  test('large final snapshot is rejected before validation or checkpoint write',
+      () async {
+    final store =
+        HybridCheckpointSnapshotStore(backend: _MemorySecureBackend());
+    final ledger =
+        HybridCheckpointLedger(executionId: 'oversized-final', totalCheckpoints: 1);
+    await store.saveSnapshot(ownerId: owner, snapshot: ledger.toJson());
+    final lease = ledger.beginAttempt(
+      attemptId: 'cloud-large',
+      executor: HybridCheckpointExecutor.cloud,
+    );
+    var validated = 0;
+    final runner = HybridCheckpointStepRunner(
+      snapshotStore: store,
+      cloudRuntimeProvider: _cloud(),
+      streamInference: (request) async* {
+        yield InferenceResponse.finalChunk(
+          text: 'x' *
+              (HybridCheckpointStepRunner.maxCheckpointOutputCharacters + 1),
+          tokensGenerated: 20000,
+        );
+      },
+    );
+    await expectLater(
+      runner.executeNext(
+        ownerId: owner,
+        ledger: ledger,
+        lease: lease,
+        sessionId: session,
+        stepInstruction: 'Answer a bounded question',
+        isOffline: false,
+        authorizeCloudText: (_) async => true,
+        validateResult: (_) async {
+          validated++;
+          return true;
+        },
+      ),
+      throwsStateError,
+    );
+    expect(validated, 0);
+    expect(ledger.completedCount, 0);
+    expect((await store.load(
+      ownerId: owner, executionId: 'oversized-final'))?.completedCount, 0);
+  });
+
+  test('data after terminal success cannot silently change a checkpoint',
+      () async {
+    final store =
+        HybridCheckpointSnapshotStore(backend: _MemorySecureBackend());
+    final ledger =
+        HybridCheckpointLedger(executionId: 'trailing-stream', totalCheckpoints: 1);
+    await store.saveSnapshot(ownerId: owner, snapshot: ledger.toJson());
+    final lease = ledger.beginAttempt(
+      attemptId: 'local-trailing',
+      executor: HybridCheckpointExecutor.local,
+    );
+    final runner = HybridCheckpointStepRunner(
+      snapshotStore: store,
+      cloudRuntimeProvider: _cloud(),
+      streamInference: (request) async* {
+        yield InferenceResponse.finalChunk(
+          text: 'Verified answer', tokensGenerated: 2,
+        );
+        yield InferenceResponse.token(text: 'Unexpected trailing text');
+      },
+    );
+    await expectLater(
+      runner.executeNext(
+        ownerId: owner,
+        ledger: ledger,
+        lease: lease,
+        sessionId: session,
+        stepInstruction: 'Verify one answer',
+        isOffline: true,
+        validateResult: (_) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(ledger.completedCount, 0);
+    expect((await store.load(
+      ownerId: owner, executionId: 'trailing-stream'))?.nextCheckpoint, 1);
+  });
+
   test('independent validation rejects model output without checkpoint',
       () async {
     final store =
