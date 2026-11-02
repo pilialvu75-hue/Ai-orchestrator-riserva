@@ -1,8 +1,7 @@
-import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_snapshot_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_disclosure_consent.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-final class _ProtectedBackend implements HybridProtectedSnapshotBackend {
+final class _ProtectedBackend implements HybridCloudConsentStorage {
   final Map<String, String> values = <String, String>{};
   bool failWrite = false;
   bool hideReadback = false;

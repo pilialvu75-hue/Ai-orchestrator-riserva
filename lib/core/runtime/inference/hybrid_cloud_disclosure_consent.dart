@@ -3,7 +3,36 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
-import 'hybrid_checkpoint_snapshot_store.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+/// Minimal OS-protected data access contract. This PR is independent of the
+/// experimental checkpoint branch #975; both use FlutterSecureStorage, not
+/// plaintext preferences or another SQLite memory store.
+abstract interface class HybridCloudConsentStorage {
+  Future<String?> read(String key);
+  Future<void> write(String key, String value);
+  Future<void> delete(String key);
+}
+
+/// Uses the app's existing protected storage plugin; no custom plaintext DB.
+final class FlutterSecureCloudConsentStorage
+    implements HybridCloudConsentStorage {
+  FlutterSecureCloudConsentStorage({FlutterSecureStorage? secureStorage})
+      : _storage = secureStorage ?? const FlutterSecureStorage();
+
+  final FlutterSecureStorage _storage;
+
+  @override
+  Future<String?> read(String key) => _storage.read(key: key);
+
+  @override
+  Future<void> write(String key, String value) =>
+      _storage.write(key: key, value: value);
+
+  @override
+  Future<void> delete(String key) => _storage.delete(key: key);
+}
+
 
 /// Source of each precise section that would leave the device.
 /// These labels MUST come from a trusted prompt assembler, never from a
@@ -159,13 +188,13 @@ final class HybridCloudConsentReview {
 /// from selecting the HYBRID or Cloud runtime mode.
 final class HybridCloudDisclosureConsent {
   HybridCloudDisclosureConsent({
-    required HybridProtectedSnapshotBackend backend,
+    required HybridCloudConsentStorage backend,
     required Future<bool> Function(String ownerId, String sessionId)
         authorizeOwnerSession,
   })  : _backend = backend,
         _authorizeOwnerSession = authorizeOwnerSession;
 
-  final HybridProtectedSnapshotBackend _backend;
+  final HybridCloudConsentStorage _backend;
   final Future<bool> Function(String ownerId, String sessionId)
       _authorizeOwnerSession;
   Future<void> _tail = Future<void>.value();
