@@ -1,0 +1,68 @@
+name: Authorized Desktop Publisher Replay
+
+# A dedicated request branch can recover a previously signed/published Android
+# release's Windows/macOS assets without dispatching another Android build.
+on:
+  push:
+    branches:
+      - release-request/desktop
+    paths:
+      - release-requests/replay-desktop.txt
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/authorized-desktop-replay.yml'
+      - 'scripts/dispatch_authorized_desktop_replay.sh'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: authorized-desktop-publisher-replay
+  cancel-in-progress: false
+
+jobs:
+  validate-request-contract:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout validation sources
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate replay script and immutable release gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/dispatch_authorized_desktop_replay.sh
+          grep -Fq 'github.ref == '\''refs/heads/release-request/desktop'\''' .github/workflows/authorized-desktop-replay.yml
+          grep -Fq 'github.actor == '\''pilialvu75-hue'\''' .github/workflows/authorized-desktop-replay.yml
+          grep -Fq '.event == "workflow_dispatch"' scripts/dispatch_authorized_desktop_replay.sh
+          grep -Fq '.conclusion == "success"' scripts/dispatch_authorized_desktop_replay.sh
+          grep -Fq 'expected_sha' scripts/dispatch_authorized_desktop_replay.sh
+          grep -Fq 'git/ref/tags/' scripts/dispatch_authorized_desktop_replay.sh
+          grep -Fq 'gh workflow run windows-release-publish.yml' scripts/dispatch_authorized_desktop_replay.sh
+          grep -Fq 'gh workflow run macos-release-publish.yml' scripts/dispatch_authorized_desktop_replay.sh
+          echo 'Authorized desktop publisher replay contract OK.'
+
+  dispatch-authorized-replay:
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' &&
+      github.ref == 'refs/heads/release-request/desktop' &&
+      github.actor == 'pilialvu75-hue'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout explicit recovery request
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate immutable Android release and dispatch desktop publishers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/dispatch_authorized_desktop_replay.sh
