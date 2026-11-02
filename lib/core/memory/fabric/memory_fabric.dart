@@ -12,13 +12,13 @@ final class MemoryFabricPolicyException implements Exception {
 
 final class MemoryFabricRoutingPolicy {
   const MemoryFabricRoutingPolicy({
-    this.allowPrivateOnCloud = true,
+    this.allowPrivateOnCloud = false,
     this.allowSecretOnLan = false,
     this.allowSecretOnCloud = false,
   });
 
-  /// PRIVATE remains cloud-capable by default because shared authenticated
-  /// backends are part of V1. It can be disabled without changing providers.
+  /// PRIVATE data is local/LAN-only by default. Remote replication requires
+  /// explicit approval through a separate future consent policy.
   final bool allowPrivateOnCloud;
 
   /// SECRET is device-only by default. Future trusted/encrypted LAN or cloud

@@ -585,6 +585,86 @@ void main() {
         .pendingCheckpoint(ownerId: owner, executionId: 'gallery'), isNull);
   });
 
+  test('user cancels during Local streaming: no checkpoint is committed',
+      () async {
+    final backend = _Backend();
+    var cancelled = false;
+    var modelCalls = 0;
+    final coordinator = _coordinator(backend, (request) async* {
+      modelCalls++;
+      yield InferenceResponse.token(text: 'temporary token');
+      cancelled = true; // Stop was pressed while the stream was active.
+      yield InferenceResponse.finalChunk(
+        text: 'should not commit', tokensGenerated: 2,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final journal = HybridCheckpointAttemptJournal(backend: backend);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: journal,
+      authorizeOwnerSession: (_, __) async => true,
+      isNetworkAvailable: () async => false,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: false,
+        isCancellationRequested: () async => cancelled,
+        validateResult: (_, __) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(modelCalls, 1);
+    expect((await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))?.ledger.completedCount, 0);
+    expect(await journal.pendingCheckpoint(
+      ownerId: owner, executionId: 'gallery'), 1);
+  });
+
+  test('user cancels during Cloud consent: no model or false intent',
+      () async {
+    final backend = _Backend();
+    var cancelled = false;
+    var modelCalls = 0;
+    final coordinator = _coordinator(backend, (request) async* {
+      modelCalls++;
+      yield InferenceResponse.finalChunk(
+        text: 'should not run', tokensGenerated: 2,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final journal = HybridCheckpointAttemptJournal(backend: backend);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: journal,
+      authorizeOwnerSession: (_, __) async => true,
+      isNetworkAvailable: () async => true,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: true,
+        isCancellationRequested: () async => cancelled,
+        authorizeCloudText: (_) async {
+          cancelled = true;
+          return true;
+        },
+        validateResult: (_, __) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(modelCalls, 0);
+    expect((await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
+    expect(await journal.pendingCheckpoint(
+      ownerId: owner, executionId: 'gallery'), isNull);
+  });
+
   test('logout during inference blocks commit and retains protected intent',
       () async {
     final backend = _Backend();

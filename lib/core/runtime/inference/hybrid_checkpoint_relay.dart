@@ -92,8 +92,11 @@ final class HybridCheckpointRelay {
   /// [preferCloudAtStart] applies only to a new execution or an execution
   /// whose last completed step was Cloud. It does not override a Local resume.
   ///
-  /// The caller may stop the workflow between checkpoints using [keepRunning].
-  /// Stopping does not delete protected plans or results.
+  /// [keepRunning] stops between checkpoints. [isCancellationRequested]
+  /// also stops before model dispatch and durable completion, without
+  /// per-token polling. An interrupted in-flight step retains its protected
+  /// uncertain intent and needs explicit safe-replay approval on resume.
+  /// Stopping never deletes a committed result.
   ///
   /// Only one relay for the same owner+execution can run within this Dart
   /// isolate at a time. An ambiguous transport failure does NOT automatically
@@ -110,6 +113,7 @@ final class HybridCheckpointRelay {
         validateResult,
     Future<bool> Function(String outboundText)? authorizeCloudText,
     Future<bool> Function()? keepRunning,
+    Future<bool> Function()? isCancellationRequested,
     Future<bool> Function(int checkpoint)? allowRetryAfterConnectionLoss,
     Future<bool> Function(int checkpoint)? allowRetryAfterUncertainRestart,
   }) async {
@@ -126,6 +130,7 @@ final class HybridCheckpointRelay {
         validateResult: validateResult,
         authorizeCloudText: authorizeCloudText,
         keepRunning: keepRunning,
+        isCancellationRequested: isCancellationRequested,
         allowRetryAfterConnectionLoss: allowRetryAfterConnectionLoss,
         allowRetryAfterUncertainRestart: allowRetryAfterUncertainRestart,
       );
@@ -143,6 +148,7 @@ final class HybridCheckpointRelay {
         validateResult,
     Future<bool> Function(String outboundText)? authorizeCloudText,
     Future<bool> Function()? keepRunning,
+    Future<bool> Function()? isCancellationRequested,
     Future<bool> Function(int checkpoint)? allowRetryAfterConnectionLoss,
     Future<bool> Function(int checkpoint)? allowRetryAfterUncertainRestart,
   }) async {
@@ -196,8 +202,10 @@ final class HybridCheckpointRelay {
       if (!await _authorizeOwnerSession(ownerId, sessionId)) {
         throw StateError('HYBRID owner/session authorization was revoked');
       }
-      if (keepRunning != null && !await keepRunning()) {
-        // Do not start another checkpoint; the protected progress is retained.
+      if ((keepRunning != null && !await keepRunning()) ||
+          (isCancellationRequested != null &&
+              await isCancellationRequested())) {
+        // Do not start another checkpoint; protected progress is retained.
         return operation;
       }
       final online = await _isNetworkAvailable();
@@ -238,9 +246,22 @@ final class HybridCheckpointRelay {
           isOffline: !online,
           validateResult: (output) => validateResult(step, output),
           authorizeCloudText: authorizeCloudText,
-          authorizeCheckpointCommit: () =>
-              _authorizeOwnerSession(ownerId, sessionId),
+          authorizeCheckpointCommit: () async {
+            // A stop request during streaming must not become a committed
+            // result. Check once per step, not per token, to limit overhead.
+            if (isCancellationRequested != null &&
+                await isCancellationRequested()) {
+              throw StateError('HYBRID checkpoint cancelled before commit');
+            }
+            return _authorizeOwnerSession(ownerId, sessionId);
+          },
           markBeforeInference: () async {
+            // A user may cancel while considering Cloud consent. No pending
+            // intent and no inference when they do.
+            if (isCancellationRequested != null &&
+                await isCancellationRequested()) {
+              throw StateError('HYBRID checkpoint cancelled before inference');
+            }
             // Authentication can be revoked during the Cloud consent dialog.
             // Check again after consent and before any protected marker or
             // remote inference starts.
