@@ -531,3 +531,31 @@ consenso esplicito.
 - CI condivisa e QA delle piattaforme sono necessari, ma una CI verde non
   sostituisce un test fisico. Distribuzione Android solo tramite
   **Impostazioni → Aggiornamenti**, senza reinstallazione né reset delle chat.
+
+## 17. Modalita Hybrid cognitiva — obiettivo approvato (1 novembre 2026)
+
+**Tracciamento unico:** [#973](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/973). Questa sezione e parte della roadmap canonica e non sostituisce i ring del Cantiere, la memoria #899, il sync #911 o il gate privacy #972.
+
+### Esperienza da raggiungere
+
+- **Intelligenza:** Aivexus distribuisce compiti a Local e Cloud secondo capacita e costo; usa verifiche incrociate e fonti quando servono. La superiorita delle risposte e una ipotesi misurabile, non una proprieta gia dimostrata.
+- **Rapidita:** Local-first sul semplice, Cloud autorizzato sul complesso, parallelismo solo per step indipendenti. Non aumentare il tempo di prima risposta o la pressione RAM per ogni messaggio.
+- **Memoria evolutiva:** unico core indipendente dai modelli, dati duraturi verificati e ricerca semantica multilingue, provenienza, correzione/dimenticanza e separazione personale/generale. Riutilizzare #899/#911/#913, non duplicare writer/stores.
+- **Continuita:** ad ogni step importante persistito, salvare checkpoint semantici riutilizzabili da un modello diverso. Se Cloud cade, Local recupera l'ultimo stato *effettivamente ricevuto e salvato*, completa il lavoro compatibile oppure conserva lo stato per la ripresa successiva.
+- **Privacy e consenso:** il modello Cloud riceve solo contesto necessario, autorizzato e classificato. Memorie PRIVATE non passano automaticamente a Cloud/Hybrid. Protezione in PR #972 e consenso granulare futuro; non aggirare questa barriera per ottenere una risposta migliore.
+- **Offline:** HYBRID degradato a Local con modello valido, senza chiamate remote; nessuna perdita delle chat, dei file originali o dello stato persistito.
+
+### Vincolo tecnico sulla continuita dei ragionamenti
+
+Non e possibile recuperare la chain-of-thought nascosta di un provider Cloud o output non ancora restituiti. Il protocollo deve richiedere e acquisire **risultati intermedi espliciti**: piano/stato, passi completati, evidenze, fonti, calcoli trasmessi, artifact verificati, parti rimanenti, versione/identita del lavoro, modello/provider e consumi. Uno stream parziale non verificato resta provvisorio. Il passaggio Cloud -> Local crea un nuovo Attempt della stessa Execution; non una nuova attivita e non un retry del prompt iniziale.
+
+### Priorita incrementale (una fase attiva alla volta)
+
+1. **H0 — Baseline e compatibilita:** audit di routing/fallback attuali, test di privacy/offline/costi, verifica contratti Cantiere riutilizzabili. Stato: **da implementare e validare**.
+2. **H1 — Checkpoint e recupero effettivo Cloud -> Local (P0):** persistenza locale atomica, idempotenza, handoff minimo, crash/restart, disconnessione simulata e ripresa senza ripetere gli step conclusi. Stato: **da implementare e validare**.
+3. **H2 — Collaborazione per capacita:** planner e policy bounded, parallelismo prudente, critic/verifica finale, routing osservabile. Stato: **futuro**.
+4. **H3 — Memoria evolutiva comune:** completare #899 e privacy #972 prima dei trasferimenti personali, poi sync cifrata opt-in #911 e retrieval multipiattaforma. Stato: **parziali fondamenta, non E2E certificato**.
+5. **H4 — Benchmark fisici:** prove sintetiche ripetibili Local vs Cloud vs Hybrid su accuratezza, fonti, continuita, tempo, RAM, batteria e spesa; prima S24 FE, poi Windows/macOS. Stato: **futuro**.
+6. **H5 — API per compiti estremi (ricerca futura):** cercare modelli di almeno 500B parametri con accesso API **verificabilmente gratuito** e termini compatibili, valutando qualita, limiti e stabilita. Nessuna garanzia di disponibilita/costo zero; dimensione del modello non equivale a qualita. Stato: **ricerca futura, non dipendenza P0**.
+
+**Gate H1 prima di dichiarare PASS:** perdita rete dopo risultati Cloud persistiti -> Local usa gli step completati; perdita rete prima di output -> nessuna invenzione; output parziale marcato provvisorio; crash/restart e doppio callback idempotenti; nessuna rete in offline e nessuna fuga di dati privati; nessun peggioramento ingiustificato delle prestazioni S24. CI verde non equivale a collaudo fisico. Release Android/desktop esclusivamente dal percorso di aggiornamento in-app #948.
