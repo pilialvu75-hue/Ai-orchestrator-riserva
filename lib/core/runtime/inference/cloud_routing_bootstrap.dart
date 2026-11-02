@@ -174,6 +174,7 @@ abstract final class CloudRoutingBootstrap {
       () => PromptResolvingChatRepository(
         systemPromptService: assistantSystemPromptService,
         durableMemoryContextService: durableMemoryContextService,
+        runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
         durableMemoryCaptureService: durableMemoryCaptureService,
         delegate: CloudWebEnrichingChatRepository(
           runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
