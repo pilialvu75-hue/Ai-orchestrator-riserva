@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 
 import 'hybrid_checkpoint_execution_coordinator.dart';
 import 'hybrid_checkpoint_ledger.dart';
+import 'hybrid_checkpoint_attempt_journal.dart';
 import 'hybrid_validated_connectivity.dart';
 import 'hybrid_checkpoint_step_runner.dart';
 import 'inference_response.dart';
@@ -25,10 +26,12 @@ import 'inference_response.dart';
 final class HybridCheckpointRelay {
   HybridCheckpointRelay({
     required HybridCheckpointExecutionCoordinator coordinator,
+    required HybridCheckpointAttemptJournal attemptJournal,
     required Future<bool> Function() isNetworkAvailable,
     required Future<bool> Function() isLocalReady,
     required bool Function(Object error) isConnectivityFailure,
   })  : _coordinator = coordinator,
+        _attemptJournal = attemptJournal,
         _isNetworkAvailable = isNetworkAvailable,
         _isLocalReady = isLocalReady,
         _isConnectivityFailure = isConnectivityFailure;
@@ -40,6 +43,7 @@ final class HybridCheckpointRelay {
   /// error classification, and must explicitly invoke run().
   factory HybridCheckpointRelay.android({
     required HybridCheckpointExecutionCoordinator coordinator,
+    required HybridCheckpointAttemptJournal attemptJournal,
     required Future<bool> Function() isLocalReady,
     required bool Function(Object error) isConnectivityFailure,
     HybridValidatedConnectivity? connectivity,
@@ -47,6 +51,7 @@ final class HybridCheckpointRelay {
     final network = connectivity ?? const HybridValidatedConnectivity();
     return HybridCheckpointRelay(
       coordinator: coordinator,
+      attemptJournal: attemptJournal,
       isNetworkAvailable: network.isNetworkAvailable,
       isLocalReady: isLocalReady,
       isConnectivityFailure: isConnectivityFailure,
@@ -54,6 +59,7 @@ final class HybridCheckpointRelay {
   }
 
   final HybridCheckpointExecutionCoordinator _coordinator;
+  final HybridCheckpointAttemptJournal _attemptJournal;
   final Future<bool> Function() _isNetworkAvailable;
   final Future<bool> Function() _isLocalReady;
   final bool Function(Object error) _isConnectivityFailure;
@@ -93,6 +99,7 @@ final class HybridCheckpointRelay {
     Future<bool> Function(String outboundText)? authorizeCloudText,
     Future<bool> Function()? keepRunning,
     Future<bool> Function(int checkpoint)? allowRetryAfterConnectionLoss,
+    Future<bool> Function(int checkpoint)? allowRetryAfterUncertainRestart,
   }) async {
     final claim = jsonEncode(<String>[ownerId, executionId]);
     if (!_activeExecutions.add(claim)) {
@@ -108,6 +115,7 @@ final class HybridCheckpointRelay {
         authorizeCloudText: authorizeCloudText,
         keepRunning: keepRunning,
         allowRetryAfterConnectionLoss: allowRetryAfterConnectionLoss,
+        allowRetryAfterUncertainRestart: allowRetryAfterUncertainRestart,
       );
     } finally {
       _activeExecutions.remove(claim);
@@ -124,6 +132,7 @@ final class HybridCheckpointRelay {
     Future<bool> Function(String outboundText)? authorizeCloudText,
     Future<bool> Function()? keepRunning,
     Future<bool> Function(int checkpoint)? allowRetryAfterConnectionLoss,
+    Future<bool> Function(int checkpoint)? allowRetryAfterUncertainRestart,
   }) async {
     final restored = await _coordinator.resume(
       ownerId: ownerId,
@@ -135,6 +144,24 @@ final class HybridCheckpointRelay {
     // The relay needs a non-nullable variable across the async loop. A new
     // snapshot is always loaded before ownership changes or retries.
     HybridResumableExecution operation = restored;
+    final pending = await _attemptJournal.pendingCheckpoint(
+      ownerId: ownerId, executionId: executionId,
+    );
+    if (pending != null) {
+      if (pending <= operation.ledger.completedCount) {
+        await _attemptJournal.clearAfterCommit(
+          ownerId: ownerId, executionId: executionId,
+          completedCount: operation.ledger.completedCount,
+        );
+      } else if (pending == operation.nextCheckpoint) {
+        if (allowRetryAfterUncertainRestart == null ||
+            !await allowRetryAfterUncertainRestart(pending)) {
+          throw StateError('Unconfirmed HYBRID checkpoint requires safe-retry approval');
+        }
+      } else {
+        throw StateError('HYBRID pending step disagrees with protected progress');
+      }
+    }
     if (operation.isComplete) return operation;
 
     final lastExecutor = operation.ledger.completed.isNotEmpty
@@ -182,6 +209,11 @@ final class HybridCheckpointRelay {
 
       final step = operation.nextCheckpoint;
       try {
+        // Save intent before ANY inference. A crash after this point fails
+        // closed instead of accidentally replaying an unknown remote action.
+        await _attemptJournal.markBeforeInference(
+          ownerId: ownerId, executionId: executionId, checkpoint: step,
+        );
         await _coordinator.executeNext(
           ownerId: ownerId,
           execution: operation,
@@ -190,6 +222,10 @@ final class HybridCheckpointRelay {
           isOffline: !online,
           validateResult: (output) => validateResult(step, output),
           authorizeCloudText: authorizeCloudText,
+        );
+        await _attemptJournal.clearAfterCommit(
+          ownerId: ownerId, executionId: executionId,
+          completedCount: operation.ledger.completedCount,
         );
       } catch (error) {
         // Only a trusted transport classification AND confirmed network loss

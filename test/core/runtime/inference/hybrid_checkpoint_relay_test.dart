@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_execution_coordinator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_ledger.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_attempt_journal.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_plan_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_relay.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_checkpoint_snapshot_store.dart';
@@ -109,6 +110,7 @@ void main() {
     await register(coordinator);
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       isNetworkAvailable: () async => networkOnline,
       isLocalReady: () async => true,
       isConnectivityFailure: (error) => error is SocketException,
@@ -159,6 +161,7 @@ void main() {
     await register(coordinator);
     final relay = HybridCheckpointRelay.android(
       coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       connectivity: const HybridValidatedConnectivity(
         channel: connectivityChannel,
         platformOverride: TargetPlatform.android,
@@ -209,6 +212,7 @@ void main() {
     await register(coordinator, steps: 1);
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       isNetworkAvailable: () async => networkOnline,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) => e is SocketException,
@@ -253,6 +257,7 @@ void main() {
     await register(coordinator, steps: 1);
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       isNetworkAvailable: () async => online,
       isLocalReady: () async => true,
       isConnectivityFailure: (error) =>
@@ -292,6 +297,7 @@ void main() {
     await register(coordinator, steps: 1);
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       isNetworkAvailable: () async => online,
       isLocalReady: () async => true,
       // Even a mistakenly permissive caller classifier cannot override an
@@ -327,6 +333,7 @@ void main() {
     await register(coordinator, steps: 1);
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       isNetworkAvailable: () async => online,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) =>
@@ -362,6 +369,7 @@ void main() {
         preferCloudAtStart: true,
         authorizeCloudText: (_) async => true,
         validateResult: (_, __) async => true,
+        allowRetryAfterUncertainRestart: (_) async => true,
         allowRetryAfterConnectionLoss: (_) async => false,
       ),
       throwsA(isA<HybridCheckpointStreamFailure>()),
@@ -397,6 +405,7 @@ void main() {
               tokensGenerated: 2,
             );
           }),
+          attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
           isNetworkAvailable: () async => false,
           isLocalReady: () async => true,
           isConnectivityFailure: (_) => false,
@@ -438,6 +447,99 @@ void main() {
     expect(inferenceCalls, 1);
   });
 
+  test('process restart refuses to repeat an unconfirmed Cloud attempt',
+      () async {
+    final backend = _Backend();
+    final calls = <InferenceRequest>[];
+    var firstRun = true;
+    final coordinator = _coordinator(backend, (request) async* {
+      calls.add(request);
+      if (firstRun) {
+        firstRun = false;
+        yield InferenceResponse.error('Remote outcome is unknown');
+        return;
+      }
+      yield InferenceResponse.finalChunk(text: 'verified retry', tokensGenerated: 2);
+    });
+    await register(coordinator, steps: 1);
+    HybridCheckpointRelay relay() => HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      isNetworkAvailable: () async => true,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay().run(ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: true, authorizeCloudText: (_) async => true,
+        validateResult: (_, __) async => true),
+      throwsA(isA<HybridCheckpointStreamFailure>()),
+    );
+    expect(calls, hasLength(1));
+    expect(await HybridCheckpointAttemptJournal(backend: backend)
+        .pendingCheckpoint(ownerId: owner, executionId: 'gallery'), 1);
+    await expectLater(
+      relay().run(ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: true, authorizeCloudText: (_) async => true,
+        validateResult: (_, __) async => true),
+      throwsStateError,
+    );
+    expect(calls, hasLength(1));
+    final result = await relay().run(
+      ownerId: owner, executionId: 'gallery', sessionId: session,
+      preferCloudAtStart: true, authorizeCloudText: (_) async => true,
+      allowRetryAfterUncertainRestart: (_) async => true,
+      validateResult: (_, text) async => text == 'verified retry',
+    );
+    expect(result.isComplete, isTrue);
+    expect(calls, hasLength(2));
+    expect(await HybridCheckpointAttemptJournal(backend: backend)
+        .pendingCheckpoint(ownerId: owner, executionId: 'gallery'), isNull);
+  });
+
+  test('crash after committed result never replays a stale pending marker',
+      () async {
+    final backend = _Backend();
+    var calls = 0;
+    final coordinator = _coordinator(backend, (request) async* {
+      calls++;
+      yield InferenceResponse.finalChunk(
+        text: 'completed before crash', tokensGenerated: 2,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final journal = HybridCheckpointAttemptJournal(backend: backend);
+    await journal.markBeforeInference(
+      ownerId: owner, executionId: 'gallery', checkpoint: 1,
+    );
+    final saved = (await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))!;
+    final lease = saved.ledger.beginAttempt(
+      attemptId: 'before-crash', executor: HybridCheckpointExecutor.cloud,
+    );
+    await coordinator.executeNext(
+      ownerId: owner, execution: saved, lease: lease,
+      sessionId: session, isOffline: false,
+      authorizeCloudText: (_) async => true,
+      validateResult: (_) async => true,
+    );
+    expect(calls, 1);
+    final finished = await HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      isNetworkAvailable: () async => true,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    ).run(
+      ownerId: owner, executionId: 'gallery', sessionId: session,
+      preferCloudAtStart: true, validateResult: (_, __) async => true,
+    );
+    expect(finished.isComplete, isTrue);
+    expect(calls, 1);
+    expect(await journal.pendingCheckpoint(
+      ownerId: owner, executionId: 'gallery'), isNull);
+  });
+
   test('ordinary model or validation failure never triggers Local replay',
       () async {
     final backend = _Backend();
@@ -451,6 +553,7 @@ void main() {
     await register(coordinator, steps: 2);
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       isNetworkAvailable: () async => networkOnline,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) => e is SocketException,
@@ -487,6 +590,7 @@ void main() {
     await register(coordinator, steps: 1);
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       isNetworkAvailable: () async => online,
       isLocalReady: () async => false,
       isConnectivityFailure: (e) => e is SocketException,
@@ -526,6 +630,7 @@ void main() {
     await register(coordinator, steps: 3);
     final firstRelay = HybridCheckpointRelay(
       coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       isNetworkAvailable: () async => false,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) => e is SocketException,
@@ -550,6 +655,7 @@ void main() {
           tokensGenerated: 1,
         );
       }),
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
       isNetworkAvailable: () async => true,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) => e is SocketException,
