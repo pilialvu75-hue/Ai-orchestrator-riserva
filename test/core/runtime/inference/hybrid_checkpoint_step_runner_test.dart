@@ -290,6 +290,7 @@ void main() {
     // NOT turn an automatic HYBRID route into a manual paid Cloud request.
     var autoAllowed = true;
     var outboundCalls = 0;
+    var intentWrites = 0;
     final cloud = CloudRuntimeProvider(
       sendQuery: (String providerId, AiRequest request) async {
         outboundCalls++;
@@ -340,13 +341,18 @@ void main() {
         isOffline: false,
         validateResult: (_) async => true,
         authorizeCloudText: (_) async {
-          autoAllowed = false; // Changed before provider execution.
+          autoAllowed = false; // Changed during consent.
           return true;
         },
+        markBeforeInference: () async {
+          intentWrites++;
+        },
       ),
-      throwsA(isA<HybridCheckpointStreamFailure>()),
+      throwsStateError,
     );
     expect(outboundCalls, 0);
+    // No model invocation means no protected "maybe completed" marker.
+    expect(intentWrites, 0);
     expect(ledger.completedCount, 0);
     final restored = await store.load(
       ownerId: owner,

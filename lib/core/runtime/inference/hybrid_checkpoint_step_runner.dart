@@ -125,6 +125,18 @@ final class HybridCheckpointStepRunner {
           !await authorizeCloudText(prompt)) {
         throw StateError('HYBRID Cloud route is not authorized or available');
       }
+      // Consent can take time. AUTO permission, provider availability and
+      // spending policy may have changed while the user reviewed the prompt.
+      // Re-check BEFORE writing an "in-flight" marker so a revoked policy
+      // cannot leave a false ambiguous remote attempt. The Cloud provider
+      // still enforces requireAutomaticCloudPolicy again at dispatch.
+      if (_cloud.recommendProviderFor(
+            preflight,
+            enforceAutomaticPolicy: true,
+          ) !=
+          approvedCloudProvider) {
+        throw StateError('HYBRID Cloud authorization changed before dispatch');
+      }
     }
 
     // Construct a fresh request to avoid forwarding hidden private memory,
