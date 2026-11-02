@@ -147,25 +147,28 @@ jobs:
         run: |
           $base = 'v${{ steps.version.outputs.version_name }}'
           $build = '${{ steps.version.outputs.version_code }}'
-          $releases = gh release list --limit 100 --repo $env:GITHUB_REPOSITORY --json tagName,isPrerelease | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Unable to inspect the published GitHub releases.'
+          # Query only the exact expected tags. Older authorized releases must
+          # not disappear from discovery when GitHub holds more than 100 releases.
+          $matches = @()
+          foreach ($channel in @('beta', 'nightly', 'dev', 'stable')) {
+            $candidate = if ($channel -eq 'stable') { "$base+$build" } else { "$base-$channel+$build" }
+            $isPrerelease = gh release view $candidate --repo $env:GITHUB_REPOSITORY --json isPrerelease --jq '.isPrerelease' 2>$null
+            if ($LASTEXITCODE -ne 0) { continue }
+            if (($channel -eq 'stable' -and $isPrerelease -eq 'false') -or
+                ($channel -ne 'stable' -and $isPrerelease -eq 'true')) {
+              $matches += $candidate
+            }
           }
-          $prereleaseCandidates = @("$base-beta+$build", "$base-nightly+$build", "$base-dev+$build")
-          $stableCandidate = "$base+$build"
-          $matches = @($releases | Where-Object {
-            ($_.isPrerelease -eq $true -and $_.tagName -in $prereleaseCandidates) -or
-            ($_.isPrerelease -eq $false -and $_.tagName -eq $stableCandidate)
-          })
           if ($matches.Count -ne 1) {
             throw "Expected exactly one explicitly published release for $base and build $build."
           }
-          $publishedSha = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$($matches[0].tagName)" --jq '.object.sha'
+          $tag = $matches[0]
+          $publishedSha = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha'
           if ($LASTEXITCODE -ne 0 -or $publishedSha.Trim() -ne '${{ steps.android_source.outputs.source_sha }}') {
             throw 'Release tag does not point to the authorized Android source commit.'
           }
-          "tag=$($matches[0].tagName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Attaching desktop asset to $($matches[0].tagName)"
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Attaching desktop asset to $tag"
 
       - name: Resolve Flutter dependencies
         shell: pwsh
