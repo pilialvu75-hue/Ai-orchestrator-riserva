@@ -1,6 +1,13 @@
 name: Publish macOS Release Asset
 
 on:
+  # Replay only an already published, explicitly authorized Android release.
+  workflow_dispatch:
+    inputs:
+      android_run_id:
+        description: 'Successful manual Build & Release APK run ID'
+        type: string
+        required: true
   pull_request:
     branches:
       - main
@@ -53,17 +60,49 @@ jobs:
           command -v gh >/dev/null
           grep -Eq '^version:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?[[:space:]]*$' pubspec.yaml
           grep -q 'AI-Orchestrator-macOS.dmg' .github/workflows/macos-release-publish.yml
+          python3 scripts/check_android_release_gate.py .github/workflows/build.yml .github/workflows/macos-release-publish.yml .github/workflows/linux-release-publish.yml .github/workflows/windows-release-publish.yml
           echo 'macOS release publisher contract is valid.'
 
   publish-macos:
     if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_dispatch'
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_dispatch') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: macos-15
     timeout-minutes: 120
 
     steps:
+      - name: Checkout publisher validation sources
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate already authorized Android release
+        id: android_source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANDROID_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.android_run_id || github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          run_id="$ANDROID_RUN_ID"
+          [[ "$run_id" =~ ^[0-9]{6,16}$ ]] || { echo 'Invalid Android release run ID' >&2; exit 1; }
+          source_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .name == "Build & Release APK" and
+            .event == "workflow_dispatch" and
+            .status == "completed" and
+            .conclusion == "success" and
+            .head_branch == "main" and
+            .repository.full_name == $repo and
+            (.head_sha | test("^[0-9a-f]{40}$")) and
+            (.run_number > 0)
+          ' <<<"$source_run" >/dev/null || { echo 'Not an authorized successful Android release' >&2; exit 1; }
+          echo "source_sha=$(jq -r .head_sha <<<"$source_run")" >> "$GITHUB_OUTPUT"
+          echo "run_number=$(jq -r .run_number <<<"$source_run")" >> "$GITHUB_OUTPUT"
+          echo "Verified manual Android release workflow run $run_id"
+
       - name: Check production signing availability
         id: signing
         shell: bash
@@ -93,7 +132,7 @@ jobs:
         if: steps.signing.outputs.ready == 'true'
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ steps.android_source.outputs.source_sha }}
           fetch-depth: 0
           submodules: recursive
 
@@ -116,7 +155,7 @@ jobs:
         run: |
           set -euo pipefail
           version_name="$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)(\+[0-9]+)?[[:space:]]*$/\1/p' pubspec.yaml | head -n 1)"
-          version_code="$((100000 + ${{ github.event.workflow_run.run_number }}))"
+          version_code="$((100000 + ${{ steps.android_source.outputs.run_number }}))"
           if [[ -z "$version_name" ]]; then
             echo 'Unable to resolve semantic application version from pubspec.yaml.' >&2
             exit 1
@@ -154,7 +193,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Coordinated macOS version: $release_version"
           echo "Target GitHub release: $tag"
-          echo "Source commit: ${{ github.event.workflow_run.head_sha }}"
+          echo "Source commit: ${{ steps.android_source.outputs.source_sha }}"
 
       - name: Resolve existing explicitly published release tag
         if: steps.signing.outputs.ready == 'true'
@@ -181,6 +220,11 @@ jobs:
           fi
           if [ "${#matches[@]}" -ne 1 ]; then
             echo "::error::Expected exactly one explicitly published release for $base and build $build"
+            exit 1
+          fi
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/${matches[0]}" --jq '.object.sha')"
+          if [[ "$tag_sha" != '${{ steps.android_source.outputs.source_sha }}' ]]; then
+            echo 'Release tag does not point to the authorized Android source commit' >&2
             exit 1
           fi
           echo "tag=${matches[0]}" >> "$GITHUB_OUTPUT"
