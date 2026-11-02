@@ -304,7 +304,10 @@ final class HybridCheckpointLedger {
       executionId: id,
       totalCheckpoints: total,
       completed: restored,
-      generation: generation + 1,
+      // No lease survives deserialization; beginAttempt increments this value
+      // before granting the next executor ownership. Preserve the stored
+      // generation so sequential writes from one Attempt stay monotonic.
+      generation: generation,
     );
   }
 }
