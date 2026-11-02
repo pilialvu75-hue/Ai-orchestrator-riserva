@@ -585,6 +585,81 @@ void main() {
         .pendingCheckpoint(ownerId: owner, executionId: 'gallery'), isNull);
   });
 
+  test('logout during inference blocks commit and retains protected intent',
+      () async {
+    final backend = _Backend();
+    var authorized = true;
+    var modelCalls = 0;
+    final coordinator = _coordinator(backend, (request) async* {
+      modelCalls++;
+      yield InferenceResponse.token(text: 'model was answering');
+      authorized = false; // Revoked while the stream was active.
+      yield InferenceResponse.finalChunk(
+        text: 'result after logout', tokensGenerated: 3,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final journal = HybridCheckpointAttemptJournal(backend: backend);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: journal,
+      authorizeOwnerSession: (_, __) async => authorized,
+      isNetworkAvailable: () async => false,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: false,
+        validateResult: (_, __) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(modelCalls, 1);
+    // An uncommitted but already started model step remains ambiguous.
+    expect((await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))?.ledger.completedCount, 0);
+    expect(await journal.pendingCheckpoint(
+      ownerId: owner, executionId: 'gallery'), 1);
+  });
+
+  test('logout during independent validation blocks durable checkpoint',
+      () async {
+    final backend = _Backend();
+    var authorized = true;
+    final coordinator = _coordinator(backend, (request) async* {
+      yield InferenceResponse.finalChunk(
+        text: 'uncommitted result', tokensGenerated: 3,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final journal = HybridCheckpointAttemptJournal(backend: backend);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: journal,
+      authorizeOwnerSession: (_, __) async => authorized,
+      isNetworkAvailable: () async => false,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: false,
+        validateResult: (_, __) async {
+          authorized = false;
+          return true;
+        },
+      ),
+      throwsStateError,
+    );
+    expect((await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))?.ledger.completedCount, 0);
+    expect(await journal.pendingCheckpoint(
+      ownerId: owner, executionId: 'gallery'), 1);
+  });
+
   test('owner authorization revoked during Cloud consent blocks inference',
       () async {
     final backend = _Backend();

@@ -80,6 +80,7 @@ final class HybridCheckpointStepRunner {
     required Future<bool> Function(String result) validateResult,
     Future<bool> Function(String outboundText)? authorizeCloudText,
     Future<void> Function()? markBeforeInference,
+    Future<bool> Function()? authorizeCheckpointCommit,
   }) async {
     if (sessionId.trim().isEmpty || stepInstruction.trim().isEmpty) {
       throw ArgumentError('A session and a planned checkpoint are required');
@@ -216,6 +217,13 @@ final class HybridCheckpointStepRunner {
       }
       if (!await validateResult(output)) {
         throw StateError('HYBRID checkpoint was not independently validated');
+      }
+      // Authorization may expire or be revoked while inference or independent
+      // validation is running. Never persist another user-owned result after
+      // this gate fails. This runs ONCE per completed step, not per token.
+      if (authorizeCheckpointCommit != null &&
+          !await authorizeCheckpointCommit()) {
+        throw StateError('HYBRID owner/session authorization was revoked');
       }
       await ledger.completeCheckpointDurably(
         lease: lease,

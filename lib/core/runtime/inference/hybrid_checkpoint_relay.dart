@@ -238,6 +238,8 @@ final class HybridCheckpointRelay {
           isOffline: !online,
           validateResult: (output) => validateResult(step, output),
           authorizeCloudText: authorizeCloudText,
+          authorizeCheckpointCommit: () =>
+              _authorizeOwnerSession(ownerId, sessionId),
           markBeforeInference: () async {
             // Authentication can be revoked during the Cloud consent dialog.
             // Check again after consent and before any protected marker or
