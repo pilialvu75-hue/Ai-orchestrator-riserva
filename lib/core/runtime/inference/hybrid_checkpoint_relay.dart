@@ -57,13 +57,16 @@ final class HybridCheckpointRelay {
     Future<bool> Function(String outboundText)? authorizeCloudText,
     Future<bool> Function()? keepRunning,
   }) async {
-    var operation = await _coordinator.resume(
+    final restored = await _coordinator.resume(
       ownerId: ownerId,
       executionId: executionId,
     );
-    if (operation == null) {
+    if (restored == null) {
       throw StateError('HYBRID plan and checkpoints must be registered first');
     }
+    // The relay needs a non-nullable variable across the async loop. A new
+    // snapshot is always loaded before ownership changes or retries.
+    HybridResumableExecution operation = restored;
     if (operation.isComplete) return operation;
 
     final lastExecutor = operation.ledger.completed.isNotEmpty

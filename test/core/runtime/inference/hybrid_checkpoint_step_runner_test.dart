@@ -344,7 +344,7 @@ void main() {
           return true;
         },
       ),
-      throwsStateError,
+      throwsA(isA<HybridCheckpointStreamFailure>()),
     );
     expect(outboundCalls, 0);
     expect(ledger.completedCount, 0);
