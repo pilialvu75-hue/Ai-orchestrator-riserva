@@ -68,14 +68,17 @@ final class HybridCheckpointSnapshotStore {
           Map<String, dynamic>.from(snapshot),
         );
         final key = _storageKey(owner, parsed.executionId);
-        final serialized = jsonEncode(snapshot);
+        final serialized = jsonEncode(<String, Object?>{
+          'ownerFingerprint': _ownerFingerprint(owner),
+          'checkpoint': snapshot,
+        });
         if (utf8.encode(serialized).length > maxSnapshotBytes) {
           throw StateError('HYBRID checkpoint exceeds protected storage limit');
         }
 
         final existing = await _backend.read(key);
         if (existing != null) {
-          final previous = _decode(existing, parsed.executionId);
+          final previous = _decode(existing, parsed.executionId, owner);
           if (parsed.totalCheckpoints != previous.totalCheckpoints) {
             throw StateError('HYBRID plan size cannot change during an execution');
           }
@@ -123,7 +126,7 @@ final class HybridCheckpointSnapshotStore {
         final id = _checkIdentity(executionId);
         final raw = await _backend.read(_storageKey(owner, id));
         if (raw == null) return null;
-        return _decode(raw, id);
+        return _decode(raw, id, owner);
       });
 
   /// Only for explicit user-directed cleanup/forgetting; never automatic
@@ -139,7 +142,11 @@ final class HybridCheckpointSnapshotStore {
         await _backend.delete(key);
       });
 
-  static HybridCheckpointLedger _decode(String raw, String expectedId) {
+  static HybridCheckpointLedger _decode(
+    String raw,
+    String expectedId,
+    String expectedOwner,
+  ) {
     if (utf8.encode(raw).length > maxSnapshotBytes) {
       throw const FormatException('Oversized HYBRID checkpoint snapshot');
     }
@@ -147,8 +154,12 @@ final class HybridCheckpointSnapshotStore {
     if (decoded is! Map) {
       throw const FormatException('Malformed HYBRID checkpoint snapshot');
     }
+    if (decoded['ownerFingerprint'] != _ownerFingerprint(expectedOwner) ||
+        decoded['checkpoint'] is! Map) {
+      throw const FormatException('HYBRID checkpoint owner mismatch');
+    }
     final ledger = HybridCheckpointLedger.fromJson(
-      Map<String, dynamic>.from(decoded),
+      Map<String, dynamic>.from(decoded['checkpoint'] as Map),
     );
     if (ledger.executionId != expectedId) {
       throw const FormatException('HYBRID checkpoint execution mismatch');
@@ -164,6 +175,9 @@ final class HybridCheckpointSnapshotStore {
     }
     return id;
   }
+
+  static String _ownerFingerprint(String owner) =>
+      sha256.convert(utf8.encode(owner)).toString();
 
   static String _storageKey(String owner, String executionId) {
     final bytes = utf8.encode('$owner\u0000$executionId');
