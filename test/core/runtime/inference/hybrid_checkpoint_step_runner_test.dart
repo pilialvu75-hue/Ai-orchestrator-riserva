@@ -468,7 +468,7 @@ void main() {
         validateResult: (_) async => true,
         authorizeCloudText: (_) async => true,
       ),
-      throwsStateError,
+      throwsA(isA<HybridCheckpointStreamFailure>()),
     );
     expect(ledger.completedCount, 0);
     expect((await store.load(ownerId: owner, executionId: 'cloud-drop'))!

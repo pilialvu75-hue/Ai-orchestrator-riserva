@@ -164,6 +164,89 @@ void main() {
     expect(result.ledger.completed.single.result, 'local verified');
   });
 
+  test('Cloud provider error response: network outage reroutes to Local',
+      () async {
+    final backend = _Backend();
+    final calls = <InferenceRequest>[];
+    var online = true;
+    final coordinator = _coordinator(backend, (request) async* {
+      calls.add(request);
+      if (calls.length == 1) {
+        yield InferenceResponse.token(text: 'partial Cloud answer');
+        online = false;
+        // Real CloudRuntimeProvider maps transport errors to terminal chunks
+        // rather than throwing a raw SocketException through the stream.
+        yield InferenceResponse.error('Gemini network unavailable.');
+        return;
+      }
+      yield InferenceResponse.finalChunk(
+        text: 'verified Local result',
+        tokensGenerated: 4,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      isNetworkAvailable: () async => online,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (error) =>
+          error is HybridCheckpointStreamFailure &&
+          error.providerError == 'Gemini network unavailable.',
+    );
+    final result = await relay.run(
+      ownerId: owner,
+      executionId: 'gallery',
+      sessionId: session,
+      preferCloudAtStart: true,
+      authorizeCloudText: (_) async => true,
+      validateResult: (_, output) async =>
+          output == 'verified Local result',
+    );
+    expect(calls.length, 2);
+    expect(calls.first.routeDirective, InferenceRouteDirective.cloudOnly);
+    expect(calls.last.routeDirective, InferenceRouteDirective.localOnly);
+    expect(result.ledger.completedCount, 1);
+    expect(result.ledger.completed.single.result, 'verified Local result');
+  });
+
+  test('cancelled Cloud response never automatically replays in Local',
+      () async {
+    final backend = _Backend();
+    final calls = <InferenceRequest>[];
+    var online = true;
+    final coordinator = _coordinator(backend, (request) async* {
+      calls.add(request);
+      online = false;
+      yield InferenceResponse.error(
+        'Inference cancelled.',
+        state: InferenceTerminalState.cancelled,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      isNetworkAvailable: () async => online,
+      isLocalReady: () async => true,
+      // Even a mistakenly permissive caller classifier cannot override an
+      // explicit cancellation from the underlying inference service.
+      isConnectivityFailure: (_) => true,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner,
+        executionId: 'gallery',
+        sessionId: session,
+        preferCloudAtStart: true,
+        authorizeCloudText: (_) async => true,
+        validateResult: (_, __) async => true,
+      ),
+      throwsA(isA<HybridCheckpointStreamFailure>()),
+    );
+    expect(calls.length, 1);
+    expect((await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
+  });
+
   test('ordinary model or validation failure never triggers Local replay',
       () async {
     final backend = _Backend();

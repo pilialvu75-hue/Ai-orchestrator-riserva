@@ -6,6 +6,24 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 
+/// Typed, non-secret transport failure from a completed inference stream.
+///
+/// The provider's short normalized error text is available only to the
+/// caller's trusted connectivity classifier. This wrapper deliberately does
+/// not log raw provider output or include it in its toString representation.
+final class HybridCheckpointStreamFailure implements Exception {
+  const HybridCheckpointStreamFailure({
+    required this.providerError,
+    required this.terminalState,
+  });
+
+  final String providerError;
+  final InferenceTerminalState? terminalState;
+
+  @override
+  String toString() => 'HYBRID inference failed without a committed checkpoint';
+}
+
 /// A single model call for one explicitly planned HYBRID checkpoint.
 ///
 /// This is an opt-in integration boundary: callers connect it to the existing
@@ -130,7 +148,10 @@ final class HybridCheckpointStepRunner {
         if (chunk.isError ||
             (chunk.isFinal &&
                 chunk.terminalState != InferenceTerminalState.success)) {
-          throw StateError('HYBRID inference did not complete successfully');
+          throw HybridCheckpointStreamFailure(
+            providerError: chunk.errorMessage ?? 'Unsuccessful inference',
+            terminalState: chunk.terminalState,
+          );
         }
         if (chunk.text.isNotEmpty) {
           output = mergeStreamedText(

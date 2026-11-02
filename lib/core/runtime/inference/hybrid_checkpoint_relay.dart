@@ -2,6 +2,8 @@ import 'package:uuid/uuid.dart';
 
 import 'hybrid_checkpoint_execution_coordinator.dart';
 import 'hybrid_checkpoint_ledger.dart';
+import 'hybrid_checkpoint_step_runner.dart';
+import 'inference_response.dart';
 
 /// Explicit, opt-in network-aware relay for one Assistant HYBRID execution.
 ///
@@ -123,6 +125,8 @@ final class HybridCheckpointRelay {
         // permit one fallback. No automatic retry on validation, consent,
         // spending, cancellation or data-integrity failures.
         if (executor != HybridCheckpointExecutor.cloud ||
+            (error is HybridCheckpointStreamFailure &&
+                error.terminalState == InferenceTerminalState.cancelled) ||
             !_isConnectivityFailure(error) ||
             await _isNetworkAvailable()) {
           rethrow;
