@@ -35,6 +35,22 @@ final class _Backend implements HybridProtectedSnapshotBackend {
   }
 }
 
+final class _FailIntentWritesBackend implements HybridProtectedSnapshotBackend {
+  _FailIntentWritesBackend(this.delegate);
+  final _Backend delegate;
+
+  @override
+  Future<String?> read(String key) => delegate.read(key);
+
+  @override
+  Future<void> write(String key, String value) async {
+    throw StateError('Native encrypted intent storage unavailable');
+  }
+
+  @override
+  Future<void> delete(String key) => delegate.delete(key);
+}
+
 CloudRuntimeProvider _cloud() => CloudRuntimeProvider(
       sendQuery: (String provider, AiRequest request) async => AiResponse(
         text: 'unused',
@@ -445,6 +461,39 @@ void main() {
     );
     expect(alreadyDone.isComplete, isTrue);
     expect(inferenceCalls, 1);
+  });
+
+  test('refused protected intent write never invokes Local inference',
+      () async {
+    final backend = _Backend();
+    var inferenceCalls = 0;
+    final coordinator = _coordinator(backend, (request) async* {
+      inferenceCalls++;
+      yield InferenceResponse.finalChunk(
+        text: 'This must never run', tokensGenerated: 3,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final journal = HybridCheckpointAttemptJournal(
+      backend: _FailIntentWritesBackend(backend),
+    );
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: journal,
+      isNetworkAvailable: () async => false,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: false, validateResult: (_, __) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(inferenceCalls, 0);
+    expect((await coordinator.resume(
+      ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
   });
 
   test('Cloud consent denial never leaves a false pending intent', () async {
