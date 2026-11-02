@@ -84,7 +84,7 @@ def update_background_color(root: Path, *, apply: bool) -> str | None:
     line = f'    <color name="{COLOR_NAME}">{COLOR_VALUE}</color>'
     if colors.exists():
         original = colors.read_text(encoding="utf-8")
-        pattern = rf'<color\\s+name="{COLOR_NAME}"[^>]*>[^<]*</color>'
+        pattern = rf'<color\s+name="{COLOR_NAME}"[^>]*>[^<]*</color>'
         if re.search(pattern, original):
             updated = re.sub(pattern, line.strip(), original, count=1)
         else:
