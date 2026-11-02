@@ -168,6 +168,27 @@ class ChatSessionStore {
     );
   }
 
+  /// Read-only membership check for opt-in HYBRID local session isolation.
+  ///
+  /// A missing or trashed conversation must never be used to resume model
+  /// work. This is a bounded indexed lookup; it does NOT read chat messages,
+  /// change the active session, or authenticate a remote account.
+  Future<bool> hasUsableSession(String sessionId) async {
+    final id = sessionId.trim();
+    if (id.isEmpty || id != sessionId || id.length > 256) return false;
+    final db = await _database;
+    final rows = await db.rawQuery('''
+      SELECT 1 FROM ${AppConstants.tableChatSessions} AS s
+      WHERE s.id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM ${AppConstants.tableUserPreferences} AS p
+          WHERE p.${AppConstants.colPrefKey} = ?
+        )
+      LIMIT 1
+    ''', <Object>[id, '$_trashPreferencePrefix$id']);
+    return rows.isNotEmpty;
+  }
+
   /// Pinned sessions first, then most recent. User titles override titles
   /// derived from the first message; the original message is never edited.
   Future<List<ChatSessionInfo>> listSessions({bool inTrash = false}) async {

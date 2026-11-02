@@ -53,6 +53,23 @@ void main() {
     });
   }
 
+  test('read-only session lookup rejects missing and trashed conversations',
+      () async {
+    expect(await store.hasUsableSession('new'), isFalse);
+    await store.createSession('new');
+    await store.createSession('other');
+    expect(await store.hasUsableSession('new'), isTrue);
+    expect(await store.hasUsableSession('other'), isTrue);
+    expect(await store.hasUsableSession(' new '), isFalse);
+    expect(await store.hasUsableSession(''), isFalse);
+    await store.moveToTrash('new');
+    expect(await store.hasUsableSession('new'), isFalse);
+    expect(await store.hasUsableSession('other'), isTrue);
+    await store.restoreFromTrash('new');
+    expect(await store.hasUsableSession('new'), isTrue);
+    expect(await db.query('chat_history'), isEmpty);
+  });
+
   test('new session preserves previously stored messages', () async {
     await store.createSession('default');
     await addMessage('old-message', 'default', 10, 'Prima conversazione');
