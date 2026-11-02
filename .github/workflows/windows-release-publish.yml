@@ -149,13 +149,14 @@ jobs:
           $build = '${{ steps.version.outputs.version_code }}'
           # Query only the exact expected tags. Older authorized releases must
           # not disappear from discovery when GitHub holds more than 100 releases.
+          $prereleaseCandidates = @("$base-beta+$build", "$base-nightly+$build", "$base-dev+$build")
+          $stableCandidate = "$base+$build"
           $matches = @()
-          foreach ($channel in @('beta', 'nightly', 'dev', 'stable')) {
-            $candidate = if ($channel -eq 'stable') { "$base+$build" } else { "$base-$channel+$build" }
+          foreach ($candidate in @($prereleaseCandidates) + @($stableCandidate)) {
             $isPrerelease = gh release view $candidate --repo $env:GITHUB_REPOSITORY --json isPrerelease --jq '.isPrerelease' 2>$null
             if ($LASTEXITCODE -ne 0) { continue }
-            if (($channel -eq 'stable' -and $isPrerelease -eq 'false') -or
-                ($channel -ne 'stable' -and $isPrerelease -eq 'true')) {
+            if (($candidate -eq $stableCandidate -and $isPrerelease -eq 'false') -or
+                ($candidate -in $prereleaseCandidates -and $isPrerelease -eq 'true')) {
               $matches += $candidate
             }
           }
