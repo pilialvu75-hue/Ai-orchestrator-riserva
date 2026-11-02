@@ -64,6 +64,12 @@ final class HybridCheckpointStepRunner {
   ///
   /// [validateResult] is mandatory for both routes. Generated text is merely
   /// proposed until an external gate verifies it.
+  ///
+  /// [markBeforeInference] is called only AFTER all local preflight checks,
+  /// including Cloud provider selection and explicit consent, and immediately
+  /// BEFORE subscribing to the model stream. A relay must pass a protected,
+  /// readback-verified intent journal here: a denial/invalid prompt never
+  /// leaves behind a false "possibly executed" checkpoint.
   Future<String> executeNext({
     required String ownerId,
     required HybridCheckpointLedger ledger,
@@ -73,6 +79,7 @@ final class HybridCheckpointStepRunner {
     required bool isOffline,
     required Future<bool> Function(String result) validateResult,
     Future<bool> Function(String outboundText)? authorizeCloudText,
+    Future<void> Function()? markBeforeInference,
   }) async {
     if (sessionId.trim().isEmpty || stepInstruction.trim().isEmpty) {
       throw ArgumentError('A session and a planned checkpoint are required');
@@ -145,6 +152,12 @@ final class HybridCheckpointStepRunner {
       throw StateError('HYBRID checkpoint assignment changed');
     }
     try {
+      // The checked Cloud route/consent can still be revoked at dispatch;
+      // the provider enforces requireAutomaticCloudPolicy at that boundary.
+      // Save the protected intent after preflight but BEFORE model activity.
+      if (markBeforeInference != null) {
+        await markBeforeInference();
+      }
       var output = '';
       var sawSuccess = false;
       await for (final chunk in _stream(request)) {

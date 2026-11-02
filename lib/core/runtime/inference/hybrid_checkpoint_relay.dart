@@ -209,11 +209,6 @@ final class HybridCheckpointRelay {
 
       final step = operation.nextCheckpoint;
       try {
-        // Save intent before ANY inference. A crash after this point fails
-        // closed instead of accidentally replaying an unknown remote action.
-        await _attemptJournal.markBeforeInference(
-          ownerId: ownerId, executionId: executionId, checkpoint: step,
-        );
         await _coordinator.executeNext(
           ownerId: ownerId,
           execution: operation,
@@ -222,6 +217,9 @@ final class HybridCheckpointRelay {
           isOffline: !online,
           validateResult: (output) => validateResult(step, output),
           authorizeCloudText: authorizeCloudText,
+          markBeforeInference: () => _attemptJournal.markBeforeInference(
+            ownerId: ownerId, executionId: executionId, checkpoint: step,
+          ),
         );
         await _attemptJournal.clearAfterCommit(
           ownerId: ownerId, executionId: executionId,

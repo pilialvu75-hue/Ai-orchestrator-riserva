@@ -101,6 +101,7 @@ final class HybridCheckpointExecutionCoordinator {
     required bool isOffline,
     required Future<bool> Function(String result) validateResult,
     Future<bool> Function(String outboundText)? authorizeCloudText,
+    Future<void> Function()? markBeforeInference,
   }) async {
     execution.plan.verifyLedger(execution.ledger);
     return _runner.executeNext(
@@ -113,6 +114,7 @@ final class HybridCheckpointExecutionCoordinator {
       isOffline: isOffline,
       validateResult: validateResult,
       authorizeCloudText: authorizeCloudText,
+      markBeforeInference: markBeforeInference,
     );
   }
 }

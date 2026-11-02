@@ -447,6 +447,88 @@ void main() {
     expect(inferenceCalls, 1);
   });
 
+  test('Cloud consent denial never leaves a false pending intent', () async {
+    final backend = _Backend();
+    final calls = <InferenceRequest>[];
+    final coordinator = _coordinator(backend, (request) async* {
+      calls.add(request);
+      yield InferenceResponse.finalChunk(
+        text: 'approved output', tokensGenerated: 2,
+      );
+    });
+    await register(coordinator, steps: 1);
+    HybridCheckpointRelay createRelay() => HybridCheckpointRelay(
+      coordinator: _coordinator(backend, (request) async* {
+        calls.add(request);
+        yield InferenceResponse.finalChunk(
+          text: 'approved output', tokensGenerated: 2,
+        );
+      }),
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      isNetworkAvailable: () async => true,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    var consentCalls = 0;
+    await expectLater(
+      createRelay().run(
+        ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: true,
+        authorizeCloudText: (_) async {
+          consentCalls++;
+          return false;
+        },
+        validateResult: (_, __) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(consentCalls, 1);
+    expect(calls, isEmpty);
+    expect(await HybridCheckpointAttemptJournal(backend: backend)
+        .pendingCheckpoint(ownerId: owner, executionId: 'gallery'), isNull);
+    final done = await createRelay().run(
+      ownerId: owner, executionId: 'gallery', sessionId: session,
+      preferCloudAtStart: true,
+      authorizeCloudText: (_) async => true,
+      validateResult: (_, text) async => text == 'approved output',
+    );
+    expect(done.isComplete, isTrue);
+    expect(calls, hasLength(1));
+    expect(await HybridCheckpointAttemptJournal(backend: backend)
+        .pendingCheckpoint(ownerId: owner, executionId: 'gallery'), isNull);
+  });
+
+  test('protected intent exists before the model stream receives a request',
+      () async {
+    final backend = _Backend();
+    final journal = HybridCheckpointAttemptJournal(backend: backend);
+    final coordinator = _coordinator(backend, (request) async* {
+      final pending = await journal.pendingCheckpoint(
+        ownerId: owner, executionId: 'gallery',
+      );
+      expect(pending, 1); // No model token before durable intent readback.
+      yield InferenceResponse.finalChunk(
+        text: 'step complete', tokensGenerated: 2,
+      );
+    });
+    await register(coordinator, steps: 1);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: journal,
+      isNetworkAvailable: () async => false,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    final completed = await relay.run(
+      ownerId: owner, executionId: 'gallery', sessionId: session,
+      preferCloudAtStart: false,
+      validateResult: (_, text) async => text == 'step complete',
+    );
+    expect(completed.isComplete, isTrue);
+    expect(await journal.pendingCheckpoint(
+      ownerId: owner, executionId: 'gallery'), isNull);
+  });
+
   test('process restart refuses to repeat an unconfirmed Cloud attempt',
       () async {
     final backend = _Backend();
