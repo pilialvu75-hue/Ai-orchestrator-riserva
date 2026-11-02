@@ -275,6 +275,8 @@ void main() {
     expect(request.systemPrompt, contains('[WEB SEARCH RESULTS]'));
     expect(request.systemPrompt, contains('https://example.test/weather'));
     expect(request.cloudProviderId, 'gemini');
+    expect(request.requireAutomaticCloudPolicy, isTrue);
+    expect(request.allowCloudProviderFailover, isFalse);
   });
 
   test('Hybrid web failure degrades to the original inference request',
@@ -310,6 +312,7 @@ void main() {
     final request = verify(() => inference.stream(captureAny())).captured.single
         as InferenceRequest;
     expect(request.systemPrompt, 'Base prompt.');
+    expect(request.requireAutomaticCloudPolicy, isTrue);
   });
 
   test('pre-searches Local mode without asking the model to emit a tool call', () async {
