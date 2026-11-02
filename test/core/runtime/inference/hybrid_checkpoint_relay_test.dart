@@ -20,9 +20,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 final class _Backend implements HybridProtectedSnapshotBackend {
   final values = <String, String>{};
+  int readCalls = 0;
 
   @override
-  Future<String?> read(String key) async => values[key];
+  Future<String?> read(String key) async {
+    readCalls++;
+    return values[key];
+  }
 
   @override
   Future<void> write(String key, String value) async {
@@ -127,6 +131,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => networkOnline,
       isLocalReady: () async => true,
       isConnectivityFailure: (error) => error is SocketException,
@@ -178,6 +183,7 @@ void main() {
     final relay = HybridCheckpointRelay.android(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       connectivity: const HybridValidatedConnectivity(
         channel: connectivityChannel,
         platformOverride: TargetPlatform.android,
@@ -229,6 +235,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => networkOnline,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) => e is SocketException,
@@ -274,6 +281,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => online,
       isLocalReady: () async => true,
       isConnectivityFailure: (error) =>
@@ -314,6 +322,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => online,
       isLocalReady: () async => true,
       // Even a mistakenly permissive caller classifier cannot override an
@@ -350,6 +359,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => online,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) =>
@@ -422,6 +432,7 @@ void main() {
             );
           }),
           attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+          authorizeOwnerSession: (_, __) async => true,
           isNetworkAvailable: () async => false,
           isLocalReady: () async => true,
           isConnectivityFailure: (_) => false,
@@ -480,6 +491,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: journal,
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => false,
       isLocalReady: () async => true,
       isConnectivityFailure: (_) => false,
@@ -494,6 +506,83 @@ void main() {
     expect(inferenceCalls, 0);
     expect((await coordinator.resume(
       ownerId: owner, executionId: 'gallery'))?.nextCheckpoint, 1);
+  });
+
+  test('unauthorized owner/session cannot read protected execution data',
+      () async {
+    final backend = _Backend();
+    var modelCalls = 0;
+    final coordinator = _coordinator(backend, (request) async* {
+      modelCalls++;
+      yield InferenceResponse.finalChunk(text: 'never', tokensGenerated: 1);
+    });
+    await register(coordinator, steps: 1);
+    final protectedReadsBefore = backend.readCalls;
+    var authorizations = 0;
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (ownerId, sessionId) async {
+        authorizations++;
+        expect(ownerId, owner);
+        expect(sessionId, session);
+        return false;
+      },
+      isNetworkAvailable: () async => true,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: true,
+        authorizeCloudText: (_) async => true,
+        validateResult: (_, __) async => true,
+      ),
+      throwsStateError,
+    );
+    expect(authorizations, 1);
+    expect(backend.readCalls, protectedReadsBefore);
+    expect(modelCalls, 0);
+  });
+
+  test('owner/session revocation stops before a second checkpoint',
+      () async {
+    final backend = _Backend();
+    var modelCalls = 0;
+    var authorizationChecks = 0;
+    final coordinator = _coordinator(backend, (request) async* {
+      modelCalls++;
+      yield InferenceResponse.finalChunk(
+        text: 'finished $modelCalls', tokensGenerated: 2,
+      );
+    });
+    await register(coordinator, steps: 2);
+    final relay = HybridCheckpointRelay(
+      coordinator: coordinator,
+      attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => ++authorizationChecks <= 2,
+      isNetworkAvailable: () async => false,
+      isLocalReady: () async => true,
+      isConnectivityFailure: (_) => false,
+    );
+    await expectLater(
+      relay.run(
+        ownerId: owner, executionId: 'gallery', sessionId: session,
+        preferCloudAtStart: false,
+        validateResult: (_, output) async => output.startsWith('finished'),
+      ),
+      throwsStateError,
+    );
+    expect(authorizationChecks, 3);
+    expect(modelCalls, 1);
+    final restored = await coordinator.resume(
+      ownerId: owner, executionId: 'gallery',
+    );
+    expect(restored?.ledger.completedCount, 1);
+    expect(restored?.nextCheckpoint, 2);
+    expect(await HybridCheckpointAttemptJournal(backend: backend)
+        .pendingCheckpoint(ownerId: owner, executionId: 'gallery'), isNull);
   });
 
   test('Cloud consent denial never leaves a false pending intent', () async {
@@ -514,6 +603,7 @@ void main() {
         );
       }),
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => true,
       isLocalReady: () async => true,
       isConnectivityFailure: (_) => false,
@@ -564,6 +654,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: journal,
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => false,
       isLocalReady: () async => true,
       isConnectivityFailure: (_) => false,
@@ -596,6 +687,7 @@ void main() {
     HybridCheckpointRelay relay() => HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => true,
       isLocalReady: () async => true,
       isConnectivityFailure: (_) => false,
@@ -658,6 +750,7 @@ void main() {
     final finished = await HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => true,
       isLocalReady: () async => true,
       isConnectivityFailure: (_) => false,
@@ -685,6 +778,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => networkOnline,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) => e is SocketException,
@@ -722,6 +816,7 @@ void main() {
     final relay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => online,
       isLocalReady: () async => false,
       isConnectivityFailure: (e) => e is SocketException,
@@ -762,6 +857,7 @@ void main() {
     final firstRelay = HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => false,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) => e is SocketException,
@@ -787,6 +883,7 @@ void main() {
         );
       }),
       attemptJournal: HybridCheckpointAttemptJournal(backend: backend),
+      authorizeOwnerSession: (_, __) async => true,
       isNetworkAvailable: () async => true,
       isLocalReady: () async => true,
       isConnectivityFailure: (e) => e is SocketException,

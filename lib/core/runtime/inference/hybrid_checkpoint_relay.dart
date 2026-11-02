@@ -27,11 +27,14 @@ final class HybridCheckpointRelay {
   HybridCheckpointRelay({
     required HybridCheckpointExecutionCoordinator coordinator,
     required HybridCheckpointAttemptJournal attemptJournal,
+    required Future<bool> Function(String ownerId, String sessionId)
+        authorizeOwnerSession,
     required Future<bool> Function() isNetworkAvailable,
     required Future<bool> Function() isLocalReady,
     required bool Function(Object error) isConnectivityFailure,
   })  : _coordinator = coordinator,
         _attemptJournal = attemptJournal,
+        _authorizeOwnerSession = authorizeOwnerSession,
         _isNetworkAvailable = isNetworkAvailable,
         _isLocalReady = isLocalReady,
         _isConnectivityFailure = isConnectivityFailure;
@@ -44,6 +47,8 @@ final class HybridCheckpointRelay {
   factory HybridCheckpointRelay.android({
     required HybridCheckpointExecutionCoordinator coordinator,
     required HybridCheckpointAttemptJournal attemptJournal,
+    required Future<bool> Function(String ownerId, String sessionId)
+        authorizeOwnerSession,
     required Future<bool> Function() isLocalReady,
     required bool Function(Object error) isConnectivityFailure,
     HybridValidatedConnectivity? connectivity,
@@ -52,6 +57,7 @@ final class HybridCheckpointRelay {
     return HybridCheckpointRelay(
       coordinator: coordinator,
       attemptJournal: attemptJournal,
+      authorizeOwnerSession: authorizeOwnerSession,
       isNetworkAvailable: network.isNetworkAvailable,
       isLocalReady: isLocalReady,
       isConnectivityFailure: isConnectivityFailure,
@@ -60,6 +66,12 @@ final class HybridCheckpointRelay {
 
   final HybridCheckpointExecutionCoordinator _coordinator;
   final HybridCheckpointAttemptJournal _attemptJournal;
+
+  /// A trusted production adapter must validate the active authenticated
+  /// principal AND the right to access this session. Caller-provided ownerId
+  /// and secure-storage fingerprints are not user authentication.
+  final Future<bool> Function(String ownerId, String sessionId)
+      _authorizeOwnerSession;
   final Future<bool> Function() _isNetworkAvailable;
   final Future<bool> Function() _isLocalReady;
   final bool Function(Object error) _isConnectivityFailure;
@@ -134,6 +146,11 @@ final class HybridCheckpointRelay {
     Future<bool> Function(int checkpoint)? allowRetryAfterConnectionLoss,
     Future<bool> Function(int checkpoint)? allowRetryAfterUncertainRestart,
   }) async {
+    // Reject before reading protected plans, checkpoints or intent markers.
+    // A rejected caller must not learn whether an execution exists.
+    if (!await _authorizeOwnerSession(ownerId, sessionId)) {
+      throw StateError('HYBRID owner/session is not authorized');
+    }
     final restored = await _coordinator.resume(
       ownerId: ownerId,
       executionId: executionId,
@@ -175,6 +192,10 @@ final class HybridCheckpointRelay {
     HybridAttemptLease? lease;
 
     while (!operation.isComplete) {
+      // Revocation during a previous step must block any subsequent step.
+      if (!await _authorizeOwnerSession(ownerId, sessionId)) {
+        throw StateError('HYBRID owner/session authorization was revoked');
+      }
       if (keepRunning != null && !await keepRunning()) {
         // Do not start another checkpoint; the protected progress is retained.
         return operation;
@@ -245,6 +266,9 @@ final class HybridCheckpointRelay {
         }
         if (!await _isLocalReady()) {
           throw StateError('Cloud interrupted; Local model not ready');
+        }
+        if (!await _authorizeOwnerSession(ownerId, sessionId)) {
+          throw StateError('HYBRID owner/session authorization was revoked');
         }
         operation = (await _coordinator.resume(
           ownerId: ownerId,
