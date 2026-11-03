@@ -58,6 +58,9 @@ final class AssistantDurableMemoryCaptureService {
   // other through concurrent SQLite read-modify-write operations.
   Future<void> _pendingWrites = Future<void>.value();
   bool _resetInProgress = false;
+  // A two-step local confirmation, scoped to the chat that requested it.
+  // Only small subjects are retained transiently; no chat text is cached.
+  final Map<String, String> _pendingBroadForgetBySession = <String, String>{};
 
   /// Prevents in-flight memory capture from repopulating storage after reset.
   /// Used by the Danger Zone coordinator together with the semantic index
@@ -67,6 +70,7 @@ final class AssistantDurableMemoryCaptureService {
       throw StateError('Durable memory reset is already in progress.');
     }
     _resetInProgress = true;
+    _pendingBroadForgetBySession.clear();
     try {
       await _pendingWrites;
       return await operation();
@@ -363,6 +367,13 @@ final class AssistantDurableMemoryCaptureService {
     final confirmedTopic = _forgetAllConfirm.firstMatch(input)?.group(1);
     if (confirmedTopic != null) {
       final topic = confirmedTopic.trim();
+      final expected = _pendingBroadForgetBySession.remove(sessionId.trim());
+      if (expected == null ||
+          expected.toLowerCase() != topic.toLowerCase()) {
+        return const AssistantMemoryCommandResult(
+          AssistantMemoryCommandStatus.invalid,
+        );
+      }
       final removed = await _memoryService.removeExplicitUserFactsForTopic(
         scopeId: AssistantDurableMemoryContextService.localUserScopeId,
         topic: topic,
@@ -382,12 +393,28 @@ final class AssistantDurableMemoryCaptureService {
           AssistantMemoryCommandStatus.invalid,
         );
       }
+      final ownerSession = sessionId.trim();
+      if (ownerSession.isEmpty) {
+        return const AssistantMemoryCommandResult(
+          AssistantMemoryCommandStatus.invalid,
+        );
+      }
+      // Bound pending confirmations even if many chats are opened.
+      if (!_pendingBroadForgetBySession.containsKey(ownerSession) &&
+          _pendingBroadForgetBySession.length >= 16) {
+        _pendingBroadForgetBySession.remove(
+          _pendingBroadForgetBySession.keys.first,
+        );
+      }
+      _pendingBroadForgetBySession[ownerSession] = topic;
       return AssistantMemoryCommandResult(
         AssistantMemoryCommandStatus.confirmationRequired,
         topic: topic,
       );
     }
 
+    // A subsequent non-confirmation turn cancels a pending broad delete.
+    _pendingBroadForgetBySession.remove(sessionId.trim());
     var scope = AssistantMemoryScope.user;
     var scopeId = AssistantDurableMemoryContextService.localUserScopeId;
     final inChat = _saveInConversation.firstMatch(input);
