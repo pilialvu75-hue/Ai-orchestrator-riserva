@@ -191,6 +191,24 @@ void main() {
     expect(await userRecords(), isEmpty);
   });
 
+  test('natural memory questions are not hijacked as write commands',
+      () async {
+    for (final text in <String>[
+      'Ricorda quando ci siamo parlati?',
+      'Ricorda che cosa significa Aivexus?',
+      'Ricorda il budget',
+      'Come si chiama il mio amico?',
+    ]) {
+      final result = await capture.applyExplicitUserInstructionResult(
+        sessionId: 'chat',
+        userPrompt: text,
+      );
+      expect(result.status, AssistantMemoryCommandStatus.notInstruction,
+          reason: text);
+    }
+    expect(await userRecords(), isEmpty);
+  });
+
   test('narrow forget deletes only a relation, not other details of topic',
       () async {
     for (final fact in <String>[
