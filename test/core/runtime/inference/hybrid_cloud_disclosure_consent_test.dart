@@ -7,6 +7,7 @@ final class _ProtectedBackend implements HybridCloudConsentStorage {
   final Map<String, String> values = <String, String>{};
   bool failWrite = false;
   bool hideReadback = false;
+  int writeCount = 0;
 
   @override
   Future<String?> read(String key) async =>
@@ -15,6 +16,7 @@ final class _ProtectedBackend implements HybridCloudConsentStorage {
   @override
   Future<void> write(String key, String value) async {
     if (failWrite) throw StateError('OS-protected write failed');
+    writeCount++;
     values[key] = value;
   }
 
@@ -156,7 +158,7 @@ void main() {
       disclosure: disclosure(), requestConsent: approve,
     ), isTrue);
     expect(asks, 1);
-    expect(backend.values, hasLength(2));
+    expect(backend.values, hasLength(1));
     // Different text of the SAME explicitly allowed categories can proceed.
     expect(await consent.authorize(
       disclosure: disclosure(parts: const <HybridDisclosureSegment>[
@@ -302,6 +304,85 @@ void main() {
           decideAll(r, HybridCloudConsentChoice.allowOnce),
     ), isTrue);
     expect(backend.values, isEmpty);
+  });
+
+  test('two allowed categories persist in exactly one protected write',
+      () async {
+    final before = backend.writeCount;
+    expect(await consent.authorize(
+      disclosure: disclosure(),
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowAlways),
+    ), isTrue);
+    expect(backend.writeCount - before, 1);
+    expect(backend.values, hasLength(1));
+    expect(await consent.storedPreference(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+      scope: memory,
+    ), HybridCloudStoredConsent.allowAlways);
+  });
+
+  test('revocation by another instance invalidates an open review', () async {
+    final other = HybridCloudDisclosureConsent(
+      backend: backend,
+      authorizeOwnerSession: (ownerId, sessionId) async =>
+          ownerId == owner && sessionId == session,
+    );
+    final entered = Completer<void>();
+    final finished = Completer<void>();
+    final result = consent.authorize(
+      disclosure: disclosure(),
+      requestConsent: (r) async {
+        entered.complete();
+        await finished.future;
+        return decideAll(r, HybridCloudConsentChoice.allowAlways);
+      },
+    );
+    await entered.future;
+    await other.revoke(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+      scope: memory,
+    );
+    finished.complete();
+    expect(await result, isFalse);
+    expect(backend.values, isEmpty);
+  });
+
+  test('cross-instance category revocation does not erase other grants',
+      () async {
+    final other = HybridCloudDisclosureConsent(
+      backend: backend,
+      authorizeOwnerSession: (ownerId, sessionId) async =>
+          ownerId == owner && sessionId == session,
+    );
+    expect(await other.authorize(
+      disclosure: disclosure(),
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowAlways),
+    ), isTrue);
+    await consent.revoke(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential', scope: memory,
+    );
+    expect(await other.authorize(disclosure: disclosure()), isFalse);
+    expect(await other.storedPreference(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential', scope: question,
+    ), HybridCloudStoredConsent.allowAlways);
+  });
+
+  test('changed sensitivity of the same outbound text changes fingerprint',
+      () {
+    final a = disclosure(parts: const <HybridDisclosureSegment>[
+      HybridDisclosureSegment(text: 'same', scope: memory),
+    ]);
+    final b = disclosure(parts: const <HybridDisclosureSegment>[
+      HybridDisclosureSegment(text: 'same', scope: question),
+    ]);
+    expect(a.outboundText, b.outboundText);
+    expect(a.contentFingerprint, isNot(b.contentFingerprint));
   });
 
   test('revoking during an open dialog invalidates consent without deadlock',
