@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dar
 /// Keeping this deterministic avoids learning benchmark answers and hallucinated
 /// facts as permanent user preferences. More ambitious candidate extraction
 /// should use a separate, explicitly reviewed pipeline.
+
 /// Authoritative result of an explicit local memory instruction.
 /// This is application evidence, never a language-model assertion.
 enum AssistantMemoryCommandStatus {
@@ -455,7 +456,8 @@ final class AssistantDurableMemoryCaptureService {
       final subject = forget.group(1)!.trim();
       final assignment = _parseAssignment(subject);
       final key = assignment?.key ?? _keyFromSubject(subject);
-      if (key == null || subject.toLowerCase().startsWith('tutto ')) {
+      if (key == null || subject.toLowerCase() == 'tutto' ||
+          subject.toLowerCase().startsWith('tutto ')) {
         return const AssistantMemoryCommandResult(
           AssistantMemoryCommandStatus.invalid,
         );
