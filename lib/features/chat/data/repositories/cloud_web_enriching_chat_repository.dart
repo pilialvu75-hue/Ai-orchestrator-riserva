@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 import 'package:ai_orchestrator/core/tools/tool.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
+import 'package:ai_orchestrator/features/chat/domain/repositories/verified_memory_action_writer.dart';
 
 /// Adds fresh public web context to the Assistant's explicit Cloud route.
 ///
@@ -17,7 +18,7 @@ import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repositor
 ///
 /// Web access is best-effort: a timeout, missing connection or search failure
 /// never prevents the underlying Assistant request from continuing.
-final class CloudWebEnrichingChatRepository implements ChatRepository {
+final class CloudWebEnrichingChatRepository implements ChatRepository, VerifiedMemoryActionWriter {
   CloudWebEnrichingChatRepository({
     required ChatRepository delegate,
     required Tool webSearchTool,
@@ -33,14 +34,18 @@ final class CloudWebEnrichingChatRepository implements ChatRepository {
   final AiRuntimeMode Function() _runtimeMode;
 
   @override
-  Future<ChatMessage?> persistVerifiedMemoryAction({
+  Future<ChatMessage> persistVerifiedMemoryAction({
     required String sessionId,
     required String userPrompt,
     required String acknowledgement,
     void Function(String partialText)? onPartialResponse,
   }) {
     // Local memory writes/receipts must never be redirected to Cloud Web.
-    return _delegate.persistVerifiedMemoryAction(
+    final delegate = _delegate;
+    if (delegate is! VerifiedMemoryActionWriter) {
+      throw StateError('The chat backend cannot persist memory actions.');
+    }
+    return delegate.persistVerifiedMemoryAction(
       sessionId: sessionId,
       userPrompt: userPrompt,
       acknowledgement: acknowledgement,
