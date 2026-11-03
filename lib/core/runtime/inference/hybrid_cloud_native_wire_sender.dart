@@ -51,7 +51,8 @@ final class HybridCloudNativeWireSender {
         },
         trustedSend: (AiRequest approved) {
           final providerId = approved.providerId;
-          if (providerId != 'openAi' && providerId != 'gemini') {
+          if (providerId == null ||
+              (providerId != 'openAi' && providerId != 'gemini')) {
             throw StateError('Unsupported consent-gated Cloud provider');
           }
           if (providerId != seal.disclosure.providerId) {
