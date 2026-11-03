@@ -192,6 +192,18 @@ class AssistantDurableMemoryService {
     return _store.removeReviewedConfirmedUserMemory(reviewed: reviewed);
   }
 
+  /// Delete only explicit user-originated facts on a whole-token topic,
+  /// after the application has obtained an explicit broad-delete confirmation.
+  Future<int> removeExplicitUserFactsForTopic({
+    required String scopeId,
+    required String topic,
+  }) {
+    return _store.removeExplicitUserFactsForTopic(
+      scopeId: scopeId,
+      topic: topic,
+    );
+  }
+
   Future<bool> remove({
     required AssistantMemoryScope scope,
     required String scopeId,
