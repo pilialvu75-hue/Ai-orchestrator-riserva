@@ -550,6 +550,183 @@ void main() {
         throwsFormatException);
   });
 
+  test('dispatch permit starts one exact authorized Cloud request once',
+      () async {
+    final disclosureValue = disclosure();
+    final permit = await consent.authorizeForDispatch(
+      disclosure: disclosureValue,
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowOnce),
+    );
+    expect(permit, isNotNull);
+    expect(permit!.fingerprint, disclosureValue.contentFingerprint);
+    var calls = 0;
+    final answer = await consent.dispatchApproved<String>(
+      permit: permit,
+      currentDisclosure: disclosureValue,
+      isCurrentDestination: (provider, account) async =>
+          provider == 'gemini' && account == 'primary-credential',
+      trustedSend: (exact) async {
+        calls++;
+        expect(exact.outboundText, disclosureValue.outboundText);
+        return 'model-response';
+      },
+    );
+    expect(answer, 'model-response');
+    expect(calls, 1);
+    await expectLater(
+      consent.dispatchApproved<String>(
+        permit: permit,
+        currentDisclosure: disclosureValue,
+        isCurrentDestination: (_, __) async => true,
+        trustedSend: (_) async {
+          calls++;
+          return 'duplicate';
+        },
+      ),
+      throwsStateError,
+    );
+    expect(calls, 1);
+    expect(backend.values, isEmpty); // One-shot never becomes permanent.
+  });
+
+  test('modified prompt or classification cannot reuse a review',
+      () async {
+    final original = disclosure();
+    final permit = (await consent.authorizeForDispatch(
+      disclosure: original,
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowOnce),
+    ))!;
+    var calls = 0;
+    await expectLater(
+      consent.dispatchApproved<String>(
+        permit: permit,
+        currentDisclosure: disclosure(parts: const <HybridDisclosureSegment>[
+          HybridDisclosureSegment(
+            text: 'A different prompt', scope: question,
+          ),
+        ]),
+        isCurrentDestination: (_, __) async => true,
+        trustedSend: (_) async {
+          calls++;
+          return 'must-not-run';
+        },
+      ),
+      throwsStateError,
+    );
+    expect(calls, 0);
+    final newPermit = (await consent.authorizeForDispatch(
+      disclosure: original,
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowOnce),
+    ))!;
+    await expectLater(
+      consent.dispatchApproved<String>(
+        permit: newPermit,
+        currentDisclosure: disclosure(parts: const <HybridDisclosureSegment>[
+          HybridDisclosureSegment(
+            text: original.outboundText, scope: privateHistory,
+          ),
+        ]),
+        isCurrentDestination: (_, __) async => true,
+        trustedSend: (_) async {
+          calls++;
+          return 'must-not-run';
+        },
+      ),
+      throwsStateError,
+    );
+    expect(calls, 0);
+  });
+
+  test('provider or account switch after approval blocks network dispatch',
+      () async {
+    final original = disclosure();
+    final permit = (await consent.authorizeForDispatch(
+      disclosure: original,
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowOnce),
+    ))!;
+    var calls = 0;
+    await expectLater(
+      consent.dispatchApproved<String>(
+        permit: permit,
+        currentDisclosure: original,
+        isCurrentDestination: (provider, account) async =>
+            provider == 'openai' || account == 'other-credential',
+        trustedSend: (_) async {
+          calls++;
+          return 'must-not-run';
+        },
+      ),
+      throwsStateError,
+    );
+    expect(calls, 0);
+  });
+
+  test('revocation after approval invalidates a not-yet-used permit',
+      () async {
+    final original = disclosure();
+    final permit = (await consent.authorizeForDispatch(
+      disclosure: original,
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowOnce),
+    ))!;
+    await consent.revoke(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential', scope: memory,
+    );
+    var calls = 0;
+    await expectLater(
+      consent.dispatchApproved<String>(
+        permit: permit,
+        currentDisclosure: original,
+        isCurrentDestination: (_, __) async => true,
+        trustedSend: (_) async {
+          calls++;
+          return 'must-not-run';
+        },
+      ),
+      throwsStateError,
+    );
+    expect(calls, 0);
+  });
+
+  test('session revoked after review prevents final provider call',
+      () async {
+    final original = disclosure();
+    final permit = (await consent.authorizeForDispatch(
+      disclosure: original,
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowOnce),
+    ))!;
+    validSession = false;
+    var calls = 0;
+    await expectLater(
+      consent.dispatchApproved<String>(
+        permit: permit,
+        currentDisclosure: original,
+        isCurrentDestination: (_, __) async => true,
+        trustedSend: (_) async {
+          calls++;
+          return 'must-not-run';
+        },
+      ),
+      throwsStateError,
+    );
+    expect(calls, 0);
+  });
+
+  test('rejected review does not issue a Cloud dispatch permit', () async {
+    final permit = await consent.authorizeForDispatch(
+      disclosure: disclosure(),
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.denyOnce),
+    );
+    expect(permit, isNull);
+  });
+
   test('stored rules contain no actual personal prompt or memory text',
       () async {
     final outbound = disclosure();

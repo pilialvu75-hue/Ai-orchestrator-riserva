@@ -191,6 +191,35 @@ final class HybridCloudConsentReview {
   String get fingerprint => disclosure.contentFingerprint;
 }
 
+/// One-use, exact-payload permission issued only by the consent manager.
+///
+/// This object is not a credential, does not permit arbitrary prompts, and
+/// cannot be constructed by external Dart libraries. Its validity expires on
+/// owner/session revocation, provider/account change or content alteration.
+final class HybridCloudDispatchPermit {
+  HybridCloudDispatchPermit._({
+    required HybridCloudDisclosureConsent issuer,
+    required HybridCloudDisclosure approved,
+    required int revision,
+  })  : _issuer = issuer,
+        _approved = approved,
+        _revision = revision;
+
+  final HybridCloudDisclosureConsent _issuer;
+  final HybridCloudDisclosure _approved;
+  final int _revision;
+  bool _used = false;
+
+  String get fingerprint => _approved.contentFingerprint;
+}
+
+/// Allows the protected consent queue to be released as soon as the trusted
+/// sender has STARTED, rather than blocking revocation for network latency.
+final class _HybridCloudStartedRequest<T> {
+  const _HybridCloudStartedRequest(this.result);
+  final Future<T> result;
+}
+
 /// Opt-in, fail-closed consent contract for Cloud data disclosures.
 ///
 /// Preferences are per owner, provider, account, origin and sensitivity, persisted in
@@ -324,6 +353,107 @@ final class HybridCloudDisclosureConsent {
       }
       return approved && revision == (_epochs[familyKey] ?? 0);
     });
+  }
+
+  /// Obtain a dispatch permit for one exact, fully classified outbound
+  /// payload. The UI may suspend; no network request is started here.
+  ///
+  /// Unlike a plain bool from [authorize], the permit can be consumed once
+  /// only, and is invalidated by same-isolate settings revocation.
+  Future<HybridCloudDispatchPermit?> authorizeForDispatch({
+    required HybridCloudDisclosure disclosure,
+    Future<Map<HybridDisclosureScope, HybridCloudConsentChoice>> Function(
+      HybridCloudConsentReview review,
+    )? requestConsent,
+  }) async {
+    final familyKey = _key(
+      disclosure.ownerId, disclosure.providerId, disclosure.accountId,
+    );
+    final revision = _epochs[familyKey] ?? 0;
+    final approved = await authorize(
+      disclosure: disclosure,
+      requestConsent: requestConsent,
+    );
+    if (!approved || revision != (_epochs[familyKey] ?? 0)) {
+      return null;
+    }
+    return HybridCloudDispatchPermit._(
+      issuer: this,
+      approved: disclosure,
+      revision: revision,
+    );
+  }
+
+  /// FINAL opt-in check immediately before a trusted network sender starts.
+  ///
+  /// The sender receives ONLY the exact reviewed disclosure. Its adapter must
+  /// construct the actual HTTP/provider request faithfully, including system
+  /// instructions, chat history, RAG excerpts, tool results and attachments.
+  /// Never pass a sender that silently adds context after this check.
+  ///
+  /// The destination callback must consult the CURRENT selected credential,
+  /// not the label carried by the review. This API remains unconnected to
+  /// production Chat/Cloud transport until a trusted assembler and authenticated
+  /// provider/account selector exist.
+  Future<T> dispatchApproved<T>({
+    required HybridCloudDispatchPermit permit,
+    required HybridCloudDisclosure currentDisclosure,
+    required Future<bool> Function(String providerId, String accountId)
+        isCurrentDestination,
+    required Future<T> Function(HybridCloudDisclosure exactDisclosure)
+        trustedSend,
+  }) async {
+    final started = await _serialize<_HybridCloudStartedRequest<T>>(() async {
+      // Burn immediately, including on mismatch or provider failure.
+      // A review can NEVER be replayed with a second provider request.
+      if (permit._used) {
+        throw StateError('HYBRID Cloud consent permit was already consumed');
+      }
+      permit._used = true;
+      if (!identical(permit._issuer, this) ||
+          permit._approved.contentFingerprint !=
+              currentDisclosure.contentFingerprint) {
+        throw StateError('HYBRID Cloud disclosure changed after consent');
+      }
+
+      final approved = permit._approved;
+      final familyKey = _key(
+        approved.ownerId, approved.providerId, approved.accountId,
+      );
+      if (permit._revision != (_epochs[familyKey] ?? 0)) {
+        throw StateError('HYBRID Cloud consent revoked before dispatch');
+      }
+      if (!await _authorizeOwnerSession(
+        approved.ownerId, approved.sessionId,
+      )) {
+        throw StateError('HYBRID owner/session revoked before dispatch');
+      }
+      if (!await isCurrentDestination(
+        approved.providerId, approved.accountId,
+      )) {
+        throw StateError('HYBRID Cloud destination changed after consent');
+      }
+      // The callbacks may yield; check revocation AGAIN without yielding
+      // between the final checks and invocation of the trusted sender.
+      if (permit._revision != (_epochs[familyKey] ?? 0)) {
+        throw StateError('HYBRID Cloud consent revoked before dispatch');
+      }
+      for (final scope in approved.scopes) {
+        if (await _readRule(
+          approved.ownerId, approved.providerId, approved.accountId, scope,
+        ) == HybridCloudStoredConsent.neverShare) {
+          throw StateError('HYBRID Cloud category is no longer shareable');
+        }
+      }
+      if (permit._revision != (_epochs[familyKey] ?? 0)) {
+        throw StateError('HYBRID Cloud consent revoked before dispatch');
+      }
+
+      // Start while holding the same-isolate consent queue; return a wrapper
+      // rather than awaiting the network Future inside the queue.
+      return _HybridCloudStartedRequest<T>(trustedSend(approved));
+    });
+    return started.result;
   }
 
   /// Used by a settings/consent-management UI. Explicit user action only.
