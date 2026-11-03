@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.d
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
+import 'package:ai_orchestrator/features/chat/domain/repositories/verified_memory_action_writer.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -311,7 +312,8 @@ void main() {
         sessionId: 'qwen-session',
         userPrompt: 'Ricorda che il numero di prova è 731',
       );
-      expect(qwenRuntime.lastSystemPrompt, contains('numero di prova è 731'));
+      expect(qwenRuntime.lastVerifiedAcknowledgement,
+          contains('Ho salvato il ricordo'));
 
       // A new repository, memory service and chat session simulate a model
       // switch or an app restart. Only storage is shared, not model state.
@@ -513,6 +515,112 @@ void main() {
       expect(phiRuntime.lastSystemPrompt, contains('il budget è 420'));
     });
 
+    test('memory save/forget reports SQLite result without calling a model',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final disk = _PromptMemoryPersistence();
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: disk),
+      );
+      final runtime = _RecordingChatRepository();
+      final repo = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
+        delegate: runtime,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: AssistantDurableMemoryCaptureService(
+          memoryService: memory,
+          now: () => 100,
+        ),
+      );
+
+      final saved = await repo.sendMessage(
+        sessionId: 'original',
+        userPrompt: 'Ricorda che il colore della prova Aivexus è verde',
+      );
+      expect(saved.provider, 'local_memory');
+      expect(saved.content, contains('Ho salvato il ricordo'));
+      expect(runtime.modelCalls, 0);
+      expect(runtime.verifiedMemoryCalls, 1);
+
+      final forgotten = await repo.sendMessage(
+        sessionId: 'original',
+        userPrompt: 'Dimentica il colore della prova Aivexus',
+      );
+      expect(forgotten.provider, 'local_memory');
+      expect(forgotten.content, contains('Ho eliminato il ricordo'));
+      expect(runtime.modelCalls, 0);
+      expect(await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ), isEmpty);
+
+      final notFound = await repo.sendMessage(
+        sessionId: 'original',
+        userPrompt: 'Dimentica il colore della prova Aivexus',
+      );
+      expect(notFound.content, contains('Non ho trovato ricordi'));
+      expect(runtime.modelCalls, 0);
+
+      await repo.sendMessage(
+        sessionId: 'other-chat',
+        userPrompt: 'Spiegami la fotosintesi.',
+      );
+      expect(runtime.modelCalls, 1);
+    });
+
+    test('broad forget asks confirmation and does not invoke AI',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final disk = _PromptMemoryPersistence();
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(persistence: disk),
+      );
+      final runtime = _RecordingChatRepository();
+      final repo = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
+        delegate: runtime,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: AssistantDurableMemoryCaptureService(
+          memoryService: memory,
+          now: () => 101,
+        ),
+      );
+      for (final prompt in <String>[
+        'Ricorda che il colore della prova Aivexus è verde',
+        'Ricorda che la data della prova Aivexus è domani',
+        'Ricorda che il colore del test separato è blu',
+      ]) {
+        await repo.sendMessage(sessionId: 'chat-a', userPrompt: prompt);
+      }
+      final request = await repo.sendMessage(
+        sessionId: 'chat-a',
+        userPrompt: 'Dimentica tutto sulla prova Aivexus',
+      );
+      expect(request.content, contains('Confermo: dimentica tutto su prova Aivexus'));
+      expect(await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ), hasLength(3));
+      final confirmation = await repo.sendMessage(
+        sessionId: 'chat-a',
+        userPrompt: 'Confermo: dimentica tutto su prova Aivexus',
+      );
+      expect(confirmation.content, contains('2 ricordi espliciti'));
+      expect(runtime.modelCalls, 0);
+      final remaining = await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      );
+      expect(remaining, hasLength(1));
+      expect(remaining.single.content, contains('test separato'));
+    });
+
     test('specialized Assistant requests cannot create durable user facts',
         () async {
       final fixture = await createService(const <String, Object>{});
@@ -615,8 +723,31 @@ void main() {
   });
 }
 
-class _RecordingChatRepository implements ChatRepository {
+class _RecordingChatRepository implements ChatRepository, VerifiedMemoryActionWriter {
   String? lastSystemPrompt;
+  String? lastVerifiedAcknowledgement;
+  int modelCalls = 0;
+  int verifiedMemoryCalls = 0;
+
+  @override
+  Future<ChatMessage> persistVerifiedMemoryAction({
+    required String sessionId,
+    required String userPrompt,
+    required String acknowledgement,
+    void Function(String partialText)? onPartialResponse,
+  }) async {
+    verifiedMemoryCalls++;
+    lastVerifiedAcknowledgement = acknowledgement;
+    onPartialResponse?.call(acknowledgement);
+    return ChatMessage(
+      id: 'verified-$verifiedMemoryCalls',
+      sessionId: sessionId,
+      role: 'assistant',
+      content: acknowledgement,
+      timestamp: verifiedMemoryCalls,
+      provider: 'local_memory',
+    );
+  }
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) async =>
@@ -631,6 +762,7 @@ class _RecordingChatRepository implements ChatRepository {
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) async {
+    modelCalls++;
     lastSystemPrompt = systemPrompt;
     return ChatMessage(
       id: 'assistant-1',

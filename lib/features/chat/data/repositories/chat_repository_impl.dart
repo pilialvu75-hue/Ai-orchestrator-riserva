@@ -19,6 +19,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
+import 'package:ai_orchestrator/features/chat/domain/repositories/verified_memory_action_writer.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
@@ -28,7 +29,7 @@ import 'package:ai_orchestrator/features/chat/data/services/chat_file_context_se
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
-class ChatRepositoryImpl implements ChatRepository {
+class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
   static const _logTag = 'CHAT_PIPELINE';
 
   ChatRepositoryImpl({
@@ -69,6 +70,64 @@ class ChatRepositoryImpl implements ChatRepository {
   final Map<String, StreamSubscription<InferenceResponse>>
       _activeInferenceSubscriptions =
       <String, StreamSubscription<InferenceResponse>>{};
+
+  @override
+  Future<ChatMessage> persistVerifiedMemoryAction({
+    required String sessionId,
+    required String userPrompt,
+    required String acknowledgement,
+    void Function(String partialText)? onPartialResponse,
+  }) async {
+    if (!_activeSendSessions.add(sessionId)) {
+      throw const ServerFailure(
+        'A response is already in progress for this session.',
+      );
+    }
+    try {
+      // The Assistant, not the LLM, owns the result of a local SQLite write.
+      // Both turns enter normal chat history so switching conversations keeps
+      // the user's instruction and its *real* acknowledgement.
+      final user = ChatMessageModel(
+        id: _uuid.v4(),
+        sessionId: sessionId,
+        role: 'user',
+        content: userPrompt.trim(),
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+      );
+      await localDataSource.insertMessage(user);
+      await conversationMemoryService.storeMessageEmbedding(
+        sessionId: sessionId,
+        messageId: user.id,
+        role: user.role,
+        content: user.content,
+        timestamp: user.timestamp,
+      );
+
+      final response = ChatMessageModel(
+        id: _uuid.v4(),
+        sessionId: sessionId,
+        role: 'assistant',
+        content: acknowledgement,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        provider: 'local_memory',
+      );
+      await localDataSource.insertMessage(response);
+      await conversationMemoryService.storeMessageEmbedding(
+        sessionId: sessionId,
+        messageId: response.id,
+        role: response.role,
+        content: response.content,
+        timestamp: response.timestamp,
+      );
+      onPartialResponse?.call(response.content);
+      RuntimeEventLog.instance.emit(
+        '[ASSISTANT_MEMORY_ACTION] result=verified_local_response',
+      );
+      return response;
+    } finally {
+      _activeSendSessions.remove(sessionId);
+    }
+  }
 
   @override
   Future<List<ChatMessage>> getMessages(String sessionId) async {
