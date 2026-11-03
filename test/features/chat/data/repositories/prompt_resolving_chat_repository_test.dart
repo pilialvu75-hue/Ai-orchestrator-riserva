@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.d
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/prompt_resolving_chat_repository.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
+import 'package:ai_orchestrator/features/chat/domain/repositories/verified_memory_action_writer.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -722,14 +723,14 @@ void main() {
   });
 }
 
-class _RecordingChatRepository implements ChatRepository {
+class _RecordingChatRepository implements ChatRepository, VerifiedMemoryActionWriter {
   String? lastSystemPrompt;
   String? lastVerifiedAcknowledgement;
   int modelCalls = 0;
   int verifiedMemoryCalls = 0;
 
   @override
-  Future<ChatMessage?> persistVerifiedMemoryAction({
+  Future<ChatMessage> persistVerifiedMemoryAction({
     required String sessionId,
     required String userPrompt,
     required String acknowledgement,
