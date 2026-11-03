@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/i_chat_repository.dart';
 
 export '../../../../core/orchestrator/state_engine/i_chat_repository.dart';
