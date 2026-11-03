@@ -191,6 +191,139 @@ void main() {
     expect(await userRecords(), isEmpty);
   });
 
+  test('narrow forget deletes only a relation, not other details of topic',
+      () async {
+    for (final fact in <String>[
+      'Ricorda che il colore della prova Aivexus è verde',
+      'Ricorda che la data della prova Aivexus è domani',
+      'Ricorda che il nome del test è alfa',
+    ]) {
+      expect(await capture.applyExplicitUserInstruction(
+        sessionId: 'test-chat', userPrompt: fact), isTrue);
+    }
+
+    final result = await capture.applyExplicitUserInstructionResult(
+      sessionId: 'test-chat',
+      userPrompt: 'Dimentica il colore della prova Aivexus',
+    );
+    expect(result.status, AssistantMemoryCommandStatus.forgotten);
+    final records = await userRecords();
+    expect(records, hasLength(2));
+    expect(records.any((record) => record.content.contains('colore')), isFalse);
+    expect(records.any((record) => record.content.contains('data')), isTrue);
+    expect(records.any((record) => record.content.contains('nome')), isTrue);
+
+    final repeated = await capture.applyExplicitUserInstructionResult(
+      sessionId: 'test-chat',
+      userPrompt: 'Dimentica il colore della prova Aivexus',
+    );
+    expect(repeated.status, AssistantMemoryCommandStatus.notFound);
+    expect(await userRecords(), hasLength(2));
+  });
+
+  test('forget everything on a topic requires same-chat confirmation',
+      () async {
+    for (final fact in <String>[
+      'Ricorda che il colore della prova Aivexus è verde',
+      'Ricorda che la data della prova Aivexus è domani',
+      'Ricorda che la prova Aivexus2 è un controllo separato',
+      'Ricorda che il nome del test è alfa',
+    ]) {
+      expect(await capture.applyExplicitUserInstruction(
+        sessionId: 'original', userPrompt: fact), isTrue);
+    }
+
+    const confirm = 'Confermo: dimentica tutto su prova Aivexus';
+    var result = await capture.applyExplicitUserInstructionResult(
+      sessionId: 'original', userPrompt: confirm);
+    expect(result.status, AssistantMemoryCommandStatus.invalid);
+    expect(await userRecords(), hasLength(4));
+
+    result = await capture.applyExplicitUserInstructionResult(
+      sessionId: 'original',
+      userPrompt: 'Dimentica tutto sulla prova Aivexus',
+    );
+    expect(result.status, AssistantMemoryCommandStatus.confirmationRequired);
+    expect(result.topic, 'prova Aivexus');
+    expect(await userRecords(), hasLength(4));
+
+    result = await capture.applyExplicitUserInstructionResult(
+      sessionId: 'another-chat', userPrompt: confirm);
+    expect(result.status, AssistantMemoryCommandStatus.invalid);
+    expect(await userRecords(), hasLength(4));
+
+    result = await capture.applyExplicitUserInstructionResult(
+      sessionId: 'original', userPrompt: confirm);
+    expect(result.status, AssistantMemoryCommandStatus.topicForgotten);
+    expect(result.count, 2);
+    final records = await userRecords();
+    expect(records, hasLength(2));
+    expect(records.any((record) => record.content.contains('Aivexus2')), isTrue);
+    expect(records.any((record) => record.content.contains('test')), isTrue);
+  });
+
+  test('broad forget does not erase protected non-explicit knowledge',
+      () async {
+    expect(await capture.applyExplicitUserInstruction(
+      sessionId: 'original',
+      userPrompt: 'Ricorda che il colore della prova Aivexus è verde',
+    ), isTrue);
+    await memory.recordConfirmed(
+      recordKey: 'procedure.prova_aivexus',
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      kind: AssistantMemoryKind.procedure,
+      content: 'Procedura prova Aivexus verificata con test.',
+      source: AssistantMemorySource.verifiedTest,
+      updatedAt: 40,
+    );
+    await memory.recordConfirmed(
+      recordKey: 'project.prova_aivexus',
+      scope: AssistantMemoryScope.project,
+      scopeId: 'project-A',
+      kind: AssistantMemoryKind.fact,
+      content: 'Progetto prova Aivexus',
+      source: AssistantMemorySource.projectEvent,
+      updatedAt: 40,
+    );
+
+    await capture.applyExplicitUserInstructionResult(
+      sessionId: 'original',
+      userPrompt: 'Dimentica tutto sulla prova Aivexus',
+    );
+    final result = await capture.applyExplicitUserInstructionResult(
+      sessionId: 'original',
+      userPrompt: 'Confermo: dimentica tutto su prova Aivexus',
+    );
+    expect(result.count, 1);
+    expect((await userRecords()).single.kind, AssistantMemoryKind.procedure);
+    expect(await memory.loadConfirmed(
+      scope: AssistantMemoryScope.project,
+      scopeId: 'project-A',
+    ), hasLength(1));
+  });
+
+  test('unrelated message invalidates pending broad delete', () async {
+    await capture.applyExplicitUserInstruction(
+      sessionId: 'test-chat',
+      userPrompt: 'Ricorda che il colore della prova Aivexus è verde',
+    );
+    await capture.applyExplicitUserInstructionResult(
+      sessionId: 'test-chat',
+      userPrompt: 'Dimentica tutto sulla prova Aivexus',
+    );
+    await capture.applyExplicitUserInstructionResult(
+      sessionId: 'test-chat',
+      userPrompt: 'Parliamo di altro.',
+    );
+    final result = await capture.applyExplicitUserInstructionResult(
+      sessionId: 'test-chat',
+      userPrompt: 'Confermo: dimentica tutto su prova Aivexus',
+    );
+    expect(result.status, AssistantMemoryCommandStatus.invalid);
+    expect(await userRecords(), hasLength(1));
+  });
+
   test('concurrent updates are serialized in their arrival order', () async {
     final updates = <Future<bool>>[
       capture.applyExplicitUserInstruction(
