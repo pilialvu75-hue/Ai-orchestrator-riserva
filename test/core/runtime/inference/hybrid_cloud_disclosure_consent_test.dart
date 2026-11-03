@@ -624,7 +624,7 @@ void main() {
     await expectLater(
       consent.dispatchApproved<String>(
         permit: newPermit,
-        currentDisclosure: disclosure(parts: const <HybridDisclosureSegment>[
+        currentDisclosure: disclosure(parts: <HybridDisclosureSegment>[
           HybridDisclosureSegment(
             text: original.outboundText, scope: privateHistory,
           ),
