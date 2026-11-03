@@ -333,6 +333,151 @@ class AssistantDurableMemoryStore {
     });
   }
 
+  /// Forget only explicit local-user facts whose canonical subject contains
+  /// the complete requested topic. Does not wipe project, session, imported
+  /// or independently verified knowledge.
+  ///
+  /// Requires explicit confirmation at the capture layer and uses the same
+  /// scope write lock as single-key updates.
+  Future<int> removeExplicitUserFactsForTopic({
+    required String scopeId,
+    required String topic,
+  }) async {
+    final owner = scopeId.trim();
+    final needle = topic
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9à-öø-ÿ]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+    AssistantMemoryScope scope,
+    String scopeId,
+    List<AssistantDurableMemoryRecord> records,
+  ) {
+    final payload = jsonEncode(
+      records
+          .take(AssistantDurableMemoryPolicy.maxRecordsPerScope)
+          .map((item) => item.toJson())
+          .toList(growable: false),
+    );
+    return _persistence.write(_storageKey(scope, scopeId), payload);
+  }
+
+  AssistantDurableMemoryRecord _validateAndNormalize(
+    AssistantDurableMemoryRecord record,
+  ) {
+    final key = record.recordKey.trim();
+    final scopeId = record.scopeId.trim();
+    final content = record.content.trim();
+    final before = _nullableTrim(record.before);
+    final after = _nullableTrim(record.after);
+    final reason = _nullableTrim(record.reason);
+
+    _requireBounded('recordKey', key, AssistantDurableMemoryPolicy.maxKeyChars);
+    _requireBounded(
+      'scopeId',
+      scopeId,
+      AssistantDurableMemoryPolicy.maxScopeIdChars,
+    );
+    _requireBounded(
+      'content',
+      content,
+      AssistantDurableMemoryPolicy.maxContentChars,
+    );
+    _requireOptionalBounded('before', before);
+    _requireOptionalBounded('after', after);
+    _requireOptionalBounded('reason', reason);
+
+    if (record.updatedAt < 0) {
+      throw ArgumentError.value(record.updatedAt, 'updatedAt');
+    }
+    if (record.status == AssistantMemoryStatus.confirmed &&
+        (record.source == AssistantMemorySource.modelCandidate ||
+         record.source == AssistantMemorySource.userStatement)) {
+      throw ArgumentError(
+        'Tentative/model memories cannot be persisted as confirmed.',
+      );
+    }
+    // Reusable procedures are trusted only after a reproducible test.
+    // A confident model response or unverified user statement is not proof.
+    if (record.kind == AssistantMemoryKind.procedure &&
+        record.status == AssistantMemoryStatus.confirmed &&
+        record.source != AssistantMemorySource.verifiedTest) {
+      throw ArgumentError(
+        'Confirmed reusable procedures require a verified test.',
+      );
+    }
+
+    return AssistantDurableMemoryRecord(
+      recordKey: key,
+      scope: record.scope,
+      scopeId: scopeId,
+      kind: record.kind,
+      content: content,
+      source: record.source,
+      updatedAt: record.updatedAt,
+      status: record.status,
+      before: before,
+      after: after,
+      reason: reason,
+    );
+  }
+
+  void _requireBounded(String name, String value, int maxChars) {
+    if (value.isEmpty || value.length > maxChars) {
+      throw ArgumentError.value(value, name, 'must be 1..$maxChars chars');
+    }
+  }
+
+  void _requireOptionalBounded(String name, String? value) {
+    if (value != null &&
+        value.length > AssistantDurableMemoryPolicy.maxTransitionFieldChars) {
+      throw ArgumentError.value(
+        value,
+        name,
+        'must be <= ${AssistantDurableMemoryPolicy.maxTransitionFieldChars} chars',
+      );
+    }
+  }
+
+  String? _nullableTrim(String? value) {
+    final trimmed = value?.trim();
+    return trimmed == null || trimmed.isEmpty ? null : trimmed;
+  }
+
+  String _storageKey(AssistantMemoryScope scope, String scopeId) =>
+      '$storagePrefix${scope.name}:${Uri.encodeComponent(scopeId)}';
+}
+), '');
+    if (owner.isEmpty || needle.length < 6 || needle.length > 100) {
+      return 0;
+    }
+
+    return _withScopeWriteLock(AssistantMemoryScope.user, owner, () async {
+      final records = await load(
+        scope: AssistantMemoryScope.user,
+        scopeId: owner,
+        confirmedOnly: false,
+      );
+      bool matches(AssistantDurableMemoryRecord record) {
+        if (record.scope != AssistantMemoryScope.user ||
+            record.source != AssistantMemorySource.userExplicit ||
+            !record.recordKey.startsWith('explicit.')) {
+          return false;
+        }
+        final key = record.recordKey.substring('explicit.'.length);
+        // Whole tokens: "prova Aivexus" must not match "prova Aivexus2".
+        return key == needle ||
+            key.startsWith('${needle}_') ||
+            key.endsWith('_$needle') ||
+            key.contains('_${needle}_');
+      }
+
+      final next = records.where((record) => !matches(record)).toList();
+      final removed = records.length - next.length;
+      if (removed == 0) return 0;
+      await _write(AssistantMemoryScope.user, owner, next);
+      return removed;
+    });
+  }
+
   Future<void> _write(
     AssistantMemoryScope scope,
     String scopeId,
