@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
+import 'package:ai_orchestrator/features/chat/domain/repositories/verified_memory_action_writer.dart';
 
 /// Thin decorator that keeps Assistant prompt preference resolution outside the
 /// persistence/runtime implementation.
@@ -15,7 +16,7 @@ import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repositor
 /// All chat behavior is delegated unchanged except [sendMessage], where the
 /// ordinary Assistant prompt marker is replaced with the user's configured
 /// prompt before Local/Cloud routing begins.
-class PromptResolvingChatRepository implements ChatRepository {
+class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryActionWriter {
   const PromptResolvingChatRepository({
     required ChatRepository delegate,
     required AssistantSystemPromptService systemPromptService,
@@ -35,6 +36,52 @@ class PromptResolvingChatRepository implements ChatRepository {
   final AssistantDurableMemoryCaptureService? _durableMemoryCaptureService;
 
   @override
+  Future<ChatMessage> persistVerifiedMemoryAction({
+    required String sessionId,
+    required String userPrompt,
+    required String acknowledgement,
+    void Function(String partialText)? onPartialResponse,
+  }) {
+    final delegate = _delegate;
+    if (delegate is! VerifiedMemoryActionWriter) {
+      throw StateError('The chat backend cannot persist memory actions.');
+    }
+    return (delegate as VerifiedMemoryActionWriter).persistVerifiedMemoryAction(
+      sessionId: sessionId,
+      userPrompt: userPrompt,
+      acknowledgement: acknowledgement,
+      onPartialResponse: onPartialResponse,
+    );
+  }
+
+  String _memoryAcknowledgement(AssistantMemoryCommandResult result) {
+    return switch (result.status) {
+      AssistantMemoryCommandStatus.saved =>
+        'Ho salvato il ricordo nella memoria locale di Aivexus.',
+      AssistantMemoryCommandStatus.forgotten =>
+        'Ho eliminato il ricordo richiesto dalla memoria locale di Aivexus. '
+            'La cronologia delle chat non è stata cancellata.',
+      AssistantMemoryCommandStatus.notFound =>
+        'Non ho trovato ricordi espliciti corrispondenti nella memoria locale. '
+            'Non ho cancellato altri dati.',
+      AssistantMemoryCommandStatus.confirmationRequired =>
+        'Per cancellare tutti i ricordi espliciti locali su questo argomento, '
+            'invia: "Confermo: dimentica tutto su ${result.topic}". '
+            'Le chat e le altre conoscenze resteranno intatte.',
+      AssistantMemoryCommandStatus.topicForgotten =>
+        'Ho eliminato ${result.count} ricordi espliciti locali relativi '
+            'all’argomento richiesto. Non ho cancellato chat o progetti.',
+      AssistantMemoryCommandStatus.invalid =>
+        'Non ho modificato la memoria: la richiesta non è valida '
+            'o non è riconosciuta come istruzione di memoria.',
+      AssistantMemoryCommandStatus.blocked =>
+        'La memoria locale è temporaneamente indisponibile: '
+            'non posso confermare modifiche.',
+      AssistantMemoryCommandStatus.notInstruction => '',
+    };
+  }
+
+  @override
   Future<List<ChatMessage>> getMessages(String sessionId) =>
       _delegate.getMessages(sessionId);
 
@@ -49,33 +96,34 @@ class PromptResolvingChatRepository implements ChatRepository {
   }) async {
     final isOrdinary =
         _systemPromptService.isOrdinaryAssistantRequest(systemPrompt);
-    // Only the direct user's ordinary chat input is eligible. Attachments,
-    // specialized workers and retrieved web content never seed user memory.
+    // The app's local memory service is the authoritative writer.
+    // An explicit instruction receives a real, persisted acknowledgement,
+    // without asking any Local/Hybrid/Cloud model to hallucinate the result.
     if (isOrdinary &&
         attachments.isEmpty &&
         _durableMemoryCaptureService != null) {
+      final AssistantMemoryCommandResult result;
       try {
-        final updated = await _durableMemoryCaptureService
-            .applyExplicitUserInstruction(
+        result = await _durableMemoryCaptureService
+            .applyExplicitUserInstructionResult(
           sessionId: sessionId,
           userPrompt: userPrompt,
         );
-        if (updated) {
-          onRuntimeNotice?.call('Long-term Assistant memory updated.');
-        } else if (RegExp(
-          r'^(?:ricorda|memorizza|remember that|dimentica|forget)\b',
-          caseSensitive: false,
-        ).hasMatch(userPrompt.trim())) {
-          // Avoid making the model's conversational acknowledgement look like
-          // proof that an unsupported or rejected fact was actually saved.
-          onRuntimeNotice?.call(
-            'Long-term memory unchanged. To save a fact, use: '
-            'Ricorda che [soggetto] è [valore].',
-          );
-        }
       } catch (_) {
-        // A local memory storage failure must not break chat inference.
-        onRuntimeNotice?.call('Long-term memory could not be updated.');
+        // No model may claim the operation succeeded after a storage failure.
+        onRuntimeNotice?.call(
+          'Non è stato possibile verificare la modifica della memoria locale.',
+        );
+        rethrow;
+      }
+
+      if (result.isInstruction) {
+        return persistVerifiedMemoryAction(
+          sessionId: sessionId,
+          userPrompt: userPrompt,
+          acknowledgement: _memoryAcknowledgement(result),
+          onPartialResponse: onPartialResponse,
+        );
       }
     }
 

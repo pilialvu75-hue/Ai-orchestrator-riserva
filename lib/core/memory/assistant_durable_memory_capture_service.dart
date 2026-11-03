@@ -11,6 +11,40 @@ import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dar
 /// Keeping this deterministic avoids learning benchmark answers and hallucinated
 /// facts as permanent user preferences. More ambitious candidate extraction
 /// should use a separate, explicitly reviewed pipeline.
+
+/// Authoritative result of an explicit local memory instruction.
+/// This is application evidence, never a language-model assertion.
+enum AssistantMemoryCommandStatus {
+  notInstruction,
+  saved,
+  forgotten,
+  notFound,
+  confirmationRequired,
+  topicForgotten,
+  invalid,
+  blocked,
+}
+
+class AssistantMemoryCommandResult {
+  const AssistantMemoryCommandResult(
+    this.status, {
+    this.topic,
+    this.count = 0,
+  });
+
+  final AssistantMemoryCommandStatus status;
+  final String? topic;
+  final int count;
+
+  bool get isInstruction =>
+      status != AssistantMemoryCommandStatus.notInstruction;
+
+  bool get changed =>
+      status == AssistantMemoryCommandStatus.saved ||
+      status == AssistantMemoryCommandStatus.forgotten ||
+      status == AssistantMemoryCommandStatus.topicForgotten;
+}
+
 final class AssistantDurableMemoryCaptureService {
   AssistantDurableMemoryCaptureService({
     required AssistantDurableMemoryService memoryService,
@@ -25,6 +59,9 @@ final class AssistantDurableMemoryCaptureService {
   // other through concurrent SQLite read-modify-write operations.
   Future<void> _pendingWrites = Future<void>.value();
   bool _resetInProgress = false;
+  // A two-step local confirmation, scoped to the chat that requested it.
+  // Only small subjects are retained transiently; no chat text is cached.
+  final Map<String, String> _pendingBroadForgetBySession = <String, String>{};
 
   /// Prevents in-flight memory capture from repopulating storage after reset.
   /// Used by the Danger Zone coordinator together with the semantic index
@@ -34,6 +71,7 @@ final class AssistantDurableMemoryCaptureService {
       throw StateError('Durable memory reset is already in progress.');
     }
     _resetInProgress = true;
+    _pendingBroadForgetBySession.clear();
     try {
       await _pendingWrites;
       return await operation();
@@ -58,6 +96,29 @@ final class AssistantDurableMemoryCaptureService {
     r'^(?:dimentica|forget)\s+(.+)$',
     caseSensitive: false,
   );
+  // Broad deletion requires a second, unmistakable explicit instruction.
+  // No broad delete is performed by the unconfirmed form.
+  static final RegExp _forgetAllConfirm = RegExp(
+    r'^confermo\s*:\s*dimentica tutto (?:su|sul|sulla|sui|sulle)\s+(.+?)[.!]?$',
+    caseSensitive: false,
+  );
+  static final RegExp _forgetAll = RegExp(
+    r'^dimentica tutto (?:su|sul|sulla|sui|sulle)\s+(.+?)[.!]?$',
+    caseSensitive: false,
+  );
+
+  static bool looksLikeInstruction(String input) => RegExp(
+    r'^(?:ricorda|memorizza|remember that|dimentica|forget|confermo\s*:)',
+    caseSensitive: false,
+  ).hasMatch(input.trim());
+
+  // A conversational recollection question must still reach the language
+  // model, not be treated as an attempt to save a new fact.
+  static final RegExp _explicitSavePrefix = RegExp(
+    r'^(?:ricorda che|ricorda in questa chat che|ricorda solo in questa chat che|memorizza che|remember that)\b',
+    caseSensitive: false,
+  );
+
   static final RegExp _assignment = RegExp(
     r'^(.{1,100}?)\s*(?:=|:|\s+è\s+|\s+vale\s+|\s+is\s+)\s*(.{1,400})$',
     caseSensitive: false,
@@ -72,14 +133,39 @@ final class AssistantDurableMemoryCaptureService {
   ///
   /// No model-provided content or attachment text is processed. The caller is
   /// responsible for passing only the direct user's ordinary chat prompt.
+  /// Backward compatible boolean API used by existing callers/tests.
   Future<bool> applyExplicitUserInstruction({
     required String sessionId,
     required String userPrompt,
+  }) async {
+    final result = await applyExplicitUserInstructionResult(
+      sessionId: sessionId,
+      userPrompt: userPrompt,
+    );
+    return result.changed;
+  }
+
+  /// Serialized and authoritative, independent of any selected LLM.
+  Future<AssistantMemoryCommandResult> applyExplicitUserInstructionResult({
+    required String sessionId,
+    required String userPrompt,
   }) {
-    if (_resetInProgress) return Future<bool>.value(false);
+    if (_resetInProgress) {
+      return Future<AssistantMemoryCommandResult>.value(
+        const AssistantMemoryCommandResult(
+          AssistantMemoryCommandStatus.blocked,
+        ),
+      );
+    }
 
     final operation = _pendingWrites.then((_) {
-      if (_resetInProgress) return Future<bool>.value(false);
+      if (_resetInProgress) {
+        return Future<AssistantMemoryCommandResult>.value(
+          const AssistantMemoryCommandResult(
+            AssistantMemoryCommandStatus.blocked,
+          ),
+        );
+      }
       return _applyExplicitUserInstruction(
         sessionId: sessionId,
         userPrompt: userPrompt,
@@ -266,7 +352,7 @@ final class AssistantDurableMemoryCaptureService {
     return operation;
   }
 
-  Future<bool> _applyExplicitUserInstruction({
+  Future<AssistantMemoryCommandResult> _applyExplicitUserInstruction({
     required String sessionId,
     required String userPrompt,
   }) async {
@@ -276,14 +362,82 @@ final class AssistantDurableMemoryCaptureService {
         input.contains('\n') ||
         input.contains('\r') ||
         _secrets.hasMatch(input)) {
-      return false;
+      return AssistantMemoryCommandResult(
+        looksLikeInstruction(input)
+            ? AssistantMemoryCommandStatus.invalid
+            : AssistantMemoryCommandStatus.notInstruction,
+      );
     }
 
+    if (input.endsWith('?')) {
+      return const AssistantMemoryCommandResult(
+        AssistantMemoryCommandStatus.notInstruction,
+      );
+    }
+
+    // Only the exact, explicitly confirmed broad operation can delete
+    // multiple keys. It is restricted to userExplicit facts in this device's
+    // local owner scope; other scopes and project knowledge stay untouched.
+    final confirmedTopic = _forgetAllConfirm.firstMatch(input)?.group(1);
+    if (confirmedTopic != null) {
+      final topic = confirmedTopic.trim();
+      final expected = _pendingBroadForgetBySession.remove(sessionId.trim());
+      if (expected == null ||
+          expected.toLowerCase() != topic.toLowerCase()) {
+        return const AssistantMemoryCommandResult(
+          AssistantMemoryCommandStatus.invalid,
+        );
+      }
+      final removed = await _memoryService.removeExplicitUserFactsForTopic(
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        topic: topic,
+      );
+      return AssistantMemoryCommandResult(
+        removed > 0
+            ? AssistantMemoryCommandStatus.topicForgotten
+            : AssistantMemoryCommandStatus.notFound,
+        count: removed,
+      );
+    }
+    final requestedTopic = _forgetAll.firstMatch(input)?.group(1);
+    if (requestedTopic != null) {
+      final topic = requestedTopic.trim();
+      if (topic.length < 6 || topic.length > 100 || topic.contains('?')) {
+        return const AssistantMemoryCommandResult(
+          AssistantMemoryCommandStatus.invalid,
+        );
+      }
+      final ownerSession = sessionId.trim();
+      if (ownerSession.isEmpty) {
+        return const AssistantMemoryCommandResult(
+          AssistantMemoryCommandStatus.invalid,
+        );
+      }
+      // Bound pending confirmations even if many chats are opened.
+      if (!_pendingBroadForgetBySession.containsKey(ownerSession) &&
+          _pendingBroadForgetBySession.length >= 16) {
+        _pendingBroadForgetBySession.remove(
+          _pendingBroadForgetBySession.keys.first,
+        );
+      }
+      _pendingBroadForgetBySession[ownerSession] = topic;
+      return AssistantMemoryCommandResult(
+        AssistantMemoryCommandStatus.confirmationRequired,
+        topic: topic,
+      );
+    }
+
+    // A subsequent non-confirmation turn cancels a pending broad delete.
+    _pendingBroadForgetBySession.remove(sessionId.trim());
     var scope = AssistantMemoryScope.user;
     var scopeId = AssistantDurableMemoryContextService.localUserScopeId;
     final inChat = _saveInConversation.firstMatch(input);
     if (inChat != null) {
-      if (sessionId.trim().isEmpty) return false;
+      if (sessionId.trim().isEmpty) {
+        return const AssistantMemoryCommandResult(
+          AssistantMemoryCommandStatus.invalid,
+        );
+      }
       scope = AssistantMemoryScope.conversation;
       scopeId = sessionId.trim();
     }
@@ -291,7 +445,13 @@ final class AssistantDurableMemoryCaptureService {
     final save = inChat ?? _save.firstMatch(input);
     if (save != null) {
       final assignment = _parseAssignment(save.group(1)!);
-      if (assignment == null) return false;
+      if (assignment == null) {
+        return AssistantMemoryCommandResult(
+          _explicitSavePrefix.hasMatch(input)
+              ? AssistantMemoryCommandStatus.invalid
+              : AssistantMemoryCommandStatus.notInstruction,
+        );
+      }
       await _memoryService.recordConfirmed(
         recordKey: assignment.key,
         scope: scope,
@@ -301,7 +461,9 @@ final class AssistantDurableMemoryCaptureService {
         source: AssistantMemorySource.userExplicit,
         updatedAt: _now(),
       );
-      return true;
+      return const AssistantMemoryCommandResult(
+        AssistantMemoryCommandStatus.saved,
+      );
     }
 
     final forget = _forget.firstMatch(input);
@@ -309,15 +471,29 @@ final class AssistantDurableMemoryCaptureService {
       final subject = forget.group(1)!.trim();
       final assignment = _parseAssignment(subject);
       final key = assignment?.key ?? _keyFromSubject(subject);
-      if (key == null) return false;
-      return _memoryService.remove(
+      if (key == null || subject.toLowerCase() == 'tutto' ||
+          subject.toLowerCase().startsWith('tutto ')) {
+        return const AssistantMemoryCommandResult(
+          AssistantMemoryCommandStatus.invalid,
+        );
+      }
+      final removed = await _memoryService.remove(
         scope: AssistantMemoryScope.user,
         scopeId: AssistantDurableMemoryContextService.localUserScopeId,
         recordKey: key,
       );
+      return AssistantMemoryCommandResult(
+        removed
+            ? AssistantMemoryCommandStatus.forgotten
+            : AssistantMemoryCommandStatus.notFound,
+      );
     }
 
-    return false;
+    return AssistantMemoryCommandResult(
+      looksLikeInstruction(input)
+          ? AssistantMemoryCommandStatus.invalid
+          : AssistantMemoryCommandStatus.notInstruction,
+    );
   }
 
   ({String key, String content})? _parseAssignment(String input) {

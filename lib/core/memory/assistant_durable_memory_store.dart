@@ -333,6 +333,53 @@ class AssistantDurableMemoryStore {
     });
   }
 
+  /// Forget only explicit local-user facts whose canonical subject contains
+  /// the complete requested topic. Does not wipe project, session, imported
+  /// or independently verified knowledge.
+  ///
+  /// Requires explicit confirmation at the capture layer and uses the same
+  /// scope write lock as single-key updates.
+  Future<int> removeExplicitUserFactsForTopic({
+    required String scopeId,
+    required String topic,
+  }) async {
+    final owner = scopeId.trim();
+    final needle = topic
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9à-öø-ÿ]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    if (owner.isEmpty || needle.length < 6 || needle.length > 100) {
+      return 0;
+    }
+
+    return _withScopeWriteLock(AssistantMemoryScope.user, owner, () async {
+      final records = await load(
+        scope: AssistantMemoryScope.user,
+        scopeId: owner,
+        confirmedOnly: false,
+      );
+      bool matches(AssistantDurableMemoryRecord record) {
+        if (record.scope != AssistantMemoryScope.user ||
+            record.source != AssistantMemorySource.userExplicit ||
+            !record.recordKey.startsWith('explicit.')) {
+          return false;
+        }
+        final key = record.recordKey.substring('explicit.'.length);
+        // Whole tokens: "prova Aivexus" must not match "prova Aivexus2".
+        return key == needle ||
+            key.startsWith('${needle}_') ||
+            key.endsWith('_$needle') ||
+            key.contains('_${needle}_');
+      }
+
+      final next = records.where((record) => !matches(record)).toList();
+      final removed = records.length - next.length;
+      if (removed == 0) return 0;
+      await _write(AssistantMemoryScope.user, owner, next);
+      return removed;
+    });
+  }
+
   Future<void> _write(
     AssistantMemoryScope scope,
     String scopeId,
