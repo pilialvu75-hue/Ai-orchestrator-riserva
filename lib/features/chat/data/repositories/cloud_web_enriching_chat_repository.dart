@@ -33,6 +33,22 @@ final class CloudWebEnrichingChatRepository implements ChatRepository {
   final AiRuntimeMode Function() _runtimeMode;
 
   @override
+  Future<ChatMessage?> persistVerifiedMemoryAction({
+    required String sessionId,
+    required String userPrompt,
+    required String acknowledgement,
+    void Function(String partialText)? onPartialResponse,
+  }) {
+    // Local memory writes/receipts must never be redirected to Cloud Web.
+    return _delegate.persistVerifiedMemoryAction(
+      sessionId: sessionId,
+      userPrompt: userPrompt,
+      acknowledgement: acknowledgement,
+      onPartialResponse: onPartialResponse,
+    );
+  }
+
+  @override
   Future<List<ChatMessage>> getMessages(String sessionId) {
     return _delegate.getMessages(sessionId);
   }
