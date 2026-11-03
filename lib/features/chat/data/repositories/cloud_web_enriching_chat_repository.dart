@@ -45,7 +45,7 @@ final class CloudWebEnrichingChatRepository implements ChatRepository, VerifiedM
     if (delegate is! VerifiedMemoryActionWriter) {
       throw StateError('The chat backend cannot persist memory actions.');
     }
-    return delegate.persistVerifiedMemoryAction(
+    return (delegate as VerifiedMemoryActionWriter).persistVerifiedMemoryAction(
       sessionId: sessionId,
       userPrompt: userPrompt,
       acknowledgement: acknowledgement,
