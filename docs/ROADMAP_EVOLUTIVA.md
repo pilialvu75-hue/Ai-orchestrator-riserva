@@ -539,9 +539,19 @@ consenso esplicito.
   e chiedere il consenso pertinente. Nessun fallimento nascosto né dati
   classificati inventati da un modello: serve un assemblatore trusted che
   certifichi che i segmenti coprono **esattamente** il testo inviato.
-- Mantenere **LOCAL rigorosamente offline quando scelto**: verificare che Web,
-  tool, download, sync e fallback non comunichino in rete senza consenso.
-  La presenza di Internet non deve cambiare silenziosamente la scelta Local.
+- **LOCAL = senza provider IA esterni/Cloud**: non significa per forza
+  assenza totale di Internet. Strumenti Web, retrieval remoto, download e sync
+  sono servizi separati e soggetti alle rispettive impostazioni/consensi. Non
+  inviare mai prompt o ricordi ai provider IA remoti tramite fallback implicito.
+  L'inferenza LOCAL deve continuare a funzionare anche senza connessione.
+- **Impostazioni → Modalità IA → Consensi Cloud**: sottomenu per consultare,
+  modificare e revocare regole per fonte e sensibilità, provider e account.
+  L'autorizzazione «solo questa volta» non viene salvata. La prima versione
+  del sottomenu resta inattiva senza una reale identità owner/session:
+  non simulare login né concedere accesso Cloud in automatico. Collega in
+  seguito l'identità verificata, la schermata di consenso e il controllo
+  del payload del provider. Prevedere anche autorizzazione esplicita
+  opzionale per categoria su tutti i provider, senza consenso implicito.
 - PR #977 introduce un **contratto source-only con test**, non la UI e non il
   routing produttivo; PR #975 resta il percorso checkpoint sperimentale separato.
   #899 governa la memoria, #973 HYBRID, #948 OTA. La verifica richiede
