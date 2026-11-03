@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
+import 'package:ai_orchestrator/features/chat/domain/repositories/verified_memory_action_writer.dart';
 
 /// Thin decorator that keeps Assistant prompt preference resolution outside the
 /// persistence/runtime implementation.
@@ -15,7 +16,7 @@ import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repositor
 /// All chat behavior is delegated unchanged except [sendMessage], where the
 /// ordinary Assistant prompt marker is replaced with the user's configured
 /// prompt before Local/Cloud routing begins.
-class PromptResolvingChatRepository implements ChatRepository {
+class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryActionWriter {
   const PromptResolvingChatRepository({
     required ChatRepository delegate,
     required AssistantSystemPromptService systemPromptService,
@@ -35,17 +36,23 @@ class PromptResolvingChatRepository implements ChatRepository {
   final AssistantDurableMemoryCaptureService? _durableMemoryCaptureService;
 
   @override
-  Future<ChatMessage?> persistVerifiedMemoryAction({
+  Future<ChatMessage> persistVerifiedMemoryAction({
     required String sessionId,
     required String userPrompt,
     required String acknowledgement,
     void Function(String partialText)? onPartialResponse,
-  }) => _delegate.persistVerifiedMemoryAction(
-        sessionId: sessionId,
-        userPrompt: userPrompt,
-        acknowledgement: acknowledgement,
-        onPartialResponse: onPartialResponse,
-      );
+  }) {
+    final delegate = _delegate;
+    if (delegate is! VerifiedMemoryActionWriter) {
+      throw StateError('The chat backend cannot persist memory actions.');
+    }
+    return delegate.persistVerifiedMemoryAction(
+      sessionId: sessionId,
+      userPrompt: userPrompt,
+      acknowledgement: acknowledgement,
+      onPartialResponse: onPartialResponse,
+    );
+  }
 
   String _memoryAcknowledgement(AssistantMemoryCommandResult result) {
     return switch (result.status) {
@@ -111,18 +118,12 @@ class PromptResolvingChatRepository implements ChatRepository {
       }
 
       if (result.isInstruction) {
-        final stored = await _delegate.persistVerifiedMemoryAction(
+        return persistVerifiedMemoryAction(
           sessionId: sessionId,
           userPrompt: userPrompt,
           acknowledgement: _memoryAcknowledgement(result),
           onPartialResponse: onPartialResponse,
         );
-        if (stored == null) {
-          throw StateError(
-            'The chat backend cannot persist a verified memory response.',
-          );
-        }
-        return stored;
       }
     }
 
