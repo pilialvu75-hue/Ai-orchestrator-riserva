@@ -19,6 +19,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
 import 'package:ai_orchestrator/features/chat/domain/entities/chat_message.dart';
 import 'package:ai_orchestrator/features/chat/domain/repositories/chat_repository.dart';
+import 'package:ai_orchestrator/features/chat/domain/repositories/verified_memory_action_writer.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
@@ -28,7 +29,7 @@ import 'package:ai_orchestrator/features/chat/data/services/chat_file_context_se
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 
-class ChatRepositoryImpl implements ChatRepository {
+class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
   static const _logTag = 'CHAT_PIPELINE';
 
   ChatRepositoryImpl({
@@ -71,7 +72,7 @@ class ChatRepositoryImpl implements ChatRepository {
       <String, StreamSubscription<InferenceResponse>>{};
 
   @override
-  Future<ChatMessage?> persistVerifiedMemoryAction({
+  Future<ChatMessage> persistVerifiedMemoryAction({
     required String sessionId,
     required String userPrompt,
     required String acknowledgement,
