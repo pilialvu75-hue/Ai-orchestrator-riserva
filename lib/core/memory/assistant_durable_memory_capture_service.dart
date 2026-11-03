@@ -112,6 +112,13 @@ final class AssistantDurableMemoryCaptureService {
     caseSensitive: false,
   ).hasMatch(input.trim());
 
+  // A conversational recollection question must still reach the language
+  // model, not be treated as an attempt to save a new fact.
+  static final RegExp _explicitSavePrefix = RegExp(
+    r'^(?:ricorda che|ricorda in questa chat che|ricorda solo in questa chat che|memorizza che|remember that)\b',
+    caseSensitive: false,
+  );
+
   static final RegExp _assignment = RegExp(
     r'^(.{1,100}?)\s*(?:=|:|\s+è\s+|\s+vale\s+|\s+is\s+)\s*(.{1,400})$',
     caseSensitive: false,
@@ -362,6 +369,12 @@ final class AssistantDurableMemoryCaptureService {
       );
     }
 
+    if (input.endsWith('?')) {
+      return const AssistantMemoryCommandResult(
+        AssistantMemoryCommandStatus.notInstruction,
+      );
+    }
+
     // Only the exact, explicitly confirmed broad operation can delete
     // multiple keys. It is restricted to userExplicit facts in this device's
     // local owner scope; other scopes and project knowledge stay untouched.
@@ -433,8 +446,10 @@ final class AssistantDurableMemoryCaptureService {
     if (save != null) {
       final assignment = _parseAssignment(save.group(1)!);
       if (assignment == null) {
-        return const AssistantMemoryCommandResult(
-          AssistantMemoryCommandStatus.invalid,
+        return AssistantMemoryCommandResult(
+          _explicitSavePrefix.hasMatch(input)
+              ? AssistantMemoryCommandStatus.invalid
+              : AssistantMemoryCommandStatus.notInstruction,
         );
       }
       await _memoryService.recordConfirmed(
