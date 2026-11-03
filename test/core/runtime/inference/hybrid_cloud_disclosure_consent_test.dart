@@ -727,6 +727,131 @@ void main() {
     expect(permit, isNull);
   });
 
+  test('settings list shows only saved categories for selected account',
+      () async {
+    final req = disclosure();
+    expect(await consent.listStoredPreferences(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+    ), isEmpty);
+    expect(await consent.authorize(
+      disclosure: req,
+      requestConsent: (review) async =>
+          decideAll(review, HybridCloudConsentChoice.allowAlways),
+    ), isTrue);
+    final saved = await consent.listStoredPreferences(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+    );
+    expect(saved, hasLength(2));
+    expect(saved[memory], HybridCloudStoredConsent.allowAlways);
+    expect(await consent.listStoredPreferences(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'different-credential',
+    ), isEmpty);
+    expect(await consent.listStoredPreferences(
+      ownerId: owner, sessionId: session,
+      providerId: 'openAi', accountId: 'primary-credential',
+    ), isEmpty);
+    expect(() => saved.clear(), throwsUnsupportedError);
+  });
+
+  test('settings can switch allow to ask every time, deny and clear',
+      () async {
+    Future<void> set(HybridCloudStoredConsent? choice) =>
+        consent.setStoredPreference(
+          ownerId: owner, sessionId: session,
+          providerId: 'gemini', accountId: 'primary-credential',
+          scope: memory, preference: choice,
+        );
+    await set(HybridCloudStoredConsent.allowAlways);
+    expect(await consent.authorize(disclosure: disclosure(parts:
+        const <HybridDisclosureSegment>[
+          HybridDisclosureSegment(text: 'Memory', scope: memory),
+        ])), isTrue);
+    await set(HybridCloudStoredConsent.askEveryTime);
+    expect(await consent.authorize(disclosure: disclosure(parts:
+        const <HybridDisclosureSegment>[
+          HybridDisclosureSegment(text: 'Memory', scope: memory),
+        ])), isFalse);
+    await set(HybridCloudStoredConsent.neverShare);
+    var prompted = false;
+    expect(await consent.authorize(
+      disclosure: disclosure(parts: const <HybridDisclosureSegment>[
+        HybridDisclosureSegment(text: 'Memory', scope: memory),
+      ]),
+      requestConsent: (_) async {
+        prompted = true;
+        return <HybridDisclosureScope, HybridCloudConsentChoice>{
+          memory: HybridCloudConsentChoice.allowOnce,
+        };
+      },
+    ), isFalse);
+    expect(prompted, isFalse);
+    await set(null);
+    expect(await consent.listStoredPreferences(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+    ), isEmpty);
+  });
+
+  test('settings preference change cancels another instance open consent',
+      () async {
+    final parallel = HybridCloudDisclosureConsent(
+      backend: backend,
+      authorizeOwnerSession: (id, sess) async =>
+          id == owner && sess == session,
+    );
+    final entered = Completer<void>();
+    final finish = Completer<void>();
+    final pending = consent.authorize(
+      disclosure: disclosure(),
+      requestConsent: (r) async {
+        entered.complete();
+        await finish.future;
+        return decideAll(r, HybridCloudConsentChoice.allowAlways);
+      },
+    );
+    await entered.future;
+    await parallel.setStoredPreference(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+      scope: memory,
+      preference: HybridCloudStoredConsent.neverShare,
+    );
+    finish.complete();
+    expect(await pending, isFalse);
+    final saved = await consent.listStoredPreferences(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+    );
+    expect(saved[memory], HybridCloudStoredConsent.neverShare);
+    expect(saved[question], isNull);
+  });
+
+  test('settings rejects non-owner and permanent unknown sensitivity',
+      () async {
+    validSession = false;
+    await expectLater(consent.listStoredPreferences(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+    ), throwsStateError);
+    await expectLater(consent.setStoredPreference(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+      scope: memory,
+      preference: HybridCloudStoredConsent.allowAlways,
+    ), throwsStateError);
+    validSession = true;
+    expect(() => consent.setStoredPreference(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential',
+      scope: unknown,
+      preference: HybridCloudStoredConsent.allowAlways,
+    ), throwsArgumentError);
+    expect(backend.values, isEmpty);
+  });
+
   test('stored rules contain no actual personal prompt or memory text',
       () async {
     final outbound = disclosure();

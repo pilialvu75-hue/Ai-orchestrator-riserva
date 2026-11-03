@@ -491,6 +491,66 @@ final class HybridCloudDisclosureConsent {
         return _readRule(ownerId, providerId, accountId, scope);
       });
 
+  /// Read ONLY the current provider/account's saved category rules.
+  /// A blank set means the user has not granted any persistent permission.
+  /// Single-use approvals are deliberately absent from this list.
+  Future<Map<HybridDisclosureScope, HybridCloudStoredConsent>>
+      listStoredPreferences({
+    required String ownerId,
+    required String sessionId,
+    required String providerId,
+    required String accountId,
+  }) => _serialize(() async {
+        if (!await _authorizeOwnerSession(ownerId, sessionId)) {
+          throw StateError('HYBRID owner/session is not authorized');
+        }
+        final rules = await _readRules(ownerId, providerId, accountId);
+        final result = <HybridDisclosureScope, HybridCloudStoredConsent>{};
+        for (final origin in HybridDisclosureOrigin.values) {
+          for (final sensitivity in HybridDisclosureSensitivity.values) {
+            final scope = HybridDisclosureScope(origin, sensitivity);
+            final rule = rules[_scopeKey(scope)];
+            if (rule != null) result[scope] = rule;
+          }
+        }
+        return Map<HybridDisclosureScope, HybridCloudStoredConsent>.unmodifiable(
+          result,
+        );
+      });
+
+  /// Explicit SETTINGS action to change or clear ONE persistent category.
+  /// Never called while answering a chat; require a trusted owner/session
+  /// and a currently selected provider/account. Revokes outstanding dialogs
+  /// synchronously even if protected storage is slow or fails.
+  ///
+  /// Passing null clears the saved rule (so the next use asks again).
+  /// The UI must separately confirm an automatic allowance. Unknown
+  /// sensitivity cannot gain a permanent allowance.
+  Future<void> setStoredPreference({
+    required String ownerId,
+    required String sessionId,
+    required String providerId,
+    required String accountId,
+    required HybridDisclosureScope scope,
+    required HybridCloudStoredConsent? preference,
+  }) {
+    if (scope.sensitivity == HybridDisclosureSensitivity.unknown &&
+        preference == HybridCloudStoredConsent.allowAlways) {
+      throw ArgumentError('Unknown Cloud data cannot be auto-approved');
+    }
+    final familyKey = _key(ownerId, providerId, accountId);
+    _epochs[familyKey] = (_epochs[familyKey] ?? 0) + 1;
+    return _serialize(() async {
+      if (!await _authorizeOwnerSession(ownerId, sessionId)) {
+        throw StateError('HYBRID owner/session is not authorized');
+      }
+      await _writeRules(ownerId, providerId, accountId,
+          <HybridDisclosureScope, HybridCloudStoredConsent?>{
+        scope: preference,
+      });
+    });
+  }
+
   static String _scopeKey(HybridDisclosureScope scope) =>
       scope.origin.name + ':' + scope.sensitivity.name;
 
