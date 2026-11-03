@@ -68,6 +68,7 @@ void main() {
 
   HybridCloudDisclosure disclosure({
     String provider = 'gemini',
+    String account = 'primary-credential',
     String sessionId = session,
     List<HybridDisclosureSegment>? parts,
   }) {
@@ -79,6 +80,7 @@ void main() {
       ownerId: owner,
       sessionId: sessionId,
       providerId: provider,
+      accountId: account,
       purpose: 'Give a more complete and personalized answer',
       outboundText: segments.map((item) => item.text).join(),
       segments: segments,
@@ -104,7 +106,7 @@ void main() {
       () => HybridCloudDisclosure(
         ownerId: owner,
         sessionId: session,
-        providerId: 'gemini',
+        providerId: 'gemini', accountId: 'primary-credential',
         purpose: 'Reply',
         outboundText: 'Question + undisclosed history',
         segments: const <HybridDisclosureSegment>[
@@ -182,6 +184,59 @@ void main() {
     ), isFalse);
   });
 
+  test('account switch requires fresh consent for the same provider',
+      () async {
+    final primary = disclosure();
+    final secondary = disclosure(account: 'other-credential');
+    expect(primary.contentFingerprint, isNot(secondary.contentFingerprint));
+    expect(await consent.authorize(
+      disclosure: primary,
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowAlways),
+    ), isTrue);
+    expect(await consent.authorize(disclosure: primary), isTrue);
+    expect(await consent.authorize(disclosure: secondary), isFalse);
+    expect(await consent.authorize(
+      disclosure: secondary,
+      requestConsent: (r) async =>
+          decideAll(r, HybridCloudConsentChoice.allowOnce),
+    ), isTrue);
+    expect(await consent.authorize(disclosure: secondary), isFalse);
+    expect(backend.values.values.join(), isNot(contains('primary-credential')));
+    expect(backend.values.values.join(), isNot(contains('other-credential')));
+  });
+
+  test('mixed denial does not persist automatic grants for unsent sections',
+      () async {
+    expect(await consent.authorize(
+      disclosure: disclosure(),
+      requestConsent: (_) async => <HybridDisclosureScope, HybridCloudConsentChoice>{
+        question: HybridCloudConsentChoice.allowAlways,
+        memory: HybridCloudConsentChoice.denyOnce,
+      },
+    ), isFalse);
+    expect(backend.values, isEmpty);
+  });
+
+  test('mixed permanent denial persists only forbidden scope', () async {
+    expect(await consent.authorize(
+      disclosure: disclosure(),
+      requestConsent: (_) async => <HybridDisclosureScope, HybridCloudConsentChoice>{
+        question: HybridCloudConsentChoice.allowAlways,
+        memory: HybridCloudConsentChoice.neverShare,
+      },
+    ), isFalse);
+    expect(backend.values, hasLength(1));
+    expect(await consent.storedPreference(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential', scope: question,
+    ), isNull);
+    expect(await consent.storedPreference(
+      ownerId: owner, sessionId: session,
+      providerId: 'gemini', accountId: 'primary-credential', scope: memory,
+    ), HybridCloudStoredConsent.neverShare);
+  });
+
   test('ask on every use is remembered but never authorizes silently',
       () async {
     final outbound = disclosure(parts: const <HybridDisclosureSegment>[
@@ -197,7 +252,7 @@ void main() {
       disclosure: outbound, requestConsent: approve,
     ), isTrue);
     expect(await consent.storedPreference(
-      ownerId: owner, sessionId: session, providerId: 'gemini',
+      ownerId: owner, sessionId: session, providerId: 'gemini', accountId: 'primary-credential',
       scope: memory,
     ), HybridCloudStoredConsent.askEveryTime);
     expect(await consent.authorize(disclosure: outbound), isFalse);
@@ -224,7 +279,7 @@ void main() {
           decideAll(r, HybridCloudConsentChoice.neverShare),
     ), isFalse);
     expect(await consent.storedPreference(
-      ownerId: owner, sessionId: session, providerId: 'gemini',
+      ownerId: owner, sessionId: session, providerId: 'gemini', accountId: 'primary-credential',
       scope: privateHistory,
     ), HybridCloudStoredConsent.neverShare);
     var laterPromptCalled = false;
@@ -238,7 +293,7 @@ void main() {
     expect(laterPromptCalled, isFalse);
 
     await consent.revoke(
-      ownerId: owner, sessionId: session, providerId: 'gemini',
+      ownerId: owner, sessionId: session, providerId: 'gemini', accountId: 'primary-credential',
       scope: privateHistory,
     );
     expect(await consent.authorize(
@@ -269,13 +324,13 @@ void main() {
     // while the user's consent callback is still suspended.
     await consent.revoke(
       ownerId: owner, sessionId: session,
-      providerId: 'gemini', scope: memory,
+      providerId: 'gemini', accountId: 'primary-credential', scope: memory,
     );
     finishReview.complete();
     expect(await pending, isFalse);
     expect(await consent.storedPreference(
       ownerId: owner, sessionId: session,
-      providerId: 'gemini', scope: memory,
+      providerId: 'gemini', accountId: 'primary-credential', scope: memory,
     ), isNull);
   });
 
@@ -292,11 +347,11 @@ void main() {
     expect(await consent.authorize(disclosure: outbound), isTrue);
     await consent.revoke(
       ownerId: owner, sessionId: session,
-      providerId: 'gemini', scope: document,
+      providerId: 'gemini', accountId: 'primary-credential', scope: document,
     );
     expect(await consent.storedPreference(
       ownerId: owner, sessionId: session,
-      providerId: 'gemini', scope: document,
+      providerId: 'gemini', accountId: 'primary-credential', scope: document,
     ), isNull);
     expect(await consent.authorize(disclosure: outbound), isFalse);
   });

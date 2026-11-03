@@ -95,6 +95,7 @@ final class HybridCloudDisclosure {
     required this.ownerId,
     required this.sessionId,
     required this.providerId,
+    required this.accountId,
     required this.purpose,
     required this.outboundText,
     required List<HybridDisclosureSegment> segments,
@@ -107,6 +108,10 @@ final class HybridCloudDisclosure {
         sessionId.length > 256 ||
         !RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$')
             .hasMatch(providerId) ||
+        accountId.trim().isEmpty ||
+        accountId != accountId.trim() ||
+        accountId.length > 256 ||
+        accountId.codeUnits.any((unit) => unit < 32 || unit == 127) ||
         purpose.trim().isEmpty ||
         purpose.length > 256 ||
         outboundText.isEmpty ||
@@ -125,6 +130,9 @@ final class HybridCloudDisclosure {
   final String ownerId;
   final String sessionId;
   final String providerId;
+  /// Stable credential/account identity from trusted account selection.
+  /// Switching Cloud accounts requires fresh consent.
+  final String accountId;
   final String purpose;
   final String outboundText;
   final List<HybridDisclosureSegment> segments;
@@ -135,7 +143,7 @@ final class HybridCloudDisclosure {
   /// Binds a one-shot UI review to an exact outgoing prompt and destination.
   /// This digest is not a secret or a replacement for consent.
   String get contentFingerprint => sha256.convert(utf8.encode(jsonEncode(
-        <String>[ownerId, sessionId, providerId, purpose, outboundText],
+        <String>[ownerId, sessionId, providerId, accountId, purpose, outboundText],
       ))).toString();
 }
 
@@ -177,7 +185,7 @@ final class HybridCloudConsentReview {
 
 /// Opt-in, fail-closed consent contract for Cloud data disclosures.
 ///
-/// Preferences are per owner, provider, origin and sensitivity, persisted in
+/// Preferences are per owner, provider, account, origin and sensitivity, persisted in
 /// the same OS-protected storage abstraction used by HYBRID checkpoints.
 /// The stored rules contain NO raw prompt, document, memory or secret.
 /// They are *not* a login, a chat widget or the final Cloud dispatch gate.
@@ -200,7 +208,8 @@ final class HybridCloudDisclosureConsent {
   Future<void> _tail = Future<void>.value();
   int _revocationRevision = 0;
 
-  static const String _prefix = 'hybrid_cloud_consent_v1_';
+  // New account-scoped format refuses legacy provider-wide grants.
+  static const String _prefix = 'hybrid_cloud_consent_v2_';
 
   /// The dialog intentionally runs OUTSIDE the protected-storage queue.
   /// Otherwise a settings revocation during a visible consent dialog could
@@ -224,7 +233,7 @@ final class HybridCloudDisclosureConsent {
       final pending = <HybridDisclosureScope>[];
       for (final scope in disclosure.scopes) {
         final rule = await _readRule(
-          disclosure.ownerId, disclosure.providerId, scope,
+          disclosure.ownerId, disclosure.providerId, disclosure.accountId, scope,
         );
         if (rule == HybridCloudStoredConsent.neverShare) return null;
         if (rule != HybridCloudStoredConsent.allowAlways ||
@@ -266,12 +275,28 @@ final class HybridCloudDisclosureConsent {
         return false;
       }
       for (final scope in disclosure.scopes) {
-        if (await _readRule(disclosure.ownerId, disclosure.providerId, scope) ==
+        if (await _readRule(disclosure.ownerId, disclosure.providerId, disclosure.accountId, scope) ==
             HybridCloudStoredConsent.neverShare) {
           return false;
         }
       }
-      var canSend = true;
+      // Denied mixed payload: save NO new grants for segments not sent.
+      if (unapproved.any((scope) =>
+          decisions[scope] == HybridCloudConsentChoice.denyOnce ||
+          decisions[scope] == HybridCloudConsentChoice.neverShare)) {
+        for (final scope in unapproved) {
+          if (decisions[scope] == HybridCloudConsentChoice.neverShare) {
+            await _writeRule(disclosure.ownerId, disclosure.providerId,
+                disclosure.accountId, scope, HybridCloudStoredConsent.neverShare);
+          }
+        }
+        return false;
+      }
+      if (unapproved.any((scope) =>
+          scope.sensitivity == HybridDisclosureSensitivity.unknown &&
+          decisions[scope] == HybridCloudConsentChoice.allowAlways)) {
+        return false;
+      }
       for (final scope in unapproved) {
         final decision = decisions[scope]!;
         switch (decision) {
@@ -282,19 +307,17 @@ final class HybridCloudDisclosureConsent {
               return false; // Unknown content cannot be auto-allowed.
             }
             await _writeRule(disclosure.ownerId, disclosure.providerId,
-                scope, HybridCloudStoredConsent.allowAlways);
+                disclosure.accountId, scope, HybridCloudStoredConsent.allowAlways);
           case HybridCloudConsentChoice.allowAndAskNextTime:
             await _writeRule(disclosure.ownerId, disclosure.providerId,
-                scope, HybridCloudStoredConsent.askEveryTime);
+                disclosure.accountId, scope, HybridCloudStoredConsent.askEveryTime);
           case HybridCloudConsentChoice.denyOnce:
-            canSend = false;
+            return false; // Handled before any grants.
           case HybridCloudConsentChoice.neverShare:
-            await _writeRule(disclosure.ownerId, disclosure.providerId,
-                scope, HybridCloudStoredConsent.neverShare);
-            canSend = false;
+            return false; // Handled before any grants.
         }
       }
-      return canSend && revision == _revocationRevision;
+      return revision == _revocationRevision;
     });
   }
 
@@ -304,6 +327,7 @@ final class HybridCloudDisclosureConsent {
     required String ownerId,
     required String sessionId,
     required String providerId,
+    required String accountId,
     required HybridDisclosureScope scope,
   }) {
     // Invalidate outstanding dialogs synchronously. No UI callback needs to
@@ -313,7 +337,7 @@ final class HybridCloudDisclosureConsent {
       if (!await _authorizeOwnerSession(ownerId, sessionId)) {
         throw StateError('HYBRID consent owner/session is not authorized');
       }
-      final key = _key(ownerId, providerId, scope);
+      final key = _key(ownerId, providerId, accountId, scope);
       await _backend.delete(key);
       if (await _backend.read(key) != null) {
         throw StateError('HYBRID Cloud consent revocation not confirmed');
@@ -325,27 +349,29 @@ final class HybridCloudDisclosureConsent {
     required String ownerId,
     required String sessionId,
     required String providerId,
+    required String accountId,
     required HybridDisclosureScope scope,
   }) => _serialize(() async {
         if (!await _authorizeOwnerSession(ownerId, sessionId)) {
           throw StateError('HYBRID consent owner/session is not authorized');
         }
-        return _readRule(ownerId, providerId, scope);
+        return _readRule(ownerId, providerId, accountId, scope);
       });
 
   Future<HybridCloudStoredConsent?> _readRule(
-    String owner, String provider, HybridDisclosureScope scope,
+    String owner, String provider, String account, HybridDisclosureScope scope,
   ) async {
-    final raw = await _backend.read(_key(owner, provider, scope));
+    final raw = await _backend.read(_key(owner, provider, account, scope));
     if (raw == null) return null;
     if (raw.length > 1024) {
       throw const FormatException('Oversized HYBRID consent rule');
     }
     final value = jsonDecode(raw);
     if (value is! Map ||
-        value['version'] != 1 ||
+        value['version'] != 2 ||
         value['ownerDigest'] != _digest(owner) ||
         value['provider'] != provider ||
+        value['accountDigest'] != _digest(account) ||
         value['origin'] != scope.origin.name ||
         value['sensitivity'] != scope.sensitivity.name ||
         value['rule'] is! String) {
@@ -360,14 +386,16 @@ final class HybridCloudDisclosureConsent {
   Future<void> _writeRule(
     String owner,
     String provider,
+    String account,
     HybridDisclosureScope scope,
     HybridCloudStoredConsent rule,
   ) async {
-    final key = _key(owner, provider, scope);
+    final key = _key(owner, provider, account, scope);
     final value = jsonEncode(<String, Object>{
-      'version': 1,
+      'version': 2,
       'ownerDigest': _digest(owner),
       'provider': provider,
+      'accountDigest': _digest(account),
       'origin': scope.origin.name,
       'sensitivity': scope.sensitivity.name,
       'rule': rule.name,
@@ -382,15 +410,19 @@ final class HybridCloudDisclosureConsent {
       sha256.convert(utf8.encode(value)).toString();
 
   static String _key(
-    String owner, String provider, HybridDisclosureScope scope,
+    String owner, String provider, String account, HybridDisclosureScope scope,
   ) {
     if (owner.trim().isEmpty || owner.trim() != owner ||
         owner.length > 256 ||
+        account.trim().isEmpty ||
+        account != account.trim() ||
+        account.length > 256 ||
+        account.codeUnits.any((unit) => unit < 32 || unit == 127) ||
         !RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$').hasMatch(provider)) {
       throw ArgumentError('Invalid HYBRID Cloud consent identity');
     }
     return _prefix + _digest(jsonEncode(<String>[
-      owner, provider, scope.origin.name, scope.sensitivity.name,
+      owner, provider, account, scope.origin.name, scope.sensitivity.name,
     ]));
   }
 

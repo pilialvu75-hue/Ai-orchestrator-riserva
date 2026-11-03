@@ -1,0 +1,116 @@
+name: Import Approved Aivexus Platform Icons
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/import-approved-platform-icons.yml'
+      - 'scripts/install_platform_icons.py'
+      - 'test/scripts/test_install_platform_icons.py'
+      - 'test/scripts/test_icon_transport.py'
+      - 'scripts/unpack_icon_transport.py'
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: approved-platform-icons-${{ github.event.comment.id || github.sha }}
+  cancel-in-progress: false
+jobs:
+  validate-importer:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate asset-import logic
+        run: |
+          python3 -m py_compile scripts/install_platform_icons.py scripts/unpack_icon_transport.py
+          python3 -m unittest discover -s test/scripts -p 'test_*icon*.py' -v
+
+  import-owner-approved-icons:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' &&
+      github.event.issue.number == 979 &&
+      github.event.comment.user.login == 'pilialvu75-hue' &&
+      (contains(github.event.comment.body, 'AI-Orchestrator-Platform-Icons-v1.zip') ||
+       contains(github.event.comment.body, 'AI-Orchestrator-Platform-Icons-v1-GitHub.zip'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: main
+      - name: Extract only owner's original GitHub ZIP attachment
+        id: zip
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          links = re.findall(
+              r'https://github[.]com/user-attachments/files/[0-9]+/[A-Za-z0-9_.-]+[.]zip',
+              os.environ['COMMENT_BODY'],
+          )
+          accepted = {'AI-Orchestrator-Platform-Icons-v1.zip', 'AI-Orchestrator-Platform-Icons-v1-GitHub.zip'}
+          if len(links) != 1 or links[0].rsplit('/', 1)[-1] not in accepted:
+              raise SystemExit('Expected exactly one original or compact approved ZIP upload')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write('url=' + links[0] + '\n')
+              f.write('filename=' + links[0].rsplit('/', 1)[-1] + '\n')
+          PY
+      - name: Download and install exact approved original assets
+        env:
+          ZIP_URL: ${{ steps.zip.outputs.url }}
+          ZIP_NAME: ${{ steps.zip.outputs.filename }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 --max-time 150 --proto '=https' --proto-redir '=https' -o "/tmp/$ZIP_NAME" "$ZIP_URL"
+          # The compact upload preserves the exact original 109-file ZIP inside XZ;
+          # both archives have SHA256s pinned in the source-reviewed unpacker.
+          python3 scripts/unpack_icon_transport.py "/tmp/$ZIP_NAME" /tmp/aivexus-icons.zip
+          python3 scripts/install_platform_icons.py /tmp/aivexus-icons.zip --dry-run
+          python3 scripts/install_platform_icons.py /tmp/aivexus-icons.zip --apply
+          python3 -m unittest discover -s test/scripts -p 'test_*icon*.py' -v
+      - name: Verify platform icons and native resources
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, xml.etree.ElementTree as ET
+          root = Path.cwd()
+          a = root / 'android/app/src/main/res'
+          assert (a / 'mipmap-hdpi/ic_launcher.png').read_bytes().startswith(bytes.fromhex('89504e470d0a1a0a'))
+          ET.parse(a / 'mipmap-anydpi-v26/ic_launcher.xml')
+          ET.parse(a / 'values/colors.xml')
+          assert (root / 'windows/runner/resources/app_icon.ico').read_bytes()[:4] == bytes.fromhex('00000100')
+          m = root / 'macos/Runner/Assets.xcassets/AppIcon.appiconset'
+          if m.is_dir():
+              json.loads((m / 'Contents.json').read_text())
+              assert (m / 'icon_512x512@2x.png').read_bytes().startswith(bytes.fromhex('89504e470d0a1a0a'))
+          PY
+      - name: Create separate image-assets PR without any release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          branch="branding/import-approved-icons-979-${COMMENT_ID}"
+          git switch -c "$branch"
+          for p in android/app/src/main/res macos/Runner/Assets.xcassets/AppIcon.appiconset windows/runner/resources/app_icon.ico ios/Runner/Assets.xcassets/AppIcon.appiconset web/icons web/favicon.png; do
+            if [ -e "$p" ]; then git add -A -- "$p"; fi
+          done
+          if git diff --cached --quiet; then
+            echo '::notice::Approved icons already match main.'
+            exit 0
+          fi
+          git commit -m '[source-only] branding: install exact approved original icon pack'
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push origin "$branch"
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" \
+            --title '[source-only] branding: approved original platform icons (issue #979)' \
+            --body "Exact owner-approved ZIP SHA256 verified. Source: issue #979 comment ${COMMENT_ID}. Review binary assets and platform build gates before merge; no release performed."

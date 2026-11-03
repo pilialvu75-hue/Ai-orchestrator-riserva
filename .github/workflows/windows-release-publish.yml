@@ -1,6 +1,13 @@
 name: Publish Windows Release Asset
 
 on:
+  # Manual recovery only for an already published, authorized Android release.
+  workflow_dispatch:
+    inputs:
+      android_run_id:
+        description: 'Successful manual Build & Release APK run ID'
+        type: string
+        required: true
   pull_request:
     branches:
       - main
@@ -42,21 +49,53 @@ jobs:
           test -f windows/installer/ai_orchestrator.iss
           grep -q 'OutputBaseFilename=AI-Orchestrator-Setup-x64' windows/installer/ai_orchestrator.iss
           grep -Eq '^version:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?[[:space:]]*$' pubspec.yaml
+          python3 scripts/check_android_release_gate.py .github/workflows/build.yml .github/workflows/macos-release-publish.yml .github/workflows/linux-release-publish.yml .github/workflows/windows-release-publish.yml
           echo 'Windows release publisher contract is valid.'
 
   publish-windows:
     if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_dispatch'
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_dispatch') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: windows-2022
     timeout-minutes: 75
 
     steps:
+      - name: Checkout publisher validation sources
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate already authorized Android release
+        id: android_source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANDROID_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.android_run_id || github.event.workflow_run.id }}
+        run: |
+          $runId = $env:ANDROID_RUN_ID
+          if ($runId -notmatch '^[0-9]{6,16}$') { throw 'Invalid Android release run ID.' }
+          $source = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $source) { throw 'Unable to verify source Android run.' }
+          if ($source.name -ne 'Build & Release APK' -or
+              $source.event -ne 'workflow_dispatch' -or
+              $source.status -ne 'completed' -or
+              $source.conclusion -ne 'success' -or
+              $source.head_branch -ne 'main' -or
+              $source.repository.full_name -ne $env:GITHUB_REPOSITORY -or
+              $source.head_sha -notmatch '^[0-9a-f]{40}$' -or
+              [int]$source.run_number -le 0) {
+            throw 'This run is not a completed, successful, authorized Android release from main.'
+          }
+          "source_sha=$($source.head_sha)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "run_number=$($source.run_number)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Verified source Android run $runId, version workflow run number $($source.run_number)."
+
       - name: Checkout exact Android release commit
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ steps.android_source.outputs.source_sha }}
           fetch-depth: 0
           submodules: recursive
 
@@ -77,7 +116,7 @@ jobs:
           }
 
           $versionName = $versionLine.Matches[0].Groups[1].Value
-          $versionCode = [string](100000 + [int]'${{ github.event.workflow_run.run_number }}')
+          $versionCode = [string](100000 + [int]'${{ steps.android_source.outputs.run_number }}')
           if (-not $versionCode -or $versionCode -notmatch '^\d+$') {
             throw "Invalid Android workflow run number: $versionCode"
           }
@@ -99,7 +138,7 @@ jobs:
 
           Write-Host "Coordinated Windows version: $releaseVersion"
           Write-Host "Target GitHub release: $tag"
-          Write-Host "Source commit: ${{ github.event.workflow_run.head_sha }}"
+          Write-Host "Source commit: ${{ steps.android_source.outputs.source_sha }}"
 
       - name: Resolve existing explicitly published release tag
         id: publish_tag
@@ -109,21 +148,29 @@ jobs:
         run: |
           $base = 'v${{ steps.version.outputs.version_name }}'
           $build = '${{ steps.version.outputs.version_code }}'
-          $releases = gh release list --limit 100 --repo $env:GITHUB_REPOSITORY --json tagName,isPrerelease | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Unable to inspect the published GitHub releases.'
-          }
+          # Query only the exact expected tags. Older authorized releases must
+          # not disappear from discovery when GitHub holds more than 100 releases.
           $prereleaseCandidates = @("$base-beta+$build", "$base-nightly+$build", "$base-dev+$build")
           $stableCandidate = "$base+$build"
-          $matches = @($releases | Where-Object {
-            ($_.isPrerelease -eq $true -and $_.tagName -in $prereleaseCandidates) -or
-            ($_.isPrerelease -eq $false -and $_.tagName -eq $stableCandidate)
-          })
+          $matches = @()
+          foreach ($candidate in @($prereleaseCandidates) + @($stableCandidate)) {
+            $isPrerelease = gh release view $candidate --repo $env:GITHUB_REPOSITORY --json isPrerelease --jq '.isPrerelease' 2>$null
+            if ($LASTEXITCODE -ne 0) { continue }
+            if (($candidate -eq $stableCandidate -and $isPrerelease -eq 'false') -or
+                ($candidate -in $prereleaseCandidates -and $isPrerelease -eq 'true')) {
+              $matches += $candidate
+            }
+          }
           if ($matches.Count -ne 1) {
             throw "Expected exactly one explicitly published release for $base and build $build."
           }
-          "tag=$($matches[0].tagName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Attaching desktop asset to $($matches[0].tagName)"
+          $tag = $matches[0]
+          $publishedSha = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0 -or $publishedSha.Trim() -ne '${{ steps.android_source.outputs.source_sha }}') {
+            throw 'Release tag does not point to the authorized Android source commit.'
+          }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Attaching desktop asset to $tag"
 
       - name: Resolve Flutter dependencies
         shell: pwsh
