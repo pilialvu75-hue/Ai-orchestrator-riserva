@@ -103,7 +103,7 @@ jobs:
           echo "run_number=$(jq -r .run_number <<<"$source_run")" >> "$GITHUB_OUTPUT"
           echo "Verified manual Android release workflow run $run_id"
 
-      - name: Check production signing availability
+      - name: Select signing mode (Developer ID or free internal ad-hoc)
         id: signing
         shell: bash
         env:
@@ -121,11 +121,14 @@ jobs:
           [[ -n "$NOTARY_KEY_ID" ]] || missing+=("APPLE_NOTARY_KEY_ID")
           [[ -n "$NOTARY_ISSUER_ID" ]] || missing+=("APPLE_NOTARY_ISSUER_ID")
 
+          # Personal-development releases must not depend on a paid Apple account.
+          # Keep the notarized path intact whenever all production secrets exist.
+          echo "ready=true" >> "$GITHUB_OUTPUT"
           if (( ${#missing[@]} > 0 )); then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=macOS production publisher skipped::Developer ID/notarization credentials are not configured: ${missing[*]}. PR macOS CI remains available with ad-hoc signing."
+            echo "production=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=macOS internal development publisher::Apple Developer credentials are absent; build a verified ad-hoc DMG for personal devices. macOS Gatekeeper may require an explicit local override. Missing: ${missing[*]}."
           else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "production=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout exact Android release commit
@@ -297,7 +300,7 @@ jobs:
           echo "macOS app embedded and ready for Developer ID signing: $app_path"
 
       - name: Developer ID sign, notarize, staple and build verified DMG
-        if: steps.signing.outputs.ready == 'true'
+        if: steps.signing.outputs.production == 'true'
         id: dmg
         shell: bash
         env:
@@ -380,6 +383,48 @@ jobs:
           echo "Notarized macOS DMG: $dmg_path ($dmg_size bytes)"
           echo "SHA256: $dmg_sha256"
 
+      # Internal testing only: use the same verified DMG contract as production,
+      # without requiring a paid Apple Developer membership for personal devices.
+      - name: Build verified ad-hoc macOS DMG for personal testing
+        if: steps.signing.outputs.production == 'false'
+        id: dev_dmg
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path='${{ steps.app.outputs.app_path }}'
+          helper_path='${{ steps.app.outputs.helper_path }}'
+          output_dir="$PWD/build/macos/release-publish"
+          dmg_path="$output_dir/AI-Orchestrator-macOS.dmg"
+          mkdir -p "$output_dir"
+
+          # Reuse the known working pre-notarization development signature.
+          codesign --force --sign - --timestamp=none "$helper_path"
+          codesign --force --sign - --timestamp=none \
+            --entitlements "$PWD/macos/Runner/Release.entitlements" \
+            "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+          # package_dmg.sh independently validates the staged and mounted app,
+          # verifies the DMG and creates the SHA-256 sidecar.
+          bash native/macos/package_dmg.sh "$app_path" "$dmg_path"
+          hash_path="$dmg_path.sha256"
+          if [[ ! -s "$dmg_path" || ! -s "$hash_path" ]]; then
+            echo 'Development DMG or SHA-256 sidecar missing.' >&2
+            exit 1
+          fi
+          dmg_sha256="$(shasum -a 256 "$dmg_path" | awk '{print tolower($1)}')"
+          expected_sha256="$(awk '{print tolower($1)}' "$hash_path")"
+          if [[ "$dmg_sha256" != "$expected_sha256" ]]; then
+            echo 'Development DMG SHA-256 mismatch.' >&2
+            exit 1
+          fi
+          dmg_size="$(stat -f '%z' "$dmg_path")"
+          echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
+          echo "hash_path=$hash_path" >> "$GITHUB_OUTPUT"
+          echo "dmg_size=$dmg_size" >> "$GITHUB_OUTPUT"
+          echo "dmg_sha256=$dmg_sha256" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Personal Mac testing build::Ad-hoc signed, not Apple-notarized; macOS Gatekeeper may require user approval. SHA-256 integrity is verified."
+
       - name: Verify matching Android release exists
         if: steps.signing.outputs.ready == 'true'
         shell: bash
@@ -399,8 +444,8 @@ jobs:
         run: |
           set -euo pipefail
           gh release upload '${{ steps.publish_tag.outputs.tag }}' \
-            '${{ steps.dmg.outputs.dmg_path }}' \
-            '${{ steps.dmg.outputs.hash_path }}' \
+            '${{ steps.dmg.outputs.dmg_path || steps.dev_dmg.outputs.dmg_path }}' \
+            '${{ steps.dmg.outputs.hash_path || steps.dev_dmg.outputs.hash_path }}' \
             --clobber \
             --repo "$GITHUB_REPOSITORY"
 
@@ -425,7 +470,7 @@ jobs:
             echo "Published macOS DMG is missing a verified GitHub SHA-256 digest: $published_digest" >&2
             exit 1
           fi
-          if [[ "${published_digest#sha256:}" != '${{ steps.dmg.outputs.dmg_sha256 }}' ]]; then
+          if [[ "${published_digest#sha256:}" != '${{ steps.dmg.outputs.dmg_sha256 || steps.dev_dmg.outputs.dmg_sha256 }}' ]]; then
             echo 'Published GitHub digest does not match the locally verified DMG.' >&2
             exit 1
           fi
@@ -437,7 +482,7 @@ jobs:
         with:
           name: ai-orchestrator-macos-release-${{ steps.version.outputs.release_version }}
           path: |
-            ${{ steps.dmg.outputs.dmg_path }}
-            ${{ steps.dmg.outputs.hash_path }}
+            ${{ steps.dmg.outputs.dmg_path || steps.dev_dmg.outputs.dmg_path }}
+            ${{ steps.dmg.outputs.hash_path || steps.dev_dmg.outputs.hash_path }}
           if-no-files-found: error
           retention-days: 14

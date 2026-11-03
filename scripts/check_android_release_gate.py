@@ -90,6 +90,34 @@ def validate_desktop_publisher(source: str, platform: str) -> list[str]:
         problems.append(f"{platform}: publisher may not upload to an unsuffixed tag")
     if platform == "macos" and 'version_code="$((100000 +' not in source:
         problems.append("macOS must use the same build-code namespace as Android")
+    if platform == "macos":
+        # Regression guard: no paid Apple account is required to publish
+        # owner-device development updates, but all existing release-integrity
+        # and optional notarized-production checks must remain in place.
+        required_internal = (
+            "steps.signing.outputs.production == 'false'",
+            "id: dev_dmg",
+            "codesign --force --sign - --timestamp=none",
+            "bash native/macos/package_dmg.sh",
+            "if [[ \"$dmg_sha256\" != \"$expected_sha256\" ]]",
+        )
+        for marker in required_internal:
+            if marker not in source:
+                problems.append(f"macOS: missing free verified development publisher: {marker}")
+        required_production = (
+            "steps.signing.outputs.production == 'true'",
+            "native/macos/sign_notarize_release.sh",
+        )
+        for marker in required_production:
+            if marker not in source:
+                problems.append(f"macOS: optional Developer ID path regressed: {marker}")
+        for field in ("dmg_path", "hash_path", "dmg_sha256"):
+            selector = (
+                f"steps.dmg.outputs.{field} || "
+                f"steps.dev_dmg.outputs.{field}"
+            )
+            if selector not in source:
+                problems.append(f"macOS: published asset must select both signing modes: {field}")
     return problems
 
 
