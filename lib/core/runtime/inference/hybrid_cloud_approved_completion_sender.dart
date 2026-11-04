@@ -33,6 +33,7 @@ final class HybridCloudApprovedCompletionSender {
   Future<AiResponse> complete({
     required HybridCloudAiRequestSeal seal,
     required HybridCloudDispatchPermit permit,
+    required String expectedCredentialSecret,
     CancellationToken? cancellationToken,
   }) async {
     final response = await HybridCloudNativeWireSender(
@@ -42,6 +43,7 @@ final class HybridCloudApprovedCompletionSender {
     ).send(
       seal: seal,
       permit: permit,
+      expectedCredentialSecret: expectedCredentialSecret,
       cancellationToken: cancellationToken,
     );
 

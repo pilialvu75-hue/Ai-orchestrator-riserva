@@ -36,6 +36,7 @@ final class HybridCloudNativeWireSender {
   Future<http.Response> send({
     required HybridCloudAiRequestSeal seal,
     required HybridCloudDispatchPermit permit,
+    required String expectedCredentialSecret,
     CancellationToken? cancellationToken,
   }) => seal.dispatch<http.Response>(
         isRequestActive: cancellationToken == null
@@ -71,7 +72,9 @@ final class HybridCloudNativeWireSender {
               current.accountId == null ||
               current.accountId != seal.disclosure.accountId ||
               apiKey == null ||
-              apiKey.isEmpty) {
+              apiKey.isEmpty ||
+              expectedCredentialSecret.isEmpty ||
+              apiKey != expectedCredentialSecret) {
             throw StateError('Cloud credential changed before sending');
           }
           final selectedModel = approved.modelId;

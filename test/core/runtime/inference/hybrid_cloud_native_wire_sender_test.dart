@@ -137,9 +137,9 @@ void main() {
       expect(request.body, isNot(contains('account-a')));
       return http.Response('{"ok":true}', 200);
     }));
-    expect((await native.send(seal: item, permit: permit)).statusCode, 200);
+    expect((await native.send(seal: item, permit: permit, expectedCredentialSecret: 'fake-key')).statusCode, 200);
     expect(sends, 1);
-    await expectLater(native.send(seal: item, permit: permit),
+    await expectLater(native.send(seal: item, permit: permit, expectedCredentialSecret: 'fake-key'),
         throwsStateError);
     expect(sends, 1);
   });
@@ -161,7 +161,8 @@ void main() {
       return http.Response('{"ok":true}', 200);
     }));
     expect((await native.send(
-        seal: item, permit: await approve(item))).statusCode, 200);
+        seal: item, permit: await approve(item),
+        expectedCredentialSecret: 'fake-key')).statusCode, 200);
     expect(sends, 1);
   });
 
@@ -173,7 +174,24 @@ void main() {
     await expectLater(sender(MockClient((request) async {
       sends++;
       return http.Response('bad', 200);
-    })).send(seal: item, permit: permit), throwsStateError);
+    })).send(seal: item, permit: permit,
+        expectedCredentialSecret: 'key1'), throwsStateError);
+    expect(sends, 0);
+  });
+
+  test('rotated API key for SAME labeled account cannot use approved HTTP',
+      () async {
+    await credentials.setApiKey('gemini', 'old-secret', accountId: 'account-a');
+    final item = sealed('gemini');
+    final permit = await approve(item);
+    // A different token can be entered for the same human-readable account
+    // label while the review is open. An account name alone is not proof.
+    await credentials.setApiKey('gemini', 'new-secret', accountId: 'account-a');
+    await expectLater(sender(MockClient((request) async {
+      sends++;
+      return http.Response('unexpected-send', 200);
+    })).send(seal: item, permit: permit,
+        expectedCredentialSecret: 'old-secret'), throwsStateError);
     expect(sends, 0);
   });
 
@@ -184,7 +202,8 @@ void main() {
     await expectLater(sender(MockClient((request) async {
       sends++;
       return http.Response('bad', 200);
-    })).send(seal: item, permit: await approve(item)), throwsStateError);
+    })).send(seal: item, permit: await approve(item),
+        expectedCredentialSecret: 'key-no-account'), throwsStateError);
     expect(sends, 0);
   });
 
@@ -195,7 +214,8 @@ void main() {
     await expectLater(sender(MockClient((request) async {
       sends++;
       return http.Response('bad', 200);
-    })).send(seal: item, permit: await approve(item)), throwsStateError);
+    })).send(seal: item, permit: await approve(item),
+        expectedCredentialSecret: 'key'), throwsStateError);
     expect(sends, 0);
   });
 
@@ -208,7 +228,8 @@ void main() {
     await expectLater(sender(MockClient((request) async {
       sends++;
       return http.Response('bad', 200);
-    })).send(seal: other, permit: permit), throwsStateError);
+    })).send(seal: other, permit: permit,
+        expectedCredentialSecret: 'key'), throwsStateError);
     expect(sends, 0);
   });
 }

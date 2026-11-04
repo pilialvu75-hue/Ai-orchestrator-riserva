@@ -190,6 +190,57 @@ void main() {
     client.close();
   });
 
+  test('same account label with changed key DURING review blocks Cloud POST',
+      () async {
+    final protected = _ProtectedMemory();
+    final identity = HybridCloudLocalIdentity(storage: protected);
+    final consent = HybridCloudDisclosureConsent(
+      backend: protected,
+      authorizeOwnerSession: identity.isAuthorized,
+    );
+    final credentials = CloudCredentialStore(storage: _Secrets());
+    await credentials.initialize();
+    await credentials.setApiKey('openAi', 'old-key', accountId: 'account-1');
+
+    var sends = 0, reviews = 0;
+    final client = MockClient((_) async {
+      sends++;
+      return http.Response('unexpected HTTP', 200);
+    });
+    final coordinator = HybridCloudRuntimeConsentCoordinator(
+      consent: consent,
+      identity: identity,
+      credentials: credentials,
+      client: client,
+      evidenceFor: (source) async => HybridCloudRuntimeSourceEvidence(
+        sessionId: source.sessionId,
+        originalQuestion: 'Current private question',
+        baseSystemPrompt: 'System instructions',
+        originalHistory: evidence,
+      ),
+      requestConsent: (review) async {
+        reviews++;
+        // Simulate settings changing an API key during a visible review,
+        // without changing the displayed provider/account name.
+        await credentials.setApiKey(
+          'openAi', 'new-key', accountId: 'account-1',
+        );
+        return <HybridDisclosureScope, HybridCloudConsentChoice>{
+          for (final scope in review.needsConsent)
+            scope: HybridCloudConsentChoice.allowOnce,
+        };
+      },
+    );
+    final replies = await _runtime(coordinator).streamInference(
+      request: input,
+      cancellationToken: CancellationToken(),
+    ).toList();
+    expect(replies.last.isError, isTrue);
+    expect(reviews, 1);
+    expect(sends, 0);
+    client.close();
+  });
+
   test('cancelling while review is visible prevents grants and HTTP',
       () async {
     final protected = _ProtectedMemory();

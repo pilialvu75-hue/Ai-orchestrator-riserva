@@ -642,6 +642,18 @@ consenso esplicito.
   privato non è nemmeno invocato: restano solo domanda, contesto e dati
   già condivisibili secondo regole preesistenti, senza memoria durevole.
   Il servizio LOCAL nativo non viene alterato; nessuna nuova tabella DB.
+- **H20 — revalidazione della credenziale Cloud alla frontiera HTTP:**
+  il coordinatore acquisisce in memoria la chiave esatta del provider prima
+  di mostrare l'anteprima e la passa soltanto al sender gated, senza salvarla
+  nelle decisioni, nel prompt, nei log o nel fingerprint della disclosure.
+  Il `HybridCloudNativeWireSender` confronta sincronicamente la chiave
+  attuale con quella fissata prima della review, nel punto immediatamente
+  precedente al POST. Cambio di chiave durante la review, persino con
+  provider e nome account identici, impedisce l'invio. L'attestazione
+  riguarda la singola richiesta; NON dimostra ancora l'identita
+  autenticata lato provider e non risolve i permessi persistenti dopo
+  riconfigurazione delle credenziali tra sessioni. Test mock HTTP coprono
+  entrambi i casi di sostituzione account/chiave e non-send.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
