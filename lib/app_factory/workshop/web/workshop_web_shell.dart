@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'package:flutter/material.dart';
 
 enum WorkshopWebCapabilityState {
@@ -79,9 +80,9 @@ class WorkshopWebShell extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Cantiere Web',
-                  style: TextStyle(
+                Text(
+                  WorkshopWebLanguageScope.tr(context, 'Cantiere Web'),
+                  style: const TextStyle(
                     fontSize: 34,
                     fontWeight: FontWeight.w700,
                   ),
@@ -295,12 +296,12 @@ class _CapabilityCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    title,
+                    WorkshopWebLanguageScope.tr(context, title),
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    subtitle,
+                    WorkshopWebLanguageScope.tr(context, subtitle),
                     style: const TextStyle(
                       color: Colors.white60,
                       height: 1.35,
@@ -311,7 +312,7 @@ class _CapabilityCard extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              label,
+              WorkshopWebLanguageScope.tr(context, label),
               style: const TextStyle(
                 fontSize: 11,
                 color: Colors.white60,
