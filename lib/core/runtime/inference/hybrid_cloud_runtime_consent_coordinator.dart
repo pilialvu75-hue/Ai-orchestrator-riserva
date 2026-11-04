@@ -21,7 +21,7 @@ import 'hybrid_cloud_trusted_request_assembler.dart';
 /// the Chat repository supplies provenance at its real assembly boundary.
 /// Missing evidence, identity, account or dialog is a hard denial.
 final class HybridCloudRuntimeConsentCoordinator {
-  const HybridCloudRuntimeConsentCoordinator({
+  HybridCloudRuntimeConsentCoordinator({
     required HybridCloudDisclosureConsent consent,
     required HybridCloudLocalIdentity identity,
     required CloudCredentialStore credentials,
