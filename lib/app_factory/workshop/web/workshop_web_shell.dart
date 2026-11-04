@@ -173,9 +173,7 @@ class _CloudAutoCardState extends State<_CloudAutoCard> {
   late final Future<WorkshopWebCloudBrokerHealth> _health;
   late final cloud_test.WorkshopWebCloudSelfTestClient _selfTestClient;
   bool _selfTestRunning = false;
-  // Keep the asynchronous result opaque in this UI state; the client owns
-  // parsing and validation of its structured response.
-  dynamic _selfTestResult;
+  cloud_test.WorkshopWebCloudSelfTestResult? _selfTestResult;
 
   @override
   void initState() {
