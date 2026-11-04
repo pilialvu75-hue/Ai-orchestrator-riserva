@@ -122,7 +122,11 @@ void main() {
       providerDisplayName: ([name]) => name ?? 'OpenAI',
       automaticUseAllowed: (_) => true,
       modelForProvider: (_) => 'gpt-test',
-      sendQuery: (_, incoming) async {
+      sendQuery: (_, __) => throw StateError(
+        'Legacy Cloud callback must never run with consentGated=true',
+      ),
+      consentGatedSend: (source, incoming) async {
+        expect(source.prompt, 'Current private question');
         final projected = HybridCloudNativeRequestProjection.project(incoming);
         final seal = HybridCloudAiRequestSeal.fromRequest(
           ownerId: 'owner-a', sessionId: 'local-session',
@@ -178,9 +182,14 @@ void main() {
 
   test('denied consent blocks provider failover even when enabled', () async {
     var callbacks = 0;
+    var legacyCallbacks = 0;
     final runtime = CloudRuntimeProvider(
       consentGated: true,
       sendQuery: (_, __) async {
+        legacyCallbacks++;
+        throw StateError('Legacy provider callback invoked');
+      },
+      consentGatedSend: (_, __) async {
         callbacks++;
         throw const HybridCloudConsentDenied();
       },
@@ -198,8 +207,74 @@ void main() {
       cancellationToken: CancellationToken(),
     ).toList();
     expect(callbacks, 1);
+    expect(legacyCallbacks, 0);
     expect(result.last.isError, isTrue);
     expect(result.last.errorMessage, 'Cloud disclosure was not approved.');
+  });
+
+  test('consentGated with no gate never calls legacy Cloud transport',
+      () async {
+    var sends = 0;
+    final runtime = CloudRuntimeProvider(
+      consentGated: true,
+      sendQuery: (_, __) async {
+        sends++;
+        throw StateError('Legacy Cloud must never be called');
+      },
+      supportedProviders: () => const <String>['openAi'],
+      isProviderAvailable: (_) => true,
+      providerDisplayName: ([name]) => name ?? 'OpenAI',
+      automaticUseAllowed: (_) => true,
+      modelForProvider: (_) => 'gpt-test',
+    );
+    final result = await runtime.streamInference(
+      request: const InferenceRequest(
+        sessionId: 'local-session',
+        prompt: 'Private note',
+        routeDirective: InferenceRouteDirective.cloudOnly,
+      ),
+      cancellationToken: CancellationToken(),
+    ).toList();
+    expect(sends, 0);
+    expect(result.last.isError, isTrue);
+    expect(result.last.errorMessage, contains('consent bridge not configured'));
+  });
+
+  test('consentGated transport error NEVER fails over to another Cloud',
+      () async {
+    var gatedSends = 0;
+    var legacySends = 0;
+    final runtime = CloudRuntimeProvider(
+      consentGated: true,
+      sendQuery: (_, __) async {
+        legacySends++;
+        throw StateError('Legacy provider callback invoked');
+      },
+      consentGatedSend: (request, outbound) async {
+        gatedSends++;
+        expect(request.prompt, 'Private note');
+        expect(outbound.providerId, 'openAi');
+        throw StateError('network or serializer failed');
+      },
+      supportedProviders: () => const <String>['openAi', 'gemini'],
+      isProviderAvailable: (_) => true,
+      preferredProvider: () => 'openAi',
+      providerDisplayName: ([name]) => name ?? 'Cloud',
+      automaticUseAllowed: (_) => true,
+      modelForProvider: (_) => 'gpt-test',
+    );
+    final result = await runtime.streamInference(
+      request: const InferenceRequest(
+        sessionId: 'local-session',
+        prompt: 'Private note',
+        routeDirective: InferenceRouteDirective.cloudOnly,
+        allowCloudProviderFailover: true,
+      ),
+      cancellationToken: CancellationToken(),
+    ).toList();
+    expect(gatedSends, 1);
+    expect(legacySends, 0);
+    expect(result.last.isError, isTrue);
   });
 
   test('approved HTTP failure never echoes provider response body', () async {

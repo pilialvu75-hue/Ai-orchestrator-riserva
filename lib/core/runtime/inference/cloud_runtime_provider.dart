@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cloud_task_class.dart';
 import 'package:ai_orchestrator/core/runtime/inference/conversation_context_limits.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_consent_denied.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_native_request_projection.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -54,6 +55,14 @@ class CloudProviderStatusSnapshot {
   }
 }
 
+/// Injected only for a consent-protected runtime instance. The selected
+/// request is projected to exactly what the native HTTP sender serializes.
+/// Source evidence MUST be independently verified by the callback.
+typedef HybridCloudConsentGatedQuery = Future<AiResponse> Function(
+  InferenceRequest runtimeRequest,
+  AiRequest exactNativeRequest,
+);
+
 class CloudRuntimeProvider implements RuntimeInferenceProvider {
   static const int _maxContextTurns =
       ConversationContextLimits.safeCrossRuntimeTurns;
@@ -73,7 +82,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     bool Function(String provider)? automaticUseAllowed,
     bool Function(String provider, CloudTaskClass task)? automaticUseAllowedForTask,
     this.consentGated = false,
+    HybridCloudConsentGatedQuery? consentGatedSend,
   })  : _sendQuery = sendQuery,
+        _consentGatedSend = consentGatedSend,
         _supportedProviders = supportedProviders,
         _isProviderAvailable = isProviderAvailable,
         _providerDisplayName = providerDisplayName,
@@ -91,6 +102,8 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   /// Opt-in only: disable response caching for consent-reviewed requests.
   /// The production Cloud path is unchanged until full Chat UI integration.
   final bool consentGated;
+  /// Never fall back to the ordinary Cloud callback in consent-gated mode.
+  final HybridCloudConsentGatedQuery? _consentGatedSend;
 
   static const String fullyLocalNotice =
       'Cloud AI unavailable — running fully local mode.';
@@ -221,6 +234,15 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       return;
     }
 
+    // Consent-mode Cloud requests fail closed if the trusted bridge is absent.
+    // The normal sendQuery callback must NEVER be reached via this path.
+    if (consentGated && _consentGatedSend == null) {
+      yield InferenceResponse.error(
+        'Cloud disclosure is unavailable: consent bridge not configured.',
+      );
+      return;
+    }
+
     final optimized = _optimizeRequest(request);
     final signal = _taskSignal(optimized);
     final directCloud = _isDirectCloudRequest(optimized);
@@ -302,9 +324,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       final stopwatch = Stopwatch()..start();
       try {
         final selectedModel = _selectedModel(provider);
-        final response = await _sendQuery(
-          provider,
-          AiRequest(
+        final nativeSource = AiRequest(
             prompt: optimized.prompt.trim(),
             systemPrompt: optimized.systemPrompt,
             messages: _toAiMessages(optimized.context),
@@ -328,8 +348,15 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
               if (optimized.checkpointId != null)
                 'checkpointId': optimized.checkpointId,
             },
-          ),
-        );
+          );
+        final response = consentGated
+            ? await _consentGatedSend!(
+                // Send the original runtime request. A trusted source
+                // assembler must detect dropped/deduplicated history.
+                request,
+                HybridCloudNativeRequestProjection.project(nativeSource),
+              )
+            : await _sendQuery(provider, nativeSource);
         stopwatch.stop();
 
         if (cancellationToken.isCancelled) {
@@ -367,7 +394,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         _markFailure(provider, error, mapped, stopwatch.elapsedMilliseconds);
         lastError = mapped;
 
-        if (!optimized.allowCloudProviderFailover) {
+        // A consented destination cannot be silently switched after HTTP
+        // failure, quota error or a late network exception.
+        if (consentGated || !optimized.allowCloudProviderFailover) {
           break;
         }
       }

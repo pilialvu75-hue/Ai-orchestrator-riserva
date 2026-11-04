@@ -554,7 +554,7 @@ consenso esplicito.
   nella Chat e il controllo esatto del payload. Prevedere inoltre
   autorizzazione esplicita opzionale su tutti i provider approvati senza
   includere automaticamente provider/account futuri.
-- **Stato tecnico H10–H13 (#977, ancora DRAFT):** contratto di consenso,
+- **Stato tecnico H10–H14 (#977, ancora DRAFT):** contratto di consenso,
   revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
   OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
   `ChatFileContextService` conserva separatamente domanda, istruzioni e
@@ -564,14 +564,27 @@ consenso esplicito.
   `HybridCloudTrustedRequestAssembler` verifica che domanda, cronologia,
   RAG e memorie corrispondano **esattamente** all'`AiRequest` da autorizzare,
   impedendo append invisibili (H13).
+- **H14 — trasporto con consenso davvero separato (solo opt-in):**
+  `CloudRuntimeProvider(consentGated: true)` richiede una callback
+  `consentGatedSend` dedicata. Senza di essa rifiuta la richiesta;
+  non esegue mai il vecchio `sendQuery`, non usa cache Cloud, non tenta
+  automaticamente un altro provider nemmeno su errore generico. La richiesta
+  viene prima proiettata nelle forme realmente serializzate da OpenAI/Gemini.
+  `HybridCloudRuntimeConsentCoordinator` collega le prove originali,
+  l'identità locale protetta, credenziale con account esplicito,
+  assemblatore H13, review, permesso monouso e invio native HTTP in un
+  test completo con client mock. Sorgente o dialogo assenti = nessun HTTP.
+  Il percorso applicativo ordinario NON è stato abilitato.
 - I dati utente/documenti/ricordi e cronologia con sensibilità non verificata
   restano `unknown`: sono autorizzabili soltanto per una richiesta, non con
   permesso permanente; contenuti con false direttive `[SYSTEM]` rimangono
   dati della fonte. Servono classificazione affidabile, provenienza dei
   risultati Web/tool, allegati binari e trasporti oltre OpenAI/Gemini.
-  **Queste funzioni sono ancora source-only:** mancano il passaggio
-  dell'evidenza attraverso tutta Chat -> runtime -> dialogo UI -> HTTP,
-  consenso provider/account verificato e E2E sul Galaxy S24 FE.
+  **Il percorso H14 funziona nei test con HTTP simulato, non nella Chat
+  produttiva:** bisogna ancora propagare l'evidenza trusted dalle richieste
+  Chat/Hybrid al runtime senza aggiunte da Web/tool, installare un vero
+  presentatore del dialogo nel ciclo UI, associare l'account Cloud
+  esplicitamente configurato e completare l'E2E sul Galaxy S24 FE.
 - PR #975 è il checkpoint sperimentale separato. #899 governa la memoria,
   #973 HYBRID, #948 OTA. Non dichiarare prodotto completo né pubblicare
   release sulla sola base di test source-only.
