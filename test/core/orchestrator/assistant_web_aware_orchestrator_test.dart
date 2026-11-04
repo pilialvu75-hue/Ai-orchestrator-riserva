@@ -59,7 +59,10 @@ void main() {
     );
   });
 
-  AssistantWebAwareOrchestrator build({WebSearchTool? actualTool}) {
+  AssistantWebAwareOrchestrator build({
+    WebSearchTool? actualTool,
+    HybridLocalMemoryPromptEnricher? hybridMemoryEnricher,
+  }) {
     return AssistantWebAwareOrchestrator(
       intentAnalyzer: const IntentAnalyzer(),
       executor: executor,
@@ -67,6 +70,7 @@ void main() {
       webSearchTool: actualTool ?? webSearch,
       runtimeSettingsService: settings,
       cloudRuntimeProvider: cloud,
+      hybridLocalMemoryPromptEnricher: hybridMemoryEnricher,
     );
   }
 
@@ -242,6 +246,115 @@ void main() {
     verifyNever(() => inference.stream(any()));
   });
 
+  test('HYBRID LOCAL uses confirmed memory only AFTER localOnly routing',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(false);
+    var memoryReads = 0;
+    const question = 'Parlami della mia bicicletta';
+    final original = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-local-memory',
+      originalQuestion: question,
+      baseSystemPrompt: 'Base Assistant rules.',
+      originalHistory: const <AiMessage>[],
+    );
+    await build(
+      hybridMemoryEnricher: ({
+        required String baseSystemPrompt,
+        required String sessionId,
+        required String userPrompt,
+      }) async {
+        memoryReads++;
+        expect(sessionId, 'hybrid-local-memory');
+        expect(userPrompt, question);
+        expect(baseSystemPrompt, 'Base Assistant rules.');
+        return '$baseSystemPrompt\n\nCONFIRMED PRIVATE MEMORY: blue bicycle';
+      },
+    ).handleStream(
+      question,
+      sessionId: 'hybrid-local-memory',
+      systemPrompt: 'Base Assistant rules.',
+      trustedCloudSourceEvidence: original,
+    ).drain<void>();
+    final selected = verify(() => inference.stream(captureAny()))
+        .captured.single as InferenceRequest;
+    expect(memoryReads, 1);
+    expect(selected.routeDirective, InferenceRouteDirective.localOnly);
+    expect(selected.systemPrompt, contains('CONFIRMED PRIVATE MEMORY'));
+    expect(selected.allowCloudProviderFailover, isFalse);
+    expect(selected.allowWebSearchTool, isFalse);
+    expect(selected.trustedCloudSourceEvidence, isNull);
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('HYBRID CLOUD choice does not read memory or inject personal context',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    var memoryReads = 0;
+    final original = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-cloud-no-memory',
+      originalQuestion: 'Explain private context policy',
+      baseSystemPrompt: 'Base Assistant rules.',
+      originalHistory: const <AiMessage>[],
+    );
+    await build(
+      hybridMemoryEnricher: ({
+        required String baseSystemPrompt,
+        required String sessionId,
+        required String userPrompt,
+      }) async {
+        memoryReads++;
+        return '$baseSystemPrompt\n\nPRIVATE MEMORY MUST NOT LEAVE DEVICE';
+      },
+    ).handleStream(
+      'Explain private context policy',
+      sessionId: 'hybrid-cloud-no-memory',
+      systemPrompt: 'Base Assistant rules.',
+      trustedCloudSourceEvidence: original,
+    ).drain<void>();
+    final selected = verify(() => inference.stream(captureAny()))
+        .captured.single as InferenceRequest;
+    expect(memoryReads, 0);
+    expect(selected.routeDirective, InferenceRouteDirective.cloudOnly);
+    expect(selected.cloudProviderId, 'gemini');
+    expect(selected.systemPrompt, 'Base Assistant rules.');
+    expect(selected.trustedCloudSourceEvidence, same(original));
+  });
+
+  test('HYBRID LOCAL memory read failure preserves ordinary local answer',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(false);
+    final original = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-fallback-local',
+      originalQuestion: 'Help with a bicycle',
+      baseSystemPrompt: 'Base Assistant rules.',
+      originalHistory: const <AiMessage>[],
+    );
+    await build(
+      hybridMemoryEnricher: ({
+        required String baseSystemPrompt,
+        required String sessionId,
+        required String userPrompt,
+      }) async => throw StateError('Local SQLite temporarily unavailable'),
+    ).handleStream(
+      'Help with a bicycle',
+      sessionId: 'hybrid-fallback-local',
+      systemPrompt: 'Base Assistant rules.',
+      trustedCloudSourceEvidence: original,
+    ).drain<void>();
+    final selected = verify(() => inference.stream(captureAny()))
+        .captured.single as InferenceRequest;
+    expect(selected.routeDirective, InferenceRouteDirective.localOnly);
+    expect(selected.systemPrompt, 'Base Assistant rules.');
+    expect(selected.allowCloudProviderFailover, isFalse);
+    expect(selected.trustedCloudSourceEvidence, isNull);
+  });
+
   test('ordinary HYBRID Cloud route carries original Chat provenance',
       () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
@@ -301,7 +414,7 @@ void main() {
     expect(selected.trustedCloudSourceEvidence, isNull);
   });
 
-  test('document's locally inserted Web restriction invalidates evidence',
+  test("document's locally inserted Web restriction invalidates evidence",
       () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
     when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);

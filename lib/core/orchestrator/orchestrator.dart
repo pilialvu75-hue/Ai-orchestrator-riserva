@@ -16,6 +16,16 @@ import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 import 'package:flutter/foundation.dart';
 
+/// Local-only confirmed-memory context callback. The Orchestrator never
+/// calls this on a Cloud route and never passes the returned prompt to an
+/// external provider. A normal Local request is still handled by the
+/// existing PromptResolvingChatRepository memory decorator.
+typedef HybridLocalMemoryPromptEnricher = Future<String> Function({
+  required String baseSystemPrompt,
+  required String sessionId,
+  required String userPrompt,
+});
+
 /// Central routing layer for Assistant/Hybrid AI calls.
 ///
 /// Explicit Cloud chat does not depend on this class: it enters the inference
@@ -32,13 +42,15 @@ class Orchestrator {
     WebSearchTool? webSearchTool,
     AiRuntimeSettingsService? runtimeSettingsService,
     CloudRuntimeProvider? cloudRuntimeProvider,
+    HybridLocalMemoryPromptEnricher? hybridLocalMemoryPromptEnricher,
   })  : _analyzer = intentAnalyzer,
         _executor = executor,
         _inferenceService = inferenceService,
         _plannerService = plannerService,
         _webSearchTool = webSearchTool,
         _runtimeSettingsService = runtimeSettingsService,
-        _cloudRuntimeProvider = cloudRuntimeProvider;
+        _cloudRuntimeProvider = cloudRuntimeProvider,
+        _hybridLocalMemoryPromptEnricher = hybridLocalMemoryPromptEnricher;
 
   final IntentAnalyzer _analyzer;
   final ExecutionEngine _executor;
@@ -47,6 +59,7 @@ class Orchestrator {
   final WebSearchTool? _webSearchTool;
   final AiRuntimeSettingsService? _runtimeSettingsService;
   final CloudRuntimeProvider? _cloudRuntimeProvider;
+  final HybridLocalMemoryPromptEnricher? _hybridLocalMemoryPromptEnricher;
 
   Future<InferenceResponse> handle(
     String input, {
@@ -191,7 +204,53 @@ class Orchestrator {
       ' cloud_provider=${request.cloudProviderId ?? 'none'}',
     );
 
+    // The confirmed private context may ONLY be added once Hannibal has
+    // committed to localOnly. It is NEVER part of the Cloud request or a
+    // shared Hybrid system prompt. No Local -> Cloud fallback may reuse it.
+    final enrichMemory = _hybridLocalMemoryPromptEnricher;
+    if (_runtimeSettingsService?.runtimeMode == AiRuntimeMode.hybrid &&
+        request.routeDirective == InferenceRouteDirective.localOnly &&
+        trustedCloudSourceEvidence != null &&
+        enrichMemory != null) {
+      return _streamHybridLocalWithConfirmedMemory(
+        request: request,
+        enricher: enrichMemory,
+        originalUserQuestion: trustedCloudSourceEvidence.originalQuestion,
+      );
+    }
+
     return _inferenceService.stream(request);
+  }
+
+  TokenStream _streamHybridLocalWithConfirmedMemory({
+    required InferenceRequest request,
+    required HybridLocalMemoryPromptEnricher enricher,
+    required String originalUserQuestion,
+  }) async* {
+    final baseSystemPrompt = request.systemPrompt ?? '';
+    String localSystemPrompt;
+    try {
+      localSystemPrompt = await enricher(
+        baseSystemPrompt: baseSystemPrompt,
+        sessionId: request.sessionId,
+        userPrompt: originalUserQuestion,
+      );
+    } catch (_) {
+      // Optional memory reads never prevent an ordinary LOCAL answer.
+      localSystemPrompt = baseSystemPrompt;
+    }
+    // The memory-augmented prompt is intentionally unreviewed for Cloud.
+    // Remove its original source evidence and forbid model-driven Web tools
+    // from accidentally transmitting private memory in a search query.
+    final localOnlyRequest = request.copyWith(
+      systemPrompt: localSystemPrompt,
+      allowCloudProviderFailover: false,
+      allowWebSearchTool: localSystemPrompt == baseSystemPrompt
+          ? request.allowWebSearchTool
+          : false,
+      discardTrustedCloudSourceEvidence: true,
+    );
+    yield* _inferenceService.stream(localOnlyRequest);
   }
 
   /// Converts persisted runtime mode into an explicit execution decision.

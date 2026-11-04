@@ -35,6 +35,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     required AiRuntimeSettingsService runtimeSettingsService,
     required CloudRuntimeProvider cloudRuntimeProvider,
     PlannerService? plannerService,
+    HybridLocalMemoryPromptEnricher? hybridLocalMemoryPromptEnricher,
   })  : _intentAnalyzer = intentAnalyzer,
         _webSearchTool = webSearchTool,
         _runtimeSettingsService = runtimeSettingsService,
@@ -47,6 +48,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
           webSearchTool: webSearchTool,
           runtimeSettingsService: runtimeSettingsService,
           cloudRuntimeProvider: cloudRuntimeProvider,
+          hybridLocalMemoryPromptEnricher: hybridLocalMemoryPromptEnricher,
         );
 
   static const int _maxResults = 5;

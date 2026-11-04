@@ -167,6 +167,17 @@ abstract final class CloudRoutingBootstrap {
         webSearchTool: assistantWebSearchTool,
         runtimeSettingsService: sl<AiRuntimeSettingsService>(),
         cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
+        // Memory is resolved AFTER Hannibal chooses localOnly, never as part
+        // of an HYBRID shared prompt that might be forwarded to Cloud.
+        hybridLocalMemoryPromptEnricher: ({
+          required String baseSystemPrompt,
+          required String sessionId,
+          required String userPrompt,
+        }) => durableMemoryContextService.augmentSystemPrompt(
+          baseSystemPrompt: baseSystemPrompt,
+          sessionId: sessionId,
+          userPrompt: userPrompt,
+        ),
       ),
     );
 

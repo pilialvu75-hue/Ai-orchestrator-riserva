@@ -554,7 +554,7 @@ consenso esplicito.
   nella Chat e il controllo esatto del payload. Prevedere inoltre
   autorizzazione esplicita opzionale su tutti i provider approvati senza
   includere automaticamente provider/account futuri.
-- **Stato tecnico H10–H18 (#977, ancora DRAFT):** contratto di consenso,
+- **Stato tecnico H10–H19 (#977, ancora DRAFT):** contratto di consenso,
   revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
   OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
   `ChatFileContextService` conserva separatamente domanda, istruzioni e
@@ -628,12 +628,27 @@ consenso esplicito.
 - Test widget reali del gate H17 inseriti nella pipeline CI condivisa
   su Ubuntu e macOS, insieme al dialogo di review multilingue preesistente.
   Non scambiare il solo verde dei sorgenti Android per test UI eseguiti.
-- **Limite attuale:** gateway UI e provenienza Hannibal sono presenti,
+- **H19 — memoria confermata SOLO nel ramo Hybrid->LOCAL:**
+  dopo la decisione reale `Orchestrator._routeRequest`, se Hannibal ha scelto
+  `localOnly` e la prova deriva dalla chat corrente, usa
+  `AssistantDurableMemoryContextService.augmentSystemPrompt` per recuperare
+  soltanto ricordi pertinenti e confermati in SQLite. La ricerca non avviene
+  prima della decisione di routing e non cambia la risposta quando la memoria
+  non è pertinente o il database non è disponibile. L'aggiunta avviene su
+  una `InferenceRequest` **localOnly**, senza fallback ad altri provider IA,
+  senza evidence Cloud riutilizzabile e con Web/tool-call disabilitati
+  quando la memoria entra nel prompt (evita che un tool dinamico trasformi
+  un ricordo in una query di rete). Se Hannibal sceglie Cloud, il retrieval
+  privato non è nemmeno invocato: restano solo domanda, contesto e dati
+  già condivisibili secondo regole preesistenti, senza memoria durevole.
+  Il servizio LOCAL nativo non viene alterato; nessuna nuova tabella DB.
+- **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
+  ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
-  gated nel bootstrap e senza consenso in Chat attivo. Mancano un destinatario
-  Cloud verificato per l'account corrente, le prove E2E con HTTP reale e
-  l'abilitazione sicura dei ricordi Hybrid->Local. I permessi non autorizzano
-  alcuna replica o invio automatico di memoria.
+  gated nel bootstrap e senza consenso in Chat attivo. Mancano destinatario
+  Cloud/account verificato per la review, prove E2E con HTTP reale e test
+  fisici S24 FE. I permessi non autorizzano replica o invio automatico della
+  memoria.
 - I dati utente/documenti/ricordi e cronologia con sensibilità non verificata
   restano `unknown`: sono autorizzabili soltanto per una richiesta, non con
   permesso permanente; contenuti con false direttive `[SYSTEM]` rimangono
