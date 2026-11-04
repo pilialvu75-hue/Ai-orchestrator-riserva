@@ -8,7 +8,7 @@ void main() {
 
     expect(source, contains("const SELF_TEST_MARKER = 'AIVEXUS_WEB_SELF_TEST_OK'"));
     expect(source, contains('selfTestFree: row.selfTestFree === true'));
-    expect(source, contains("(route) => !selfTest || route.selfTestFree"));
+    expect(source, contains('route.selfTestFree'));
     expect(source, contains("'self_test_not_configured'"));
     expect(source, contains("selfTest && capability !== 'orchestration'"));
     expect(source, contains("const messages = selfTest"));

@@ -11,6 +11,7 @@ final class WorkshopWebCloudSelfTestResult {
     required this.detail,
     required this.elapsed,
     this.statusCode,
+    this.errorCode,
     this.provider,
     this.configuredModel,
     this.reportedModel,
@@ -22,6 +23,7 @@ final class WorkshopWebCloudSelfTestResult {
   final String detail;
   final Duration elapsed;
   final int? statusCode;
+  final String? errorCode;
   final String? provider;
   final String? configuredModel;
   final String? reportedModel;
@@ -45,7 +47,7 @@ final class WorkshopWebCloudSelfTestClient {
 
   Uri get endpoint => _baseUri.resolve('/api/cantiere/inference');
 
-  Future<WorkshopWebCloudSelfTestResult> run() async {
+  Future<WorkshopWebCloudSelfTestResult> run({String? selectedRouteId}) async {
     final stopwatch = Stopwatch()..start();
     try {
       final response = await _client
@@ -56,10 +58,13 @@ final class WorkshopWebCloudSelfTestClient {
               'Content-Type': 'application/json',
             },
             // No model, credential, prompt, or upstream URL is sent by Web.
-            body: jsonEncode(const <String, Object>{
+            body: jsonEncode(<String, Object>{
               'version': 1,
               'capability': 'orchestration',
               'selfTest': true,
+              if (selectedRouteId != null &&
+                  RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$').hasMatch(selectedRouteId))
+                'routeId': selectedRouteId,
             }),
           )
           .timeout(timeout);
@@ -89,6 +94,7 @@ final class WorkshopWebCloudSelfTestClient {
                   '${code is String ? ' ($code)' : ''}.',
           elapsed: stopwatch.elapsed,
           statusCode: response.statusCode,
+          errorCode: code is String ? code : null,
         );
       }
 

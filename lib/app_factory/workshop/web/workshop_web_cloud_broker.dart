@@ -137,19 +137,22 @@ final class WorkshopWebCloudBrokerClient {
 /// Browser-safe RuntimeInferenceProvider that delegates one Cantiere
 /// capability to the same-origin server-side broker.
 ///
-/// The browser never selects an upstream endpoint, provider API key or concrete
-/// model. AUTO routing is owned by the server configuration.
+/// The browser never chooses an upstream endpoint, key or arbitrary model.
+/// An optional opaque route alias can constrain orchestration to one
+/// server-approved zero-cost route; all validation remains server-side.
 final class WorkshopWebCloudRuntimeProvider
     implements RuntimeInferenceProvider {
   WorkshopWebCloudRuntimeProvider({
     required this.capability,
     http.Client? client,
     Uri? baseUri,
+    this.selectedRouteId,
     this.timeout = const Duration(seconds: 90),
   })  : _client = client ?? http.Client(),
         _baseUri = baseUri ?? Uri.base;
 
   final WorkshopWebCloudCapability capability;
+  final String? Function()? selectedRouteId;
   final http.Client _client;
   final Uri _baseUri;
   final Duration timeout;
@@ -183,6 +186,10 @@ final class WorkshopWebCloudRuntimeProvider
     final payload = <String, Object?>{
       'version': 1,
       'capability': capability.id,
+      if (capability == WorkshopWebCloudCapability.orchestration &&
+          selectedRouteId != null &&
+          selectedRouteId!() != null)
+        'routeId': selectedRouteId!(),
       'messages': _messagesFor(request),
       'maxTokens': request.maxTokens,
       'temperature': request.temperature,
