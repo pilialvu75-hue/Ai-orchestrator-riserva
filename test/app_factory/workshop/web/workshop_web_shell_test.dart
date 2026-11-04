@@ -93,7 +93,7 @@ void main() {
         calls += 1;
         expect(jsonDecode(request.body)['selfTest'], true);
         return http.Response(
-          jsonEncode(<String, Object>{
+          jsonEncode(<String, dynamic>{
             'version': 1,
             'text': WorkshopWebCloudSelfTestClient.expectedMarker,
             'model': 'configured-model',
