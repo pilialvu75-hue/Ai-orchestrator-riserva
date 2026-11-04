@@ -59,41 +59,7 @@ abstract final class AssistantReplyLanguagePolicy {
   static String? detect(String userPrompt) {
     final text = userPrompt.trim().toLowerCase();
     if (text.isEmpty) return null;
-    final wholeTurn = text.replaceAll(RegExp(r'[.!?]+
-    final words = RegExp(
-      r"[\p{L}]+(?:['’][\p{L}]+)?",
-      unicode: true,
-    ).allMatches(text).map((match) => match.group(0)!).toList();
-    if (words.isEmpty) return null;
-
-    String? best;
-    var bestScore = 1;
-    var tied = false;
-    for (final entry in _signals.entries) {
-      final score = words.where(entry.value.contains).length;
-      if (score > bestScore) {
-        best = entry.key;
-        bestScore = score;
-        tied = false;
-      } else if (score == bestScore && score > 1) {
-        tied = true;
-      }
-    }
-    return tied ? null : best;
-  }
-
-  static String withCurrentTurnHint({
-    required String systemPrompt,
-    required String userPrompt,
-  }) {
-    final language = detect(userPrompt);
-    if (language == null) return systemPrompt;
-    return '$systemPrompt\n\nFor this response, write in $language. '
-        'The latest user message determines the reply language, even when '
-        'earlier messages used another language. Preserve proper names.';
-  }
-}
-), '')
+    final wholeTurn = text.replaceAll(RegExp(r'[.!?]+$'), '')
         .replaceAll(RegExp(r'\s+'), ' ').trim();
     final explicitLanguage = _shortTurns[wholeTurn];
     if (explicitLanguage != null) return explicitLanguage;
