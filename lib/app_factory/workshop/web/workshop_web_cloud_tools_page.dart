@@ -59,7 +59,7 @@ class _WorkshopWebCloudToolsPageState extends State<WorkshopWebCloudToolsPage> {
     });
     try {
       final result = await _selfTestClient.run(
-        routeId: widget.preference.routeId,
+        selectedRouteId: widget.preference.routeId,
       );
       if (mounted) setState(() => _last = result);
     } finally {
