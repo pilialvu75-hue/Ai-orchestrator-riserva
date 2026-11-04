@@ -3,6 +3,6 @@
   "operation": "deploy_private",
   "confirmation": "DEPLOY_PRIVATE_CANTIERE",
   "environment": "web-private-production",
-  "requestId": "aivexus-web-p0-selftest-i18n-20261104-merged-989-990",
-  "reason": "Owner-approved private Aivexus Web release of merged PR #989 synthetic Cloud Self-Test and PR #990 IT/FR/EN/ES multilingual UI; no provider, Access or credential changes."
+  "requestId": "aivexus-web-p0-menu-diagnostics-pr991-20261105-0024",
+  "reason": "Owner-authorized private production deploy of PR #991: hamburger menu, sanitized Cloud route diagnostics and zero-cost-only model selection. No changes to Cloudflare Access, provider routes, credentials or policies."
 }
