@@ -1,6 +1,7 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_self_test.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'package:flutter/material.dart';
 
@@ -56,10 +57,12 @@ class WorkshopWebShell extends StatelessWidget {
     super.key,
     required this.checkpointStore,
     required this.cloudHealth,
+    this.selfTestClient,
   });
 
   final Future<WorkshopCheckpointStore> checkpointStore;
   final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
+  final WorkshopWebCloudSelfTestClient? selfTestClient;
 
   @override
   Widget build(BuildContext context) {
@@ -108,6 +111,7 @@ class WorkshopWebShell extends StatelessWidget {
                 ),
                 _CloudAutoCard(
                   cloudHealth: cloudHealth,
+                  selfTestClient: selfTestClient,
                 ),
                 const _CapabilityCard(
                   title: 'Module Library + Researcher',
@@ -155,9 +159,11 @@ class WorkshopWebShell extends StatelessWidget {
 class _CloudAutoCard extends StatefulWidget {
   const _CloudAutoCard({
     required this.cloudHealth,
+    this.selfTestClient,
   });
 
   final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
+  final WorkshopWebCloudSelfTestClient? selfTestClient;
 
   @override
   State<_CloudAutoCard> createState() => _CloudAutoCardState();
@@ -165,43 +171,130 @@ class _CloudAutoCard extends StatefulWidget {
 
 class _CloudAutoCardState extends State<_CloudAutoCard> {
   late final Future<WorkshopWebCloudBrokerHealth> _health;
+  late final WorkshopWebCloudSelfTestClient _selfTestClient;
+  bool _selfTestRunning = false;
+  WorkshopWebCloudSelfTestResult? _selfTestResult;
 
   @override
   void initState() {
     super.initState();
     _health = widget.cloudHealth;
+    _selfTestClient = widget.selfTestClient ?? WorkshopWebCloudSelfTestClient();
+  }
+
+  Future<void> _runSelfTest() async {
+    if (_selfTestRunning) return;
+    setState(() {
+      _selfTestRunning = true;
+      _selfTestResult = null;
+    });
+    try {
+      final result = await _selfTestClient.run();
+      if (mounted) setState(() => _selfTestResult = result);
+    } finally {
+      if (mounted) setState(() => _selfTestRunning = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<WorkshopWebCloudBrokerHealth>(
-      future: _health,
-      builder: (context, snapshot) {
-        final health = snapshot.data;
-        if (snapshot.hasError || (health != null && !health.isReady)) {
-          return _CapabilityCard(
-            title: 'Cloud / AUTO execution',
-            subtitle: health?.errorCode == null
-                ? 'Server-side broker is reachable but one or more Cantiere capabilities are not configured.'
-                : 'Server-side broker unavailable: ${health!.errorCode}.',
-            state: WorkshopWebCapabilityState.unavailable,
-          );
-        }
-        if (health == null) {
-          return const _CapabilityCard(
-            title: 'Cloud / AUTO execution',
-            subtitle:
-                'Checking the server-side capability broker. No provider secret is stored in the browser.',
-            state: WorkshopWebCapabilityState.planned,
-          );
-        }
-        return const _CapabilityCard(
-          title: 'Cloud / AUTO execution',
-          subtitle:
-              'Server-side AUTO routing ready for Orchestrator, Architect, Engineer and Reviewer.',
-          state: WorkshopWebCapabilityState.available,
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        FutureBuilder<WorkshopWebCloudBrokerHealth>(
+          future: _health,
+          builder: (context, snapshot) {
+            final health = snapshot.data;
+            if (snapshot.hasError || (health != null && !health.isReady)) {
+              return _CapabilityCard(
+                title: 'Cloud / AUTO execution',
+                subtitle: health?.errorCode == null
+                    ? 'Server-side broker is reachable but one or more Cantiere capabilities are not configured.'
+                    : 'Server-side broker unavailable: ${health!.errorCode}.',
+                state: WorkshopWebCapabilityState.unavailable,
+              );
+            }
+            if (health == null) {
+              return const _CapabilityCard(
+                title: 'Cloud / AUTO execution',
+                subtitle:
+                    'Checking the server-side capability broker. No provider secret is stored in the browser.',
+                state: WorkshopWebCapabilityState.planned,
+              );
+            }
+            return const _CapabilityCard(
+              title: 'Cloud / AUTO execution',
+              subtitle:
+                  'Server-side AUTO routing ready for Orchestrator, Architect, Engineer and Reviewer.',
+              state: WorkshopWebCapabilityState.available,
+            );
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+          child: OutlinedButton.icon(
+            onPressed: _selfTestRunning ? null : _runSelfTest,
+            icon: _selfTestRunning
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.science_outlined),
+            label: Text(
+              _selfTestRunning ? 'Self-Test in corso…' : 'Esegui Self-Test Cloud',
+            ),
+          ),
+        ),
+        if (_selfTestResult case final result?)
+          Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Icon(
+                        result.passed
+                            ? Icons.check_circle_outline
+                            : Icons.error_outline,
+                        color: result.passed ? Colors.greenAccent : Colors.amber,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        result.passed
+                            ? 'Cloud Self-Test Passed'
+                            : 'Cloud Self-Test Not Passed',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(result.detail),
+                  const SizedBox(height: 8),
+                  Text(
+                    'HTTP: ${result.statusCode?.toString() ?? '—'}'
+                    ' · Tempo: ${result.elapsed.inMilliseconds} ms',
+                  ),
+                  if (result.provider != null)
+                    Text('Provider (endpoint): ${result.provider}'),
+                  if (result.configuredModel != null)
+                    Text('Modello configurato: ${result.configuredModel}'),
+                  if (result.reportedModel != null)
+                    Text('Modello dichiarato dal provider: ${result.reportedModel}'),
+                  if (result.routeId != null)
+                    Text('Rotta: ${result.routeId}'),
+                  if (result.tokensGenerated != null)
+                    Text('Token generati: ${result.tokensGenerated}'),
+                  if (result.passed)
+                    const Text('Testo generato: AIVEXUS_WEB_SELF_TEST_OK'),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
