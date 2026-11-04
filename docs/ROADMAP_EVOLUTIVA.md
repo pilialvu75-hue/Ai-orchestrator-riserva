@@ -546,18 +546,35 @@ consenso esplicito.
   L'inferenza LOCAL deve continuare a funzionare anche senza connessione.
 - **Impostazioni → Modalità IA → Consensi Cloud**: sottomenu per consultare,
   modificare e revocare regole per fonte e sensibilità, provider e account.
-  L'autorizzazione «solo questa volta» non viene salvata. La prima versione
-  del sottomenu resta inattiva senza una reale identità owner/session:
-  non simulare login né concedere accesso Cloud in automatico. Collega in
-  seguito l'identità verificata, la schermata di consenso e il controllo
-  del payload del provider. Prevedere anche autorizzazione esplicita
-  opzionale per categoria su tutti i provider, senza consenso implicito.
-- PR #977 introduce un **contratto source-only con test**, non la UI e non il
-  routing produttivo; PR #975 resta il percorso checkpoint sperimentale separato.
-  #899 governa la memoria, #973 HYBRID, #948 OTA. La verifica richiede
-  integrazione reale del consent manager e provider/account/payload al dispatch,
-  UI IT/FR/EN/ES, test privacy, CI e S24 FE fisico; non dichiarare il prodotto
-  completo per il solo merge di un contratto.
+  L'autorizzazione «solo questa volta» non viene salvata. Il sottomenu
+  e la finestra di review sono realizzati nella PR #977. Una identità locale
+  protetta per installazione abilita la gestione delle regole sul dispositivo,
+  ma **non autentica l'utente nei provider Cloud** e non basta per autorizzare
+  il dispatch. Collegare in seguito la verifica del destinatario, il dialogo
+  nella Chat e il controllo esatto del payload. Prevedere inoltre
+  autorizzazione esplicita opzionale su tutti i provider approvati senza
+  includere automaticamente provider/account futuri.
+- **Stato tecnico H10–H13 (#977, ancora DRAFT):** contratto di consenso,
+  revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
+  OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
+  `ChatFileContextService` conserva separatamente domanda, istruzioni e
+  estratti senza cambiare il prompt LOCAL (H11). Il retrieval reale di
+  `AssistantDurableMemoryContextService` espone intestazione applicativa e
+  record confermati, senza includere candidati (H12). L'assemblatore
+  `HybridCloudTrustedRequestAssembler` verifica che domanda, cronologia,
+  RAG e memorie corrispondano **esattamente** all'`AiRequest` da autorizzare,
+  impedendo append invisibili (H13).
+- I dati utente/documenti/ricordi e cronologia con sensibilità non verificata
+  restano `unknown`: sono autorizzabili soltanto per una richiesta, non con
+  permesso permanente; contenuti con false direttive `[SYSTEM]` rimangono
+  dati della fonte. Servono classificazione affidabile, provenienza dei
+  risultati Web/tool, allegati binari e trasporti oltre OpenAI/Gemini.
+  **Queste funzioni sono ancora source-only:** mancano il passaggio
+  dell'evidenza attraverso tutta Chat -> runtime -> dialogo UI -> HTTP,
+  consenso provider/account verificato e E2E sul Galaxy S24 FE.
+- PR #975 è il checkpoint sperimentale separato. #899 governa la memoria,
+  #973 HYBRID, #948 OTA. Non dichiarare prodotto completo né pubblicare
+  release sulla sola base di test source-only.
 - Massimizzare completezza e accuratezza con verifica e fonti senza promettere
   risposte **esaustive al 100%**, impossibili da garantire.
 
