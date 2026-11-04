@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_project_storage.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/domains/shared/aivexus_project_extension.dart';
 
@@ -43,6 +44,8 @@ final class _WorkshopWebProjectsPageState
   bool _loading = true;
   bool _showNewProject = false;
   bool _busy = false;
+
+  String _tr(String source) => WorkshopWebLanguageScope.tr(context, source);
 
   @override
   void initState() {
@@ -256,11 +259,14 @@ final class _WorkshopWebProjectsPageState
     });
 
     widget.controller.clearConversation();
+    final replyLanguage =
+        WorkshopWebLanguageScope.maybeOf(context)?.replyLanguageName ?? 'italiano';
     final prompt =
         '''
 Titolo progetto: $title
 Piattaforme richieste: ${platforms.join(', ')}
 Cosa deve fare: $goal
+Lingua della risposta: $replyLanguage
 
 Prepara esclusivamente la proposta del progetto. Non iniziare la creazione,
 non dichiarare file creati e non avviare build. Se manca un dato indispensabile
@@ -316,7 +322,7 @@ proposta breve, concreta e approvabile.
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Approva progetto'),
+        title: Text(_tr('Approva progetto')),
         content: Text(
           'Approvi la proposta di “${project.title}”? '
           'Nessuna creazione parte prima di questa conferma.',
@@ -324,11 +330,11 @@ proposta breve, concreta e approvabile.
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Annulla'),
+            child: Text(_tr('Annulla')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Approva'),
+            child: Text(_tr('Approva')),
           ),
         ],
       ),
@@ -387,7 +393,7 @@ proposta breve, concreta e approvabile.
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: _reload,
-                child: const Text('Riprova lettura'),
+                child: Text(_tr('Riprova lettura')),
               ),
             ],
           ),
@@ -420,11 +426,11 @@ proposta breve, concreta e approvabile.
             children: <Widget>[
               Row(
                 children: <Widget>[
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Text(
+                        const Text(
                           'Aivexus',
                           style: TextStyle(
                             color: Colors.white54,
@@ -433,8 +439,8 @@ proposta breve, concreta e approvabile.
                         ),
                         SizedBox(height: 6),
                         Text(
-                          'Cantiere',
-                          style: TextStyle(
+                          _tr('Cantiere'),
+                          style: const TextStyle(
                             fontSize: 34,
                             fontWeight: FontWeight.w700,
                           ),
@@ -445,15 +451,15 @@ proposta breve, concreta e approvabile.
                   FilledButton.icon(
                     onPressed: _startNewProject,
                     icon: const Icon(Icons.add),
-                    label: const Text('Nuovo progetto'),
+                    label: Text(_tr('Nuovo progetto')),
                   ),
                 ],
               ),
               const SizedBox(height: 10),
-              const Text(
-                'Ogni progetto ha il proprio stato. La vecchia cronologia chat '
-                'globale non viene mescolata con i nuovi progetti.',
-                style: TextStyle(color: Colors.white60, height: 1.4),
+              Text(
+                _tr('Ogni progetto ha il proprio stato. La vecchia cronologia chat '
+                'globale non viene mescolata con i nuovi progetti.'),
+                style: const TextStyle(color: Colors.white60, height: 1.4),
               ),
               const SizedBox(height: 24),
               _sectionTitle('In corso', active.length),
@@ -478,7 +484,7 @@ proposta breve, concreta e approvabile.
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(
-        '$title ($count)',
+        '${_tr(title)} ($count)',
         style: Theme.of(context).textTheme.titleMedium,
       ),
     );
@@ -504,12 +510,12 @@ proposta breve, concreta e approvabile.
               Text(
                 '${_projectKindLabel(project.projectKind)}'
                 '${project.platforms.isEmpty ? '' : ' · ${project.platforms.join(' · ')}'}'
-                ' · ${_statusLabel(project.status)}',
+                ' · ${_tr(_statusLabel(project.status))}',
               ),
               const SizedBox(height: 8),
               LinearProgressIndicator(value: project.progress),
               const SizedBox(height: 5),
-              Text('$percent% · ${project.currentPhase}'),
+              Text('$percent% · ${_tr(project.currentPhase)}'),
             ],
           ),
         ),
@@ -536,9 +542,9 @@ proposta breve, concreta e approvabile.
                     icon: const Icon(Icons.arrow_back),
                   ),
                   const SizedBox(width: 8),
-                  const Text(
-                    'Nuovo progetto',
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+                  Text(
+                    _tr('Nuovo progetto'),
+                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
                   ),
                 ],
               ),
@@ -546,14 +552,14 @@ proposta breve, concreta e approvabile.
               TextField(
                 controller: _titleController,
                 enabled: !_busy,
-                decoration: const InputDecoration(
-                  labelText: 'Titolo',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: _tr('Titolo'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 18),
               Text(
-                'Tipo progetto',
+                _tr('Tipo progetto'),
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
@@ -587,13 +593,13 @@ proposta breve, concreta e approvabile.
               ),
               const SizedBox(height: 8),
               Text(
-                _projectKindDescription(_newProjectKind),
+                _tr(_projectKindDescription(_newProjectKind)),
                 style: const TextStyle(color: Colors.white60, height: 1.35),
               ),
               if (_newProjectKind == AivexusProjectKind.software) ...<Widget>[
                 const SizedBox(height: 18),
                 Text(
-                  'Piattaforme',
+                  _tr('Piattaforme'),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 6),
@@ -630,15 +636,15 @@ proposta breve, concreta e approvabile.
                 maxLines: 10,
                 decoration: InputDecoration(
                   labelText: _newProjectKind == AivexusProjectKind.software
-                      ? 'Cosa deve fare?'
+                      ? _tr('Cosa deve fare?')
                       : _newProjectKind == AivexusProjectKind.cad
-                          ? 'Descrivi il modello 3D'
-                          : 'Descrivi il gioco',
+                          ? _tr('Descrivi il modello 3D')
+                          : _tr('Descrivi il gioco'),
                   hintText: _newProjectKind == AivexusProjectKind.software
-                      ? 'Descrivi il comportamento e il risultato desiderato.'
+                      ? _tr('Descrivi il comportamento e il risultato desiderato.')
                       : _newProjectKind == AivexusProjectKind.cad
-                          ? 'Descrivi forma, misure e risultato desiderato.'
-                          : 'Descrivi regole, obiettivo e controlli desiderati.',
+                          ? _tr('Descrivi forma, misure e risultato desiderato.')
+                          : _tr('Descrivi regole, obiettivo e controlli desiderati.'),
                   alignLabelWithHint: true,
                   border: const OutlineInputBorder(),
                 ),
@@ -655,22 +661,22 @@ proposta breve, concreta e approvabile.
                     : Icon(_projectKindIcon(_newProjectKind)),
                 label: Text(
                   _busy
-                      ? 'Salvataggio in corso…'
+                      ? _tr('Salvataggio in corso…')
                       : _newProjectKind == AivexusProjectKind.software
-                          ? 'Prepara proposta'
+                          ? _tr('Prepara proposta')
                           : _newProjectKind == AivexusProjectKind.cad
-                              ? 'Crea bozza Stampa 3D'
-                              : 'Crea bozza Videogioco',
+                              ? _tr('Crea bozza Stampa 3D')
+                              : _tr('Crea bozza Videogioco'),
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                _newProjectKind == AivexusProjectKind.software
+                _tr(_newProjectKind == AivexusProjectKind.software
                     ? 'La creazione non parte da questo pulsante. Prima vedrai '
                         'la proposta e dovrai approvarla esplicitamente.'
                     : 'La bozza viene salvata nello stesso elenco progetti. '
                         'Il runner specializzato non è ancora collegato e '
-                        'nessuna generazione viene simulata.',
+                        'nessuna generazione viene simulata.'),
                 style: const TextStyle(color: Colors.white54, height: 1.4),
               ),
             ],
@@ -711,7 +717,7 @@ proposta breve, concreta e approvabile.
               ),
               const SizedBox(height: 8),
               Text(
-                _projectKindLabel(project.projectKind) +
+                _tr(_projectKindLabel(project.projectKind)) +
                     (project.platforms.isEmpty
                         ? ''
                         : ' · ${project.platforms.join(' · ')}'),
@@ -731,13 +737,13 @@ proposta breve, concreta e approvabile.
                 ],
               ),
               const SizedBox(height: 12),
-              _infoRow('Tipo', _projectKindLabel(project.projectKind)),
-              _infoRow('Fase', project.currentPhase),
-              _infoRow('Elemento', project.currentItem),
-              _infoRow('Stato', _statusLabel(project.status)),
+              _infoRow('Tipo', _tr(_projectKindLabel(project.projectKind))),
+              _infoRow('Fase', _tr(project.currentPhase)),
+              _infoRow('Elemento', _tr(project.currentItem)),
+              _infoRow('Stato progetto', _tr(_statusLabel(project.status))),
               const SizedBox(height: 16),
               Text(
-                'Cosa deve fare',
+                _tr('Cosa deve fare'),
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 6),
@@ -751,9 +757,9 @@ proposta breve, concreta e approvabile.
                   project.proposal!.trim().isNotEmpty) ...<Widget>[
                 const SizedBox(height: 14),
                 Text(
-                  project.status == WorkshopWebProjectStatus.draft
+                  _tr(project.status == WorkshopWebProjectStatus.draft
                       ? 'Domanda / chiarimento del Cantiere'
-                      : 'Proposta del Cantiere',
+                      : 'Proposta del Cantiere'),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 6),
@@ -770,17 +776,17 @@ proposta breve, concreta e approvabile.
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.error_outline),
-                    title: const Text('Errore'),
+                    title: Text(_tr('Errore')),
                     subtitle: Text(project.error!),
                   ),
                 ),
               ],
               const SizedBox(height: 18),
               if (project.isReadOnly)
-                const Card(
+                Card(
                   child: ListTile(
                     leading: Icon(Icons.lock_outline),
-                    title: Text('Progetto in sola lettura'),
+                    title: Text(_tr('Progetto in sola lettura')),
                     subtitle: Text(
                       'I dati sono conservati, ma questa versione non riconosce '
                       'l’estensione del progetto.',
@@ -807,7 +813,7 @@ proposta breve, concreta e approvabile.
                 FilledButton.icon(
                   onPressed: _busy ? null : _approveProject,
                   icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Approva progetto'),
+                  label: Text(_tr('Approva progetto')),
                 ),
               if (!project.isReadOnly &&
                   project.projectKind == AivexusProjectKind.software &&
@@ -819,21 +825,21 @@ proposta breve, concreta e approvabile.
                 OutlinedButton.icon(
                   onPressed: _busy ? null : _editProject,
                   icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Modifica progetto'),
+                  label: Text(_tr('Modifica progetto')),
                 ),
               ],
               if (project.status ==
                   WorkshopWebProjectStatus.approved) ...<Widget>[
                 const SizedBox(height: 8),
-                const Card(
+                Card(
                   child: ListTile(
-                    leading: Icon(Icons.construction_outlined),
-                    title: Text('Inizia creazione'),
+                    leading: const Icon(Icons.construction_outlined),
+                    title: Text(_tr('Inizia creazione')),
                     subtitle: Text(
                       'Il gate è pronto, ma l’esecutore Web server-side non è '
                       'ancora collegato. Il Cantiere non simulerà file o percentuali.',
                     ),
-                    trailing: Icon(Icons.lock_clock_outlined),
+                    trailing: const Icon(Icons.lock_clock_outlined),
                   ),
                 ),
               ],
@@ -875,7 +881,7 @@ proposta breve, concreta e approvabile.
         children: <Widget>[
           SizedBox(
             width: 82,
-            child: Text(label, style: const TextStyle(color: Colors.white54)),
+            child: Text(_tr(label), style: const TextStyle(color: Colors.white54)),
           ),
           Expanded(child: Text(value)),
         ],
@@ -905,7 +911,7 @@ final class _EmptyProjectCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Text(text, style: const TextStyle(color: Colors.white54)),
+        child: Text(WorkshopWebLanguageScope.tr(context, text), style: const TextStyle(color: Colors.white54)),
       ),
     );
   }

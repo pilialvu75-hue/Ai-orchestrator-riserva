@@ -98,6 +98,25 @@ final class WorkshopChatController extends ChangeNotifier {
   final String _sessionId;
   final String _systemPrompt;
 
+  // Web-only language preference. Native Cantiere behavior remains unchanged
+  // until its caller explicitly sets this value.
+  String? _preferredWebResponseLanguage;
+
+  void setPreferredWebResponseLanguage(String language) {
+    const allowed = <String>{'italiano', 'français', 'English', 'español'};
+    _preferredWebResponseLanguage = allowed.contains(language) ? language : null;
+  }
+
+  String get _effectiveSystemPrompt {
+    final language = _preferredWebResponseLanguage;
+    if (language == null) return _systemPrompt;
+    return '$_systemPrompt\\n'
+        'AIVEXUS WEB LANGUAGE OVERRIDE: Respond only in $language, '
+        'regardless of the language of the project title, description '
+        'or previous messages. Preserve the exact protocol prefixes '
+        'PROPOSAL: and CLARIFY: without translating those markers.';
+  }
+
   static const int _defaultConversationMaxTokens = 384;
 
   final List<ChatTurn> _messages = <ChatTurn>[];
@@ -217,7 +236,7 @@ final class WorkshopChatController extends ChangeNotifier {
       var result =
           await _inferenceGateway.complete(
         prompt: normalizedMessage,
-        systemPrompt: _systemPrompt,
+        systemPrompt: _effectiveSystemPrompt,
         context: context,
         sessionId: _sessionId,
         isOffline: isOffline,
@@ -236,7 +255,11 @@ final class WorkshopChatController extends ChangeNotifier {
       )) {
         result = await _inferenceGateway.complete(
           prompt: normalizedMessage,
-          systemPrompt: _truncationRetrySystemPrompt,
+          systemPrompt: _preferredWebResponseLanguage == null
+              ? _truncationRetrySystemPrompt
+              : '$_truncationRetrySystemPrompt\\n'
+                  'Reply only in $_preferredWebResponseLanguage, '
+                  'preserving PROPOSAL: and CLARIFY: markers.',
           context: context,
           sessionId: '$_sessionId:retry-truncated-1',
           isOffline: isOffline,
