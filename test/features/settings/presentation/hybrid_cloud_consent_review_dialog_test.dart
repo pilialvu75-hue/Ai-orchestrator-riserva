@@ -67,6 +67,9 @@ void main() {
       HybridCloudConsentReviewDialog.ask(context, review)
           .then((value) => answer = value);
     }));
+    // Localizations load asynchronously; wait until the opening button exists.
+    await tester.pumpAndSettle();
+    expect(find.text('Open review'), findsOneWidget);
     await tester.tap(find.text('Open review'));
     await tester.pumpAndSettle();
     expect(find.textContaining('gemini'), findsOneWidget);
@@ -93,6 +96,9 @@ void main() {
       HybridCloudConsentReviewDialog.ask(context, review)
           .then((value) => answer = value);
     }));
+    // Localizations load asynchronously; wait until the opening button exists.
+    await tester.pumpAndSettle();
+    expect(find.text('Open review'), findsOneWidget);
     await tester.tap(find.text('Open review'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const Key('review-apply')));
@@ -109,6 +115,9 @@ void main() {
       HybridCloudConsentReviewDialog.ask(context, review)
           .then((value) => answer = value);
     }));
+    // Localizations load asynchronously; wait until the opening button exists.
+    await tester.pumpAndSettle();
+    expect(find.text('Open review'), findsOneWidget);
     await tester.tap(find.text('Open review'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('review-cancel')));
