@@ -531,3 +531,284 @@ consenso esplicito.
 - CI condivisa e QA delle piattaforme sono necessari, ma una CI verde non
   sostituisce un test fisico. Distribuzione Android solo tramite
   **Impostazioni → Aggiornamenti**, senza reinstallazione né reset delle chat.
+## 17. Progetto unico MEMORIA EVOLUTIVA AIVEXUS — visione, stato e piano operativo (4 novembre 2026)
+
+Questa sezione e la **specifica operativa complessiva** della memoria evolutiva. Integra,
+senza sostituire o duplicare, le sezioni 10, 14 e 16: la roadmap resta questo unico
+documento. Quando un gate piu vecchio descrive una baseline precedente alla beta
+Android 103717, prevale lo stato fisico datato qui sotto, non un PASS retroattivo.
+
+**Obiettivo di prodotto:** Aivexus apprende le informazioni utili dal dialogo naturale,
+ricorda fatti, preferenze, decisioni ed esperienze verificabili, corregge errori,
+recupera soltanto cio che serve e rende tale patrimonio disponibile ai modelli e ai
+dispositivi autorizzati. Non richiede formule artificiali come «Ricorda che» per
+ogni informazione e non confonde una risposta plausibile con una conoscenza certa.
+
+### 17.1 — Comportamento finale atteso
+
+Esempi di conversazione normale, con dati sintetici:
+
+- «Mi chiamo Paolo», «I'm John», «Je m'appelle Annabelle», «Soy Ana»:
+  riconoscere una **presentazione diretta** nelle lingue IT/EN/FR/ES.
+- «La mia auto e blu»: individuare un fatto autobiografico candidato,
+  distinto da «l'auto di Anna e blu» e da una citazione/roleplay.
+- «Preferisco Intel» oppure «Parlami normalmente in italiano»: riconoscere
+  preferenze durevoli solo quando espresse come tali, con perimetro e
+  provenienza.
+- «Ho cambiato auto: ora e rossa»: aggiornare il fatto pertinente, senza
+  conservare la versione vecchia come verita contemporanea.
+- «Quella soluzione non funzionava; questa e stata verificata»: conservare
+  esito, condizioni e prove per riutilizzare una procedura, NON promuovere
+  automaticamente il testo del modello a verita verificata.
+- «Dimentica il colore della mia auto»: eliminare solo quel dato;
+  «Dimentica tutto sulla mia auto»: chiedere conferma e applicare la
+  cancellazione limitata al soggetto e allo scope autorizzati.
+
+Esempio end-to-end: dopo aver comunicato un nome in una chat LOCAL,
+aprire una nuova chat con un altro modello e ricevere il nome corretto;
+dopo una correzione recuperare solo la versione attuale; dopo una
+dimenticanza non recuperare ne inventare un sostituto. Una copia
+sincronizzata deve rispettare gli stessi aggiornamenti e le stesse revoche.
+
+**Non equivale a riaddestramento automatico dei pesi LLM:** apprendimento
+operativo significa principalmente memoria esterna selettiva, RAG,
+provenienza, esperienza e retrieval affidabile. Fine-tuning rimane una
+eventualita separata, solo dopo dataset, licenze, test e autorizzazioni.
+
+### 17.2 — Un'unica architettura, modello indipendente
+
+Percorso canonico:
+
+1. **Ingresso affidabile:** distinguere messaggio scritto direttamente
+   dall'utente da output modello, documenti, Web, citazioni e tool; i dati
+   esterni non impartiscono istruzioni al motore memoria.
+2. **Comprensione e filtro:** estrarre candidati con soggetto, attributo,
+   valore, lingua, tempo, fonte, livello di sensibilita, attendibilita e
+   identificazione del proprietario. Non schedare indiscriminatamente
+   ogni frase; rispettare opt-in, preferenze e budget CPU/RAM.
+3. **Politica di acquisizione:** separare fatto dichiarato dall'utente,
+   candidata da rivedere, inferenza del modello, conoscenza verificata e
+   esperienza procedurale. Acquisizione diretta consentita solo nelle
+   categorie a basso rischio scelte dall'utente; dubbio/sensibile -> review.
+4. **Archivio locale autorevole:** SQLite e indici RAG/semantici bounded,
+   scopes USER / CONVERSAZIONE / PROGETTO, ownership e provenienza.
+   Il modello non possiede il database e non puo auto-promuovere i
+   candidati. Provenienza e storico delle revisioni devono essere leggibili.
+5. **Recupero:** selezionare memorie confermate pertinenti per domanda,
+   modello, scope e consenso; non riversare tutte le chat nel prompt;
+   distinguere assenza di ricordo, ricordo cancellato, incertezza e
+   contraddizione; mantenere latenza/RAM adatte a S24 FE.
+6. **Ciclo di vita:** visualizzare, correggere, confermare, esportare,
+   aggiornare, dimenticare un fatto, dimenticare un argomento e revocare
+   l'eventuale condivisione. Tombstone/ID revisionati impediscono la
+   resurrezione di dati eliminati durante sincronizzazioni o recovery.
+7. **Condivisione opzionale:** medesimo contratto per Qwen, Phi,
+   Nemotron e altri modelli, indipendente dal provider. Le copie su
+   dispositivi diversi richiedono pairing, cifratura, ownership,
+   merge policy, revoca e prova E2E.
+
+**Tipologie di patrimonio:**
+
+| Tipo | Significato | Fonte e autorizzazione |
+| --- | --- | --- |
+| Personale | Identita dichiarata, fatti, preferenze, abitudini | Utente, con acquisizione controllata |
+| Episodico | Eventi, decisioni, contesto e risultati di un lavoro | Chat/task, scope e provenienza |
+| Semantico/RAG | Documenti, progetti, conoscenza e riferimenti | Fonti originali, citazioni, validazione |
+| Procedurale | Errori, fix, test ed esperienza riutilizzabile | Evidenza verificata, mai sola risposta modello |
+
+Non replicare conversazioni originali per default: fatti deduplicati, sintesi
+controllate e riferimenti alle fonti devono coesistere senza diventare
+duplicati incontrollabili. La cronologia della chat, la memoria durevole
+dell'utente e l'indice RAG sono **tre insiemi distinti**.
+
+### 17.3 — Stato verificato e lacune, baseline S24 FE
+
+**Codice e CI:** servizio capture per comandi espliciti, store SQLite
+duraturo, contesto confirmed-only, code path condiviso fra modelli,
+gestione selettiva dell'eliminazione in PR
+[#983](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/983)
+(merged). La risposta ai comandi di salvataggio/dimenticanza e
+generata dall'app solo dopo l'operazione locale, non inventata dal LLM.
+La pipeline di acquisizione naturale e ancora **non collegata al chat flow
+in modo generale**: il flusso candidato-preferenza gia esistente e
+conservativo, opt-in e limitato a poche formule, non ai nomi personali.
+
+**Evidenza fisica del 4 novembre, Android beta 1.0.15-beta+103717:**
+
+| Prova | Evidenza riferita dal tester | Valutazione |
+| --- | --- | --- |
+| Due ricordi in LOCAL Qwen | Colore prova Aivexus=viola, data=domani; due conferme applicative | PASS |
+| Recupero in nuova chat Qwen | Entrambi i fatti restituiti | PASS |
+| Forget selettivo Qwen | Eliminazione colore confermata; nuova chat non ripete viola, conserva «domani» | PASS comportamentale |
+| Cambio Qwen -> Nemotron | Nemotron recupera «domani», non il viola cancellato | PASS parziale cross-model |
+| Fedelta dopo forget | Qwen dice «non e colorata», Nemotron inventa «rossa» | DIFETTO qualita, non prova che il colore sia ancora memorizzato |
+| Riferimenti temporali | Qwen inventa data assoluta incompatibile con «domani» | DIFETTO di ancoraggio/qualita |
+| Phi-3.5 Mini, frasi naturali | «Mi chiamo Paolo», «La mia auto e blu» non richiamate dopo la chat | GAP acquisizione naturale |
+| Phi-3.5 Mini, comando | «Ricorda che la mia auto e blu» confermato; richiamo in altra chat riferito corretto | PASS esplicito |
+| Chat origine eliminata DOPO save esplicito | Test STELLA73 non ancora eseguito fisicamente | DA PROVARE |
+| Android -> Windows/Mac | Nessuna sincronizzazione dimostrata | NON ATTIVO |
+
+Interpretazione prudente: la prima cancellazione di chat Phi avveniva
+**prima** di un salvataggio esplicito; non prova che l'eliminazione della
+chat cancelli la memoria confermata. Lo stato di «nel cestino» e distinto
+da eliminazione definitiva. I test Qwen/Nemotron non dimostrano un audit
+diretto dei record SQLite, ma sono evidenze fisiche utili.
+
+Le anomalie di lingua, risposte inventate e date sono consegnate al
+filone qualita [#973](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/973),
+gestito da Work: **evitare PR concorrenti sugli stessi file di qualita**.
+
+### 17.4 — Piano per milestone con gate di accettazione
+
+| Milestone | Priorita | Deliverable e gate verificabile |
+| --- | --- | --- |
+| **ME-0: affidabilita** | P0 immediato | Salvataggio, recupero, update/forget, nuovo modello, riavvio, offline e chat cestinata/eliminata; record e chat scopes separati; CI + S24 |
+| **ME-1: dialogo naturale** | P1 prodotto | IT/EN/FR/ES per presentazioni, fatti autobiografici e preferenze bounded; non servono formule; citazioni/roleplay negati, approvazione/correzione e provenance |
+| **ME-2: ciclo di vita evolutivo** | P1 | Riconoscere correzioni, contraddizioni, date relative ancorate, conflitti, versioni e tombstone; nessuna resurrezione o auto-certificazione |
+| **ME-3: RAG ed esperienze** | P2 | Retrieval locale multilingue con fonte, deduplica e limiti RAM/token; errori/soluzioni diventano procedure solo dopo evidenza e test |
+| **ME-4: dispositivi e profili** | P2 sequenziale | Export/import cifrato e pairing S24 <-> ASUS, poi Mac/Linux; offline/reconnect, revoche e zero contaminazione fra owner |
+| **ME-5: integrazione modalita** | P2 in parallelo | LOCAL senza provider Cloud; HYBRID/Cloud con consenso per contenuti personali, fonte, provider e revoca, continuita di lavoro |
+| **ME-6: qualita/autonomia continua** | trasversale | Riduzione misurata di falsi ricordi, date sbagliate, latenza, duplicati e regressioni; QA fisico e automatico |
+
+**ME-0 — operazioni immediate:**
+1. Unit/integration test file-backed SQLite con due scopes:
+   salvataggio USER nella chat A e memoria CONVERSAZIONE nella chat A;
+   spostare A nel cestino e verificare che il ricordo USER sia leggibile
+   dalla chat B, quello scoped A no; dopo reset/riapertura ripetere.
+2. Provare rimozione di A dalla cronologia con il percorso reale
+   dell'app e distinguere tombstone cestino da eliminazione definitiva.
+   Definire e testare l'effetto previsto sulle memorie CONVERSAZIONE:
+   la distruzione definitiva dei riferimenti privati non deve lasciare
+   indici RAG orfani, senza eliminare automaticamente ricordi USER
+   confermati e separati dalla chat.
+3. Test fisico con record sintetico «STELLA73»:
+   nuova chat -> «Ricorda che il codice della prova chat eliminata e STELLA73»
+   -> conferma dell'app -> eliminare quella chat -> nuova chat ->
+   interrogare codice. Ripetere dopo riavvio, senza reset dell'app.
+4. Ripetere Qwen -> Nemotron -> Phi, logout/riavvio quando supportati,
+   test con rete assente; mantenere registrazione degli esiti effettivi.
+
+**ME-1 — prima tranche implementabile, senza cattura indiscriminata:**
+- Definire un solo estrattore di *messaggi utente diretti*, con parser
+  multilingue conservativo e/o classificatore locale bounded;
+  supportare prima nome dichiarato e poche categorie stabili. Vietare
+  output modello, citazioni, ipotesi, scherzi/roleplay, segreti,
+  informazioni di terzi o importazioni come auto-verita.
+- Riutilizzare store **candidate** e review esistenti: staged candidato
+  con key logica stabile, lingua, fonte e proprietario; consentire
+  approvazione, edit, rifiuto e disattivazione. Solo confermati nel
+  retrieval ordinario. Consentire preferenze esplicite di auto-acquisizione
+  per classi non sensibili; senza opt-in la normale chat non registra
+  automaticamente ricordi confermati.
+- Il test di accettazione usa identita **fittizie** in chat A, recupero
+  da chat B/altro modello SOLO dopo conferma/consenso; una citazione
+  «Paolo ha detto: mi chiamo John» non deve diventare nome dell'utente.
+  IT/EN/FR/ES con variazioni e negazioni. Verificare scritture concorrenti,
+  auto-revisioni e no cloud I/O.
+
+**ME-2 — correzione e tempo:**
+- Mantenere identificatori soggetto/attributo indipendenti dal testo
+  superficiale per poter correggere «la mia auto» e «my car» senza
+  lasciare due verita contraddittorie. Allineare scope/user e owner.
+- Registrare per date relative l'istante di affermazione e il fuso
+  locale: «domani» non va convertito a una data assoluta inventata.
+  Esporre la frase originale e distinguere evento pianificato da
+  promemoria scaduto.
+- Dimenticanza atomica mirata, broad delete con conferma, refresh
+  di retrieval/index, policy backup/sync e prova che chat vecchie o
+  device offline non facciano ricomparire i ricordi cancellati.
+
+**ME-3 — RAG ed esperienze:**
+- Consolidare LocalDocumentIndexService, ChatFileContextService e
+  CANT-RAG-1 della Libreria; provenienza recuperabile, citazioni,
+  filtri owner, prompt-injection defense e bassa pressione RAM.
+- Separare memoria di fatti, retrieval dei documenti e knowledge
+  procedurale; trasferire a Libreria soltanto componenti con sorgente,
+  licenza, hash, test e prova di integrazione. Un fix riconosciuto
+  come «riuscito» va comunque validato in contesto.
+
+**ME-4 — sincronizzazione incrementale:**
+- Prima due DB sintetici e schema/export/import versionati, poi
+  S24 <-> ASUS (bidirezionale), poi Mac/Linux. Pairing autenticato
+  (#915), cifratura, conflitti e revoca; CRDT e MemoryFabric
+  eventualmente riusati dopo verifica, non dichiarati gia attivi.
+- Offline sempre possibile, nessun deposito non autorizzato su repo
+  pubblico/Diagnostics; NAS/storage remoto opzionale, non prerequisito;
+  tombstone e cancel propagati agli altri dispositivi abbinati.
+- Multiutente reale **solo dopo** isolamento completo simulato con
+  profili fittizi, inclusi cache, RAG, log e backup (#913/#914).
+
+**ME-5 — LOCAL/HYBRID/CLOUD:**
+- **LOCAL = senza provider esterni/Cloud**; accesso Web separato e
+  regolato dalle proprie impostazioni, non automaticamente vietato
+  dalla parola LOCAL. La memoria base funziona anche in modalita aereo.
+- In HYBRID la fase LOCAL usa il proprio ricordo confermato pertinente;
+  prima di inviare chat, dati personali, memoria, documenti o tool output
+  al Cloud occorre una scelta consapevole, granulare per provider,
+  categoria e durata; scelta negativa -> continuare senza condividere.
+- «Uso provider Cloud» e «sincronizzo archivio privato» sono consensi
+  distinti. Sottomenu Impostazioni -> Modalita IA -> Consensi Cloud
+  consente consultazione, modifica e revoca delle decisioni.
+  Lavori autonomi gia in [PR #977](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/977)
+  e [#975](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/975):
+  non duplicare controller, policy o interfacce, e non considerarli
+  attivi finche non integrati/testati.
+
+**ME-6 — QA e miglioramento continuo:**
+- Dataset sintetici per test di recall corretto/non-recall, falsi
+  positivi, omissioni, negazioni, dialoghi lunghi, lingua, date,
+  correzioni, segreti e cancellazioni; metriche separano retrieval
+  dalla risposta del modello. Un modello che inventa «rossa» dopo
+  aver dimenticato «viola» e un difetto di fedelta, non prova che il
+  record cancellato sia tornato.
+- Misurare S24 FE: RAM, batteria, latenza chat/TTFT, occupazione
+  SQLite e finestra token. Candidatura e indexing fuori dal path
+  critico quando possibile, limiti deterministici e nessun loop di
+  inference superfluo. Work resta responsabile del filone qualita.
+
+### 17.5 — Gate trasversali, privacy e collaudo
+
+Ogni milestone e conclusa **solo** quando:
+- cambiamento realmente integrato nel repository, test automatici
+  relativi superati, nessun conflitto con PR parallele, nota di
+  provenienza e regression suite;
+- verifica su dispositivo/ambiente pertinente con transcript
+  sintetico e risultato esatto; CI verde non sostituisce accettazione
+  fisica, e una PR draft non equivale a funzione installata;
+- la cancellazione specifica non svuota altri fatti, non cancella
+  chat senza comando, non resuscita da prompt/cache/backup/sync;
+- non introduce upload involontario, new data collection silenziosa
+  o regressioni percettibili in performance/affidabilita;
+- release Android autorizzata e aggiornabile **solo** da
+  Impostazioni -> Aggiornamenti, senza sideload, reset o uninstall
+  per collaudare.
+
+**Policy dati:** fatti familiari/terzi, informazioni particolarmente
+sensibili, segreti e contenuto documentale non devono essere raccolti
+automaticamente come memoria personale per il solo fatto che appaiono
+in chat; minimizzazione, revoca e visibilita del processo sono requisiti.
+Il fatto che il modello possa usare temporaneamente il contesto NON
+implica consenso alla persistenza o alla trasmissione esterna.
+
+### 17.6 — Ownership e riferimenti; nessuna roadmap parallela
+
+- **Issue [#899](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899)**:
+  epic acquisizione, memoria SQLite, forget e RAG locale; qui si
+  registrano gli esiti di test S24 e gli incrementi ME-0/ME-1.
+- **Issue [#911](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/911)**,
+  PR #912/#914 e issue #915: archivio, isolamento owner, pairing
+  e successiva sincronizzazione cross-device; non attivare
+  trasferimenti o multiutente senza gates.
+- **Issue [#973](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/973)**:
+  coordinamento con qualita risposte e Hybrid; PR #975/#977 in
+  lavorazione separata. Condividere evidenze, non modificare in
+  parallelo gli stessi file.
+- **Libreria CANT-RAG-1**: piano del retrieval locale e validazione
+  di componenti, senza doppiare il motore memoria dell'assistente.
+
+**Prossima decisione operativa:** chiudere ME-0 con test riproducibili
+e prova fisica chat eliminata -> ricordo USER persistente; poi
+implementare il primo incremento ME-1 di acquisizione naturale
+multilingue con provenance e review, senza attivare sync/Cloud o
+confondere risposte inventate con ricordi attendibili.
+
