@@ -156,7 +156,10 @@ void main() {
           },
         );
         if (permit == null) throw const HybridCloudConsentDenied();
-        return completion.complete(seal: seal, permit: permit);
+        return completion.complete(
+          seal: seal, permit: permit,
+          expectedCredentialSecret: 'dummy',
+        );
       },
     );
     const input = InferenceRequest(
@@ -321,6 +324,7 @@ void main() {
     await expectLater(
       sender.complete(
         seal: seal, permit: permit!, cancellationToken: token,
+        expectedCredentialSecret: 'test-only',
       ),
       throwsA(isA<StateError>()),
     );
@@ -366,7 +370,8 @@ void main() {
       )),
     );
     try {
-      await sender.complete(seal: seal, permit: permit!);
+      await sender.complete(
+         seal: seal, permit: permit!, expectedCredentialSecret: 'dummy');
       fail('Expected HTTP exception');
     } on CloudHttpException catch (e) {
       expect(e.statusCode, 429);
