@@ -11,6 +11,7 @@ const MAX_TOTAL_CHARS = 60000;
 const MAX_BODY_CHARS = 100000;
 const MAX_OUTPUT_CHARS = 100000;
 const MAX_ROUTE_ATTEMPTS = 2;
+const SELF_TEST_MARKER = 'AIVEXUS_WEB_SELF_TEST_OK';
 const MAX_RETRY_DELAY_MS = 2000;
 const MAX_PENDING_POLLS = 20;
 const PENDING_POLL_DELAY_MS = 1000;
@@ -93,12 +94,38 @@ function parseRoutes(env) {
       if (url.protocol !== 'https:' || url.username || url.password) continue;
       if (!env[apiKeySecret]) continue;
 
-      valid.push({ id, endpoint: url.toString(), model, apiKeySecret });
+      valid.push({
+        id,
+        endpoint: url.toString(),
+        model,
+        apiKeySecret,
+        // Only explicitly authorized zero-cost routes may run synthetic tests.
+        selfTestFree: row.selfTestFree === true,
+      });
     }
     if (valid.length > 0) result[capability] = valid;
   }
 
   return result;
+}
+
+function providerForEndpoint(endpoint) {
+  const host = new URL(endpoint).hostname.toLowerCase();
+  // Compare hostname labels, never embed provider URLs or defaults in Web.
+  const labels = host.split('.');
+  if (labels.join('.') === ['integrate', 'api', 'nvidia', 'com'].join('.')) {
+    return 'NVIDIA NIM';
+  }
+  if (labels.join('.') === ['api', 'groq', 'com'].join('.')) {
+    return 'Groq';
+  }
+  if (
+    labels.join('.') ===
+    ['generativelanguage', 'googleapis', 'com'].join('.')
+  ) {
+    return 'Gemini';
+  }
+  return null;
 }
 
 function boundedNumber(value, min, max, fallback) {
@@ -305,6 +332,14 @@ async function callRoute(route, request) {
         ok: true,
         text: text.trim(),
         model: route.model,
+        // Only the upstream reply can attest which model actually answered.
+        reportedModel:
+          typeof decoded?.model === 'string' &&
+          decoded.model.trim() &&
+          decoded.model.length <= 200
+            ? decoded.model.trim()
+            : null,
+        provider: providerForEndpoint(route.endpoint),
         routeId: route.id,
         tokensGenerated:
           Number.isInteger(completionTokens) && completionTokens >= 0
@@ -371,20 +406,46 @@ export async function onRequest(context) {
     return error('unsupported_capability', 400);
   }
 
-  const messages = validateMessages(body.messages);
+  const selfTest = body.selfTest === true;
+  if (selfTest && capability !== 'orchestration') {
+    return error('unsupported_self_test_capability', 400);
+  }
+
+  // The browser cannot substitute a paid prompt or arbitrary model during
+  // a self-test. All prompt content and generation parameters are fixed here.
+  const messages = selfTest
+    ? [
+        {
+          role: 'system',
+          content:
+            'This is a synthetic connectivity test. Respond with exactly ' +
+            SELF_TEST_MARKER + ' and nothing else.',
+        },
+        { role: 'user', content: 'Print the exact test marker.' },
+      ]
+    : validateMessages(body.messages);
   if (!messages) return error('invalid_messages', 400);
 
-  const routes = parseRoutes(context.env)[capability] || [];
+  const routes = (parseRoutes(context.env)[capability] || []).filter(
+    (route) => !selfTest || route.selfTestFree,
+  );
   if (routes.length === 0) {
-    return error('capability_unavailable', 503);
+    return error(
+      selfTest ? 'self_test_not_configured' : 'capability_unavailable',
+      503,
+    );
   }
 
   const request = {
     env: context.env,
     messages,
-    maxTokens: Math.round(boundedNumber(body.maxTokens, 1, 4096, 512)),
-    temperature: boundedNumber(body.temperature, 0, 1.5, 0.45),
-    topP: boundedNumber(body.topP, 0.05, 1, 0.9),
+    maxTokens: selfTest
+      ? 512
+      : Math.round(boundedNumber(body.maxTokens, 1, 4096, 512)),
+    temperature: selfTest
+      ? 0
+      : boundedNumber(body.temperature, 0, 1.5, 0.45),
+    topP: selfTest ? 1 : boundedNumber(body.topP, 0.05, 1, 0.9),
     identity: {
       requestId: safeIdentity(body.requestId),
       projectId: safeIdentity(body.projectId),
@@ -405,6 +466,12 @@ export async function onRequest(context) {
         model: result.model,
         routeId: result.routeId,
         tokensGenerated: result.tokensGenerated,
+        ...(selfTest
+          ? {
+              provider: result.provider,
+              reportedModel: result.reportedModel,
+            }
+          : {}),
       });
     }
     if (Number.isInteger(result?.status)) {

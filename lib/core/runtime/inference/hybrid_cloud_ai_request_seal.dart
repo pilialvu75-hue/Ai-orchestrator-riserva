@@ -152,10 +152,12 @@ final class HybridCloudAiRequestSeal {
     required Future<bool> Function(String providerId, String accountId)
         isCurrentDestination,
     required Future<T> Function(AiRequest exactRequest) trustedSend,
+    bool Function()? isRequestActive,
   }) => consent.dispatchApproved<T>(
         permit: permit,
         currentDisclosure: disclosure,
         isCurrentDestination: isCurrentDestination,
         trustedSend: (_) => trustedSend(request),
+        isRequestActive: isRequestActive,
       );
 }

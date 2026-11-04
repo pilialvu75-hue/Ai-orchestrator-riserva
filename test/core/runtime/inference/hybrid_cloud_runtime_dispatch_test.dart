@@ -277,6 +277,56 @@ void main() {
     expect(result.last.isError, isTrue);
   });
 
+  test('approval issued before cancellation cannot start native HTTP',
+      () async {
+    final creds = CloudCredentialStore(storage: _CredentialStore());
+    await creds.initialize();
+    await creds.setApiKey('openAi', 'test-only', accountId: 'account-1');
+    final consent = HybridCloudDisclosureConsent(
+      backend: _ConsentStore(),
+      authorizeOwnerSession: (o, s) async => o == 'owner' && s == 'session',
+    );
+    final seal = HybridCloudAiRequestSeal.fromRequest(
+      ownerId: 'owner', sessionId: 'session',
+      accountId: 'account-1', purpose: 'Answer private question',
+      request: const AiRequest(
+        providerId: 'openAi', modelId: 'gpt-test',
+        prompt: 'Private prompt', maxTokens: 1024,
+      ),
+      controlScope: controls,
+      promptSegments: const <HybridDisclosureSegment>[
+        HybridDisclosureSegment(text: 'Private prompt', scope: question),
+      ],
+      historyScopes: const <HybridDisclosureScope>[],
+    );
+    final permit = await consent.authorizeForDispatch(
+      disclosure: seal.disclosure,
+      requestConsent: (review) async =>
+          <HybridDisclosureScope, HybridCloudConsentChoice>{
+            for (final scope in review.needsConsent)
+              scope: HybridCloudConsentChoice.allowOnce,
+          },
+    );
+    expect(permit, isNotNull);
+    var httpSends = 0;
+    final client = MockClient((_) async {
+      httpSends++;
+      return http.Response('unexpected', 200);
+    });
+    final token = CancellationToken()..cancel();
+    final sender = HybridCloudApprovedCompletionSender(
+      consent: consent, credentials: creds, client: client,
+    );
+    await expectLater(
+      sender.complete(
+        seal: seal, permit: permit!, cancellationToken: token,
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(httpSends, 0);
+    client.close();
+  });
+
   test('approved HTTP failure never echoes provider response body', () async {
     final creds = CloudCredentialStore(storage: _CredentialStore());
     await creds.initialize();

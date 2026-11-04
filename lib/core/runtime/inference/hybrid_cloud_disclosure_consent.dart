@@ -258,7 +258,9 @@ final class HybridCloudDisclosureConsent {
     Future<Map<HybridDisclosureScope, HybridCloudConsentChoice>> Function(
       HybridCloudConsentReview review,
     )? requestConsent,
+    bool Function()? isRequestActive,
   }) async {
+    if (isRequestActive != null && !isRequestActive()) return false;
     final familyKey =
         _key(disclosure.ownerId, disclosure.providerId, disclosure.accountId);
     final revision = _epochs[familyKey] ?? 0;
@@ -284,11 +286,13 @@ final class HybridCloudDisclosureConsent {
       }
       return pending;
     });
-    if (unapproved == null || revision != (_epochs[familyKey] ?? 0)) return false;
+    if (unapproved == null || revision != (_epochs[familyKey] ?? 0) ||
+        (isRequestActive != null && !isRequestActive())) return false;
     if (unapproved.isEmpty) {
       return await _authorizeOwnerSession(
         disclosure.ownerId, disclosure.sessionId,
-      ) && revision == (_epochs[familyKey] ?? 0);
+      ) && revision == (_epochs[familyKey] ?? 0) &&
+          (isRequestActive == null || isRequestActive());
     }
     if (requestConsent == null) return false;
 
@@ -296,7 +300,8 @@ final class HybridCloudDisclosureConsent {
       disclosure: disclosure,
       needsConsent: List<HybridDisclosureScope>.unmodifiable(unapproved),
     ));
-    if (revision != (_epochs[familyKey] ?? 0) ||
+    if ((isRequestActive != null && !isRequestActive()) ||
+        revision != (_epochs[familyKey] ?? 0) ||
         !await _authorizeOwnerSession(
           disclosure.ownerId, disclosure.sessionId,
         )) {
@@ -309,7 +314,8 @@ final class HybridCloudDisclosureConsent {
     // A review may have changed another category's rule while the dialog
     // was open. Never override a newly persisted "never share" rule.
     return _serialize(() async {
-      if (revision != (_epochs[familyKey] ?? 0) ||
+      if ((isRequestActive != null && !isRequestActive()) ||
+          revision != (_epochs[familyKey] ?? 0) ||
           !await _authorizeOwnerSession(
             disclosure.ownerId, disclosure.sessionId,
           )) {
@@ -347,11 +353,15 @@ final class HybridCloudDisclosureConsent {
         updates.removeWhere((_, value) =>
             value != HybridCloudStoredConsent.neverShare);
       }
+      if (isRequestActive != null && !isRequestActive()) {
+        return false;
+      }
       if (updates.isNotEmpty) {
         await _writeRules(disclosure.ownerId, disclosure.providerId,
             disclosure.accountId, updates);
       }
-      return approved && revision == (_epochs[familyKey] ?? 0);
+      return approved && revision == (_epochs[familyKey] ?? 0) &&
+          (isRequestActive == null || isRequestActive());
     });
   }
 
@@ -365,6 +375,7 @@ final class HybridCloudDisclosureConsent {
     Future<Map<HybridDisclosureScope, HybridCloudConsentChoice>> Function(
       HybridCloudConsentReview review,
     )? requestConsent,
+    bool Function()? isRequestActive,
   }) async {
     final familyKey = _key(
       disclosure.ownerId, disclosure.providerId, disclosure.accountId,
@@ -373,8 +384,10 @@ final class HybridCloudDisclosureConsent {
     final approved = await authorize(
       disclosure: disclosure,
       requestConsent: requestConsent,
+      isRequestActive: isRequestActive,
     );
-    if (!approved || revision != (_epochs[familyKey] ?? 0)) {
+    if (!approved || revision != (_epochs[familyKey] ?? 0) ||
+        (isRequestActive != null && !isRequestActive())) {
       return null;
     }
     return HybridCloudDispatchPermit._(
@@ -402,6 +415,7 @@ final class HybridCloudDisclosureConsent {
         isCurrentDestination,
     required Future<T> Function(HybridCloudDisclosure exactDisclosure)
         trustedSend,
+    bool Function()? isRequestActive,
   }) async {
     final started = await _serialize<_HybridCloudStartedRequest<T>>(() async {
       // Burn immediately, including on mismatch or provider failure.
@@ -449,6 +463,11 @@ final class HybridCloudDisclosureConsent {
         throw StateError('HYBRID Cloud consent revoked before dispatch');
       }
 
+      // User may have cancelled the Chat turn while reviewing consent.
+      // This final synchronous check executes without an await before POST.
+      if (isRequestActive != null && !isRequestActive()) {
+        throw StateError('HYBRID request cancelled before Cloud dispatch');
+      }
       // Start while holding the same-isolate consent queue; return a wrapper
       // rather than awaiting the network Future inside the queue.
       return _HybridCloudStartedRequest<T>(trustedSend(approved));

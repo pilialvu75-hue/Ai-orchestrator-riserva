@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
@@ -179,6 +180,60 @@ void main() {
     expect(refused.last.isError, isTrue);
     expect(httpSends, 0);
     expect(legacySends, 0);
+    client.close();
+  });
+
+  test('cancelling while review is visible prevents grants and HTTP',
+      () async {
+    final protected = _ProtectedMemory();
+    final identity = HybridCloudLocalIdentity(storage: protected);
+    final consent = HybridCloudDisclosureConsent(
+      backend: protected,
+      authorizeOwnerSession: identity.isAuthorized,
+    );
+    final credentials = CloudCredentialStore(storage: _Secrets());
+    await credentials.initialize();
+    await credentials.setApiKey('openAi', 'test-only', accountId: 'account-1');
+    var httpSends = 0;
+    final client = MockClient((_) async {
+      httpSends++;
+      return http.Response('unexpected', 200);
+    });
+    final shown = Completer<HybridCloudConsentReview>();
+    final decision = Completer<
+        Map<HybridDisclosureScope, HybridCloudConsentChoice>>();
+    final coordinator = HybridCloudRuntimeConsentCoordinator(
+      consent: consent, identity: identity, credentials: credentials,
+      client: client,
+      evidenceFor: (source) async => HybridCloudRuntimeSourceEvidence(
+        sessionId: source.sessionId,
+        originalQuestion: 'Current private question',
+        baseSystemPrompt: 'System instructions',
+        originalHistory: evidence,
+      ),
+      requestConsent: (review) {
+        shown.complete(review);
+        return decision.future;
+      },
+    );
+    final token = CancellationToken();
+    final stream = _runtime(coordinator).streamInference(
+      request: input, cancellationToken: token,
+    ).toList();
+    final review = await shown.future;
+    token.cancel();
+    decision.complete(<HybridDisclosureScope, HybridCloudConsentChoice>{
+      for (final scope in review.needsConsent)
+        scope: scope.sensitivity ==
+                HybridDisclosureSensitivity.publicOrNonPersonal
+            ? HybridCloudConsentChoice.allowAlways
+            : HybridCloudConsentChoice.allowOnce,
+    });
+    final chunks = await stream;
+    expect(chunks.last.isError, isTrue);
+    expect(httpSends, 0);
+    expect(protected.contents.keys.where(
+        (k) => k.startsWith('hybrid_cloud_consent_v3_')), isEmpty);
     client.close();
   });
 

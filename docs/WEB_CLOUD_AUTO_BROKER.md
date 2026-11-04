@@ -54,6 +54,42 @@ The Web shell marks Cloud/AUTO available only when all four Cantiere
 capabilities are configured. No endpoint, model routing table or secret is
 returned by the health endpoint.
 
+## Self-Test Cloud sintetico (solo su richiesta)
+
+La scheda Web **Stato → Cloud / AUTO** propone il pulsante
+**Esegui Self-Test Cloud**. Esegue una vera inferenza tramite
+`POST /api/cantiere/inference`, ma senza modificare progetti o conversazioni.
+Il browser invia esclusivamente
+`{"version":1,"capability":"orchestration","selfTest":true}`.
+
+La Pages Function sostituisce il prompt con un testo sintetico e fisso,
+usa un budget massimo di 512 token e verifica che un provider risponda.
+La risposta espone lo stato HTTP, il tempo osservato, il provider dedotto
+dall'hostname della rotta, il modello configurato, il modello dichiarato
+dall'upstream e l'identificativo della rotta. Il test risulta **Passed**
+solo quando il testo finale corrisponde al marcatore richiesto ed è
+possibile attribuire provider, modello dichiarato e rotta. L'indicazione
+Cloud/AUTO Available resta una semplice verifica dei binding, non un
+collaudo dell'inferenza.
+
+**Protezione dei costi:** nessuna rotta esistente è eleggibile di default.
+Il responsabile Web deve prima accertare indipendentemente che una rotta sia
+autorizzata a costo monetario zero e impostare su quella sola rotta
+`"selfTestFree": true` in `CANTIERE_CLOUD_ROUTES_JSON`, lato Cloudflare.
+Non utilizzare rotte con crediti a consumo, modelli dal costo sconosciuto
+o API non verificate. Il repository non contiene credenziali. Se manca
+una rotta marcata, l'endpoint risponde
+`503 self_test_not_configured` **senza contattare alcun provider**.
+La modifica in produzione richiede approvazione separata, non viene
+effettuata dalla PR. Il flag è una dichiarazione di configurazione
+dell'operatore, non una garanzia automatica di gratuità del provider.
+
+La rotta di test è limitata alla capacità `orchestration`; questa è la
+prima capacità utilizzata nella preparazione delle proposte. Non sono
+consentiti prompt arbitrari, invii di dati personali, cambi del provider
+dal browser o avvio automatico del test. Le rotte non marcate restano
+disponibili per il funzionamento ordinario del Cantiere, ma non per il test.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does

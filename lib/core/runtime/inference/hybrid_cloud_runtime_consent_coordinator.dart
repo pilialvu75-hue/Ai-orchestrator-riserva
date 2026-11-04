@@ -2,6 +2,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_response.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:http/http.dart' as http;
 
@@ -77,7 +78,11 @@ final class HybridCloudRuntimeConsentCoordinator {
   Future<AiResponse> send(
     InferenceRequest source,
     AiRequest outbound,
+    CancellationToken cancellationToken,
   ) async {
+    if (cancellationToken.isCancelled) {
+      throw const HybridCloudConsentDenied();
+    }
     final providerId = outbound.providerId;
     if (providerId != 'openAi' && providerId != 'gemini') {
       throw const HybridCloudConsentDenied();
@@ -94,7 +99,8 @@ final class HybridCloudRuntimeConsentCoordinator {
     }
 
     final evidence = await _evidenceFor(source);
-    if (evidence == null || evidence.sessionId != source.sessionId) {
+    if (cancellationToken.isCancelled ||
+        evidence == null || evidence.sessionId != source.sessionId) {
       throw const HybridCloudConsentDenied();
     }
 
@@ -116,7 +122,8 @@ final class HybridCloudRuntimeConsentCoordinator {
 
     final projected = HybridCloudNativeRequestProjection.project(outbound);
     final session = await _identity.openSession();
-    if (!await _identity.isAuthorized(session.ownerId, session.sessionId)) {
+    if (cancellationToken.isCancelled ||
+        !await _identity.isAuthorized(session.ownerId, session.sessionId)) {
       throw const HybridCloudConsentDenied();
     }
 
@@ -138,13 +145,20 @@ final class HybridCloudRuntimeConsentCoordinator {
     final permit = await _consent.authorizeForDispatch(
       disclosure: seal.disclosure,
       requestConsent: requestConsent,
+      isRequestActive: () => !cancellationToken.isCancelled,
     );
-    if (permit == null) throw const HybridCloudConsentDenied();
+    if (permit == null || cancellationToken.isCancelled) {
+      throw const HybridCloudConsentDenied();
+    }
 
     return HybridCloudApprovedCompletionSender(
       consent: _consent,
       credentials: _credentials,
       client: _client,
-    ).complete(seal: seal, permit: permit);
+    ).complete(
+      seal: seal,
+      permit: permit,
+      cancellationToken: cancellationToken,
+    );
   }
 }

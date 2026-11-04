@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/features/cloud_ai/data/models/ai_request_model.dart';
 import 'package:http/http.dart' as http;
 
@@ -35,7 +36,11 @@ final class HybridCloudNativeWireSender {
   Future<http.Response> send({
     required HybridCloudAiRequestSeal seal,
     required HybridCloudDispatchPermit permit,
+    CancellationToken? cancellationToken,
   }) => seal.dispatch<http.Response>(
+        isRequestActive: cancellationToken == null
+            ? null
+            : () => !cancellationToken.isCancelled,
         consent: _consent,
         permit: permit,
         isCurrentDestination: (providerId, accountId) async {

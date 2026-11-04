@@ -554,7 +554,7 @@ consenso esplicito.
   nella Chat e il controllo esatto del payload. Prevedere inoltre
   autorizzazione esplicita opzionale su tutti i provider approvati senza
   includere automaticamente provider/account futuri.
-- **Stato tecnico H10–H14 (#977, ancora DRAFT):** contratto di consenso,
+- **Stato tecnico H10–H15 (#977, ancora DRAFT):** contratto di consenso,
   revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
   OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
   `ChatFileContextService` conserva separatamente domanda, istruzioni e
@@ -575,6 +575,15 @@ consenso esplicito.
   assemblatore H13, review, permesso monouso e invio native HTTP in un
   test completo con client mock. Sorgente o dialogo assenti = nessun HTTP.
   Il percorso applicativo ordinario NON è stato abilitato.
+- **H15 — annullamento durante review e revoca prima di HTTP:** il token
+  della richiesta segue il percorso `CloudRuntimeProvider` ->
+  `HybridCloudRuntimeConsentCoordinator` -> manager di consenso ->
+  permesso monouso -> native HTTP. Annullare la conversazione mentre è
+  visibile il dialogo impedisce sia il POST sia nuovi permessi persistenti;
+  un ulteriore controllo sincrono del token è fatto nel punto in cui
+  `dispatchApproved` avvia realmente il client HTTP. Test simulano un
+  dialogo sospeso, l'annullamento prima di rispondere e l'annullamento
+  dopo un permesso ottenuto, prima dell'avvio HTTP.
 - I dati utente/documenti/ricordi e cronologia con sensibilità non verificata
   restano `unknown`: sono autorizzabili soltanto per una richiesta, non con
   permesso permanente; contenuti con false direttive `[SYSTEM]` rimangono

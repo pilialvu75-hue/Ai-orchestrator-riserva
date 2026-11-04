@@ -61,6 +61,7 @@ class CloudProviderStatusSnapshot {
 typedef HybridCloudConsentGatedQuery = Future<AiResponse> Function(
   InferenceRequest runtimeRequest,
   AiRequest exactNativeRequest,
+  CancellationToken cancellationToken,
 );
 
 class CloudRuntimeProvider implements RuntimeInferenceProvider {
@@ -355,6 +356,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
                 // assembler must detect dropped/deduplicated history.
                 request,
                 HybridCloudNativeRequestProjection.project(nativeSource),
+                cancellationToken,
               )
             : await _sendQuery(provider, nativeSource);
         stopwatch.stop();
