@@ -411,6 +411,18 @@ export async function onRequest(context) {
     return error('unsupported_self_test_capability', 400);
   }
 
+  // A manual choice is an opaque server route alias, never an endpoint/model.
+  // It is limited to independently approved zero-cost routes. AUTO retains
+  // its existing server-side ordering for normal project requests.
+  const hasSelectedRoute = body.routeId !== undefined;
+  const selectedRouteId =
+    typeof body.routeId === 'string' ? body.routeId.trim() : '';
+  if (hasSelectedRoute &&
+      (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(selectedRouteId) ||
+       capability !== 'orchestration')) {
+    return error('invalid_route_selection', 400);
+  }
+
   // The browser cannot substitute a paid prompt or arbitrary model during
   // a self-test. All prompt content and generation parameters are fixed here.
   const messages = selfTest
@@ -426,9 +438,17 @@ export async function onRequest(context) {
     : validateMessages(body.messages);
   if (!messages) return error('invalid_messages', 400);
 
-  const routes = (parseRoutes(context.env)[capability] || []).filter(
-    (route) => !selfTest || route.selfTestFree,
+  const configuredRoutes = parseRoutes(context.env)[capability] || [];
+  const routes = configuredRoutes.filter(
+    (route) =>
+      (!selfTest && !hasSelectedRoute || route.selfTestFree) &&
+      (!hasSelectedRoute || route.id === selectedRouteId),
   );
+  // In manual mode, never silently fall back to a different (possibly
+  // billable) route when the selected route is missing or fails.
+  if (hasSelectedRoute && routes.length === 0) {
+    return error('route_not_authorized', 403);
+  }
   if (routes.length === 0) {
     return error(
       selfTest ? 'self_test_not_configured' : 'capability_unavailable',
