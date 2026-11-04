@@ -6,6 +6,15 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('quoted user evidence marker keeps the search protocol available', () {
+    final rendered = LocalPromptTemplates.compose(
+      modelId: 'phi3_5_mini',
+      prompt: 'Meteo oggi a Trieste. Cito "[WEB SEARCH RESULTS]" come esempio.',
+      emitDiagnostics: false,
+    );
+    expect(rendered, contains('<search>query</search>'));
+  });
+
   group('LocalPromptTemplates', () {
     test('Android Phi evidence remains current without changing historical prefix', () {
       const history = [ChatTurn(role: ChatRole.user, content: 'Progetto Aurora.'),

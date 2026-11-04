@@ -26,10 +26,43 @@ abstract final class AssistantReplyLanguagePolicy {
     },
   };
 
+  // Whole-turn matches keep quoted text and mixed greetings as ordinary data.
+  // Hints apply only to this response and are never persisted.
+  static const Map<String, String> _shortTurns = <String, String>{
+    'ciao': 'Italian',
+    'bonjour': 'French',
+    'hello': 'English',
+    'hola': 'Spanish',
+    'parlami in italiano': 'Italian',
+    'rispondi in italiano': 'Italian',
+    'reply in italian': 'Italian',
+    'réponds en italien': 'Italian',
+    'responde en italiano': 'Italian',
+    'parlami in inglese': 'English',
+    'rispondi in inglese': 'English',
+    'reply in english': 'English',
+    'réponds en anglais': 'English',
+    'responde en inglés': 'English',
+    'parlami in francese': 'French',
+    'rispondi in francese': 'French',
+    'reply in french': 'French',
+    'réponds en français': 'French',
+    'responde en francés': 'French',
+    'parlami in spagnolo': 'Spanish',
+    'rispondi in spagnolo': 'Spanish',
+    'reply in spanish': 'Spanish',
+    'réponds en espagnol': 'Spanish',
+    'responde en español': 'Spanish',
+  };
+
   /// Returns null when a message is too short or mixed to classify safely.
   static String? detect(String userPrompt) {
     final text = userPrompt.trim().toLowerCase();
     if (text.isEmpty) return null;
+    final wholeTurn = text.replaceAll(RegExp(r'[.!?]+$'), '')
+        .replaceAll(RegExp(r'\s+'), ' ').trim();
+    final explicitLanguage = _shortTurns[wholeTurn];
+    if (explicitLanguage != null) return explicitLanguage;
     final words = RegExp(
       r"[\p{L}]+(?:['’][\p{L}]+)?",
       unicode: true,
