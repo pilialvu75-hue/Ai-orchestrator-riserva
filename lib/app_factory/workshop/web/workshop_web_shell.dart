@@ -242,7 +242,7 @@ class _CloudAutoCardState extends State<_CloudAutoCard> {
                   )
                 : const Icon(Icons.science_outlined),
             label: Text(
-              _selfTestRunning ? 'Self-Test in corso…' : 'Esegui Self-Test Cloud',
+              WorkshopWebLanguageScope.tr(context, _selfTestRunning ? 'Self-Test in corso…' : 'Esegui Self-Test Cloud'),
             ),
           ),
         ),
@@ -264,15 +264,18 @@ class _CloudAutoCardState extends State<_CloudAutoCard> {
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        result.passed
-                            ? 'Cloud Self-Test Passed'
-                            : 'Cloud Self-Test Not Passed',
+                        WorkshopWebLanguageScope.tr(context,
+                          result.errorCode == 'self_test_not_configured'
+                              ? 'Self-Test non configurato'
+                              : result.passed
+                                  ? 'Cloud Self-Test Passed'
+                                  : 'Cloud Self-Test Not Passed'),
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(result.detail),
+                  Text(WorkshopWebLanguageScope.tr(context, result.detail)),
                   const SizedBox(height: 8),
                   Text(
                     'HTTP: ${result.statusCode?.toString() ?? '—'}'
