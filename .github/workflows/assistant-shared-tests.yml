@@ -60,4 +60,5 @@ jobs:
           test/core/memory/assistant_memory_preference_candidate_test.dart
           test/core/memory/assistant_memory_selective_forget_test.dart
           test/core/memory/assistant_memory_review_page_test.dart
+          test/core/chat/chat_runtime_mode_shortcut_test.dart
           test/core/system/update
