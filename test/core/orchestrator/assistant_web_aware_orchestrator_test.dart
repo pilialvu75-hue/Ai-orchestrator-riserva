@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:ai_orchestrator/core/orchestrator/assistant_web_aware_orchestrator.dart';
+import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
