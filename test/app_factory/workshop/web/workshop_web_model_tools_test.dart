@@ -139,7 +139,7 @@ void main() {
     expect(source, contains("return error('route_not_authorized', 403)"));
     expect(source, contains('route.selfTestFree'));
     expect(source, contains('route.id === selectedRouteId'));
-    expect(catalogue, contains("model:"));
+    expect(catalogue, contains("      model,"));
     expect(catalogue, contains("bindingPresent"));
     expect(catalogue, contains("testApproved"));
     expect(catalogue, isNot(contains('sk-')));
