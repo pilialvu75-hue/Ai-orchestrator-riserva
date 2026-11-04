@@ -47,7 +47,7 @@ final class WorkshopWebCloudSelfTestClient {
 
   Uri get endpoint => _baseUri.resolve('/api/cantiere/inference');
 
-  Future<WorkshopWebCloudSelfTestResult> run({String? routeId}) async {
+  Future<WorkshopWebCloudSelfTestResult> run({String? selectedRouteId}) async {
     final stopwatch = Stopwatch()..start();
     try {
       final response = await _client
@@ -62,9 +62,9 @@ final class WorkshopWebCloudSelfTestClient {
               'version': 1,
               'capability': 'orchestration',
               'selfTest': true,
-              if (routeId != null &&
-                  RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$').hasMatch(routeId))
-                'routeId': routeId,
+              if (selectedRouteId != null &&
+                  RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$').hasMatch(selectedRouteId))
+                'routeId': selectedRouteId,
             }),
           )
           .timeout(timeout);
