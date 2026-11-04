@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'dart:async';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
@@ -584,6 +585,14 @@ Top results:
 
             expect(cancellationToken.isCancelled, isFalse);
             expect(request.prompt, contains('[INTERNET SEARCH RESULTS]'));
+            final composed = LocalPromptTemplates.compose(
+              modelId: 'phi3_5_mini',
+              prompt: request.prompt,
+              systemPrompt: request.systemPrompt,
+              emitDiagnostics: false,
+            );
+            expect(composed, contains('https://example.com/rome'));
+            expect(composed, isNot(contains('<search>query</search>')));
             yield InferenceResponse.finalChunk(
               text: 'Rome weather is sunny.',
               tokensGenerated: 5,
