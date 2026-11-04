@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_project_storage.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/domains/shared/aivexus_project_extension.dart';
 
@@ -43,6 +44,8 @@ final class _WorkshopWebProjectsPageState
   bool _loading = true;
   bool _showNewProject = false;
   bool _busy = false;
+
+  String _tr(String source) => WorkshopWebLanguageScope.tr(context, source);
 
   @override
   void initState() {
@@ -256,11 +259,14 @@ final class _WorkshopWebProjectsPageState
     });
 
     widget.controller.clearConversation();
+    final replyLanguage =
+        WorkshopWebLanguageScope.maybeOf(context)?.replyLanguageName ?? 'italiano';
     final prompt =
         '''
 Titolo progetto: $title
 Piattaforme richieste: ${platforms.join(', ')}
 Cosa deve fare: $goal
+Lingua della risposta: $replyLanguage
 
 Prepara esclusivamente la proposta del progetto. Non iniziare la creazione,
 non dichiarare file creati e non avviare build. Se manca un dato indispensabile
@@ -387,7 +393,7 @@ proposta breve, concreta e approvabile.
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: _reload,
-                child: const Text('Riprova lettura'),
+                child: Text(_tr('Riprova lettura')),
               ),
             ],
           ),
@@ -445,7 +451,7 @@ proposta breve, concreta e approvabile.
                   FilledButton.icon(
                     onPressed: _startNewProject,
                     icon: const Icon(Icons.add),
-                    label: const Text('Nuovo progetto'),
+                    label: Text(_tr('Nuovo progetto')),
                   ),
                 ],
               ),
@@ -478,7 +484,7 @@ proposta breve, concreta e approvabile.
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(
-        '$title ($count)',
+        '${_tr(title)} ($count)',
         style: Theme.of(context).textTheme.titleMedium,
       ),
     );
@@ -504,12 +510,12 @@ proposta breve, concreta e approvabile.
               Text(
                 '${_projectKindLabel(project.projectKind)}'
                 '${project.platforms.isEmpty ? '' : ' · ${project.platforms.join(' · ')}'}'
-                ' · ${_statusLabel(project.status)}',
+                ' · ${_tr(_statusLabel(project.status))}',
               ),
               const SizedBox(height: 8),
               LinearProgressIndicator(value: project.progress),
               const SizedBox(height: 5),
-              Text('$percent% · ${project.currentPhase}'),
+              Text('$percent% · ${_tr(project.currentPhase)}'),
             ],
           ),
         ),
@@ -546,14 +552,14 @@ proposta breve, concreta e approvabile.
               TextField(
                 controller: _titleController,
                 enabled: !_busy,
-                decoration: const InputDecoration(
-                  labelText: 'Titolo',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: _tr('Titolo'),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 18),
               Text(
-                'Tipo progetto',
+                _tr('Tipo progetto'),
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
@@ -587,13 +593,13 @@ proposta breve, concreta e approvabile.
               ),
               const SizedBox(height: 8),
               Text(
-                _projectKindDescription(_newProjectKind),
+                _tr(_projectKindDescription(_newProjectKind)),
                 style: const TextStyle(color: Colors.white60, height: 1.35),
               ),
               if (_newProjectKind == AivexusProjectKind.software) ...<Widget>[
                 const SizedBox(height: 18),
                 Text(
-                  'Piattaforme',
+                  _tr('Piattaforme'),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 6),
@@ -630,15 +636,15 @@ proposta breve, concreta e approvabile.
                 maxLines: 10,
                 decoration: InputDecoration(
                   labelText: _newProjectKind == AivexusProjectKind.software
-                      ? 'Cosa deve fare?'
+                      ? _tr('Cosa deve fare?')
                       : _newProjectKind == AivexusProjectKind.cad
-                          ? 'Descrivi il modello 3D'
-                          : 'Descrivi il gioco',
+                          ? _tr('Descrivi il modello 3D')
+                          : _tr('Descrivi il gioco'),
                   hintText: _newProjectKind == AivexusProjectKind.software
-                      ? 'Descrivi il comportamento e il risultato desiderato.'
+                      ? _tr('Descrivi il comportamento e il risultato desiderato.')
                       : _newProjectKind == AivexusProjectKind.cad
-                          ? 'Descrivi forma, misure e risultato desiderato.'
-                          : 'Descrivi regole, obiettivo e controlli desiderati.',
+                          ? _tr('Descrivi forma, misure e risultato desiderato.')
+                          : _tr('Descrivi regole, obiettivo e controlli desiderati.'),
                   alignLabelWithHint: true,
                   border: const OutlineInputBorder(),
                 ),
@@ -655,12 +661,12 @@ proposta breve, concreta e approvabile.
                     : Icon(_projectKindIcon(_newProjectKind)),
                 label: Text(
                   _busy
-                      ? 'Salvataggio in corso…'
+                      ? _tr('Salvataggio in corso…')
                       : _newProjectKind == AivexusProjectKind.software
-                          ? 'Prepara proposta'
+                          ? _tr('Prepara proposta')
                           : _newProjectKind == AivexusProjectKind.cad
-                              ? 'Crea bozza Stampa 3D'
-                              : 'Crea bozza Videogioco',
+                              ? _tr('Crea bozza Stampa 3D')
+                              : _tr('Crea bozza Videogioco'),
                 ),
               ),
               const SizedBox(height: 8),
@@ -731,13 +737,13 @@ proposta breve, concreta e approvabile.
                 ],
               ),
               const SizedBox(height: 12),
-              _infoRow('Tipo', _projectKindLabel(project.projectKind)),
-              _infoRow('Fase', project.currentPhase),
-              _infoRow('Elemento', project.currentItem),
-              _infoRow('Stato', _statusLabel(project.status)),
+              _infoRow('Tipo', _tr(_projectKindLabel(project.projectKind))),
+              _infoRow('Fase', _tr(project.currentPhase)),
+              _infoRow('Elemento', _tr(project.currentItem)),
+              _infoRow('Stato progetto', _tr(_statusLabel(project.status))),
               const SizedBox(height: 16),
               Text(
-                'Cosa deve fare',
+                _tr('Cosa deve fare'),
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 6),
@@ -770,7 +776,7 @@ proposta breve, concreta e approvabile.
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.error_outline),
-                    title: const Text('Errore'),
+                    title: Text(_tr('Errore')),
                     subtitle: Text(project.error!),
                   ),
                 ),
@@ -807,7 +813,7 @@ proposta breve, concreta e approvabile.
                 FilledButton.icon(
                   onPressed: _busy ? null : _approveProject,
                   icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Approva progetto'),
+                  label: Text(_tr('Approva progetto')),
                 ),
               if (!project.isReadOnly &&
                   project.projectKind == AivexusProjectKind.software &&
@@ -819,7 +825,7 @@ proposta breve, concreta e approvabile.
                 OutlinedButton.icon(
                   onPressed: _busy ? null : _editProject,
                   icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Modifica progetto'),
+                  label: Text(_tr('Modifica progetto')),
                 ),
               ],
               if (project.status ==
@@ -875,7 +881,7 @@ proposta breve, concreta e approvabile.
         children: <Widget>[
           SizedBox(
             width: 82,
-            child: Text(label, style: const TextStyle(color: Colors.white54)),
+            child: Text(_tr(label), style: const TextStyle(color: Colors.white54)),
           ),
           Expanded(child: Text(value)),
         ],
@@ -905,7 +911,7 @@ final class _EmptyProjectCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Text(text, style: const TextStyle(color: Colors.white54)),
+        child: Text(WorkshopWebLanguageScope.tr(context, text), style: const TextStyle(color: Colors.white54)),
       ),
     );
   }
