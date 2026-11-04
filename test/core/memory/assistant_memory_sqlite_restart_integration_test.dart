@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_ser
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
+import 'package:ai_orchestrator/features/chat/data/services/chat_session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -282,6 +283,117 @@ void main() {
         memoryService: makeMemory(),
       ).loadReviewablePreferenceCandidates(),
       isEmpty,
+    );
+  });
+
+
+
+  test('user-scoped memory survives trash and history wipe across restarts',
+      () async {
+    // Synthetic production-shape chat tables in a disposable file-backed DB.
+    // Never open, modify or reset the tester's installed application data.
+    await database.execute('''
+      CREATE TABLE chat_sessions (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await database.execute('''
+      CREATE TABLE chat_history (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        timestamp INTEGER NOT NULL
+      )
+    ''');
+
+    final chatStore = ChatSessionStore.forTesting(database);
+    await chatStore.createSession('origin');
+    await chatStore.createSession('next');
+    await database.insert('chat_history', <String, Object>{
+      'id': 'original-user-message',
+      'session_id': 'origin',
+      'role': 'user',
+      'content': 'Ricorda che il codice della prova chat eliminata è STELLA73',
+      'timestamp': 123,
+    });
+
+    final capture = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+    );
+    expect(
+      await capture.applyExplicitUserInstruction(
+        sessionId: 'origin',
+        userPrompt: 'Ricorda che il codice della prova chat eliminata è STELLA73',
+      ),
+      isTrue,
+    );
+    expect(
+      await capture.applyExplicitUserInstruction(
+        sessionId: 'origin',
+        userPrompt: 'Ricorda solo in questa chat che il colore segreto è lavanda',
+      ),
+      isTrue,
+    );
+
+    // Removing a conversation from the visible list is not an instruction
+    // to erase separately confirmed, user-scoped memory.
+    await chatStore.moveToTrash('origin');
+    expect(
+      (await chatStore.listSessions()).map((session) => session.id),
+      <String>['next'],
+    );
+    expect(
+      (await chatStore.listSessions(inTrash: true)).single.id,
+      'origin',
+    );
+
+    await reopen();
+    final reopenedStore = ChatSessionStore.forTesting(database);
+    expect(
+      (await reopenedStore.listSessions(inTrash: true)).single.id,
+      'origin',
+    );
+    var fromAnotherChat = await promptFor(
+      makeMemory(),
+      sessionId: 'next',
+      question: 'Qual è il codice della prova chat eliminata?',
+    );
+    expect(fromAnotherChat, contains('STELLA73'));
+    expect(
+      await promptFor(
+        makeMemory(),
+        sessionId: 'next',
+        question: 'Qual è il colore segreto?',
+      ),
+      isNot(contains('lavanda')),
+    );
+
+    // A separate, explicit full-history wipe also leaves confirmed USER
+    // facts untouched. It is NOT a test of permanent per-chat deletion:
+    // conversation-scoped records and semantic indexes need a separate gate.
+    final removed =
+        await DatabaseHelper.forTesting(database).deleteAllChatMessages();
+    expect(removed, 1);
+    expect(await database.query('chat_history'), isEmpty);
+    expect(await database.query('chat_sessions'), isEmpty);
+
+    await reopen();
+    fromAnotherChat = await promptFor(
+      makeMemory(),
+      sessionId: 'fresh-session-after-wipe',
+      question: 'Qual è il codice della prova chat eliminata?',
+    );
+    expect(fromAnotherChat, contains('STELLA73'));
+    expect(
+      await promptFor(
+        makeMemory(),
+        sessionId: 'fresh-session-after-wipe',
+        question: 'Qual è il colore segreto?',
+      ),
+      isNot(contains('lavanda')),
     );
   });
 
