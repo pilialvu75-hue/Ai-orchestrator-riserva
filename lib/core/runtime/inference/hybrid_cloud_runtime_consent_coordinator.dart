@@ -1,6 +1,5 @@
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_response.dart';
-import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
@@ -11,35 +10,8 @@ import 'hybrid_cloud_consent_denied.dart';
 import 'hybrid_cloud_disclosure_consent.dart';
 import 'hybrid_cloud_local_identity.dart';
 import 'hybrid_cloud_native_request_projection.dart';
-import 'hybrid_cloud_prompt_provenance.dart';
+import 'hybrid_cloud_runtime_source_evidence.dart';
 import 'hybrid_cloud_trusted_request_assembler.dart';
-
-/// Provenance supplied by the application that originally assembled the Chat
-/// turn. Neither an LLM nor a provider callback may synthesize this evidence.
-///
-/// Importantly, the original user question is separate from the RAG-augmented
-/// inference prompt; they are *not* the same source of trust.
-final class HybridCloudRuntimeSourceEvidence {
-  HybridCloudRuntimeSourceEvidence({
-    required this.sessionId,
-    required this.originalQuestion,
-    required this.baseSystemPrompt,
-    required List<AiMessage> originalHistory,
-    this.documentPrompt,
-    this.confirmedMemory,
-  }) : originalHistory = List<AiMessage>.unmodifiable(
-          originalHistory.map((message) => AiMessage(
-            role: message.role, content: message.content,
-          )),
-        );
-
-  final String sessionId;
-  final String originalQuestion;
-  final String baseSystemPrompt;
-  final List<AiMessage> originalHistory;
-  final HybridCloudPromptProvenance? documentPrompt;
-  final AssistantConfirmedMemoryContext? confirmedMemory;
-}
 
 /// One exact provider request -> trusted source check -> opt-in UI approval ->
 /// a one-use permit -> native OpenAI/Gemini HTTP. The legacy Cloud transport
@@ -54,15 +26,16 @@ final class HybridCloudRuntimeConsentCoordinator {
     required HybridCloudLocalIdentity identity,
     required CloudCredentialStore credentials,
     required http.Client client,
-    required Future<HybridCloudRuntimeSourceEvidence?> Function(
+    Future<HybridCloudRuntimeSourceEvidence?> Function(
       InferenceRequest request,
-    ) evidenceFor,
+    )? evidenceFor,
     this.requestConsent,
   }) : _consent = consent,
        _identity = identity,
        _credentials = credentials,
        _client = client,
-       _evidenceFor = evidenceFor;
+       _evidenceFor = evidenceFor ??
+           ((request) async => request.trustedCloudSourceEvidence);
 
   final HybridCloudDisclosureConsent _consent;
   final HybridCloudLocalIdentity _identity;
@@ -107,17 +80,34 @@ final class HybridCloudRuntimeConsentCoordinator {
     // The original runtime request is the trusted boundary, not its optimized
     // provider-facing history. No source may be invented after this snapshot.
     if (source.prompt.trim() != outbound.prompt ||
+        source.systemPrompt != evidence.expectedSystemPrompt ||
         evidence.originalHistory.length != source.context.length) {
       throw const HybridCloudConsentDenied();
     }
+    // The history originated from the local Chat store, not a model. The
+    // existing Cloud optimizer may omit irrelevant, excluded or duplicate
+    // turns, but it must never add, reorder or rewrite content.
     for (var i = 0; i < source.context.length; i++) {
-      final item = source.context[i];
+      final turn = source.context[i];
       final message = evidence.originalHistory[i];
-      if (item.excludeFromContext ||
-          item.role.name != message.role.name ||
-          item.content != message.content) {
+      if (turn.role.name != message.role.name ||
+          turn.content != message.content) {
         throw const HybridCloudConsentDenied();
       }
+    }
+    var cursor = 0;
+    for (final outgoing in outbound.messages) {
+      var matched = false;
+      while (cursor < source.context.length) {
+        final candidate = source.context[cursor++];
+        if (candidate.excludeFromContext) continue;
+        if (candidate.role.name == outgoing.role.name &&
+            candidate.content == outgoing.content) {
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) throw const HybridCloudConsentDenied();
     }
 
     final projected = HybridCloudNativeRequestProjection.project(outbound);
@@ -138,7 +128,8 @@ final class HybridCloudRuntimeConsentCoordinator {
       request: projected,
       originalQuestion: evidence.originalQuestion,
       exactBaseSystemPrompt: evidence.baseSystemPrompt,
-      historySnapshot: evidence.originalHistory,
+      runtimeSystemPromptSuffix: evidence.runtimeSystemPromptSuffix,
+      historySnapshot: List<AiMessage>.unmodifiable(outbound.messages),
       documentPrompt: evidence.documentPrompt,
       confirmedMemory: evidence.confirmedMemory,
     );

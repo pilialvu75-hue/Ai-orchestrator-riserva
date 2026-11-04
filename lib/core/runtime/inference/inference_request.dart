@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
 
 /// Optional caller directive for the runtime boundary.
 ///
@@ -28,6 +29,7 @@ class InferenceRequest {
     this.isOffline = false,
     this.allowWebSearchTool = true,
     this.trustedDocumentWebQuery,
+    this.trustedCloudSourceEvidence,
     this.maxTokens = defaultMaxTokens,
     this.temperature = defaultTemperature,
     this.preserveMaxTokens = false,
@@ -59,6 +61,10 @@ class InferenceRequest {
   final bool allowWebSearchTool;
   /// Trusted original user request for optional public lookup, not PDF data.
   final String? trustedDocumentWebQuery;
+  /// In-memory, first-party provenance created when Chat assembles the turn.
+  /// Never serialize this into provider metadata or diagnostics. Without it
+  /// consent-gated Cloud requests must fail closed.
+  final HybridCloudRuntimeSourceEvidence? trustedCloudSourceEvidence;
   final int maxTokens;
   final double temperature;
 
@@ -201,6 +207,8 @@ class InferenceRequest {
     bool? isOffline,
     bool? allowWebSearchTool,
     String? trustedDocumentWebQuery,
+    HybridCloudRuntimeSourceEvidence? trustedCloudSourceEvidence,
+    bool discardTrustedCloudSourceEvidence = false,
     int? maxTokens,
     double? temperature,
     bool? preserveMaxTokens,
@@ -228,6 +236,9 @@ class InferenceRequest {
       isOffline: isOffline ?? this.isOffline,
       allowWebSearchTool: allowWebSearchTool ?? this.allowWebSearchTool,
       trustedDocumentWebQuery: trustedDocumentWebQuery ?? this.trustedDocumentWebQuery,
+      trustedCloudSourceEvidence: discardTrustedCloudSourceEvidence
+          ? null
+          : trustedCloudSourceEvidence ?? this.trustedCloudSourceEvidence,
       maxTokens: maxTokens ?? this.maxTokens,
       temperature: temperature ?? this.temperature,
       preserveMaxTokens: preserveMaxTokens ?? this.preserveMaxTokens,

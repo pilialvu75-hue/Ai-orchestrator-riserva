@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
@@ -13,6 +14,8 @@ import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.da
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_prompt_provenance.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -394,6 +397,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
 
             String effectivePrompt = normalizedPrompt;
             var hasDocumentContext = false;
+            HybridCloudPromptProvenance? documentPromptProvenance;
             if (attachmentsSnapshot.any(
               (item) => item.type == ChatAttachmentType.file,
             )) {
@@ -424,6 +428,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
               if (fileContext != null) {
                 hasDocumentContext = true;
                 effectivePrompt = fileContext.prompt;
+                documentPromptProvenance = fileContext.provenance;
                 onRuntimeNotice?.call(
                   mode == AiRuntimeMode.cloud
                       ? 'File: estratti locali recuperati; inviati al '
@@ -466,6 +471,12 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                   : null,
               systemPrompt: systemPrompt,
               context: contextSnapshot,
+              originalUserQuestion: normalizedPrompt,
+              documentPromptProvenance: documentPromptProvenance,
+              mayBuildCloudEvidence: attachmentsSnapshot.isEmpty ||
+                  (hasDocumentContext && documentPromptProvenance != null &&
+                      attachmentsSnapshot.every((item) =>
+                          item.type == ChatAttachmentType.file)),
             );
             final streamCompleter = Completer<void>();
             final abortSignal = Completer<void>();
@@ -637,6 +648,9 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
     required String? documentWebQuery,
     required String? systemPrompt,
     required List<ChatTurn> context,
+    required String originalUserQuestion,
+    required HybridCloudPromptProvenance? documentPromptProvenance,
+    required bool mayBuildCloudEvidence,
   }) {
     final settings = runtimeSettingsService;
     final directInference = inferenceService;
@@ -665,6 +679,21 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
           routeDirective: InferenceRouteDirective.cloudOnly,
           cloudProviderId: manualProvider,
           allowCloudProviderFailover: automaticProviderSelection,
+          trustedCloudSourceEvidence: mayBuildCloudEvidence
+              ? HybridCloudRuntimeSourceEvidence(
+                  sessionId: sessionId,
+                  originalQuestion: originalUserQuestion,
+                  baseSystemPrompt: systemPrompt ?? '',
+                  originalHistory: <AiMessage>[
+                    for (final turn in context)
+                      AiMessage(
+                        role: AiMessageRole.values.byName(turn.role.name),
+                        content: turn.content,
+                      ),
+                  ],
+                  documentPrompt: documentPromptProvenance,
+                )
+              : null,
         ),
       );
     }

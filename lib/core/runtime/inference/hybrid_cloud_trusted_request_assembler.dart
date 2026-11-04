@@ -26,6 +26,7 @@ final class HybridCloudTrustedRequestAssembler {
     required AiRequest request,
     required String originalQuestion,
     required String exactBaseSystemPrompt,
+    String runtimeSystemPromptSuffix = '',
     required List<AiMessage> historySnapshot,
     HybridCloudPromptProvenance? documentPrompt,
     AssistantConfirmedMemoryContext? confirmedMemory,
@@ -90,6 +91,8 @@ final class HybridCloudTrustedRequestAssembler {
     final expectedSystem = <String>[
       if (base.isNotEmpty) base,
       if (memoryText != null && memoryText.isNotEmpty) memoryText,
+      if (runtimeSystemPromptSuffix.isNotEmpty)
+        runtimeSystemPromptSuffix,
     ].join('\n\n');
     if ((request.systemPrompt ?? '') != expectedSystem) {
       throw StateError('Cloud system instructions contain unknown context');
@@ -116,6 +119,23 @@ final class HybridCloudTrustedRequestAssembler {
         ...HybridCloudConfirmedMemoryProvenance.toDisclosureSegments(
           source: confirmedMemory,
           exactContext: memoryText,
+        ),
+      if (runtimeSystemPromptSuffix.isNotEmpty &&
+          (base.isNotEmpty || (memoryText?.isNotEmpty ?? false)))
+        const HybridDisclosureSegment(
+          text: '\n\n',
+          scope: HybridDisclosureScope(
+            HybridDisclosureOrigin.systemInstructions,
+            HybridDisclosureSensitivity.publicOrNonPersonal,
+          ),
+        ),
+      if (runtimeSystemPromptSuffix.isNotEmpty)
+        HybridDisclosureSegment(
+          text: runtimeSystemPromptSuffix,
+          scope: const HybridDisclosureScope(
+            HybridDisclosureOrigin.systemInstructions,
+            HybridDisclosureSensitivity.unknown,
+          ),
         ),
     ];
 

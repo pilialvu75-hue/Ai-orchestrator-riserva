@@ -13,6 +13,8 @@ import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_consent_denied.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -111,6 +113,66 @@ void main() {
     expect(captured!.systemPrompt,
         contains('Verify changing external facts with current sources'));
     expect(captured!.prompt, 'Che giorno e oggi?');
+  });
+
+  test('Cloud runtime preserves source-backed evidence of device time',
+      () async {
+    InferenceRequest? observed;
+    var legacySends = 0;
+    final cloud = CloudRuntimeProvider(
+      consentGated: true,
+      sendQuery: (_, __) async {
+        legacySends++;
+        throw StateError('Legacy transport must not run');
+      },
+      consentGatedSend: (source, projected, token) async {
+        observed = source;
+        expect(projected.systemPrompt, contains('Device system time'));
+        expect(token.isCancelled, isFalse);
+        throw const HybridCloudConsentDenied();
+      },
+      supportedProviders: () => const <String>['openAi'],
+      isProviderAvailable: (_) => true,
+      providerDisplayName: ([name]) => name ?? 'OpenAI',
+      automaticUseAllowed: (_) => true,
+      modelForProvider: (_) => 'gpt-test',
+    );
+    final service = buildService(
+      mode: AiRuntimeMode.cloud,
+      selectedModel: validModel,
+      localRuntimeProvider: FakeLocalRuntimeProvider(),
+      cloudRuntimeProvider: cloud,
+    );
+    final evidence = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'clock-evidence',
+      originalQuestion: 'Hello',
+      baseSystemPrompt: 'You are Aivexus',
+      originalHistory: const <AiMessage>[],
+    );
+    final input = InferenceRequest(
+      sessionId: 'clock-evidence', prompt: 'Hello',
+      systemPrompt: 'You are Aivexus',
+      routeDirective: InferenceRouteDirective.cloudOnly,
+      trustedCloudSourceEvidence: evidence,
+    );
+    await service.stream(input).drain<void>();
+    expect(observed, isNotNull);
+    final updated = observed!.trustedCloudSourceEvidence;
+    expect(updated, isNotNull);
+    expect(updated!.runtimeSystemPromptSuffix,
+        contains('Device system time (local):'));
+    expect(observed!.systemPrompt, updated.expectedSystemPrompt);
+    expect(legacySends, 0);
+
+    // When another layer injects context before time augmentation, its
+    // fabricated provenance is not preserved into the Cloud boundary.
+    observed = null;
+    await service.stream(input.copyWith(
+      systemPrompt: 'You are Aivexus\nUNKNOWN WEB TOOL RESULTS',
+    )).drain<void>();
+    expect(observed, isNotNull);
+    expect(observed!.trustedCloudSourceEvidence, isNull);
+    expect(legacySends, 0);
   });
 
   group('InferenceService routing', () {

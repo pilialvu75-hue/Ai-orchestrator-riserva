@@ -74,10 +74,31 @@ class InferenceService {
         '(not independently verified). Do not invent a location. '
         'Verify changing external facts with current sources.';
     final priorSystemPrompt = request.systemPrompt?.trim();
+    final expandedSystemPrompt =
+        priorSystemPrompt == null || priorSystemPrompt.isEmpty
+            ? temporalContext
+            : '$priorSystemPrompt\n\n$temporalContext';
+    // App-owned temporal context must be disclosed as an exact additional
+    // system slice before any consent-controlled Cloud transport.
+    // If a decorator changed system text without provenance, drop evidence
+    // rather than allowing a forged classification or breaking normal Local.
+    var trustedEvidence = request.trustedCloudSourceEvidence;
+    if (trustedEvidence != null) {
+      try {
+        trustedEvidence = trustedEvidence.withTrustedRuntimeSystemAppend(
+          previousSystemPrompt: priorSystemPrompt ?? '',
+          appendedSystemPrompt: expandedSystemPrompt,
+          trustedSuffix: temporalContext,
+        );
+      } catch (_) {
+        trustedEvidence = null;
+      }
+    }
     final isolatedRequest = request.copyWith(
-      systemPrompt: priorSystemPrompt == null || priorSystemPrompt.isEmpty
-          ? temporalContext
-          : '$priorSystemPrompt\n\n$temporalContext',
+      systemPrompt: expandedSystemPrompt,
+      trustedCloudSourceEvidence: trustedEvidence,
+      discardTrustedCloudSourceEvidence:
+          request.trustedCloudSourceEvidence != null && trustedEvidence == null,
     );
     _log(
       '[SYSTEM_TIME_CONTEXT] session=${isolatedRequest.sessionId} '

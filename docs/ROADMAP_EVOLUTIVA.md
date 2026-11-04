@@ -554,7 +554,7 @@ consenso esplicito.
   nella Chat e il controllo esatto del payload. Prevedere inoltre
   autorizzazione esplicita opzionale su tutti i provider approvati senza
   includere automaticamente provider/account futuri.
-- **Stato tecnico H10–H15 (#977, ancora DRAFT):** contratto di consenso,
+- **Stato tecnico H10–H16 (#977, ancora DRAFT):** contratto di consenso,
   revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
   OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
   `ChatFileContextService` conserva separatamente domanda, istruzioni e
@@ -584,6 +584,28 @@ consenso esplicito.
   `dispatchApproved` avvia realmente il client HTTP. Test simulano un
   dialogo sospeso, l'annullamento prima di rispondere e l'annullamento
   dopo un permesso ottenuto, prima dell'avvio HTTP.
+- **H16 — provenienza dalla Chat realmente attraversata dal runtime:**
+  `ChatRepositoryImpl` genera un oggetto di provenienza per le domande
+  inviate con routing Cloud diretto, usando la vera domanda originale,
+  l'istantanea della cronologia recuperata, le istruzioni ricevute e, ove
+  presente, la provenienza dell'estratto `ChatFileContextService`. Dati
+  immagine/video/allegati non ricondotti a un documento verificato rimangono
+  privi di evidenza e saranno negati dal gate se attivato. La nuova proprietà
+  tipizzata di `InferenceRequest` è in RAM, preservata da `copyWith`
+  e mai serializzata nei metadata HTTP.
+- `InferenceService` aggiunge normalmente data/ora e fuso orario
+  dell'app al system prompt. H16 lega anche questa aggiunta al testo esatto
+  realmente creato dal runtime; se un'altra fase ha alterato il sistema,
+  elimina l'evidenza senza cambiare il percorso LOCAL/Cloud esistente.
+  `HybridCloudTrustedRequestAssembler` include il suffisso certificato
+  nella review, mentre `HybridCloudRuntimeConsentCoordinator` controlla
+  che la cronologia Cloud ottimizzata sia solo una sottosequenza dei turni
+  realmente letti dalla Chat, senza aggiunte o riordinamenti.
+- **Limite attuale:** questa provenienza viene costruita dal percorso
+  Chat -> Cloud diretto, non ancora dal percorso Chat -> Hannibal -> Hybrid
+  e NON abilita un dispatcher con review UI nel bootstrap produttivo.
+  Il consenso Cloud effettivo e il richiamo dei ricordi in Hybrid Local
+  rimangono prossimi gate P0.
 - I dati utente/documenti/ricordi e cronologia con sensibilità non verificata
   restano `unknown`: sono autorizzabili soltanto per una richiesta, non con
   permesso permanente; contenuti con false direttive `[SYSTEM]` rimangono

@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.da
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_disclosure_consent.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_local_identity.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_consent_coordinator.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -95,17 +96,21 @@ void main() {
       }), 200);
     });
 
+    // This evidence comes from the typed InferenceRequest, as it will in
+    // real Chat, rather than from an injected provider callback.
+    final requestWithEvidence = input.copyWith(
+      trustedCloudSourceEvidence: HybridCloudRuntimeSourceEvidence(
+        sessionId: input.sessionId,
+        originalQuestion: 'Current private question',
+        baseSystemPrompt: 'System instructions',
+        originalHistory: evidence,
+      ),
+    );
     final coordinator = HybridCloudRuntimeConsentCoordinator(
       consent: consent,
       identity: identity,
       credentials: credentials,
       client: client,
-      evidenceFor: (request) async => HybridCloudRuntimeSourceEvidence(
-        sessionId: request.sessionId,
-        originalQuestion: 'Current private question',
-        baseSystemPrompt: 'System instructions',
-        originalHistory: evidence,
-      ),
       requestConsent: (review) async {
         reviews++;
         expect(review.disclosure.accountId, 'account-1');
@@ -125,7 +130,7 @@ void main() {
     );
     for (var i = 0; i < 2; i++) {
       final replies = await runtime.streamInference(
-        request: input, cancellationToken: CancellationToken(),
+        request: requestWithEvidence, cancellationToken: CancellationToken(),
       ).toList();
       expect(replies.last.isError, isFalse);
       expect(replies.last.text, 'Approved result');
