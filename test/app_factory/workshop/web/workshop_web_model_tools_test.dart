@@ -126,7 +126,7 @@ void main() {
         }), 200);
       }),
     );
-    final result = await client.run(routeId: 'safe-nim');
+    final result = await client.run(selectedRouteId: 'safe-nim');
     expect(result.passed, isTrue);
     expect(sent!['routeId'], 'safe-nim');
     expect(sent!.containsKey('endpoint'), isFalse);
