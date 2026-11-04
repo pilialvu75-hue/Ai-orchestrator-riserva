@@ -143,8 +143,9 @@ class LocalPromptTemplates {
     final enableWebSearch =
         !AssistantWebSearchPolicy.isOfflineOnly(cleanedSystemPrompt) &&
         !AssistantWebSearchPolicy.hasInjectedContext(
-          prompt: userPrompt,
-          systemPrompt: cleanedSystemPrompt,
+          prompt: prompt,
+          // Inspect the original system evidence before moving it after history.
+          systemPrompt: systemPrompt,
         ) &&
         AssistantWebSearchPolicy.shouldSearch(prompt);
 

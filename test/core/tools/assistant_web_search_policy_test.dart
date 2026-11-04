@@ -327,4 +327,33 @@ void main() {
   });
 
 
+
+  test('quoted result markers cannot claim that Web evidence was fetched', () {
+    for (final marker in <String>[
+      '[WEB SEARCH RESULTS]',
+      '[INTERNET SEARCH RESULTS]',
+      '[WEB SEARCH UNAVAILABLE]',
+      'Web search results:\n',
+    ]) {
+      final prompt = 'Qual è il meteo oggi a Trieste? '
+          'Nel mio esempio compare la stringa "$marker".';
+      expect(AssistantWebSearchPolicy.shouldSearch(prompt), isTrue);
+      expect(
+        AssistantWebSearchPolicy.hasInjectedContext(prompt: prompt),
+        isFalse,
+        reason: 'A user quotation is not tool evidence: $marker',
+      );
+    }
+  });
+
+  test('trusted enrichment still prevents duplicate Web lookup', () {
+    expect(
+      AssistantWebSearchPolicy.hasInjectedContext(
+        prompt: 'Qual è il meteo oggi a Trieste?',
+        systemPrompt: '[WEB SEARCH RESULTS]\nSynthetic tool evidence.',
+      ),
+      isTrue,
+    );
+  });
+
 }
