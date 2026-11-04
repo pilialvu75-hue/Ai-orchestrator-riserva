@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_preferences
 import 'package:ai_orchestrator/core/runtime/inference/cloud_task_class.dart';
 import 'package:ai_orchestrator/core/runtime/inference/conversation_context_limits.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_consent_denied.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -71,6 +72,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     String? Function()? preferredProvider,
     bool Function(String provider)? automaticUseAllowed,
     bool Function(String provider, CloudTaskClass task)? automaticUseAllowedForTask,
+    this.consentGated = false,
   })  : _sendQuery = sendQuery,
         _supportedProviders = supportedProviders,
         _isProviderAvailable = isProviderAvailable,
@@ -85,6 +87,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
             (automaticUseAllowed != null
                 ? ((provider, _) => automaticUseAllowed(provider))
                 : CloudRuntimePreferences.instance.automaticUseAllowedForTask);
+
+  /// Opt-in only: disable response caching for consent-reviewed requests.
+  /// The production Cloud path is unchanged until full Chat UI integration.
+  final bool consentGated;
 
   static const String fullyLocalNotice =
       'Cloud AI unavailable — running fully local mode.';
@@ -252,7 +258,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     }
 
     final cacheKey = _cacheKey(providerOrder, optimized, signal);
-    final cached = _responseCache[cacheKey];
+    final cached = consentGated ? null : _responseCache[cacheKey];
     if (cached != null) {
       yield InferenceResponse.finalChunk(
         text: cached.response.text,
@@ -336,18 +342,23 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         }
 
         _markSuccess(provider, stopwatch.elapsedMilliseconds);
-        _putCache(
-          cacheKey,
-          _CachedCloudResponse(
-            response: response,
-            providerId: provider,
-          ),
-        );
+        if (!consentGated) {
+          _putCache(cacheKey, _CachedCloudResponse(
+            response: response, providerId: provider,
+          ));
+        }
         yield InferenceResponse.finalChunk(
           text: response.text,
           tokensGenerated: response.tokensUsed,
           model: response.model,
           providerId: provider,
+        );
+        return;
+      } on HybridCloudConsentDenied {
+        stopwatch.stop();
+        // Refusal ends this dispatch. NEVER try another provider.
+        yield InferenceResponse.error(
+          'Cloud disclosure was not approved.', providerId: provider,
         );
         return;
       } catch (error) {
