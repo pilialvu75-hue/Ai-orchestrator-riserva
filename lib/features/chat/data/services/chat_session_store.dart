@@ -1,5 +1,7 @@
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
@@ -218,7 +220,8 @@ class ChatSessionStore {
       // Only this conversation's private durable-memory scope is removed.
       // Keep the USER scope, all other conversations and project memories.
       final privateMemoryKey =
-          'assistant.durable_memory.v1:conversation:${Uri.encodeComponent(id)}';
+          '${AssistantDurableMemoryStore.storagePrefix}'
+          '${AssistantMemoryScope.conversation.name}:${Uri.encodeComponent(id)}';
       await txn.delete(
         AppConstants.tableUserPreferences,
         where: '${AppConstants.colPrefKey} IN (?, ?, ?)',
