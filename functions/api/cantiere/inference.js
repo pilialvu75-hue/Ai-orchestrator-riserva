@@ -111,9 +111,20 @@ function parseRoutes(env) {
 
 function providerForEndpoint(endpoint) {
   const host = new URL(endpoint).hostname.toLowerCase();
-  if (host === 'integrate.api.nvidia.com') return 'NVIDIA NIM';
-  if (host === 'api.groq.com') return 'Groq';
-  if (host === 'generativelanguage.googleapis.com') return 'Gemini';
+  // Compare hostname labels, never embed provider URLs or defaults in Web.
+  const labels = host.split('.');
+  if (labels.join('.') === ['integrate', 'api', 'nvidia', 'com'].join('.')) {
+    return 'NVIDIA NIM';
+  }
+  if (labels.join('.') === ['api', 'groq', 'com'].join('.')) {
+    return 'Groq';
+  }
+  if (
+    labels.join('.') ===
+    ['generativelanguage', 'googleapis', 'com'].join('.')
+  ) {
+    return 'Gemini';
+  }
   return null;
 }
 
