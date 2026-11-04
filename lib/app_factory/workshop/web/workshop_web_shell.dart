@@ -1,7 +1,7 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
-import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_self_test.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_self_test.dart' as cloud_test;
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'package:flutter/material.dart';
 
@@ -62,7 +62,7 @@ class WorkshopWebShell extends StatelessWidget {
 
   final Future<WorkshopCheckpointStore> checkpointStore;
   final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
-  final WorkshopWebCloudSelfTestClient? selfTestClient;
+  final cloud_test.WorkshopWebCloudSelfTestClient? selfTestClient;
 
   @override
   Widget build(BuildContext context) {
@@ -163,7 +163,7 @@ class _CloudAutoCard extends StatefulWidget {
   });
 
   final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
-  final WorkshopWebCloudSelfTestClient? selfTestClient;
+  final cloud_test.WorkshopWebCloudSelfTestClient? selfTestClient;
 
   @override
   State<_CloudAutoCard> createState() => _CloudAutoCardState();
@@ -171,15 +171,15 @@ class _CloudAutoCard extends StatefulWidget {
 
 class _CloudAutoCardState extends State<_CloudAutoCard> {
   late final Future<WorkshopWebCloudBrokerHealth> _health;
-  late final WorkshopWebCloudSelfTestClient _selfTestClient;
+  late final cloud_test.WorkshopWebCloudSelfTestClient _selfTestClient;
   bool _selfTestRunning = false;
-  WorkshopWebCloudSelfTestResult? _selfTestResult;
+  cloud_test.WorkshopWebCloudSelfTestResult? _selfTestResult;
 
   @override
   void initState() {
     super.initState();
     _health = widget.cloudHealth;
-    _selfTestClient = widget.selfTestClient ?? WorkshopWebCloudSelfTestClient();
+    _selfTestClient = widget.selfTestClient ?? cloud_test.WorkshopWebCloudSelfTestClient();
   }
 
   Future<void> _runSelfTest() async {
@@ -242,7 +242,7 @@ class _CloudAutoCardState extends State<_CloudAutoCard> {
                   )
                 : const Icon(Icons.science_outlined),
             label: Text(
-              _selfTestRunning ? 'Self-Test in corso…' : 'Esegui Self-Test Cloud',
+              WorkshopWebLanguageScope.tr(context, _selfTestRunning ? 'Self-Test in corso…' : 'Esegui Self-Test Cloud'),
             ),
           ),
         ),
@@ -264,15 +264,18 @@ class _CloudAutoCardState extends State<_CloudAutoCard> {
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        result.passed
-                            ? 'Cloud Self-Test Passed'
-                            : 'Cloud Self-Test Not Passed',
+                        WorkshopWebLanguageScope.tr(context,
+                          result.errorCode == 'self_test_not_configured'
+                              ? 'Self-Test non configurato'
+                              : result.passed
+                                  ? 'Cloud Self-Test Passed'
+                                  : 'Cloud Self-Test Not Passed'),
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(result.detail),
+                  Text(WorkshopWebLanguageScope.tr(context, result.detail)),
                   const SizedBox(height: 8),
                   Text(
                     'HTTP: ${result.statusCode?.toString() ?? '—'}'

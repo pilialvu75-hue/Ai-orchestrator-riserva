@@ -6,6 +6,8 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_browser_audio.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_checkpoint_storage.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_tools_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_conversation_storage.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_project_storage.dart';
@@ -21,10 +23,12 @@ Future<void> main() async {
   final projectStorage = await WorkshopWebProjectStorage.open();
   final cloudBroker = WorkshopWebCloudBrokerClient();
   final webLanguage = await WorkshopWebLanguage.open();
+  final webModelPreference = await WorkshopWebModelPreference.open();
   final chatController = WorkshopChatController(
     inferenceGateway: WorkshopInferenceGateway(
       provider: WorkshopWebCloudRuntimeProvider(
         capability: WorkshopWebCloudCapability.orchestration,
+        selectedRouteId: () => webModelPreference.routeId,
       ),
     ),
     sessionId: 'workshop-web',
@@ -41,6 +45,7 @@ Future<void> main() async {
       chatController: chatController,
       projectStorage: projectStorage,
       language: webLanguage,
+      modelPreference: webModelPreference,
     ),
   );
 }
@@ -75,6 +80,7 @@ class WorkshopWebApp extends StatelessWidget {
     required this.chatController,
     required this.projectStorage,
     this.language,
+    required this.modelPreference,
   });
 
   final Future<WorkshopCheckpointStore> checkpointStore;
@@ -82,6 +88,7 @@ class WorkshopWebApp extends StatelessWidget {
   final WorkshopChatController chatController;
   final WorkshopWebProjectStorage projectStorage;
   final WorkshopWebLanguage? language;
+  final WorkshopWebModelPreference modelPreference;
 
   @override
   Widget build(BuildContext context) {
@@ -119,6 +126,7 @@ class WorkshopWebApp extends StatelessWidget {
           chatController: chatController,
           projectStorage: projectStorage,
           language: selectedLanguage,
+          modelPreference: modelPreference,
         ),
       ),
     ),
@@ -134,6 +142,7 @@ class WorkshopWebHome extends StatefulWidget {
     required this.chatController,
     required this.projectStorage,
     required this.language,
+    required this.modelPreference,
   });
 
   final Future<WorkshopCheckpointStore> checkpointStore;
@@ -141,6 +150,7 @@ class WorkshopWebHome extends StatefulWidget {
   final WorkshopChatController chatController;
   final WorkshopWebProjectStorage projectStorage;
   final WorkshopWebLanguage language;
+  final WorkshopWebModelPreference modelPreference;
 
   @override
   State<WorkshopWebHome> createState() => _WorkshopWebHomeState();
@@ -149,9 +159,73 @@ class WorkshopWebHome extends StatefulWidget {
 class _WorkshopWebHomeState extends State<WorkshopWebHome> {
   int _selectedIndex = 0;
 
+  void _openCloudTools(int initialTab) {
+    Navigator.of(context).pop(); // close the hamburger drawer
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => WorkshopWebCloudToolsPage(
+          initialTab: initialTab,
+          language: widget.language,
+          preference: widget.modelPreference,
+          cloudHealth: widget.cloudHealth,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: Drawer(
+        child: SafeArea(
+          child: ListView(
+            children: <Widget>[
+              const DrawerHeader(
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Text('Aivexus Web', style: TextStyle(fontSize: 24)),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.monitor_heart_outlined),
+                title: Text(widget.language.text('Stato')),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  setState(() => _selectedIndex = 0);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.handyman_outlined),
+                title: Text(widget.language.text('Cantiere')),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  setState(() => _selectedIndex = 1);
+                },
+              ),
+              const Divider(),
+              ListTile(
+                key: const Key('web_drawer_self_test'),
+                leading: const Icon(Icons.science_outlined),
+                title: Text(widget.language.text('Self-Test Cloud')),
+                onTap: () => _openCloudTools(0),
+              ),
+              ListTile(
+                key: const Key('web_drawer_model_picker'),
+                leading: const Icon(Icons.memory_outlined),
+                title: Text(widget.language.text('Scelta modello')),
+                subtitle: Text(widget.modelPreference.routeId ?? 'AUTO'),
+                onTap: () => _openCloudTools(1),
+              ),
+              ListTile(
+                key: const Key('web_drawer_diagnostics'),
+                leading: const Icon(Icons.fact_check_outlined),
+                title: Text(widget.language.text('Diagnostica')),
+                onTap: () => _openCloudTools(2),
+              ),
+            ],
+          ),
+        ),
+      ),
       appBar: AppBar(
         title: const Text('Aivexus Web'),
         actions: <Widget>[
