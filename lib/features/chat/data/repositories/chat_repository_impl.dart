@@ -654,6 +654,31 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
   }) {
     final settings = runtimeSettingsService;
     final directInference = inferenceService;
+    // This evidence is produced at the real Chat/SQLite source boundary.
+    // Any already injected Web result has unknown provenance and must NOT
+    // be labeled as a regular app instruction for Cloud consent.
+    final trustedEvidence = mayBuildCloudEvidence &&
+            settings != null &&
+            (settings.runtimeMode == AiRuntimeMode.cloud ||
+                settings.runtimeMode == AiRuntimeMode.hybrid) &&
+            !AssistantWebSearchPolicy.hasInjectedContext(
+              prompt: prompt,
+              systemPrompt: systemPrompt,
+            )
+        ? HybridCloudRuntimeSourceEvidence(
+            sessionId: sessionId,
+            originalQuestion: originalUserQuestion,
+            baseSystemPrompt: systemPrompt ?? '',
+            originalHistory: <AiMessage>[
+              for (final turn in context)
+                AiMessage(
+                  role: AiMessageRole.values.byName(turn.role.name),
+                  content: turn.content,
+                ),
+            ],
+            documentPrompt: documentPromptProvenance,
+          )
+        : null;
 
     if (settings?.runtimeMode == AiRuntimeMode.cloud && directInference != null) {
       final manualProvider = settings!.manualCloudProvider;
@@ -679,21 +704,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
           routeDirective: InferenceRouteDirective.cloudOnly,
           cloudProviderId: manualProvider,
           allowCloudProviderFailover: automaticProviderSelection,
-          trustedCloudSourceEvidence: mayBuildCloudEvidence
-              ? HybridCloudRuntimeSourceEvidence(
-                  sessionId: sessionId,
-                  originalQuestion: originalUserQuestion,
-                  baseSystemPrompt: systemPrompt ?? '',
-                  originalHistory: <AiMessage>[
-                    for (final turn in context)
-                      AiMessage(
-                        role: AiMessageRole.values.byName(turn.role.name),
-                        content: turn.content,
-                      ),
-                  ],
-                  documentPrompt: documentPromptProvenance,
-                )
-              : null,
+          trustedCloudSourceEvidence: trustedEvidence,
         ),
       );
     }
@@ -713,6 +724,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
       systemPrompt: systemPrompt,
       documentContext: documentContext,
       documentWebQuery: documentWebQuery,
+      trustedCloudSourceEvidence: trustedEvidence,
     );
   }
 

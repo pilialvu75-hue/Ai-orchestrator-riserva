@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -95,6 +96,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     double? temperature,
     bool documentContext = false,
     String? documentWebQuery,
+    HybridCloudRuntimeSourceEvidence? trustedCloudSourceEvidence,
   }) async* {
     if (documentContext) {
       // Do not interpret content extracted from a file as shopping,
@@ -110,6 +112,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
         temperature: temperature,
         documentContext: true,
         documentWebQuery: documentWebQuery,
+        trustedCloudSourceEvidence: trustedCloudSourceEvidence,
       );
       return;
     }
@@ -178,6 +181,13 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       isOffline: isOffline,
       maxTokens: maxTokens,
       temperature: temperature,
+      // Web/tool retrieval or rewritten sport follow-ups have a different
+      // source than the Chat user's literal question/system text. Do NOT
+      // present them as if they came from the original Chat assembly.
+      trustedCloudSourceEvidence:
+          inferenceTopic == input && effectiveSystemPrompt == systemPrompt
+              ? trustedCloudSourceEvidence
+              : null,
     );
   }
 

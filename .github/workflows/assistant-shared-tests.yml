@@ -48,6 +48,8 @@ jobs:
           test/core/tools/assistant_device_clock_test.dart
           test/core/tools/assistant_web_search_policy_test.dart
           test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
+          test/features/chat/presentation/hybrid_cloud_chat_consent_gateway_test.dart
+          test/features/settings/presentation/hybrid_cloud_consent_review_dialog_test.dart
           test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart
           test/core/runtime/inference/completion_output_test.dart
           test/native/runtime/windows/windows_vulkan_device_test.dart

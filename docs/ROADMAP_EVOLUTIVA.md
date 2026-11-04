@@ -554,7 +554,7 @@ consenso esplicito.
   nella Chat e il controllo esatto del payload. Prevedere inoltre
   autorizzazione esplicita opzionale su tutti i provider approvati senza
   includere automaticamente provider/account futuri.
-- **Stato tecnico H10–H17 (#977, ancora DRAFT):** contratto di consenso,
+- **Stato tecnico H10–H18 (#977, ancora DRAFT):** contratto di consenso,
   revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
   OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
   `ChatFileContextService` conserva separatamente domanda, istruzioni e
@@ -614,12 +614,26 @@ consenso esplicito.
   tale responsabilità. Il coordinatore dispone di `chatReview` con l'ID
   sessione Chat e la condizione `requestStillActive` separati dall'identità
   locale owner.
-- **Limite attuale:** la provenienza è presente per Chat -> Cloud diretto,
-  non ancora per Chat -> Hannibal -> HYBRID. Il gateway UI è registrato
-  nella pagina Chat, ma il runtime Cloud produttivo resta normale; il nuovo
-  coordinatore non è ancora istanziato nel bootstrap. Mancano identità
-  destinatario Cloud attendibile, assegnazione della review al dispatch reale
-  e test E2E fisico S24 FE. Non dichiarare condivisione ricordi già attiva.
+- **H18 — provenienza fino alla decisione di Hannibal in HYBRID:**
+  `ChatRepositoryImpl` assegna la stessa prova tipizzata usata dal percorso
+  Cloud anche al percorso `Orchestrator.handleStream`. Hannibal trasporta
+  la prova immutata attraverso `InferenceRequest` quando sceglie un provider
+  Cloud per una domanda ordinaria, con contesto e istruzioni effettivamente
+  identiche; la perde intenzionalmente in caso di risultato Web/tool aggiunto,
+  argomento riscritto, prompt con marker Web offline per documenti, allegati
+  senza fonte verificata. `AssistantWebAwareOrchestrator` scarta la prova
+  dopo arricchimento Web, senza interrompere l'inferenza LOCAL/Cloud
+  preesistente. Test con router HYBRID mock certificano mantenimento nei
+  percorsi invariati ed esclusione dei risultati Web/estratti modificati.
+- Test widget reali del gate H17 inseriti nella pipeline CI condivisa
+  su Ubuntu e macOS, insieme al dialogo di review multilingue preesistente.
+  Non scambiare il solo verde dei sorgenti Android per test UI eseguiti.
+- **Limite attuale:** gateway UI e provenienza Hannibal sono presenti,
+  ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
+  gated nel bootstrap e senza consenso in Chat attivo. Mancano un destinatario
+  Cloud verificato per l'account corrente, le prove E2E con HTTP reale e
+  l'abilitazione sicura dei ricordi Hybrid->Local. I permessi non autorizzano
+  alcuna replica o invio automatico di memoria.
 - I dati utente/documenti/ricordi e cronologia con sensibilità non verificata
   restano `unknown`: sono autorizzabili soltanto per una richiesta, non con
   permesso permanente; contenuti con false direttive `[SYSTEM]` rimangono

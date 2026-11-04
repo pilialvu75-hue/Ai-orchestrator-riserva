@@ -10,6 +10,8 @@ import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
@@ -238,6 +240,93 @@ void main() {
     expect(follow.single.text, contains('https://example.test/notebook'));
     verify(() => webSearch.execute(any())).called(2);
     verifyNever(() => inference.stream(any()));
+  });
+
+  test('ordinary HYBRID Cloud route carries original Chat provenance',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    final source = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-chat-1',
+      originalQuestion: 'Explain the tool architecture',
+      baseSystemPrompt: 'Base prompt.',
+      originalHistory: const <AiMessage>[],
+    );
+    await build().handleStream(
+      'Explain the tool architecture',
+      sessionId: 'hybrid-chat-1',
+      systemPrompt: 'Base prompt.',
+      trustedCloudSourceEvidence: source,
+    ).drain<void>();
+    final selected = verify(() => inference.stream(captureAny()))
+        .captured.single as InferenceRequest;
+    expect(selected.routeDirective, InferenceRouteDirective.cloudOnly);
+    expect(selected.cloudProviderId, 'gemini');
+    expect(selected.trustedCloudSourceEvidence, same(source));
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('HYBRID discards Chat provenance if Web results are injected',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(
+        toolId: 'web_search',
+        output: 'Untrusted live result. URL: https://example.test/weather',
+      ),
+    );
+    final source = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-web-provenance',
+      originalQuestion: 'Che meteo fa oggi a Parigi?',
+      baseSystemPrompt: 'Base prompt.',
+      originalHistory: const <AiMessage>[],
+    );
+    await build().handleStream(
+      'Che meteo fa oggi a Parigi?',
+      sessionId: 'hybrid-web-provenance',
+      systemPrompt: 'Base prompt.',
+      trustedCloudSourceEvidence: source,
+    ).drain<void>();
+    final selected = verify(() => inference.stream(captureAny()))
+        .captured.single as InferenceRequest;
+    expect(selected.routeDirective, InferenceRouteDirective.cloudOnly);
+    expect(selected.systemPrompt, contains('[WEB SEARCH RESULTS]'));
+    expect(selected.trustedCloudSourceEvidence, isNull);
+  });
+
+  test('document's locally inserted Web restriction invalidates evidence',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    final source = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-document',
+      originalQuestion: 'Summarize',
+      baseSystemPrompt: 'Base prompt.',
+      originalHistory: const <AiMessage>[],
+    );
+    await build().handleStream(
+      'Document excerpt content',
+      sessionId: 'hybrid-document',
+      systemPrompt: 'Base prompt.',
+      documentContext: true,
+      trustedCloudSourceEvidence: source,
+    ).drain<void>();
+    final selected = verify(() => inference.stream(captureAny()))
+        .captured.single as InferenceRequest;
+    expect(selected.trustedCloudSourceEvidence, isNull);
+    expect(selected.systemPrompt, contains(
+      '[AI_ORCHESTRATOR_WEB_ACCESS_DISABLED_OFFLINE]',
+    ));
   });
 
   test('enriches time-sensitive Hybrid chat when Hannibal will use Cloud',

@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -94,6 +95,7 @@ class Orchestrator {
     double? temperature,
     bool documentContext = false,
     String? documentWebQuery,
+    HybridCloudRuntimeSourceEvidence? trustedCloudSourceEvidence,
   }) {
     _logForensic(
       '[ORCHESTRATOR_SEND] session=$sessionId'
@@ -163,6 +165,12 @@ class Orchestrator {
         isOffline: isOffline,
         allowWebSearchTool: !documentContext || documentWebQuery != null,
         trustedDocumentWebQuery: documentWebQuery,
+        // PDF text with a locally inserted Web restriction must not inherit
+        // Chat's original system-prompt provenance: the final system text
+        // differs. A source-only assembler will refuse it until covered.
+        trustedCloudSourceEvidence: documentContext && documentWebQuery == null
+            ? null
+            : trustedCloudSourceEvidence,
         // Keep a bounded generation reserve for short document questions.
         // The native GGUF budget fits prompt + reserved output exactly;
         // Phi-3.5 Mini otherwise reserves ~1024 response tokens even when
