@@ -286,8 +286,6 @@ void main() {
     );
   });
 
-
-
   test('user-scoped memory survives trash and history wipe across restarts',
       () async {
     // Synthetic production-shape chat tables in a disposable file-backed DB.
@@ -396,6 +394,4 @@ void main() {
       isNot(contains('lavanda')),
     );
   });
-
-
 }
