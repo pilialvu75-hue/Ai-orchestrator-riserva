@@ -191,7 +191,8 @@ abstract final class AssistantWebSearchPolicy {
     required String prompt,
     String? systemPrompt,
   }) {
-    final combined = '${systemPrompt ?? ''}\n$prompt'.toLowerCase();
+    // User text can quote these markers without carrying tool provenance.
+    final combined = (systemPrompt ?? '').toLowerCase();
     return combined.contains('[internet search results]') ||
         combined.contains('[web search results]') ||
         combined.contains('[web search unavailable]') ||
