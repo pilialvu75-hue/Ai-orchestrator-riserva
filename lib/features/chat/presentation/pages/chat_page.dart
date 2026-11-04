@@ -36,6 +36,7 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_session_store.dart';
+import 'package:ai_orchestrator/features/chat/presentation/services/hybrid_cloud_chat_consent_gateway.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:uuid/uuid.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
@@ -308,6 +309,19 @@ class _ChatPageState extends State<ChatPage>
   String _activeSessionId = _kDefaultSessionId;
   List<ChatSessionInfo> _chatSessions = const <ChatSessionInfo>[];
   late final ChatSessionStore _sessionStore;
+  Object? _cloudConsentBinding;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The normal Cloud runtime is not consent-gated yet. This host merely
+    // binds the translated review dialog to the currently visible Chat.
+    _cloudConsentBinding ??= HybridCloudChatConsentGateway.instance.bind(
+      context: context,
+      activeSessionId: () => _activeSessionId,
+      isSending: () => _isSending,
+    );
+  }
 
   @override
   void initState() {
@@ -396,6 +410,9 @@ class _ChatPageState extends State<ChatPage>
     try {
       final id = await _sessionStore.restoreActiveSession();
       if (!mounted) return;
+      if (id != _activeSessionId) {
+        HybridCloudChatConsentGateway.instance.invalidate();
+      }
       setState(() => _activeSessionId = id);
       context.read<OrchestratorStateEngine>().add(LoadMessagesEvent(sessionId: id));
       await _refreshChatSessions();
@@ -447,6 +464,7 @@ class _ChatPageState extends State<ChatPage>
     try {
       await _sessionStore.selectSession(id);
       if (!mounted) return;
+      HybridCloudChatConsentGateway.instance.invalidate();
       setState(() {
         _activeSessionId = id;
         _debugLabMessages.clear();
@@ -729,6 +747,10 @@ class _ChatPageState extends State<ChatPage>
 
   @override
   void dispose() {
+    final consentBinding = _cloudConsentBinding;
+    if (consentBinding != null) {
+      HybridCloudChatConsentGateway.instance.unbind(consentBinding);
+    }
     WidgetsBinding.instance
         .removeObserver(this);
 
@@ -781,6 +803,8 @@ class _ChatPageState extends State<ChatPage>
       'attachments=${attachments.length}',
     );
 
+    // A new message must never inherit a pending review for an older turn.
+    HybridCloudChatConsentGateway.instance.invalidate();
     _isSending = true;
 
     _deadlockController
@@ -811,6 +835,7 @@ class _ChatPageState extends State<ChatPage>
           'session=$_activeSessionId '
           'reason=deadlock_breaker',
         );
+        HybridCloudChatConsentGateway.instance.invalidate();
 
         context
             .read<OrchestratorStateEngine>()

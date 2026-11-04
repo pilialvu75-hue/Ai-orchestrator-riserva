@@ -111,8 +111,10 @@ void main() {
       identity: identity,
       credentials: credentials,
       client: client,
-      requestConsent: (review) async {
+      chatReview: (chatSessionId, review, isRequestActive) async {
         reviews++;
+        expect(chatSessionId, 'chat-1');
+        expect(isRequestActive(), isTrue);
         expect(review.disclosure.accountId, 'account-1');
         expect(review.disclosure.outboundText,
             contains('Earlier personal question'));

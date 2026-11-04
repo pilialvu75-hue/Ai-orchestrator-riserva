@@ -554,7 +554,7 @@ consenso esplicito.
   nella Chat e il controllo esatto del payload. Prevedere inoltre
   autorizzazione esplicita opzionale su tutti i provider approvati senza
   includere automaticamente provider/account futuri.
-- **Stato tecnico H10–H16 (#977, ancora DRAFT):** contratto di consenso,
+- **Stato tecnico H10–H17 (#977, ancora DRAFT):** contratto di consenso,
   revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
   OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
   `ChatFileContextService` conserva separatamente domanda, istruzioni e
@@ -601,21 +601,36 @@ consenso esplicito.
   nella review, mentre `HybridCloudRuntimeConsentCoordinator` controlla
   che la cronologia Cloud ottimizzata sia solo una sottosequenza dei turni
   realmente letti dalla Chat, senza aggiunte o riordinamenti.
-- **Limite attuale:** questa provenienza viene costruita dal percorso
-  Chat -> Cloud diretto, non ancora dal percorso Chat -> Hannibal -> Hybrid
-  e NON abilita un dispatcher con review UI nel bootstrap produttivo.
-  Il consenso Cloud effettivo e il richiamo dei ricordi in Hybrid Local
-  rimangono prossimi gate P0.
+- **H17 — gateway di approvazione nella vera pagina Chat:** il nuovo
+  `HybridCloudChatConsentGateway` mostra il dialogo già localizzato
+  IT/FR/EN/ES soltanto quando la pagina Chat è montata, il suo ID conversazione
+  corrisponde alla richiesta e un invio è attivo. La pagina registra un
+  binding revocabile, invalida i dialoghi pendenti quando si apre o si
+  ripristina un'altra conversazione, all'inizio di un nuovo invio, al recupero
+  da blocco e durante dispose. Il gateway rimuove soltanto la rotta esatta
+  della review, senza chiudere pagine o dialoghi estranei; una risposta tardiva,
+  il cambio pagina e l'annullamento ritornano una mappa vuota e NON un
+  consenso. Le scelte non persistono qui: soltanto il consent manager possiede
+  tale responsabilità. Il coordinatore dispone di `chatReview` con l'ID
+  sessione Chat e la condizione `requestStillActive` separati dall'identità
+  locale owner.
+- **Limite attuale:** la provenienza è presente per Chat -> Cloud diretto,
+  non ancora per Chat -> Hannibal -> HYBRID. Il gateway UI è registrato
+  nella pagina Chat, ma il runtime Cloud produttivo resta normale; il nuovo
+  coordinatore non è ancora istanziato nel bootstrap. Mancano identità
+  destinatario Cloud attendibile, assegnazione della review al dispatch reale
+  e test E2E fisico S24 FE. Non dichiarare condivisione ricordi già attiva.
 - I dati utente/documenti/ricordi e cronologia con sensibilità non verificata
   restano `unknown`: sono autorizzabili soltanto per una richiesta, non con
   permesso permanente; contenuti con false direttive `[SYSTEM]` rimangono
   dati della fonte. Servono classificazione affidabile, provenienza dei
   risultati Web/tool, allegati binari e trasporti oltre OpenAI/Gemini.
   **Il percorso H14 funziona nei test con HTTP simulato, non nella Chat
-  produttiva:** bisogna ancora propagare l'evidenza trusted dalle richieste
-  Chat/Hybrid al runtime senza aggiunte da Web/tool, installare un vero
-  presentatore del dialogo nel ciclo UI, associare l'account Cloud
-  esplicitamente configurato e completare l'E2E sul Galaxy S24 FE.
+  produttiva:** UI review e sorgenti typed sono ora disponibili in Chat,
+  ma bisogna ancora propagare l'evidenza trusted lungo Hannibal/Hybrid
+  senza aggiunte da Web/tool, agganciare il coordinator al bootstrap
+  con un destinatario Cloud effettivamente verificato e completare
+  l'E2E sul Galaxy S24 FE.
 - PR #975 è il checkpoint sperimentale separato. #899 governa la memoria,
   #973 HYBRID, #948 OTA. Non dichiarare prodotto completo né pubblicare
   release sulla sola base di test source-only.

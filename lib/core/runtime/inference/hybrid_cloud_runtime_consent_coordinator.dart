@@ -13,6 +13,15 @@ import 'hybrid_cloud_native_request_projection.dart';
 import 'hybrid_cloud_runtime_source_evidence.dart';
 import 'hybrid_cloud_trusted_request_assembler.dart';
 
+/// Presentation gateway callback: its session ID is the actual Chat ID, not
+/// the device-owner session used by protected consent storage.
+typedef HybridCloudChatReviewCallback = Future<
+    Map<HybridDisclosureScope, HybridCloudConsentChoice>> Function(
+  String chatSessionId,
+  HybridCloudConsentReview review,
+  bool Function() requestStillActive,
+);
+
 /// One exact provider request -> trusted source check -> opt-in UI approval ->
 /// a one-use permit -> native OpenAI/Gemini HTTP. The legacy Cloud transport
 /// does not appear in this chain.
@@ -30,7 +39,9 @@ final class HybridCloudRuntimeConsentCoordinator {
       InferenceRequest request,
     )? evidenceFor,
     this.requestConsent,
-  }) : _consent = consent,
+    this.chatReview,
+  }) : assert(requestConsent == null || chatReview == null),
+       _consent = consent,
        _identity = identity,
        _credentials = credentials,
        _client = client,
@@ -47,6 +58,8 @@ final class HybridCloudRuntimeConsentCoordinator {
   final Future<Map<HybridDisclosureScope, HybridCloudConsentChoice>> Function(
     HybridCloudConsentReview review,
   )? requestConsent;
+  /// Session-bound Chat UI review; absent unless explicitly configured.
+  final HybridCloudChatReviewCallback? chatReview;
 
   Future<AiResponse> send(
     InferenceRequest source,
@@ -135,7 +148,13 @@ final class HybridCloudRuntimeConsentCoordinator {
     );
     final permit = await _consent.authorizeForDispatch(
       disclosure: seal.disclosure,
-      requestConsent: requestConsent,
+      requestConsent: chatReview == null
+          ? requestConsent
+          : (review) => chatReview!(
+              source.sessionId,
+              review,
+              () => !cancellationToken.isCancelled,
+            ),
       isRequestActive: () => !cancellationToken.isCancelled,
     );
     if (permit == null || cancellationToken.isCancelled) {
