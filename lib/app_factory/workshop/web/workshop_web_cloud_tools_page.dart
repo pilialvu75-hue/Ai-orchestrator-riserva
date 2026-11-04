@@ -247,7 +247,7 @@ class _WorkshopWebCloudToolsPageState extends State<WorkshopWebCloudToolsPage> {
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 3,
-      initialIndex: widget.initialTab.clamp(0, 2),
+      initialIndex: widget.initialTab < 0 ? 0 : widget.initialTab > 2 ? 2 : widget.initialTab,
       child: Scaffold(
         appBar: AppBar(
           title: Text(_tr('Strumenti Cloud')),
