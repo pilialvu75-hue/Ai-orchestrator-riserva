@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.da
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_disclosure_consent.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/hybrid_cloud_consent_settings_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final class _PermissionMemory implements HybridCloudConsentStorage {
@@ -48,6 +49,9 @@ void main() {
     ],
     localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
       AppLocalizations.delegate,
+      GlobalMaterialLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
     ],
     home: page,
   );
