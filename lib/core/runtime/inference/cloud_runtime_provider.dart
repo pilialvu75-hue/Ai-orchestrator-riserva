@@ -577,6 +577,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   bool _isManualCloudRequest(InferenceRequest request) {
     final provider = request.cloudProviderId?.trim();
     return _isDirectCloudRequest(request) &&
+        !request.requireAutomaticCloudPolicy &&
         provider != null &&
         provider.isNotEmpty;
   }

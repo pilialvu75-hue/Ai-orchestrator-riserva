@@ -33,6 +33,41 @@ void main() {
       );
 
   group('task-aware free-first Cloud routing', () {
+    test('pinned HYBRID Cloud provider still respects automatic policy',
+        () async {
+      final calls = <String>[];
+      final provider = createProvider(
+        send: (p) async {
+          calls.add(p);
+          return ok(p);
+        },
+      );
+      final hybrid = const InferenceRequest(
+        sessionId: 'hybrid-policy-hard-boundary',
+        prompt: 'Ciao, come stai?',
+        routeDirective: InferenceRouteDirective.cloudOnly,
+        cloudProviderId: 'openAi',
+        allowCloudProviderFailover: false,
+        requireAutomaticCloudPolicy: true,
+      );
+      expect(provider.canInferFor(hybrid), isFalse);
+      final denied = await provider.streamInference(
+        request: hybrid,
+        cancellationToken: CancellationToken(),
+      ).toList();
+      expect(denied.last.isError, isTrue);
+      expect(calls, isEmpty);
+
+      // A user-pinned manual Cloud request retains the explicit choice.
+      final manual = hybrid.copyWith(requireAutomaticCloudPolicy: false);
+      final permitted = await provider.streamInference(
+        request: manual,
+        cancellationToken: CancellationToken(),
+      ).toList();
+      expect(permitted.last.isError, isFalse);
+      expect(calls, <String>['openAi']);
+    });
+
     test('healthy free provider beats preferred paid provider for coding',
         () async {
       final calls = <String>[];

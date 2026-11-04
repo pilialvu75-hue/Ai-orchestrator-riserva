@@ -229,6 +229,9 @@ class Orchestrator {
               routeDirective: InferenceRouteDirective.cloudOnly,
               cloudProviderId: provider,
               allowCloudProviderFailover: false,
+              // HYBRID is automatic execution: a pinned provider must never
+              // bypass the current AUTO opt-in/spending policy at dispatch.
+              requireAutomaticCloudPolicy: true,
             );
           }
         }
