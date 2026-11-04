@@ -11,6 +11,7 @@ final class WorkshopWebCloudSelfTestResult {
     required this.detail,
     required this.elapsed,
     this.statusCode,
+    this.errorCode,
     this.provider,
     this.configuredModel,
     this.reportedModel,
@@ -22,6 +23,7 @@ final class WorkshopWebCloudSelfTestResult {
   final String detail;
   final Duration elapsed;
   final int? statusCode;
+  final String? errorCode;
   final String? provider;
   final String? configuredModel;
   final String? reportedModel;
@@ -90,6 +92,7 @@ final class WorkshopWebCloudSelfTestClient {
                   '${code is String ? ' ($code)' : ''}.',
           elapsed: stopwatch.elapsed,
           statusCode: response.statusCode,
+          errorCode: code is String ? code : null,
         );
       }
 
