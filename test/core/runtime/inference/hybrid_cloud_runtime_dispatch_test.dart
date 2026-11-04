@@ -125,7 +125,8 @@ void main() {
       sendQuery: (_, __) => throw StateError(
         'Legacy Cloud callback must never run with consentGated=true',
       ),
-      consentGatedSend: (source, incoming) async {
+      consentGatedSend: (source, incoming, token) async {
+        expect(token.isCancelled, isFalse);
         expect(source.prompt, 'Current private question');
         final projected = HybridCloudNativeRequestProjection.project(incoming);
         final seal = HybridCloudAiRequestSeal.fromRequest(
@@ -189,7 +190,7 @@ void main() {
         legacyCallbacks++;
         throw StateError('Legacy provider callback invoked');
       },
-      consentGatedSend: (_, __) async {
+      consentGatedSend: (_, __, token) async {
         callbacks++;
         throw const HybridCloudConsentDenied();
       },
@@ -250,7 +251,7 @@ void main() {
         legacySends++;
         throw StateError('Legacy provider callback invoked');
       },
-      consentGatedSend: (request, outbound) async {
+      consentGatedSend: (request, outbound, token) async {
         gatedSends++;
         expect(request.prompt, 'Private note');
         expect(outbound.providerId, 'openAi');
