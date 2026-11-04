@@ -6,18 +6,21 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_browser_audio.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_checkpoint_storage.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_conversation_storage.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_project_storage.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_projects_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_shell.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final projectStorage = await WorkshopWebProjectStorage.open();
   final cloudBroker = WorkshopWebCloudBrokerClient();
+  final webLanguage = await WorkshopWebLanguage.open();
   final chatController = WorkshopChatController(
     inferenceGateway: WorkshopInferenceGateway(
       provider: WorkshopWebCloudRuntimeProvider(
@@ -26,6 +29,10 @@ Future<void> main() async {
     ),
     sessionId: 'workshop-web',
   );
+  chatController.setPreferredWebResponseLanguage(webLanguage.replyLanguageName);
+  webLanguage.addListener(() {
+    chatController.setPreferredWebResponseLanguage(webLanguage.replyLanguageName);
+  });
 
   runApp(
     WorkshopWebApp(
@@ -33,6 +40,7 @@ Future<void> main() async {
       cloudHealth: cloudBroker.health(),
       chatController: chatController,
       projectStorage: projectStorage,
+      language: webLanguage,
     ),
   );
 }
@@ -66,18 +74,32 @@ class WorkshopWebApp extends StatelessWidget {
     required this.cloudHealth,
     required this.chatController,
     required this.projectStorage,
+    this.language,
   });
 
   final Future<WorkshopCheckpointStore> checkpointStore;
   final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
   final WorkshopChatController chatController;
   final WorkshopWebProjectStorage projectStorage;
+  final WorkshopWebLanguage? language;
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    final selectedLanguage = language ?? WorkshopWebLanguage();
+    return AnimatedBuilder(
+      animation: selectedLanguage,
+      builder: (context, _) => MaterialApp(
       title: 'Aivexus — Cantiere Web',
       debugShowCheckedModeBanner: false,
+      locale: selectedLanguage.locale,
+      supportedLocales: const <Locale>[
+        Locale('it'), Locale('fr'), Locale('en'), Locale('es'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       themeMode: ThemeMode.dark,
       darkTheme: ThemeData(
         brightness: Brightness.dark,
@@ -89,12 +111,17 @@ class WorkshopWebApp extends StatelessWidget {
         ),
         scaffoldBackgroundColor: const Color(0xFF0D0D0D),
       ),
-      home: WorkshopWebHome(
-        checkpointStore: checkpointStore,
-        cloudHealth: cloudHealth,
-        chatController: chatController,
-        projectStorage: projectStorage,
+      home: WorkshopWebLanguageScope(
+        language: selectedLanguage,
+        child: WorkshopWebHome(
+          checkpointStore: checkpointStore,
+          cloudHealth: cloudHealth,
+          chatController: chatController,
+          projectStorage: projectStorage,
+          language: selectedLanguage,
+        ),
       ),
+    ),
     );
   }
 }
@@ -106,12 +133,14 @@ class WorkshopWebHome extends StatefulWidget {
     required this.cloudHealth,
     required this.chatController,
     required this.projectStorage,
+    required this.language,
   });
 
   final Future<WorkshopCheckpointStore> checkpointStore;
   final Future<WorkshopWebCloudBrokerHealth> cloudHealth;
   final WorkshopChatController chatController;
   final WorkshopWebProjectStorage projectStorage;
+  final WorkshopWebLanguage language;
 
   @override
   State<WorkshopWebHome> createState() => _WorkshopWebHomeState();
@@ -123,6 +152,35 @@ class _WorkshopWebHomeState extends State<WorkshopWebHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Aivexus Web'),
+        actions: <Widget>[
+          PopupMenuButton<String>(
+            key: const Key('aivexus_web_language_selector'),
+            tooltip: widget.language.text('Lingua'),
+            onSelected: widget.language.select,
+            itemBuilder: (context) => <PopupMenuEntry<String>>[
+              for (final code in WorkshopWebLanguage.codes)
+                CheckedPopupMenuItem<String>(
+                  value: code,
+                  checked: code == widget.language.code,
+                  child: Text(WorkshopWebLanguage.names[code]!),
+                ),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Icon(Icons.language),
+                  const SizedBox(width: 6),
+                  Text(widget.language.code.toUpperCase()),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
       body: IndexedStack(
         index: _selectedIndex,
         children: <Widget>[
@@ -145,12 +203,12 @@ class _WorkshopWebHomeState extends State<WorkshopWebHome> {
           NavigationDestination(
             icon: Icon(Icons.monitor_heart_outlined),
             selectedIcon: Icon(Icons.monitor_heart),
-            label: 'Stato',
+            label: widget.language.text('Stato'),
           ),
           NavigationDestination(
             icon: Icon(Icons.forum_outlined),
             selectedIcon: Icon(Icons.forum),
-            label: 'Cantiere',
+            label: widget.language.text('Cantiere'),
           ),
         ],
       ),
