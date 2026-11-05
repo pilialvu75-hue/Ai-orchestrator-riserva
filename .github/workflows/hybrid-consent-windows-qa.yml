@@ -1,0 +1,112 @@
+name: HYBRID Consent Windows QA
+
+# PR-only; never publishes a release or changes OTA update manifests.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/hybrid-consent-windows-qa.yml'
+      - 'lib/**'
+      - 'test/**'
+      - 'tool/**'
+      - 'windows/**'
+      - 'pubspec.*'
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: hybrid-consent-windows-qa-977
+  cancel-in-progress: true
+
+jobs:
+  windows-qa:
+    if: >-
+      github.event.pull_request.number == 977 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'feat/hybrid-granular-cloud-consent-899'
+    runs-on: windows-2022
+    timeout-minutes: 70
+
+    steps:
+      - name: Checkout HYBRID PR
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install pinned Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        shell: pwsh
+        run: flutter pub get --enforce-lockfile
+
+      - name: Verify consent-enabled QA compilation and routing
+        shell: pwsh
+        run: |
+          flutter test --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true --dart-define=AIVEXUS_EXPECT_HYBRID_QA_ENABLED=true test/app/runtime_bootstrap_cloud_consent_flag_test.dart test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
+          if ($LASTEXITCODE -ne 0) { throw 'Consent QA tests failed' }
+
+      - name: Build HYBRID Windows QA, compile-time flag ON
+        shell: pwsh
+        run: |
+          flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true
+          if ($LASTEXITCODE -ne 0) { throw 'QA build failed' }
+
+      - name: Bundle verified CPU and Vulkan runtimes
+        shell: pwsh
+        run: |
+          & (Join-Path $PWD 'tool\bundle_windows_modern_runtime.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
+
+      - name: Verify local GGUF inference (legacy and modern)
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $releaseDir
+          if ($LASTEXITCODE -ne 0) { throw 'Legacy GGUF inference failed' }
+          $env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN = '1'
+          try {
+            & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $releaseDir
+            if ($LASTEXITCODE -ne 0) { throw 'Modern GGUF inference failed' }
+          } finally {
+            Remove-Item Env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN -ErrorAction SilentlyContinue
+          }
+
+      - name: Build isolated portable QA archive with SHA256
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          if (!(Test-Path (Join-Path $releaseDir 'ai_orchestrator.exe')) -or !(Test-Path (Join-Path $releaseDir 'data'))) {
+            throw 'Incomplete Flutter Windows application'
+          }
+          $archive = 'AIVEXUS-HYBRID-Windows-QA.zip'
+          Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $archive -CompressionLevel Optimal -Force
+          if (!(Test-Path $archive) -or (Get-Item $archive).Length -le 0) { throw 'Missing QA archive' }
+          $sum = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          ($sum + '  ' + $archive) | Out-File -FilePath ($archive + '.sha256') -Encoding ascii
+          @(
+            'AIVEXUS - EXPERIMENTAL HYBRID CONSENT QA, NOT A RELEASE'
+            ('Source commit: ' + $env:GITHUB_SHA)
+            'HYBRID consent compile flag: ON. No API keys or approvals bundled.'
+            'Only OpenAI and Gemini with an explicit account-bound securely saved key are supported.'
+            'Use an isolated extracted folder; do not replace your installed app.'
+            'No OTA manifest, stable package or installed app is modified.'
+          ) | Set-Content -Path 'HYBRID-QA-README.txt' -Encoding utf8
+
+      - name: Upload QA artifact only (7 days; no release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIVEXUS-HYBRID-Windows-QA-only
+          path: |
+            AIVEXUS-HYBRID-Windows-QA.zip
+            AIVEXUS-HYBRID-Windows-QA.zip.sha256
+            HYBRID-QA-README.txt
+          if-no-files-found: error
+          retention-days: 7

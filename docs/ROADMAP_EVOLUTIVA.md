@@ -801,6 +801,14 @@ consenso esplicito.
   le nuove traduzioni H7/H21 dei consensi Cloud. Merge a due
   genitori nel SOLO branch draft #977; main intatto, nessuna release.
   Verificare la CI completa di questa HEAD prima di attivare QA.
+- **H32 — collaudo Windows HYBRID compile-time ON:**
+  il workflow autonomo `.github/workflows/hybrid-consent-windows-qa.yml`
+  esegue esclusivamente sulla PR #977 interna test di consenso con
+  flag QA attivo, build Windows release con lo stesso flag, integra
+  CPU e Vulkan ufficiali con SHA256 pin, prova GGUF Local e produce
+  ZIP portatile isolato + SHA256 + istruzioni. Non pubblica release
+  o aggiornamenti Android. Serve comunque collaudo fisico e provider
+  reale per dichiarare HYBRID pronto.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
