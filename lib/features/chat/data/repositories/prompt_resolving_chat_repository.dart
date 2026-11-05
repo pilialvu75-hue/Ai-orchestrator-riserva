@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.d
 import 'package:ai_orchestrator/core/config/ai/system_prompt_config.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
@@ -23,17 +24,20 @@ class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryAct
     required AssistantDurableMemoryContextService durableMemoryContextService,
     required AiRuntimeMode Function() runtimeMode,
     AssistantDurableMemoryCaptureService? durableMemoryCaptureService,
+    AssistantNaturalMemoryConsentService? naturalMemoryConsentService,
   })  : _delegate = delegate,
         _systemPromptService = systemPromptService,
         _durableMemoryContextService = durableMemoryContextService,
         _runtimeMode = runtimeMode,
-        _durableMemoryCaptureService = durableMemoryCaptureService;
+        _durableMemoryCaptureService = durableMemoryCaptureService,
+        _naturalMemoryConsentService = naturalMemoryConsentService;
 
   final ChatRepository _delegate;
   final AssistantSystemPromptService _systemPromptService;
   final AssistantDurableMemoryContextService _durableMemoryContextService;
   final AiRuntimeMode Function() _runtimeMode;
   final AssistantDurableMemoryCaptureService? _durableMemoryCaptureService;
+  final AssistantNaturalMemoryConsentService? _naturalMemoryConsentService;
 
   @override
   Future<ChatMessage> persistVerifiedMemoryAction({
@@ -123,6 +127,32 @@ class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryAct
           userPrompt: userPrompt,
           acknowledgement: _memoryAcknowledgement(result),
           onPartialResponse: onPartialResponse,
+        );
+      }
+    }
+
+    // The owner can explicitly enable *proposal staging* in Settings.
+    // Recognize only direct, attachment-free ordinary user messages. Never
+    // confirm a candidate here, attach it to Cloud/Hybrid prompts or allow a
+    // worker/model/attachment to masquerade as the owner. An extraction/storage
+    // error must not prevent the normal conversational response.
+    final consent = _naturalMemoryConsentService;
+    if (isOrdinary &&
+        attachments.isEmpty &&
+        _durableMemoryCaptureService != null &&
+        consent != null &&
+        consent.enabled) {
+      try {
+        await _durableMemoryCaptureService.proposeNaturalUserNameCandidate(
+          sessionId: sessionId,
+          userPrompt: userPrompt,
+          consentEnabled: true,
+          directUserMessage: true,
+          consentStillEnabled: () => consent.enabled,
+        );
+      } catch (_) {
+        onRuntimeNotice?.call(
+          'Non è stato possibile aggiungere la proposta di memoria locale.',
         );
       }
     }
