@@ -455,8 +455,11 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                 documentPromptProvenance = fileContext.provenance;
                 onRuntimeNotice?.call(
                   mode == AiRuntimeMode.cloud
-                      ? 'File: estratti locali recuperati; inviati al '
-                          'provider Cloud selezionato con la tua domanda.'
+                      ? consentGatedAssistantCloud
+                          ? 'File: estratti locali preparati; in attesa '
+                              'della revisione e del consenso Cloud.'
+                          : 'File: estratti locali recuperati; inviati al '
+                              'provider Cloud selezionato con la tua domanda.'
                       : 'File: estratti recuperati dal RAG locale.',
                 );
               }
