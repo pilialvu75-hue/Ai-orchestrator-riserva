@@ -12,6 +12,7 @@ void main() {
     final client = MockClient((request) async {
       calls += 1;
       expect(request.method, 'POST');
+      expect(request.headers['x-requested-with'], 'XMLHttpRequest');
       expect(request.url.path, '/api/cantiere/inference');
       final payload = jsonDecode(request.body) as Map<String, dynamic>;
       expect(payload, <String, dynamic>{
@@ -144,4 +145,41 @@ void main() {
     expect(result.statusCode, isNull);
     expect(result.detail, contains('browser'));
   });
+  test('Expired Cloudflare Access session returns a clear login warning',
+      () async {
+    final client = MockClient((request) async {
+      expect(request.headers['x-requested-with'], 'XMLHttpRequest');
+      return http.Response(
+        '<html>Cloudflare Access sign in</html>',
+        401,
+        headers: const <String, String>{'content-type': 'text/html'},
+      );
+    });
+    final result = await WorkshopWebCloudSelfTestClient(
+      client: client,
+      baseUri: Uri.parse('https://example.invalid/'),
+    ).run(selectedRouteId: 'kimi-k26-orchestrator');
+    expect(result.passed, isFalse);
+    expect(result.statusCode, 401);
+    expect(result.errorCode, 'access_login_required');
+    expect(result.detail, contains('login'));
+  });
+
+  test('Redirected Access HTML is not mistaken for NVIDIA inference', () async {
+    final client = MockClient((_) async => http.Response(
+          '<html>Cloudflare Access</html>',
+          200,
+          headers: const <String, String>{'content-type': 'text/html'},
+        ));
+    final result = await WorkshopWebCloudSelfTestClient(
+      client: client,
+      baseUri: Uri.parse('https://example.invalid/'),
+    ).run(selectedRouteId: 'deepseek-v41-flash-orchestrator');
+    expect(result.passed, isFalse);
+    expect(result.statusCode, 200);
+    expect(result.errorCode, 'possible_access_login');
+    expect(result.reportedModel, isNull);
+    expect(result.detail, contains('Cloudflare Access'));
+  });
+
 }
