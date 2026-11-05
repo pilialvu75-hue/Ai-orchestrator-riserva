@@ -3,6 +3,6 @@
   "operation": "deploy_private",
   "confirmation": "DEPLOY_PRIVATE_CANTIERE",
   "environment": "web-private-production",
-  "requestId": "aivexus-web-p0-nemotron-ultra-free-selftest-config-20261105",
-  "reason": "Owner-authorized private Pages redeploy after Cloudflare production route nemotron-ultra-orchestrator selfTestFree=true was verified by workflow 42002172729. No changes to credentials, Access, other routes or Web runtime."
+  "requestId": "aivexus-web-p0-kimi-k26-deepseek-v41-manual-prod-20261105",
+  "reason": "Owner-prioritized Kimi K2.6 (1T) and DeepSeek V4.1 Flash (552B) manual-only NVIDIA NIM routes verified in protected GitHub run 42033935449. Deploy Web server route filter, model catalogue and UI, retaining Access and all credentials."
 }
