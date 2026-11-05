@@ -172,13 +172,33 @@ jobs:
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Attaching desktop asset to $tag"
 
+      - name: Verify release-bound HYBRID beta consent attestation
+        id: hybrid_gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $enabled = 'false'
+          if (Test-Path 'scripts/hybrid_beta_release_manifest.py') {
+            $file = 'HYBRID-BETA-RELEASE-ATTESTATION.txt'
+            gh release download '${{ steps.publish_tag.outputs.tag }}' --repo $env:GITHUB_REPOSITORY --pattern $file --dir $env:RUNNER_TEMP --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Missing signed-off HYBRID release attestation' }
+            $enabled = python scripts/hybrid_beta_release_manifest.py resolve --path (Join-Path $env:RUNNER_TEMP $file) --source-sha '${{ steps.android_source.outputs.source_sha }}' --run-number '${{ steps.android_source.outputs.run_number }}' --tag '${{ steps.publish_tag.outputs.tag }}'
+            if ($LASTEXITCODE -ne 0) { throw 'HYBRID attestation mismatch with the authorized Android release' }
+            $enabled = [string]$enabled
+            $enabled = $enabled.Trim()
+          }
+          if ($enabled -notin @('true','false')) { throw 'Invalid HYBRID beta build flag' }
+          "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Protected HYBRID consent Windows build: $enabled"
+
       - name: Resolve Flutter dependencies
         shell: pwsh
         run: flutter pub get --enforce-lockfile
 
       - name: Build coordinated Windows release
         shell: pwsh
-        run: flutter build windows --release
+        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }}
 
       - name: Verify bundled Windows GGUF inference
         shell: pwsh

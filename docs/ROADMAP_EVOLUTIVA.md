@@ -865,6 +865,36 @@ consenso esplicito.
   Ogni checkpoint deve riportare SHA/tag, piattaforme, risultato
   installazione/OTA, difetti e prossime prove. Main e stabile
   rimangono protetti mentre i gate sono aperti.
+- **H36 — attestazione verificata per la futura beta coordinata:**
+  i sorgenti dei workflow publisher vengono predisposti per compilare
+  il consenso HYBRID **solo** quando l'owner seleziona esplicitamente
+  `hybrid_consent_beta=true` nel workflow Android beta autorizzato.
+  Il default rimane false per beta ordinarie, stable, nightly, dev e CI.
+  Se qualcuno tenta di attivare il gate fuori dal canale beta, il
+  workflow fallisce prima di compilare o pubblicare.
+
+  `scripts/hybrid_beta_release_manifest.py` produce un'attestazione
+  senza segreti, allegata alla release Android, con SHA commit
+  sorgente, run number, tag SemVer, canale e flag. I publisher
+  Windows/macOS/Linux leggono la release già autorizzata, verificano
+  che tag, SHA e run number corrispondano precisamente a quelli
+  della build Android, poi applicano lo stesso flag Dart alle
+  proprie build. Un'attestazione mancante/incoerente in una release
+  di nuovo formato e' un errore; release legacy prive dello script
+  restano con il gate spento. L'attestazione verifica la provenienza
+  della release, **non** e' una firma digitale autonoma.
+  Test automatici separati verificano beta ON, default OFF,
+  stable/nightly/dev non attivabili, SHA/tag/run errati, manomissioni,
+  collegamento alle quattro build e gate publisher preesistenti.
+  Non sono mai disattivati SHA256 dei runtime, firma Android o
+  controlli privacy.
+
+  Questa modifica preparatoria e' **solo nel branch draft #977**
+  finche' non saranno superati test Chat reale, interruzioni rete,
+  permessi revocati, resume LOCAL e QA fisico. Il comando owner
+  `/aivexus beta-checkpoint <SHA>` esistente continua a generare
+  una beta ordinaria con consenso HYBRID spento, finche' non viene
+  esplicitamente esteso/autorizzato. Nessuna release in questa fase.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

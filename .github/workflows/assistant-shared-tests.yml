@@ -10,6 +10,13 @@ on:
       - 'pubspec.*'
       - '.github/workflows/owner-beta-checkpoint.yml'
       - '.github/workflows/assistant-shared-tests.yml'
+      - 'scripts/hybrid_beta_release_manifest.py'
+      - 'test/scripts/test_hybrid_beta_release_manifest.py'
+      - 'test/scripts/test_hybrid_beta_publishers.py'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/windows-release-publish.yml'
+      - '.github/workflows/macos-release-publish.yml'
+      - '.github/workflows/linux-release-publish.yml'
   pull_request:
     branches: [main]
     paths:
@@ -19,6 +26,13 @@ on:
       - 'pubspec.*'
       - '.github/workflows/owner-beta-checkpoint.yml'
       - '.github/workflows/assistant-shared-tests.yml'
+      - 'scripts/hybrid_beta_release_manifest.py'
+      - 'test/scripts/test_hybrid_beta_release_manifest.py'
+      - 'test/scripts/test_hybrid_beta_publishers.py'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/windows-release-publish.yml'
+      - '.github/workflows/macos-release-publish.yml'
+      - '.github/workflows/linux-release-publish.yml'
   workflow_dispatch:
 
 permissions:
@@ -44,6 +58,12 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get --enforce-lockfile
+      - name: Verify fail-closed HYBRID beta release attestation and publisher parity
+        run: python3 -m unittest discover -s test/scripts -p 'test_hybrid_beta_*.py'
+      - name: Verify existing owner and Android publisher release gates
+        run: |
+          python3 scripts/check_owner_beta_checkpoint.py .github/workflows/owner-beta-checkpoint.yml
+          python3 scripts/check_android_release_gate.py .github/workflows/build.yml .github/workflows/macos-release-publish.yml .github/workflows/linux-release-publish.yml .github/workflows/windows-release-publish.yml
       - name: Verify shared Assistant behavior
         run: >-
           flutter test

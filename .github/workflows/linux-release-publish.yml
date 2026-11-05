@@ -143,6 +143,30 @@ jobs:
           echo "tag=${matches[0]}" >> "$GITHUB_OUTPUT"
           echo "Attaching desktop asset to ${matches[0]}"
 
+      - name: Verify release-bound HYBRID beta consent attestation
+        id: hybrid_gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A legacy authorized release predates HYBRID; never enable the gate.
+          if [[ ! -f scripts/hybrid_beta_release_manifest.py ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          file="HYBRID-BETA-RELEASE-ATTESTATION.txt"
+          gh release download '${{ steps.publish_tag.outputs.tag }}' \
+            --repo "$GITHUB_REPOSITORY" --pattern "$file" \
+            --dir "$RUNNER_TEMP" --clobber
+          enabled="$(python3 scripts/hybrid_beta_release_manifest.py resolve \
+            --path "$RUNNER_TEMP/$file" \
+            --source-sha '${{ github.event.workflow_run.head_sha }}' \
+            --run-number '${{ github.event.workflow_run.run_number }}' \
+            --tag '${{ steps.publish_tag.outputs.tag }}')"
+          [[ "$enabled" == 'true' || "$enabled" == 'false' ]] || exit 1
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+
       - name: Resolve Flutter dependencies
         run: flutter pub get --enforce-lockfile
 
@@ -150,7 +174,7 @@ jobs:
         run: bash native/linux/build_llama_cli.sh
 
       - name: Build coordinated Linux release
-        run: flutter build linux --release
+        run: flutter build linux --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }}
 
       - name: Embed and validate llama.cpp runtime
         shell: bash

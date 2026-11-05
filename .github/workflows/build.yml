@@ -19,6 +19,11 @@ on:
           - beta
           - nightly
           - dev
+      hybrid_consent_beta:
+        description: 'Opt in to protected HYBRID Cloud consent (beta only; default OFF)'
+        type: boolean
+        required: false
+        default: false
 
 # MODIFICA 1: Ampliati i permessi per permettere a CodeQL di scrivere i report nella scheda Security
 permissions:
@@ -363,6 +368,38 @@ jobs:
             echo "channel=$CHANNEL"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Verify explicit HYBRID beta flag and write release attestation
+        id: hybrid_gate
+        env:
+          OWNER_OPT_IN: ${{ github.event_name == 'workflow_dispatch' && inputs.hybrid_consent_beta || false }}
+          RELEASE_CHANNEL: ${{ steps.version.outputs.channel }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$OWNER_OPT_IN" != 'true' && "$OWNER_OPT_IN" != 'false' ]]; then
+            echo "::error::Invalid HYBRID beta owner flag"
+            exit 1
+          fi
+          if [[ "$OWNER_OPT_IN" == 'true' && "$RELEASE_CHANNEL" != 'beta' ]]; then
+            echo "::error::Protected HYBRID consent allowed only on explicit beta"
+            exit 1
+          fi
+          python3 scripts/hybrid_beta_release_manifest.py emit \
+            --path HYBRID-BETA-RELEASE-ATTESTATION.txt \
+            --source-sha "$GITHUB_SHA" \
+            --run-number "$GITHUB_RUN_NUMBER" \
+            --tag "$RELEASE_TAG" \
+            --channel "$RELEASE_CHANNEL" \
+            --enabled "$OWNER_OPT_IN"
+          resolved="$(python3 scripts/hybrid_beta_release_manifest.py resolve \
+            --path HYBRID-BETA-RELEASE-ATTESTATION.txt \
+            --source-sha "$GITHUB_SHA" \
+            --run-number "$GITHUB_RUN_NUMBER" \
+            --tag "$RELEASE_TAG")"
+          [[ "$resolved" == "$OWNER_OPT_IN" ]] || exit 1
+          echo "enabled=$resolved" >> "$GITHUB_OUTPUT"
+          echo "HYBRID consent release gate: $resolved ($RELEASE_CHANNEL)"
+
       - name: Generate build README/manual (IT)
         run: |
           set -euo pipefail
@@ -393,6 +430,7 @@ jobs:
             --build-name="${{ steps.version.outputs.version_name }}" \
             --build-number="${{ steps.version.outputs.version_code }}" \
             --dart-define=AI_ORCHESTRATOR_COMMIT_SHA="${GITHUB_SHA}" \
+            --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="${{ steps.hybrid_gate.outputs.enabled }}" \
             2>&1 | tee release_apk_build.log
 
       - name: Build signed release AAB
@@ -409,6 +447,7 @@ jobs:
             --build-name="${{ steps.version.outputs.version_name }}" \
             --build-number="${{ steps.version.outputs.version_code }}" \
             --dart-define=AI_ORCHESTRATOR_COMMIT_SHA="${GITHUB_SHA}" \
+            --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="${{ steps.hybrid_gate.outputs.enabled }}" \
             2>&1 | tee release_aab_build.log
 
       # MODIFICA 3: Analisi finale eseguita subito DOPO il completamento delle build.
@@ -544,6 +583,7 @@ jobs:
             ${{ steps.release_assets.outputs.release_apk_path }}
             ${{ steps.release_assets.outputs.release_aab_path }}
             BUILD_README_IT.md
+            HYBRID-BETA-RELEASE-ATTESTATION.txt
 
       - name: Generate release notes
         run: |
@@ -552,6 +592,7 @@ jobs:
             echo
             echo "- Version: ${{ steps.version.outputs.version_name }}"
             echo "- Build number: ${{ steps.version.outputs.version_code }}"
+            echo "- Protected HYBRID consent enabled: ${{ steps.hybrid_gate.outputs.enabled }}"
             echo
             echo "### Recent commits"
             echo
@@ -572,6 +613,7 @@ jobs:
             ${{ steps.release_assets.outputs.release_apk_path }}
             ${{ steps.release_assets.outputs.release_aab_path }}
             BUILD_README_IT.md
+            HYBRID-BETA-RELEASE-ATTESTATION.txt
 
       - name: Cleanup signing files
         if: always()
