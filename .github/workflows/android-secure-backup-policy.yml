@@ -1,0 +1,45 @@
+name: Android Secure Backup Policy
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/android-secure-backup-policy.yml'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'android/app/src/main/AndroidManifest.xml'
+      - 'android/app/src/main/res/xml/backup_rules.xml'
+      - 'android/app/src/main/res/xml/data_extraction_rules.xml'
+      - 'scripts/test_android_backup_policy.py'
+      - 'lib/core/runtime/inference/cloud_credential_store.dart'
+      - 'lib/app_factory/workshop/workshop_library_github_auth.dart'
+      - 'lib/features/module_library/data/module_library_github_config.dart'
+      - 'lib/core/diagnostics/github_diagnostics.dart'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup-policy-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run fail-closed backup policy regression tests
+        run: python3 -m unittest discover -s scripts -p 'test_android_backup_policy.py' -v
+
+      - name: Compile Android policy XML with aapt2
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          tool="$(find "$sdk/build-tools" -mindepth 2 -maxdepth 2 -type f -name aapt2 | sort -V | tail -n 1)"
+          test -x "$tool"
+          mkdir -p "${RUNNER_TEMP}/compiled-backup-policy"
+          "$tool" compile -o "${RUNNER_TEMP}/compiled-backup-policy" android/app/src/main/res/xml/backup_rules.xml
+          "$tool" compile -o "${RUNNER_TEMP}/compiled-backup-policy" android/app/src/main/res/xml/data_extraction_rules.xml
+          test "$(find "${RUNNER_TEMP}/compiled-backup-policy" -name '*.flat' | wc -l)" -eq 2
+          echo 'PASS: both Android policy resources compile with aapt2; physical restore still pending.'

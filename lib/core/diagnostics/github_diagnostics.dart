@@ -44,7 +44,9 @@ class GitHubDiagnostics extends ChangeNotifier {
   static const maxBytes = 20 * 1024 * 1024;
   static const chunkBytes = 1024 * 1024;
   static const _key = 'github.diagnostics.token.v1';
-  final _secure = const FlutterSecureStorage();
+  final _secure = const FlutterSecureStorage(
+            aOptions: AndroidOptions(resetOnError: false),
+          );
   Directory? _directory;
   SharedPreferences? _prefs;
   Future<void>? _initializing;
