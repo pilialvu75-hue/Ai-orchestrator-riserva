@@ -63,6 +63,7 @@ class AssistantDurableMemoryService {
     required AssistantMemoryKind kind,
     required String content,
     required int updatedAt,
+    String? reason,
   }) {
     return _store.upsert(
       AssistantDurableMemoryRecord(
@@ -74,6 +75,7 @@ class AssistantDurableMemoryService {
         source: AssistantMemorySource.userStatement,
         updatedAt: updatedAt,
         status: AssistantMemoryStatus.candidate,
+        reason: reason,
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 
@@ -191,6 +192,119 @@ final class AssistantDurableMemoryCaptureService {
       return _applyExplicitUserInstruction(
         sessionId: sessionId,
         userPrompt: userPrompt,
+      );
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  /// Direct-user, one-given-name proposal in IT/EN/FR/ES.
+  ///
+  /// Both gates must be explicit. The method is not wired to ordinary chat
+  /// until a persistent and user-visible opt-in is implemented. Never pass
+  /// assistant output, Web, files or quoted transcripts to this method.
+  /// No candidate is eligible for ordinary retrieval before owner review.
+  Future<bool> proposeNaturalUserNameCandidate({
+    required String userPrompt,
+    bool consentEnabled = false,
+    bool directUserMessage = false,
+  }) {
+    if (!consentEnabled || !directUserMessage || _resetInProgress) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) async {
+      if (_resetInProgress) return false;
+      final extracted =
+          AssistantNaturalMemoryCandidateExtractor.extractDirectUserName(
+              userPrompt);
+      if (extracted == null) return false;
+      await _memoryService.recordUserCandidate(
+        recordKey: AssistantNaturalNameCandidate.recordKey,
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: extracted.originalStatement,
+        updatedAt: _now(),
+        reason: 'natural_direct_user:${extracted.language}',
+      );
+      return true;
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  /// Review-only; name candidates are never confirmed by the parser itself.
+  Future<List<AssistantDurableMemoryRecord>>
+      loadReviewableNaturalNameCandidates() async {
+    final records = await _memoryService.loadCandidates(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+    );
+    return List<AssistantDurableMemoryRecord>.unmodifiable(
+      records.where((record) {
+        if (record.recordKey != AssistantNaturalNameCandidate.recordKey ||
+            record.kind != AssistantMemoryKind.fact ||
+            record.source != AssistantMemorySource.userStatement) {
+          return false;
+        }
+        final parsed =
+            AssistantNaturalMemoryCandidateExtractor.extractDirectUserName(
+                record.content);
+        return parsed != null &&
+            record.reason == 'natural_direct_user:${parsed.language}';
+      }),
+    );
+  }
+
+  /// Approve, correct or reject exactly the candidate displayed to the owner.
+  /// The SQLite store performs compare-and-swap under its scope write lock.
+  Future<bool> reviewNaturalNameCandidate({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    bool userConfirmed = false,
+    String? correctedContent,
+  }) {
+    if (!userConfirmed ||
+        _resetInProgress ||
+        reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.scopeId !=
+            AssistantDurableMemoryContextService.localUserScopeId ||
+        reviewed.status != AssistantMemoryStatus.candidate ||
+        reviewed.source != AssistantMemorySource.userStatement ||
+        reviewed.kind != AssistantMemoryKind.fact ||
+        reviewed.recordKey != AssistantNaturalNameCandidate.recordKey) {
+      return Future<bool>.value(false);
+    }
+
+    final original =
+        AssistantNaturalMemoryCandidateExtractor.extractDirectUserName(
+            reviewed.content);
+    if (original == null ||
+        reviewed.reason != 'natural_direct_user:${original.language}' ||
+        (!approve && correctedContent != null)) {
+      return Future<bool>.value(false);
+    }
+
+    final finalText = (correctedContent ?? reviewed.content).trim();
+    if (approve &&
+        AssistantNaturalMemoryCandidateExtractor.extractDirectUserName(
+            finalText) == null) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) {
+      if (_resetInProgress) return Future<bool>.value(false);
+      return _memoryService.resolveUserStatementCandidate(
+        reviewed: reviewed,
+        approve: approve,
+        approvedContent: approve ? finalText : null,
+        reviewedAt: _now(),
       );
     });
     _pendingWrites = operation.then<void>(

@@ -386,4 +386,50 @@ void main() {
   });
 
 
+
+  testWidgets('natural first-name proposal follows review and remains local',
+      (tester) async {
+    initializeMemory();
+    await showPage(tester);
+    await tester.enterText(
+      find.byType(TextField).first,
+      "Je m'appelle Annabelle",
+    );
+    // Unlike a silent chat listener, the preview requires a fresh
+    // per-proposal consent that is reset after the stage operation.
+    await tester.tap(find.text('Autorizzo questa singola proposta di prova'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Proponi per revisione'));
+    await tester.tap(find.text('Proponi per revisione'));
+    await tester.pumpAndSettle();
+
+    expect((await capture.loadReviewableNaturalNameCandidates()), hasLength(1));
+    expect(
+      await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ),
+      isEmpty,
+    );
+    expect(
+      tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+      isFalse,
+    );
+
+    await tester.ensureVisible(find.text('Approva'));
+    await tester.tap(find.text('Approva'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Conferma'));
+    await tester.pumpAndSettle();
+
+    final stored = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    );
+    expect(stored, hasLength(1));
+    expect(stored.single.content, "Je m'appelle Annabelle");
+    expect(stored.single.source, AssistantMemorySource.userExplicit);
+    expect(await capture.loadReviewableNaturalNameCandidates(), isEmpty);
+  });
+
 }
