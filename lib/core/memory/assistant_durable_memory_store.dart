@@ -241,6 +241,103 @@ class AssistantDurableMemoryStore {
     });
   }
 
+  /// Apply an owner's reviewed car-color change under the USER scope lock.
+  ///
+  /// The pending proposal references the exact confirmed source snapshot.
+  /// If the original fact was edited/forgotten since staging, approval fails,
+  /// preventing a stale callback or old device draft from resurrecting it.
+  Future<bool> resolveReviewedCarColorCorrection({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    required int reviewedAt,
+    String? correctedContent,
+  }) async {
+    if (reviewed.recordKey !=
+            AssistantNaturalCarColorCorrectionCandidate.recordKey ||
+        reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.scopeId.trim().isEmpty ||
+        reviewed.source != AssistantMemorySource.userStatement ||
+        reviewed.status != AssistantMemoryStatus.candidate ||
+        reviewed.kind != AssistantMemoryKind.fact ||
+        reviewed.before == null ||
+        reviewed.after == null ||
+        reviewedAt < reviewed.updatedAt ||
+        (!approve && correctedContent != null)) {
+      return false;
+    }
+    final original = AssistantNaturalMemoryCandidateExtractor
+        .extractDirectUserCarColorCorrection(reviewed.content);
+    if (original == null ||
+        reviewed.reason !=
+            'natural_direct_car_color_update:' + original.language ||
+        int.tryParse(reviewed.after!) == null) {
+      return false;
+    }
+    final newDeclaration = approve
+        ? AssistantNaturalMemoryCandidateExtractor
+            .extractDirectUserCarColorCorrection(
+                correctedContent ?? reviewed.content)
+        : null;
+    if (approve && newDeclaration == null) return false;
+
+    final owner = reviewed.scopeId.trim();
+    return _withScopeWriteLock(AssistantMemoryScope.user, owner, () async {
+      final records = await load(
+        scope: AssistantMemoryScope.user,
+        scopeId: owner,
+        confirmedOnly: false,
+      );
+      final pendingIndex = records.indexWhere((item) =>
+          item.recordKey ==
+          AssistantNaturalCarColorCorrectionCandidate.recordKey);
+      if (pendingIndex < 0) return false;
+      final current = records[pendingIndex];
+      if (current.source != AssistantMemorySource.userStatement ||
+          current.status != AssistantMemoryStatus.candidate ||
+          current.kind != AssistantMemoryKind.fact ||
+          current.updatedAt != reviewed.updatedAt ||
+          current.content != reviewed.content ||
+          current.before != reviewed.before ||
+          current.after != reviewed.after ||
+          current.reason != reviewed.reason ||
+          current.scopeId != reviewed.scopeId) {
+        return false;
+      }
+
+      final next = records.toList(growable: true)..removeAt(pendingIndex);
+      if (approve) {
+        final oldIndex = next.indexWhere((record) =>
+            record.recordKey == AssistantNaturalCarColorCandidate.recordKey);
+        if (oldIndex < 0) return false;
+        final accepted = next[oldIndex];
+        if (accepted.status != AssistantMemoryStatus.confirmed ||
+            accepted.source != AssistantMemorySource.userExplicit ||
+            accepted.scope != AssistantMemoryScope.user ||
+            accepted.kind != AssistantMemoryKind.fact ||
+            accepted.content != reviewed.before ||
+            accepted.updatedAt.toString() != reviewed.after) {
+          return false;
+        }
+        // Only one fact is authoritative. Old color is not carried into
+        // current context or the new record's before/after text fields.
+        next[oldIndex] = _validateAndNormalize(AssistantDurableMemoryRecord(
+          recordKey: AssistantNaturalCarColorCandidate.recordKey,
+          scope: AssistantMemoryScope.user,
+          scopeId: owner,
+          kind: AssistantMemoryKind.fact,
+          content: newDeclaration!.correctedFact,
+          source: AssistantMemorySource.userExplicit,
+          status: AssistantMemoryStatus.confirmed,
+          updatedAt: reviewedAt,
+          reason: 'owner_reviewed_natural_car_color_correction',
+        ));
+      }
+      next.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _write(AssistantMemoryScope.user, owner, next);
+      return true;
+    });
+  }
+
   Future<bool> confirm({
     required AssistantMemoryScope scope,
     required String scopeId,
