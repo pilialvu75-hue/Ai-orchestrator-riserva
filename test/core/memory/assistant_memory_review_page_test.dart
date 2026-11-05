@@ -104,7 +104,6 @@ void main() {
       (tester) async {
     initializeMemory();
     await showPage(tester);
-    expect(find.text('Nessuna proposta in attesa.'), findsOneWidget);
     await tester.enterText(
       find.byType(TextField).first,
       'Preferisco risposte brevi',
@@ -122,6 +121,14 @@ void main() {
       ),
       isEmpty,
     );
+    // The new consent toggle makes this ListView longer; discover the
+    // lazily built empty-state below the manual proposal controls.
+    await tester.scrollUntilVisible(
+      find.text('Nessuna proposta in attesa.'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Nessuna proposta in attesa.'), findsOneWidget);
   });
 
   testWidgets('explicit proposal and approval confirm local memory',
@@ -181,6 +188,11 @@ void main() {
       consentEnabled: true,
     );
     await showPage(tester);
+    await tester.scrollUntilVisible(
+      find.text('Correggi'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.ensureVisible(find.text('Correggi'));
     await tester.tap(find.text('Correggi'));
     await tester.pumpAndSettle();
@@ -228,6 +240,11 @@ void main() {
       updatedAt: 10,
     );
     await showPage(tester);
+    await tester.scrollUntilVisible(
+      find.text('Scarta'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.ensureVisible(find.text('Scarta'));
     await tester.tap(find.text('Scarta'));
     await tester.pumpAndSettle();
