@@ -23,7 +23,7 @@ permissions:
 jobs:
   validate-free-prototype-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v6
       - name: Validate Cloudflare enrollment and broker syntax
@@ -32,6 +32,19 @@ jobs:
           node --check scripts/airlab/web_p0_enroll_large_nim_models.mjs
           node --check functions/api/cantiere/inference.js
           node --check functions/api/cantiere/models.js
+      - name: Set up Flutter for cross-product model tests
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Resolve pinned dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Test independent Web and Hybrid model integration
+        run: |
+          flutter test test/app_factory/workshop/workshop_large_nvidia_models_test.dart
+          flutter test test/app_factory/workshop/workshop_large_nvidia_dispatch_test.dart
+          flutter test test/core/runtime/inference/nvidia_nim_large_hybrid_test.dart
       - name: Assert both identities and manual-only safety
         shell: bash
         run: |
