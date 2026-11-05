@@ -84,6 +84,7 @@ final class WorkshopWebCloudBrokerClient {
             capabilitiesEndpoint,
             headers: const <String, String>{
               'Accept': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest',
             },
           )
           .timeout(timeout);
@@ -216,6 +217,7 @@ final class WorkshopWebCloudRuntimeProvider
             headers: const <String, String>{
               'Accept': 'application/json',
               'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest',
             },
             body: jsonEncode(payload),
           )
@@ -244,6 +246,14 @@ final class WorkshopWebCloudRuntimeProvider
       return;
     }
 
+    if (response.statusCode == 401) {
+      yield InferenceResponse.error(
+        'Sessione Cloudflare Access scaduta: effettuare nuovamente il login.',
+        providerId: 'web_auto',
+      );
+      return;
+    }
+
     if (response.statusCode != 200) {
       yield InferenceResponse.error(
         'Cantiere Web Cloud broker failed (HTTP ${response.statusCode}).',
@@ -256,8 +266,13 @@ final class WorkshopWebCloudRuntimeProvider
     try {
       decoded = jsonDecode(response.body);
     } on FormatException {
+      final html = (response.headers['content-type'] ?? '')
+          .toLowerCase()
+          .contains('text/html');
       yield InferenceResponse.error(
-        'Cantiere Web Cloud broker returned invalid JSON.',
+        html
+            ? 'Cloudflare Access potrebbe richiedere un nuovo login (HTML anziché JSON).'
+            : 'Cantiere Web Cloud broker returned invalid JSON.',
         providerId: 'web_auto',
       );
       return;

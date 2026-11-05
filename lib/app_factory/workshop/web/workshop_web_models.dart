@@ -82,14 +82,19 @@ final class WorkshopWebModelCatalogueClient {
     try {
       final response = await _client.get(
         _baseUri.resolve('/api/cantiere/models'),
-        headers: const <String, String>{'Accept': 'application/json'},
+        headers: const <String, String>{
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
       ).timeout(timeout);
       if (response.statusCode != 200) {
         return WorkshopWebModelCatalogue(
           configStatus: 'unavailable',
           models: const [],
           httpStatus: response.statusCode,
-          errorCode: 'http_${response.statusCode}',
+          errorCode: response.statusCode == 401
+              ? 'access_login_required'
+              : 'http_${response.statusCode}',
         );
       }
       final decoded = jsonDecode(response.body);

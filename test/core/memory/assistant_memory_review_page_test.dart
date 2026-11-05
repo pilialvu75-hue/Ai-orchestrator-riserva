@@ -537,4 +537,56 @@ void main() {
     expect(await capture.loadReviewableNaturalCarColorCandidates(), isEmpty);
   });
 
+
+  testWidgets('owner reviews car color change without losing old fact early',
+      (tester) async {
+    initializeMemory();
+    const owner = AssistantDurableMemoryContextService.localUserScopeId;
+    await memory.recordConfirmed(
+      recordKey: 'natural.user.car_color',
+      scope: AssistantMemoryScope.user,
+      scopeId: owner,
+      kind: AssistantMemoryKind.fact,
+      content: 'La mia auto è blu',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 100,
+    );
+    expect(await capture.proposeNaturalUserCarColorCorrectionCandidate(
+      userPrompt: 'Ho cambiato auto: ora è rossa',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+    expect((await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: owner,
+    )).single.content, 'La mia auto è blu');
+
+    await showPage(tester);
+    await tester.scrollUntilVisible(
+      find.text('Ho cambiato auto: ora è rossa'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    final proposal = find.ancestor(
+      of: find.text('Ho cambiato auto: ora è rossa'),
+      matching: find.byType(Card),
+    );
+    final approve = find.descendant(
+      of: proposal,
+      matching: find.text('Approva'),
+    );
+    await tester.ensureVisible(approve);
+    await tester.tap(approve);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Conferma'));
+    await tester.pumpAndSettle();
+
+    expect((await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: owner,
+    )).single.content, 'La mia auto è rossa');
+    expect(await capture.loadReviewableNaturalCarColorCorrectionCandidates(),
+        isEmpty);
+  });
+
 }

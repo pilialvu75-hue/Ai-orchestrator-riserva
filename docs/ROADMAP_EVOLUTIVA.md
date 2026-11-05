@@ -794,6 +794,13 @@ consenso esplicito.
   a 3 volte su errori HTTP transitori conservando entrambi gli hash
   SHA-256 obbligatori. Il packaging macOS sqlite3 resta bloccato
   finche non e verificata l'origine del file con SHA errato.
+- **H31 — riconciliazione con main (5 novembre):** dopo confronto
+  a tre versioni da `b795b3b`, sono preservate 17 modifiche Web/NVIDIA
+  e memoria ME-2 indipendenti; `app_localizations.dart` integra
+  le otto sostituzioni testo ME-2 nelle cinque lingue mantenendo
+  le nuove traduzioni H7/H21 dei consensi Cloud. Merge a due
+  genitori nel SOLO branch draft #977; main intatto, nessuna release.
+  Verificare la CI completa di questa HEAD prima di attivare QA.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

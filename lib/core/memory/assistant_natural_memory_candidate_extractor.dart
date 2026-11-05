@@ -32,6 +32,23 @@ class AssistantNaturalCarColorCandidate {
   final String originalStatement;
 }
 
+/// A reviewed change to an already confirmed car color.
+class AssistantNaturalCarColorCorrectionCandidate {
+  const AssistantNaturalCarColorCorrectionCandidate({
+    required this.color,
+    required this.language,
+    required this.originalStatement,
+    required this.correctedFact,
+  });
+
+  static const String recordKey = 'natural.user.car_color.pending_correction';
+
+  final String color;
+  final String language;
+  final String originalStatement;
+  final String correctedFact;
+}
+
 abstract final class AssistantNaturalMemoryCandidateExtractor {
   static const int maxStatementChars = 96;
 
@@ -112,6 +129,78 @@ abstract final class AssistantNaturalMemoryCandidateExtractor {
       },
     ),
   ];
+
+  /// Only unambiguous first-person updates; no inferred contradictions.
+  static final List<({
+    String language,
+    RegExp pattern,
+    String prefix,
+  })> _carColorCorrections = [
+    (
+      language: 'it',
+      pattern: RegExp(
+          r'^(?:la mia (?:auto|macchina) ora è|ho cambiato auto: ora è)\s+(.+)$',
+          caseSensitive: false),
+      prefix: 'La mia auto è ',
+    ),
+    (
+      language: 'en',
+      pattern: RegExp(r'^my car is now\s+(.+)$', caseSensitive: false),
+      prefix: 'My car is ',
+    ),
+    (
+      language: 'fr',
+      pattern: RegExp(r'^ma voiture est maintenant\s+(.+)$',
+          caseSensitive: false),
+      prefix: 'Ma voiture est ',
+    ),
+    (
+      language: 'es',
+      pattern: RegExp(r'^mi (?:coche|carro|auto) ahora es\s+(.+)$',
+          caseSensitive: false),
+      prefix: 'Mi coche es ',
+    ),
+  ];
+
+  static AssistantNaturalCarColorCorrectionCandidate?
+      extractDirectUserCarColorCorrection(String input) {
+    final statement = input.trim();
+    if (statement.isEmpty ||
+        statement.length > maxStatementChars ||
+        statement.contains('\n') ||
+        statement.contains('\r') ||
+        statement.contains('://') ||
+        statement.contains('@') ||
+        statement.contains('=') ||
+        statement.contains(';') ||
+        statement.contains('"') ||
+        statement.contains('“') ||
+        statement.contains('”') ||
+        statement.contains('«') ||
+        statement.contains('»') ||
+        statement.contains(String.fromCharCode(96)) ||
+        statement.endsWith('?')) {
+      return null;
+    }
+
+    final clean = statement.replaceFirst(RegExp(r'[.!]$'), '').trim();
+    for (final correction in _carColorCorrections) {
+      final match = correction.pattern.firstMatch(clean);
+      if (match == null) continue;
+      final color = match.group(1)!.trim().toLowerCase();
+      final allowed = _carColorDeclarations
+          .firstWhere((item) => item.language == correction.language)
+          .colors;
+      if (!allowed.contains(color)) return null;
+      return AssistantNaturalCarColorCorrectionCandidate(
+        color: color,
+        language: correction.language,
+        originalStatement: clean,
+        correctedFact: correction.prefix + color,
+      );
+    }
+    return null;
+  }
 
   static AssistantNaturalCarColorCandidate? extractDirectUserCarColor(
       String input) {
