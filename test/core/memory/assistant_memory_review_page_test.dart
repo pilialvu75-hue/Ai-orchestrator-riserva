@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/assistant_memory_review_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 
@@ -36,6 +38,7 @@ void main() {
   late AssistantDurableMemoryCaptureService capture;
 
   Future<void> showPage(WidgetTester tester, {String language = 'it'}) async {
+    final preferences = await SharedPreferences.getInstance();
     await tester.pumpWidget(MaterialApp(
       locale: Locale(language),
       supportedLocales: const [Locale('it'), Locale('en'), Locale('fr'), Locale('es')],
@@ -45,13 +48,19 @@ void main() {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      home: AssistantMemoryReviewPage(captureService: capture),
+      home: AssistantMemoryReviewPage(
+        captureService: capture,
+        consentService: AssistantNaturalMemoryConsentService(
+          preferences: preferences,
+        ),
+      ),
     ));
     await tester.pumpAndSettle();
   }
 
   // Construct queued Futures in the widget test's own FakeAsync zone.
   void initializeMemory({AssistantDurableMemoryPersistence? persistence}) {
+    SharedPreferences.setMockInitialValues(const <String, Object>{});
     memory = AssistantDurableMemoryService(
       store: AssistantDurableMemoryStore(
         persistence: persistence ?? _MemoryPersistence(),
@@ -61,6 +70,35 @@ void main() {
       memoryService: memory,
     );
   }
+
+  testWidgets('chat natural-memory opt-in is off, persisted and revocable',
+      (tester) async {
+    initializeMemory();
+    await showPage(tester);
+    final preferences = await SharedPreferences.getInstance();
+    expect(find.byType(SwitchListTile), findsOneWidget);
+    expect(preferences.getBool(
+      AssistantNaturalMemoryConsentService.preferenceKey,
+    ), isNull);
+    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isFalse);
+
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    expect(preferences.getBool(
+      AssistantNaturalMemoryConsentService.preferenceKey,
+    ), isTrue);
+    await showPage(tester);
+    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isTrue);
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    expect(preferences.getBool(
+      AssistantNaturalMemoryConsentService.preferenceKey,
+    ), isFalse);
+    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isFalse);
+  });
 
   testWidgets('no proposal is written without per-action consent',
       (tester) async {
