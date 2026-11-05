@@ -118,6 +118,7 @@ final class WorkshopWebCloudSelfTestClient {
           'upstream_http_rejection',
           'upstream_invalid_json',
           'no_final_text',
+          'output_token_limit',
           'upstream_timeout',
           'upstream_connection_error',
           'upstream_unknown',
