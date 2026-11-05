@@ -169,14 +169,31 @@ void main() {
     expect(accepted, hasLength(1));
     expect(accepted.single.content, 'Mi chiamo Davide');
     expect(accepted.single.source, AssistantMemorySource.userExplicit);
+    final retrieval = AssistantDurableMemoryContextService(
+      memoryService: service,
+    );
+    for (final question in <String>[
+      'Cosa sai di me?',
+      'Come mi chiamo?',
+      "What's my name?",
+      "Quel est mon prénom ?",
+      '¿Cómo me llamo?',
+    ]) {
+      expect(
+        await retrieval.buildConfirmedContext(
+          sessionId: 'another-chat',
+          userPrompt: question,
+        ),
+        contains('Mi chiamo Davide'),
+        reason: question,
+      );
+    }
     expect(
-      await AssistantDurableMemoryContextService(
-        memoryService: service,
-      ).buildConfirmedContext(
+      await retrieval.buildConfirmedContext(
         sessionId: 'another-chat',
-        userPrompt: 'Cosa sai di me?',
+        userPrompt: 'Come si chiama Marco?',
       ),
-      contains('Mi chiamo Davide'),
+      isNull,
     );
     // An unreviewed later utterance must not replace a confirmed identity.
     await capture.proposeNaturalUserNameCandidate(
