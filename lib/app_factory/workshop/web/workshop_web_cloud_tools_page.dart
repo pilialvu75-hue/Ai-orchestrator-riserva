@@ -178,6 +178,10 @@ class _WorkshopWebCloudToolsPageState extends State<WorkshopWebCloudToolsPage> {
                   const SizedBox(height: 10),
                   Text(result.detail),
                   Text('HTTP ${result.statusCode ?? '—'} · ${result.elapsed.inMilliseconds} ms'),
+                  if (result.upstreamStatus != null)
+                    Text('HTTP NVIDIA: ${result.upstreamStatus}'),
+                  if (result.failureKind != null)
+                    Text('Diagnosi: ${result.failureKind}'),
                   if (result.provider != null) Text('${_tr('Provider')}: ${result.provider}'),
                   if (result.configuredModel != null)
                     Text('${_tr('Modello configurato')}: ${result.configuredModel}'),
