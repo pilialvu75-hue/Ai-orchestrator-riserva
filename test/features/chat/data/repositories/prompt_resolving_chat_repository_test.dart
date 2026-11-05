@@ -811,7 +811,7 @@ void main() {
       expect(delegate.lastSystemPrompt,
           isNot(contains('CONFIRMED DURABLE MEMORY')));
       expect(delegate.lastSystemPrompt,
-          isNot(contains('Je m\\'appelle Annabelle')));
+          isNot(contains("Je m'appelle Annabelle")));
       expect(await memory.loadConfirmed(
         scope: AssistantMemoryScope.user,
         scopeId: AssistantDurableMemoryContextService.localUserScopeId,
