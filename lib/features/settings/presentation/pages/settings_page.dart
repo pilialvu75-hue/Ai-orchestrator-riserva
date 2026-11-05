@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/features/settings/presentation/pages/modules/dia
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/danger_zone_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/assistant_memory_review_page.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/language_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/model_management_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/models_page.dart';
@@ -389,27 +390,27 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 const SizedBox(height: 12),
 
-                // Explicit test-only page; not displayed to normal users.
-                // This does not turn on conversational memory extraction.
-                if (_developerMode) ...[
-                  _ModuleCard(
-                    icon: Icons.fact_check_outlined,
-                    title: l10n.t('memory_review_title'),
-                    subtitle: l10n.t('memory_review_subtitle'),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => AssistantMemoryReviewPage(
-                            captureService:
-                                di.sl<AssistantDurableMemoryCaptureService>(),
-                          ),
+                // Accessible from normal Settings: the switch inside remains
+                // disabled by default and only stages reviewable candidates.
+                _ModuleCard(
+                  icon: Icons.fact_check_outlined,
+                  title: l10n.t('memory_review_title'),
+                  subtitle: l10n.t('memory_review_subtitle'),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => AssistantMemoryReviewPage(
+                          captureService:
+                              di.sl<AssistantDurableMemoryCaptureService>(),
+                          consentService:
+                              di.sl<AssistantNaturalMemoryConsentService>(),
                         ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                ],
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
 
                 // ── Developer Tools ────────────────────────────────────────────
                 _ModuleCard(
