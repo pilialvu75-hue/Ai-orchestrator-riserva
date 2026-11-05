@@ -203,20 +203,32 @@ final class AssistantDurableMemoryCaptureService {
 
   /// Direct-user, one-given-name proposal in IT/EN/FR/ES.
   ///
-  /// Both gates must be explicit. The method is not wired to ordinary chat
-  /// until a persistent and user-visible opt-in is implemented. Never pass
-  /// assistant output, Web, files or quoted transcripts to this method.
+  /// Both source and consent gates must be explicit. When called from chat,
+  /// [consentStillEnabled] is re-read inside the serialized write queue so a
+  /// revocation during another memory operation cannot stage a late proposal.
+  /// Never pass assistant output, Web, files or quoted transcripts here.
   /// No candidate is eligible for ordinary retrieval before owner review.
   Future<bool> proposeNaturalUserNameCandidate({
     required String userPrompt,
+    String? sessionId,
     bool consentEnabled = false,
     bool directUserMessage = false,
+    bool Function()? consentStillEnabled,
   }) {
-    if (!consentEnabled || !directUserMessage || _resetInProgress) {
+    final id = sessionId?.trim();
+    if (!consentEnabled ||
+        !directUserMessage ||
+        _resetInProgress ||
+        (id != null && (id.isEmpty || _purgedSessions.contains(id))) ||
+        (consentStillEnabled != null && !consentStillEnabled())) {
       return Future<bool>.value(false);
     }
     final operation = _pendingWrites.then((_) async {
-      if (_resetInProgress) return false;
+      if (_resetInProgress ||
+          (id != null && _purgedSessions.contains(id)) ||
+          (consentStillEnabled != null && !consentStillEnabled())) {
+        return false;
+      }
       final extracted =
           AssistantNaturalMemoryCandidateExtractor.extractDirectUserName(
               userPrompt);
