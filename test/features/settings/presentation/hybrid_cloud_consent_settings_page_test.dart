@@ -56,19 +56,25 @@ void main() {
     home: page,
   );
 
-  // A live progress spinner is intentionally indeterminate; pumpAndSettle
-  // cannot be used as a readiness signal during protected async reads.
-  // Wait for the actual empty-register state with bounded frames instead.
+  // A live progress spinner is indeterminate and a first empty frame is
+  // NOT sufficient to prove that protected loading has finished. Check that
+  // the actual action is enabled after the async storage read, with a limit.
   Future<void> waitForConsentReady(WidgetTester tester) async {
     await tester.pump();
-    for (var i = 0; i < 12 &&
-        find.byKey(const Key('consent-empty')).evaluate().isEmpty; i++) {
+    final addButton = find.byKey(const Key('consent-add'));
+    for (var i = 0; i < 20; i++) {
       await tester.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 10));
       });
       await tester.pump(const Duration(milliseconds: 50));
+      if (find.byKey(const Key('consent-empty')).evaluate().isNotEmpty &&
+          addButton.evaluate().length == 1 &&
+          tester.widget<FilledButton>(addButton).onPressed != null) {
+        return;
+      }
     }
     expect(find.byKey(const Key('consent-empty')), findsOneWidget);
+    expect(tester.widget<FilledButton>(addButton).onPressed, isNotNull);
   }
 
   testWidgets('normal Settings entry cannot grant Cloud consent without auth',
@@ -152,6 +158,9 @@ void main() {
     expect(rules[scope], HybridCloudStoredConsent.neverShare);
     expect(find.text('Non condividere mai'), findsOneWidget);
     expect(backend.data.values.join(), isNot(contains('dummy-key')));
+    // Dispose the first authenticated widget before testing a new identity.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
   });
   testWidgets('rekey during settings dialog cannot grant under new identity',
       (tester) async {
@@ -168,6 +177,7 @@ void main() {
           owner == 'owner-a' && session == 'session-a',
     );
     await tester.pumpWidget(app(HybridCloudConsentSettingsPage(
+      key: const ValueKey<String>('isolated-rekey-consent-page'),
       manager: manager,
       ownerId: 'owner-a',
       sessionId: 'session-a',
