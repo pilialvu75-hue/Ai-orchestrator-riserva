@@ -451,6 +451,150 @@ final class AssistantDurableMemoryCaptureService {
     return operation;
   }
 
+  /// A direct, opted-in statement that *updates* an existing reviewed fact.
+  /// No old accepted value is changed here: approval remains a separate step.
+  Future<bool> proposeNaturalUserCarColorCorrectionCandidate({
+    required String userPrompt,
+    String? sessionId,
+    bool consentEnabled = false,
+    bool directUserMessage = false,
+    bool Function()? consentStillEnabled,
+  }) {
+    final id = sessionId?.trim();
+    if (!consentEnabled ||
+        !directUserMessage ||
+        _resetInProgress ||
+        (id != null && (id.isEmpty || _purgedSessions.contains(id))) ||
+        (consentStillEnabled != null && !consentStillEnabled())) {
+      return Future<bool>.value(false);
+    }
+
+    final operation = _pendingWrites.then((_) async {
+      if (_resetInProgress ||
+          (id != null && _purgedSessions.contains(id)) ||
+          (consentStillEnabled != null && !consentStillEnabled())) {
+        return false;
+      }
+      final update = AssistantNaturalMemoryCandidateExtractor
+          .extractDirectUserCarColorCorrection(userPrompt);
+      if (update == null) return false;
+
+      final confirmed = await _memoryService.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+      );
+      if (_resetInProgress ||
+          (id != null && _purgedSessions.contains(id)) ||
+          (consentStillEnabled != null && !consentStillEnabled())) {
+        return false;
+      }
+      final matches = confirmed.where((record) =>
+          record.recordKey == AssistantNaturalCarColorCandidate.recordKey &&
+          record.kind == AssistantMemoryKind.fact &&
+          record.source == AssistantMemorySource.userExplicit);
+      if (matches.length != 1) return false;
+      final previous = matches.single;
+      if (AssistantNaturalMemoryCandidateExtractor
+              .extractDirectUserCarColor(previous.content) ==
+          null) {
+        return false;
+      }
+
+      await _memoryService.recordUserCandidate(
+        recordKey: AssistantNaturalCarColorCorrectionCandidate.recordKey,
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: update.originalStatement,
+        updatedAt: _now(),
+        before: previous.content,
+        after: previous.updatedAt.toString(),
+        reason: 'natural_direct_car_color_update:' + update.language,
+      );
+      return true;
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  Future<List<AssistantDurableMemoryRecord>>
+      loadReviewableNaturalCarColorCorrectionCandidates() async {
+    final pending = await _memoryService.loadCandidates(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+    );
+    return List<AssistantDurableMemoryRecord>.unmodifiable(
+      pending.where((record) {
+        if (record.recordKey !=
+                AssistantNaturalCarColorCorrectionCandidate.recordKey ||
+            record.scope != AssistantMemoryScope.user ||
+            record.kind != AssistantMemoryKind.fact ||
+            record.source != AssistantMemorySource.userStatement ||
+            record.before == null ||
+            record.after == null ||
+            int.tryParse(record.after!) == null) {
+          return false;
+        }
+        final parsed = AssistantNaturalMemoryCandidateExtractor
+            .extractDirectUserCarColorCorrection(record.content);
+        return parsed != null &&
+            record.reason ==
+                'natural_direct_car_color_update:' + parsed.language;
+      }),
+    );
+  }
+
+  Future<bool> reviewNaturalCarColorCorrectionCandidate({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    bool userConfirmed = false,
+    String? correctedContent,
+  }) {
+    if (!userConfirmed ||
+        _resetInProgress ||
+        reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.scopeId !=
+            AssistantDurableMemoryContextService.localUserScopeId ||
+        reviewed.status != AssistantMemoryStatus.candidate ||
+        reviewed.source != AssistantMemorySource.userStatement ||
+        reviewed.kind != AssistantMemoryKind.fact ||
+        reviewed.recordKey !=
+            AssistantNaturalCarColorCorrectionCandidate.recordKey) {
+      return Future<bool>.value(false);
+    }
+    final parsed = AssistantNaturalMemoryCandidateExtractor
+        .extractDirectUserCarColorCorrection(reviewed.content);
+    if (parsed == null ||
+        reviewed.reason !=
+            'natural_direct_car_color_update:' + parsed.language ||
+        (approve &&
+            AssistantNaturalMemoryCandidateExtractor
+                    .extractDirectUserCarColorCorrection(
+                        correctedContent ?? reviewed.content) ==
+                null)) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) {
+      if (_resetInProgress) return Future<bool>.value(false);
+      return _memoryService.resolveReviewedCarColorCorrection(
+        reviewed: reviewed,
+        approve: approve,
+        reviewedAt: _now(),
+        correctedContent: correctedContent,
+      );
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
   // A deliberately closed vocabulary for a future opt-in review surface.
   // No model output, imported content or arbitrary personal details.
   static final RegExp _answerPreference = RegExp(
