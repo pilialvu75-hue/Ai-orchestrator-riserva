@@ -54,7 +54,7 @@ void main() {
       'Ho riverniciato la mia auto: ora è rossa': 'it:La mia auto è rossa',
       'Ho riverniciato la mia auto: ora è verde': 'it:La mia auto è verde',
       'I repainted my car: it is now red': 'en:My car is red',
-      'J'ai repeint ma voiture: elle est maintenant rouge': 'fr:Ma voiture est rouge',
+      "J'ai repeint ma voiture: elle est maintenant rouge": 'fr:Ma voiture est rouge',
       'He repintado mi coche: ahora es rojo': 'es:Mi coche es rojo',
     };
     for (final input in examples.entries) {
