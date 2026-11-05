@@ -1,0 +1,129 @@
+name: Owner-authorized Aivexus beta checkpoint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/owner-beta-checkpoint.yml'
+      - 'scripts/check_owner_beta_checkpoint.py'
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: aivexus-owner-beta-checkpoint
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify trusted checkpoint and existing release gates
+        run: |
+          python3 scripts/check_owner_beta_checkpoint.py .github/workflows/owner-beta-checkpoint.yml
+          python3 scripts/check_android_release_gate.py \
+            .github/workflows/build.yml \
+            .github/workflows/macos-release-publish.yml \
+            .github/workflows/linux-release-publish.yml \
+            .github/workflows/windows-release-publish.yml
+
+  authorize-and-dispatch:
+    # Owner command only. Public users cannot authorize a release.
+    # The exact existing checkpoint issue also prevents accidental triggers
+    # from unrelated GitHub issue/PR conversations.
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.number == 1008 &&
+      github.event.issue.pull_request == null &&
+      github.event.issue.state == 'open' &&
+      github.actor == github.repository_owner &&
+      github.event.issue.user.login == github.repository_owner &&
+      github.event.comment.user.login == github.repository_owner &&
+      startsWith(github.event.comment.body, '/aivexus beta-checkpoint ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Authenticate checkpoint, verify main and wait for green source CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v gh
+          command -v jq
+
+          # Never interpolate issue/comment text into executable shell.
+          request="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
+          if [[ ! "$request" =~ ^/aivexus[[:space:]]beta-checkpoint[[:space:]]([0-9a-f]{40})$ ]]; then
+            echo "::error::Invalid exact checkpoint command"
+            exit 1
+          fi
+          sha="$(echo "$request" | awk '{print $3}')"
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)"
+          if [[ "$sha" != "$main_sha" ]]; then
+            echo "::error::Checkpoint commit is not the current main head"
+            exit 1
+          fi
+
+          # Idempotence: a checkpoint already dispatched for this exact
+          # source SHA cannot be silently republished with a new build code.
+          prior="$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs" \
+            -f head_sha="$sha" -f event=workflow_dispatch -f per_page=100)"
+          if jq -e '[.workflow_runs[] |
+            select(.name == "Build & Release APK")] | length > 0' \
+            <<<"$prior" >/dev/null; then
+            echo "::notice::Android release already requested for this source SHA"
+            exit 0
+          fi
+
+          # Do not release merely because a PR was merged. The mandatory
+          # post-merge source CI must pass on main before dispatching Android.
+          required=(
+            "Assistant Shared Tests"
+            "Web Cantiere Build"
+            "Build Linux Desktop"
+            "Build Windows Desktop"
+            "Build macOS Desktop"
+          )
+          for attempt in $(seq 1 90); do
+            current="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)"
+            if [[ "$current" != "$sha" ]]; then
+              echo "::error::main changed while checkpoint was waiting"
+              exit 1
+            fi
+            runs="$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs" \
+              -f head_sha="$sha" -f event=push -f per_page=100)"
+            pending=0
+            for name in "$"+"{required[@]}"; do
+              state="$(jq -r --arg name "$name" --arg sha "$sha" '
+                [.workflow_runs[] |
+                 select(.name == $name and .head_sha == $sha
+                        and .event == "push")]
+                | sort_by(.id) | last | (.conclusion // "pending")
+              ' <<<"$runs")"
+              case "$state" in
+                success) echo "PASS main CI: $name";;
+                pending|"") pending=1; echo "WAIT main CI: $name";;
+                *) echo "::error::main CI $name concluded $state";
+                   exit 1;;
+              esac
+            done
+            if [[ "$pending" -eq 0 ]]; then
+              echo "All mandatory main CI workflows completed successfully"
+              # The existing manual-dispatch release gate is deliberately
+              # preserved; this trusted owner request generates that event.
+              gh workflow run build.yml --ref main -f release_channel=beta
+              echo "Authorized beta dispatch requested for main SHA $sha"
+              exit 0
+            fi
+            sleep 45
+          done
+          echo "::error::Checkpoint timed out waiting for mandatory main CI"
+          exit 1
