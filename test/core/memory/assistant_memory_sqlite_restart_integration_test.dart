@@ -7,6 +7,14 @@ import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_ser
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_session_store.dart';
+import 'package:ai_orchestrator/features/chat/data/services/trashed_chat_purge_coordinator.dart';
+import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/memory_window_config.dart';
+import 'package:ai_orchestrator/features/chat_memory/domain/token_estimator.dart';
+import 'package:ai_orchestrator/features/chat_memory/memory_window_manager.dart';
+import 'package:ai_orchestrator/features/chat_memory/rolling_context_builder.dart';
+import 'package:ai_orchestrator/features/semantic_index/semantic_workspace_index.dart';
+import 'package:ai_orchestrator/features/semantic_index/workspace_embedding_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -45,6 +53,21 @@ void main() {
           databaseHelper: helper,
         ),
       ),
+    );
+  }
+
+  ConversationMemoryService makeSemanticMemory() {
+    return ConversationMemoryService(
+      rollingContextBuilder: RollingContextBuilder(
+        windowManager: MemoryWindowManager(
+          tokenEstimator: const CharacterLengthEstimator(),
+          configProvider: () => MemoryWindowConfig.standard(isWeb: false),
+        ),
+      ),
+      semanticWorkspaceIndex: SemanticWorkspaceIndex(
+        databaseHelper: DatabaseHelper.forTesting(database),
+      ),
+      embeddingService: const WorkspaceEmbeddingService(),
     );
   }
 
@@ -486,7 +509,34 @@ void main() {
     expect(await database.query('document_chunks'), hasLength(3));
 
     await sessions.moveToTrash(origin);
-    expect(await sessions.permanentlyDeleteTrashedSession(origin), 1);
+    final coordinator = TrashedChatPurgeCoordinator(
+      sessionStore: sessions,
+      conversationMemoryService: makeSemanticMemory(),
+      memoryCaptureService: capture,
+    );
+    expect(
+      () => coordinator.purgeTrashedSession(
+        sessionId: origin,
+        userConfirmed: false,
+      ),
+      throwsStateError,
+    );
+    // Unconfirmed request must never mutate the contents of the trash.
+    expect((await sessions.listSessions(inTrash: true)).single.id, origin);
+    expect(
+      await coordinator.purgeTrashedSession(
+        sessionId: origin,
+        userConfirmed: true,
+      ),
+      1,
+    );
+    expect(
+      (await capture.applyExplicitUserInstructionResult(
+        sessionId: origin,
+        userPrompt: 'Ricorda che il colore segreto è tornato',
+      )).status,
+      AssistantMemoryCommandStatus.blocked,
+    );
     expect(await sessions.listSessions(inTrash: true), isEmpty);
     expect((await sessions.listSessions()).single.id, 'next');
     expect((await database.query('chat_history')).single['session_id'], 'next');
