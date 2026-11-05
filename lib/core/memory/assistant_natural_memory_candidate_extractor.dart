@@ -130,7 +130,11 @@ abstract final class AssistantNaturalMemoryCandidateExtractor {
     ),
   ];
 
-  /// Only unambiguous first-person updates; no inferred contradictions.
+  /// A change of vehicle is NOT proof that its previous color changed.
+  /// Only first-person repainting of the same vehicle can update the
+  /// canonical single-car fact until entity identity is reviewed explicitly.
+  /// "Ho cambiato auto", "My car is now..." and similar statements stay
+  /// unresolved rather than silently deleting the old vehicle.
   static final List<({
     String language,
     RegExp pattern,
@@ -139,24 +143,28 @@ abstract final class AssistantNaturalMemoryCandidateExtractor {
     (
       language: 'it',
       pattern: RegExp(
-          r'^(?:la mia (?:auto|macchina) ora è|ho cambiato auto: ora è)\s+(.+)$',
+          r'^ho riverniciato la mia (?:auto|macchina): ora è\s+(.+)$',
           caseSensitive: false),
       prefix: 'La mia auto è ',
     ),
     (
       language: 'en',
-      pattern: RegExp(r'^my car is now\s+(.+)$', caseSensitive: false),
+      pattern: RegExp(
+          r'^i repainted my car: it is now\s+(.+)$',
+          caseSensitive: false),
       prefix: 'My car is ',
     ),
     (
       language: 'fr',
-      pattern: RegExp(r'^ma voiture est maintenant\s+(.+)$',
+      pattern: RegExp(
+          r"^j['’]ai repeint ma voiture: elle est maintenant\s+(.+)$",
           caseSensitive: false),
       prefix: 'Ma voiture est ',
     ),
     (
       language: 'es',
-      pattern: RegExp(r'^mi (?:coche|carro|auto) ahora es\s+(.+)$',
+      pattern: RegExp(
+          r'^he repintado mi (?:coche|carro|auto): ahora es\s+(.+)$',
           caseSensitive: false),
       prefix: 'Mi coche es ',
     ),
