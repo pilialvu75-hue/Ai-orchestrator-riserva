@@ -152,13 +152,25 @@ class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryAct
           consentStillEnabled: () => consent.enabled,
         );
         if (!nameProposed) {
-          await _durableMemoryCaptureService.proposeNaturalUserCarColorCandidate(
+          final carColorProposed =
+              await _durableMemoryCaptureService
+                  .proposeNaturalUserCarColorCandidate(
             sessionId: sessionId,
             userPrompt: userPrompt,
             consentEnabled: true,
             directUserMessage: true,
             consentStillEnabled: () => consent.enabled,
           );
+          if (!carColorProposed) {
+            await _durableMemoryCaptureService
+                .proposeNaturalUserCarColorCorrectionCandidate(
+              sessionId: sessionId,
+              userPrompt: userPrompt,
+              consentEnabled: true,
+              directUserMessage: true,
+              consentStillEnabled: () => consent.enabled,
+            );
+          }
         }
       } catch (_) {
         onRuntimeNotice?.call(
