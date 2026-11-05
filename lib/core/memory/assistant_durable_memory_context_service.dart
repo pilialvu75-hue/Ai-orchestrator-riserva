@@ -82,6 +82,13 @@ class AssistantDurableMemoryContextService {
     }
 
     for (final record in userRecords) {
+      // This narrow autobiographical fact must not answer third-party car
+      // questions merely because both texts contain the word "auto"/"car".
+      if (record.recordKey == AssistantNaturalCarColorCandidate.recordKey &&
+          !firstPersonCarColorRequest &&
+          !broadMemoryRequest) {
+        continue;
+      }
       var score = _relevanceScore(record, queryTerms);
       if (record.recordKey == AssistantNaturalNameCandidate.recordKey &&
           firstPersonNameRequest &&
