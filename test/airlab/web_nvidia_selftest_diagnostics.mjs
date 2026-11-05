@@ -127,6 +127,7 @@ test('empty final text is classified separately from NVIDIA HTTP failure', async
   });
   assert.equal(r.status, 502);
   assert.equal(r.body.error.failureKind, 'no_final_text');
+  assert.equal(r.body.error.upstreamStatus, undefined);
   assert.doesNotMatch(JSON.stringify(r.body), /internal synthetic reasoning/);
 });
 test('malformed JSON response is safely classified', async () => {
@@ -136,6 +137,7 @@ test('malformed JSON response is safely classified', async () => {
   });
   assert.equal(r.status, 502);
   assert.equal(r.body.error.failureKind, 'upstream_invalid_json');
+  assert.equal(r.body.error.upstreamStatus, undefined);
 });
 
 test('reasoning token exhaustion is diagnosed without exposing hidden reasoning', async () => {
@@ -152,6 +154,28 @@ test('reasoning token exhaustion is diagnosed without exposing hidden reasoning'
   });
   assert.equal(r.status, 502);
   assert.equal(r.body.error.failureKind, 'output_token_limit');
+  assert.equal(r.body.error.upstreamStatus, undefined);
   assert.equal(r.body.error.routeId, 'deepseek-v41-flash-orchestrator');
   assert.doesNotMatch(JSON.stringify(r.body), /private synthetic chain/);
+});
+
+test('NVIDIA 404 is a confirmed upstream HTTP status', async () => {
+  const r = await request({
+    routeId: 'kimi-k26-orchestrator',
+    mockResponse: () => new Response('not found', { status: 404 }),
+  });
+  assert.equal(r.status, 404);
+  assert.equal(r.body.error.failureKind, 'upstream_http_rejection');
+  assert.equal(r.body.error.upstreamStatus, 404);
+});
+
+test('upstream connection failure has broker 503 but no NVIDIA HTTP status', async () => {
+  const r = await request({
+    routeId: 'deepseek-v41-flash-orchestrator',
+    mockResponse: () => { throw new TypeError('synthetic connection dropped'); },
+  });
+  assert.equal(r.status, 503);
+  assert.equal(r.body.error.failureKind, 'upstream_connection_error');
+  assert.equal(r.body.error.upstreamStatus, undefined);
+  assert.doesNotMatch(JSON.stringify(r.body), /synthetic connection dropped/);
 });
