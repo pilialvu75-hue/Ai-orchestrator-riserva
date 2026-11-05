@@ -781,4 +781,83 @@ void main() {
     );
   });
 
+
+  test('reviewed natural correction persists after SQLite restart',
+      () async {
+    const owner = AssistantDurableMemoryContextService.localUserScopeId;
+    final memory = makeMemory();
+    await memory.recordConfirmed(
+      recordKey: 'natural.user.car_color',
+      scope: AssistantMemoryScope.user,
+      scopeId: owner,
+      kind: AssistantMemoryKind.fact,
+      content: 'La mia auto è blu',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 100,
+    );
+    var tick = 200;
+    final capture = AssistantDurableMemoryCaptureService(
+      memoryService: memory,
+      now: () => ++tick,
+    );
+    expect(await capture.proposeNaturalUserCarColorCorrectionCandidate(
+      userPrompt: 'Ho cambiato auto: ora è rossa',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+
+    // Reopening the database must not cause a pending correction to be
+    // promoted: only the previously approved color can enter the prompt.
+    await reopen();
+    final current = makeMemory();
+    final before = await promptFor(
+      current,
+      sessionId: 'different-chat',
+      question: 'What color is my car?',
+    );
+    expect(before, contains('La mia auto è blu'));
+    expect(before, isNot(contains('La mia auto è rossa')));
+
+    final review = AssistantDurableMemoryCaptureService(
+      memoryService: current,
+      now: () => ++tick,
+    );
+    final pending =
+        (await review.loadReviewableNaturalCarColorCorrectionCandidates())
+            .single;
+    expect(pending.before, 'La mia auto è blu');
+    expect(await review.reviewNaturalCarColorCorrectionCandidate(
+      reviewed: pending,
+      approve: true,
+      userConfirmed: true,
+    ), isTrue);
+    await reopen();
+    final after = await promptFor(
+      makeMemory(),
+      sessionId: 'another-chat',
+      question: 'What color is my car?',
+    );
+    expect(after, contains('La mia auto è rossa'));
+    expect(after, isNot(contains('La mia auto è blu')));
+
+    // An unapproved later change remains merely a candidate across restart.
+    final proposed = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+      now: () => ++tick,
+    );
+    expect(await proposed.proposeNaturalUserCarColorCorrectionCandidate(
+      userPrompt: 'My car is now black',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+    await reopen();
+    final unchanged = await promptFor(
+      makeMemory(),
+      sessionId: 'fourth-chat',
+      question: 'What color is my car?',
+    );
+    expect(unchanged, contains('La mia auto è rossa'));
+    expect(unchanged, isNot(contains('My car is black')));
+  });
+
 }
