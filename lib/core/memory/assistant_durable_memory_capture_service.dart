@@ -59,6 +59,9 @@ final class AssistantDurableMemoryCaptureService {
   // other through concurrent SQLite read-modify-write operations.
   Future<void> _pendingWrites = Future<void>.value();
   bool _resetInProgress = false;
+  // Session IDs removed permanently in this running app cannot recapture
+  // old USER or CONVERSATION facts via delayed inference callbacks.
+  final Set<String> _purgedSessions = <String>{};
   // A two-step local confirmation, scoped to the chat that requested it.
   // Only small subjects are retained transiently; no chat text is cached.
   final Map<String, String> _pendingBroadForgetBySession = <String, String>{};
@@ -78,6 +81,25 @@ final class AssistantDurableMemoryCaptureService {
     } finally {
       _resetInProgress = false;
     }
+  }
+
+  /// Drain the serialized capture queue and permanently reject late callbacks
+  /// from this session only if its SQL purge commits. The reset barrier also
+  /// blocks concurrent captures during the destructive transaction.
+  Future<T> runWithSessionPurgeBarrier<T>(
+    String sessionId,
+    Future<T> Function() operation,
+  ) {
+    final id = sessionId.trim();
+    if (id.isEmpty) throw ArgumentError('Session id must not be empty');
+    if (_purgedSessions.contains(id)) {
+      throw StateError('Conversation was already permanently deleted');
+    }
+    return runWithResetBarrier(() async {
+      final result = await operation();
+      _purgedSessions.add(id);
+      return result;
+    });
   }
 
   static int _clock() => DateTime.now().millisecondsSinceEpoch;
@@ -150,7 +172,7 @@ final class AssistantDurableMemoryCaptureService {
     required String sessionId,
     required String userPrompt,
   }) {
-    if (_resetInProgress) {
+    if (_resetInProgress || _purgedSessions.contains(sessionId.trim())) {
       return Future<AssistantMemoryCommandResult>.value(
         const AssistantMemoryCommandResult(
           AssistantMemoryCommandStatus.blocked,
@@ -159,7 +181,7 @@ final class AssistantDurableMemoryCaptureService {
     }
 
     final operation = _pendingWrites.then((_) {
-      if (_resetInProgress) {
+      if (_resetInProgress || _purgedSessions.contains(sessionId.trim())) {
         return Future<AssistantMemoryCommandResult>.value(
           const AssistantMemoryCommandResult(
             AssistantMemoryCommandStatus.blocked,
