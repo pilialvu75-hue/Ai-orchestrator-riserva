@@ -941,14 +941,14 @@ void main() {
       await consent.setEnabled(true);
       await repository.sendMessage(
         sessionId: 'car-change',
-        userPrompt: 'Ho cambiato auto: ora è rossa',
+        userPrompt: 'Ho riverniciato la mia auto: ora è rossa',
       );
       expect(delegate.lastSystemPrompt,
           isNot(contains('La mia auto è blu')));
       final proposal =
           (await capture.loadReviewableNaturalCarColorCorrectionCandidates())
               .single;
-      expect(proposal.content, 'Ho cambiato auto: ora è rossa');
+      expect(proposal.content, 'Ho riverniciato la mia auto: ora è rossa');
       expect((await memory.loadConfirmed(
         scope: AssistantMemoryScope.user,
         scopeId: owner,
@@ -977,7 +977,7 @@ void main() {
       await consent.setEnabled(false);
       await repository.sendMessage(
         sessionId: 'fourth-chat',
-        userPrompt: 'La mia auto ora è nera',
+        userPrompt: 'Ho riverniciato la mia auto: ora è nera',
       );
       expect(await capture.loadReviewableNaturalCarColorCorrectionCandidates(),
           isEmpty);
