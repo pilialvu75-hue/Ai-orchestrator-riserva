@@ -36,6 +36,31 @@ void main() {
       expect(delegate.lastSystemPrompt, contains('https://example.test/weather'));
     });
 
+    test('consent-gated Cloud never pre-searches the user's private question',
+        () async {
+      final delegate = _CapturingChatRepository();
+      final tool = _FakeWebSearchTool(
+        result: const ToolResult(
+          toolId: 'web_search',
+          output: 'Would have leaked external query',
+        ),
+      );
+      final repository = CloudWebEnrichingChatRepository(
+        delegate: delegate,
+        webSearchTool: tool,
+        runtimeMode: () => AiRuntimeMode.cloud,
+        consentGatedAssistantCloud: true,
+      );
+      await repository.sendMessage(
+        sessionId: 's-consent',
+        userPrompt: 'Che tempo fa oggi a Parigi? Il mio codice e 731',
+        systemPrompt: 'Base assistant prompt.',
+      );
+      expect(tool.calls, 0);
+      expect(delegate.sendCalls, 1);
+      expect(delegate.lastSystemPrompt, 'Base assistant prompt.');
+    });
+
     test('search failure never blocks the underlying Cloud request', () async {
       final delegate = _CapturingChatRepository();
       final tool = _FakeWebSearchTool(

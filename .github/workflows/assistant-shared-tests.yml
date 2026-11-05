@@ -61,6 +61,7 @@ jobs:
           test/core/runtime/inference/hybrid_cloud_visual_attachment_guard_test.dart
           test/features/chat/data/repositories/chat_repository_visual_consent_test.dart
           test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart
+          test/features/chat/data/repositories/cloud_web_enriching_chat_repository_test.dart
           test/core/runtime/inference/hybrid_cloud_runtime_dispatch_test.dart
           test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart
           test/core/runtime/inference/completion_output_test.dart

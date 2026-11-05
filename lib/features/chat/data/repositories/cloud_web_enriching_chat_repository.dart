@@ -23,6 +23,7 @@ final class CloudWebEnrichingChatRepository implements ChatRepository, VerifiedM
     required ChatRepository delegate,
     required Tool webSearchTool,
     required AiRuntimeMode Function() runtimeMode,
+    this.consentGatedAssistantCloud = false,
   })  : _delegate = delegate,
         _webSearchTool = webSearchTool,
         _runtimeMode = runtimeMode;
@@ -32,6 +33,11 @@ final class CloudWebEnrichingChatRepository implements ChatRepository, VerifiedM
   final ChatRepository _delegate;
   final Tool _webSearchTool;
   final AiRuntimeMode Function() _runtimeMode;
+
+  /// The gated Chat transport cannot authorize a separate Web-search POST.
+  /// In opt-in mode do not transmit the original question to an external
+  /// search service before its own typed disclosure and review exist.
+  final bool consentGatedAssistantCloud;
 
   @override
   Future<ChatMessage> persistVerifiedMemoryAction({
@@ -67,7 +73,8 @@ final class CloudWebEnrichingChatRepository implements ChatRepository, VerifiedM
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) async {
-    if (_runtimeMode() != AiRuntimeMode.cloud ||
+    if (consentGatedAssistantCloud ||
+        _runtimeMode() != AiRuntimeMode.cloud ||
         attachments.any((item) =>
             item.isImage || item.isVideo ||
             item.type == ChatAttachmentType.file) ||

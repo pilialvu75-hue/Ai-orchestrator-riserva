@@ -739,6 +739,19 @@ consenso esplicito.
   integrato, provider reale, UI Flutter fisica o connettivita S24;
   i nuovi test entrano nella suite CI Ubuntu/macOS e non consentono
   ancora l'attivazione del flag produttivo.
+- **H27 — nessuna ricerca Web anticipata senza consenso:**
+  l'adattatore Chat Cloud `CloudWebEnrichingChatRepository` possiede un
+  percorso separato per cercare automaticamente domande aggiornate su
+  motori pubblici prima della review Cloud. Nel trasporto sperimentale
+  gated ora la ricerca preventiva e proibita, per impedire che testo
+  personale venga trasmesso a servizi Web senza informativa specifica.
+  La domanda originale passa intatta al consent gateway; il percorso
+  Web legacy, con flag disattivato, resta invariato. Test di regressione
+  verificano zero chiamate al Web tool nel gated Cloud e il normale
+  percorso legacy gia collaudato. I risultati CI H27 sono da verificare.
+  Una ricerca Web nel nuovo trasporto richiedera in futuro un consenso
+  dedicato e provenienza verificata; questa protezione non copre ancora
+  tutte le operazioni Web di altri flussi.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

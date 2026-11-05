@@ -225,6 +225,7 @@ abstract final class CloudRoutingBootstrap {
         durableMemoryCaptureService: durableMemoryCaptureService,
         naturalMemoryConsentService: sl<AssistantNaturalMemoryConsentService>(),
         delegate: CloudWebEnrichingChatRepository(
+          consentGatedAssistantCloud: enableConsentGatedAssistantCloud,
           runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
           webSearchTool: assistantWebSearchTool,
           delegate: ChatRepositoryImpl(
