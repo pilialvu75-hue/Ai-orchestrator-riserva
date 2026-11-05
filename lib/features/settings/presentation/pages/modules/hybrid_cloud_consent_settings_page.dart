@@ -55,7 +55,18 @@ class _HybridCloudConsentSettingsPageState
   List<CloudCredentialSnapshot> get _accounts =>
       _credentials.snapshots.where((s) => s.configured &&
           !s.isExpired && !s.fromEnvironmentFallback &&
-          (s.accountId?.isNotEmpty ?? false)).toList(growable: false);
+          (s.accountId?.isNotEmpty ?? false) &&
+          _credentials.consentBindingFor(s.providerId) != null)
+          .toList(growable: false);
+
+  String? _registryAccountFor(String provider, String account) {
+    final binding = _credentials.consentBindingFor(provider);
+    return binding == null
+        ? null
+        : HybridCloudDisclosure.registryAccountFor(
+            accountId: account, credentialBindingId: binding,
+          );
+  }
 
   @override
   void initState() {
@@ -74,6 +85,8 @@ class _HybridCloudConsentSettingsPageState
         ? _provider : (accounts.isEmpty ? null : accounts.first.providerId);
     final account = provider == null
         ? null : _credentials.snapshotFor(provider).accountId;
+    final registryAccount = provider != null && account != null
+        ? _registryAccountFor(provider, account) : null;
     setState(() {
       _provider = provider;
       _account = account;
@@ -82,14 +95,16 @@ class _HybridCloudConsentSettingsPageState
       _rules = const <HybridDisclosureScope, HybridCloudStoredConsent>{};
     });
     try {
-      if (provider != null && account != null) {
+      if (provider != null && account != null &&
+          registryAccount != null) {
         final loaded = await widget.manager!.listStoredPreferences(
           ownerId: widget.ownerId!,
           sessionId: widget.sessionId!,
           providerId: provider,
-          accountId: account,
+          accountId: registryAccount,
         );
-        if (mounted && _provider == provider && _account == account) {
+        if (mounted && _provider == provider && _account == account &&
+            _registryAccountFor(provider, account) == registryAccount) {
           setState(() => _rules = loaded);
         }
       }
@@ -113,6 +128,12 @@ class _HybridCloudConsentSettingsPageState
   Future<void> _edit([HybridDisclosureScope? existing]) async {
     if (!_hasContext || _loading || _busy ||
         _provider == null || _account == null) return;
+    final originalProvider = _provider!;
+    final originalAccount = _account!;
+    final registryAccount = _registryAccountFor(
+      originalProvider, originalAccount,
+    );
+    if (registryAccount == null) return;
     var origin = existing?.origin ?? HybridDisclosureOrigin.durableMemory;
     var level = existing?.sensitivity ??
         HybridDisclosureSensitivity.preference;
@@ -234,6 +255,13 @@ class _HybridCloudConsentSettingsPageState
 
     final provider = _provider!;
     final account = _account!;
+    // A credential edit while either dialog was open must never transfer
+    // a saved permission to a different key with the same account label.
+    if (provider != originalProvider || account != originalAccount ||
+        _registryAccountFor(provider, account) != registryAccount) {
+      await _refresh();
+      return;
+    }
     final rule = switch (action) {
       _EditChoice.ask => HybridCloudStoredConsent.askEveryTime,
       _EditChoice.allow => HybridCloudStoredConsent.allowAlways,
@@ -246,7 +274,7 @@ class _HybridCloudConsentSettingsPageState
         ownerId: widget.ownerId!,
         sessionId: widget.sessionId!,
         providerId: provider,
-        accountId: account,
+        accountId: registryAccount,
         scope: scope,
         preference: rule,
       );

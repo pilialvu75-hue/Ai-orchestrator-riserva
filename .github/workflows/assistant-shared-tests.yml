@@ -50,6 +50,12 @@ jobs:
           test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
           test/features/chat/presentation/hybrid_cloud_chat_consent_gateway_test.dart
           test/features/settings/presentation/hybrid_cloud_consent_review_dialog_test.dart
+          test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
+          test/core/runtime/inference/cloud_credential_store_test.dart
+          test/core/runtime/inference/hybrid_cloud_disclosure_consent_test.dart
+          test/core/runtime/inference/hybrid_cloud_native_wire_sender_test.dart
+          test/core/runtime/inference/hybrid_cloud_runtime_consent_coordinator_test.dart
+          test/core/runtime/inference/hybrid_cloud_runtime_dispatch_test.dart
           test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart
           test/core/runtime/inference/completion_output_test.dart
           test/native/runtime/windows/windows_vulkan_device_test.dart

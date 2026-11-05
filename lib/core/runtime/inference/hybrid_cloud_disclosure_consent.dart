@@ -96,6 +96,7 @@ final class HybridCloudDisclosure {
     required this.sessionId,
     required this.providerId,
     required this.accountId,
+    this.credentialBindingId,
     required this.purpose,
     required this.outboundText,
     required List<HybridDisclosureSegment> segments,
@@ -112,6 +113,9 @@ final class HybridCloudDisclosure {
         accountId != accountId.trim() ||
         accountId.length > 256 ||
         accountId.codeUnits.any((unit) => unit < 32 || unit == 127) ||
+        (credentialBindingId != null &&
+            (!RegExp(r'^[a-zA-Z0-9_-]{32}$')
+                .hasMatch(credentialBindingId!) || accountId.length > 210)) ||
         purpose.trim().isEmpty ||
         purpose.length > 256 ||
         outboundText.isEmpty ||
@@ -133,6 +137,25 @@ final class HybridCloudDisclosure {
   /// Stable credential/account identity from trusted account selection.
   /// Switching Cloud accounts requires fresh consent.
   final String accountId;
+  /// Non-secret, per-installation credential generation held in OS-protected
+  /// secret storage. Production gated reviews REQUIRE a non-null value.
+  /// Missing means a legacy/test-only disclosure with its separate registry.
+  final String? credentialBindingId;
+
+  /// The human-readable account label stays unchanged in the review. Only
+  /// the protected permission registry uses the credential generation.
+  String get registryAccountId => registryAccountFor(
+    accountId: accountId,
+    credentialBindingId: credentialBindingId,
+  );
+
+  static String registryAccountFor({
+    required String accountId,
+    String? credentialBindingId,
+  }) => credentialBindingId == null
+      ? accountId
+      : accountId + '#credential:' + credentialBindingId;
+
   final String purpose;
   final String outboundText;
   final List<HybridDisclosureSegment> segments;
@@ -144,7 +167,8 @@ final class HybridCloudDisclosure {
   /// This digest is not a secret or a replacement for consent.
   String get contentFingerprint => sha256.convert(utf8.encode(jsonEncode(
         <String>[
-          ownerId, sessionId, providerId, accountId, purpose, outboundText,
+          ownerId, sessionId, providerId, accountId,
+          credentialBindingId ?? '', purpose, outboundText,
           for (final segment in segments)
             jsonEncode(<String>[
               segment.scope.origin.name,
@@ -262,7 +286,7 @@ final class HybridCloudDisclosureConsent {
   }) async {
     if (isRequestActive != null && !isRequestActive()) return false;
     final familyKey =
-        _key(disclosure.ownerId, disclosure.providerId, disclosure.accountId);
+        _key(disclosure.ownerId, disclosure.providerId, disclosure.registryAccountId);
     final revision = _epochs[familyKey] ?? 0;
     if (!await _authorizeOwnerSession(
       disclosure.ownerId, disclosure.sessionId,
@@ -276,7 +300,7 @@ final class HybridCloudDisclosureConsent {
       final pending = <HybridDisclosureScope>[];
       for (final scope in disclosure.scopes) {
         final rule = await _readRule(
-          disclosure.ownerId, disclosure.providerId, disclosure.accountId, scope,
+          disclosure.ownerId, disclosure.providerId, disclosure.registryAccountId, scope,
         );
         if (rule == HybridCloudStoredConsent.neverShare) return null;
         if (rule != HybridCloudStoredConsent.allowAlways ||
@@ -322,7 +346,7 @@ final class HybridCloudDisclosureConsent {
         return false;
       }
       for (final scope in disclosure.scopes) {
-        if (await _readRule(disclosure.ownerId, disclosure.providerId, disclosure.accountId, scope) ==
+        if (await _readRule(disclosure.ownerId, disclosure.providerId, disclosure.registryAccountId, scope) ==
             HybridCloudStoredConsent.neverShare) {
           return false;
         }
@@ -358,7 +382,7 @@ final class HybridCloudDisclosureConsent {
       }
       if (updates.isNotEmpty) {
         await _writeRules(disclosure.ownerId, disclosure.providerId,
-            disclosure.accountId, updates);
+            disclosure.registryAccountId, updates);
       }
       return approved && revision == (_epochs[familyKey] ?? 0) &&
           (isRequestActive == null || isRequestActive());
@@ -378,7 +402,7 @@ final class HybridCloudDisclosureConsent {
     bool Function()? isRequestActive,
   }) async {
     final familyKey = _key(
-      disclosure.ownerId, disclosure.providerId, disclosure.accountId,
+      disclosure.ownerId, disclosure.providerId, disclosure.registryAccountId,
     );
     final revision = _epochs[familyKey] ?? 0;
     final approved = await authorize(
@@ -432,7 +456,7 @@ final class HybridCloudDisclosureConsent {
 
       final approved = permit._approved;
       final familyKey = _key(
-        approved.ownerId, approved.providerId, approved.accountId,
+        approved.ownerId, approved.providerId, approved.registryAccountId,
       );
       if (permit._revision != (_epochs[familyKey] ?? 0)) {
         throw StateError('HYBRID Cloud consent revoked before dispatch');
@@ -454,7 +478,7 @@ final class HybridCloudDisclosureConsent {
       }
       for (final scope in approved.scopes) {
         if (await _readRule(
-          approved.ownerId, approved.providerId, approved.accountId, scope,
+          approved.ownerId, approved.providerId, approved.registryAccountId, scope,
         ) == HybridCloudStoredConsent.neverShare) {
           throw StateError('HYBRID Cloud category is no longer shareable');
         }

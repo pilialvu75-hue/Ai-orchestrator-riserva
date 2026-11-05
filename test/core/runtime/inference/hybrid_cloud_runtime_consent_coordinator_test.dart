@@ -116,6 +116,10 @@ void main() {
         expect(chatSessionId, 'chat-1');
         expect(isRequestActive(), isTrue);
         expect(review.disclosure.accountId, 'account-1');
+        expect(review.disclosure.credentialBindingId,
+            credentials.consentBindingFor('openAi'));
+        expect(review.disclosure.registryAccountId, isNot('account-1'));
+
         expect(review.disclosure.outboundText,
             contains('Earlier personal question'));
         expect(review.disclosure.outboundText,

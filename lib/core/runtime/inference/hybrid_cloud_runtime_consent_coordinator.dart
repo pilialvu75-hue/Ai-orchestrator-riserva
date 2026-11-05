@@ -78,6 +78,7 @@ final class HybridCloudRuntimeConsentCoordinator {
     // a stable explicit account name can never inherit a previous approval.
     final account = _credentials.snapshotFor(providerId!);
     final accountId = account.accountId;
+    final credentialBindingId = _credentials.consentBindingFor(providerId);
     // A human-entered account label is NOT a credential attestation.
     // Bind this exact attempt to the secret held before the review starts.
     // Never log or persist the secret in the consent record.
@@ -85,6 +86,7 @@ final class HybridCloudRuntimeConsentCoordinator {
     if (!account.configured || account.isExpired ||
         account.fromEnvironmentFallback ||
         accountId == null || accountId.isEmpty ||
+        credentialBindingId == null ||
         expectedCredentialSecret == null ||
         expectedCredentialSecret.isEmpty) {
       throw const HybridCloudConsentDenied();
@@ -143,6 +145,7 @@ final class HybridCloudRuntimeConsentCoordinator {
       ownerId: session.ownerId,
       sessionId: session.sessionId,
       accountId: accountId,
+      credentialBindingId: credentialBindingId,
       purpose: 'Answer the current question using reviewed Cloud context',
       request: projected,
       originalQuestion: evidence.originalQuestion,

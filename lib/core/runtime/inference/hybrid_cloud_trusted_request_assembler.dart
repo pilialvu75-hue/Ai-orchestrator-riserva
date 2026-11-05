@@ -22,6 +22,7 @@ final class HybridCloudTrustedRequestAssembler {
     required String ownerId,
     required String sessionId,
     required String accountId,
+    String? credentialBindingId,
     required String purpose,
     required AiRequest request,
     required String originalQuestion,
@@ -143,6 +144,7 @@ final class HybridCloudTrustedRequestAssembler {
       ownerId: ownerId,
       sessionId: sessionId,
       accountId: accountId,
+      credentialBindingId: credentialBindingId,
       purpose: purpose,
       request: request,
       controlScope: const HybridDisclosureScope(

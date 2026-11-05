@@ -85,6 +85,7 @@ void main() {
       ownerId: 'owner-a',
       sessionId: 'chat-a',
       accountId: accountId,
+      credentialBindingId: credentials.consentBindingFor(providerId),
       purpose: 'Respond to a user request with selected context',
       request: request,
       controlScope: controls,

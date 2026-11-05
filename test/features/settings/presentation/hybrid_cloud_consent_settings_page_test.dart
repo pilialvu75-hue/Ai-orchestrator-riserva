@@ -68,6 +68,48 @@ void main() {
     expect(find.byKey(const Key('consent-apply')), findsNothing);
   });
 
+  testWidgets('rekey during settings dialog cannot grant under new identity',
+      (tester) async {
+    final backend = _PermissionMemory();
+    final credentials = CloudCredentialStore(storage: _CredentialMemory());
+    await credentials.initialize();
+    await credentials.setApiKey(
+      'gemini', 'first-key', accountId: 'visible-account',
+    );
+    final previousGeneration = credentials.consentBindingFor('gemini');
+    final manager = HybridCloudDisclosureConsent(
+      backend: backend,
+      authorizeOwnerSession: (owner, session) async =>
+          owner == 'owner-a' && session == 'session-a',
+    );
+    await tester.pumpWidget(app(HybridCloudConsentSettingsPage(
+      manager: manager,
+      ownerId: 'owner-a',
+      sessionId: 'session-a',
+      credentials: credentials,
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('consent-add')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('consent-apply')), findsOneWidget);
+    // A different credential with exactly the same visible account name.
+    await credentials.setApiKey(
+      'gemini', 'second-key', accountId: 'visible-account',
+    );
+    expect(credentials.consentBindingFor('gemini'), isNot(previousGeneration));
+    await tester.tap(find.byKey(const Key('consent-apply')));
+    await tester.pumpAndSettle();
+    expect(backend.data, isEmpty);
+    final newRegistryAccount = HybridCloudDisclosure.registryAccountFor(
+      accountId: 'visible-account',
+      credentialBindingId: credentials.consentBindingFor('gemini')!,
+    );
+    expect(await manager.listStoredPreferences(
+      ownerId: 'owner-a', sessionId: 'session-a',
+      providerId: 'gemini', accountId: newRegistryAccount,
+    ), isEmpty);
+  });
+
   testWidgets('authorized test profile lists and changes protected decisions',
       (tester) async {
     final backend = _PermissionMemory();
@@ -75,6 +117,10 @@ void main() {
     await credentials.initialize();
     await credentials.setApiKey('gemini', 'dummy-key',
         accountId: 'verified-test-account');
+    final registryAccount = HybridCloudDisclosure.registryAccountFor(
+      accountId: 'verified-test-account',
+      credentialBindingId: credentials.consentBindingFor('gemini')!,
+    );
     final manager = HybridCloudDisclosureConsent(
       backend: backend,
       authorizeOwnerSession: (ownerId, sessionId) async =>
@@ -107,7 +153,7 @@ void main() {
       ownerId: 'verified-test-owner',
       sessionId: 'verified-test-chat',
       providerId: 'gemini',
-      accountId: 'verified-test-account',
+      accountId: registryAccount,
     );
     expect(rules[scope], HybridCloudStoredConsent.askEveryTime);
     expect(find.text('Ricordi confermati · Preferenze'), findsOneWidget);
@@ -128,7 +174,7 @@ void main() {
       ownerId: 'verified-test-owner',
       sessionId: 'verified-test-chat',
       providerId: 'gemini',
-      accountId: 'verified-test-account',
+      accountId: registryAccount,
     );
     expect(rules[scope], HybridCloudStoredConsent.neverShare);
     expect(find.text('Non condividere mai'), findsOneWidget);

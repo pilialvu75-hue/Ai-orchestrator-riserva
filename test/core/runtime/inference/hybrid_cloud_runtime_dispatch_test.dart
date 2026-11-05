@@ -131,7 +131,9 @@ void main() {
         final projected = HybridCloudNativeRequestProjection.project(incoming);
         final seal = HybridCloudAiRequestSeal.fromRequest(
           ownerId: 'owner-a', sessionId: 'local-session',
-          accountId: 'acc-1', purpose: 'Review private history and question',
+          accountId: 'acc-1',
+          credentialBindingId: creds.consentBindingFor('openAi'),
+          purpose: 'Review private history and question',
           request: projected, controlScope: controls,
           promptSegments: <HybridDisclosureSegment>[
             HybridDisclosureSegment(text: projected.prompt, scope: question),
@@ -292,7 +294,9 @@ void main() {
     );
     final seal = HybridCloudAiRequestSeal.fromRequest(
       ownerId: 'owner', sessionId: 'session',
-      accountId: 'account-1', purpose: 'Answer private question',
+      accountId: 'account-1',
+      credentialBindingId: creds.consentBindingFor('openAi'),
+      purpose: 'Answer private question',
       request: const AiRequest(
         providerId: 'openAi', modelId: 'gpt-test',
         prompt: 'Private prompt', maxTokens: 1024,
@@ -342,7 +346,9 @@ void main() {
     );
     final seal = HybridCloudAiRequestSeal.fromRequest(
       ownerId: 'owner', sessionId: 'session',
-      accountId: 'acc', purpose: 'Test private error',
+      accountId: 'acc',
+      credentialBindingId: creds.consentBindingFor('gemini'),
+      purpose: 'Test private error',
       request: const AiRequest(
         providerId: 'gemini', modelId: 'gemini-test',
         prompt: 'Private prompt', maxTokens: 1024,

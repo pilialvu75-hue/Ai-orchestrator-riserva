@@ -554,7 +554,7 @@ consenso esplicito.
   nella Chat e il controllo esatto del payload. Prevedere inoltre
   autorizzazione esplicita opzionale su tutti i provider approvati senza
   includere automaticamente provider/account futuri.
-- **Stato tecnico H10–H19 (#977, ancora DRAFT):** contratto di consenso,
+- **Stato tecnico H10–H21 (#977, ancora DRAFT):** contratto di consenso,
   revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
   OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
   `ChatFileContextService` conserva separatamente domanda, istruzioni e
@@ -654,6 +654,28 @@ consenso esplicito.
   autenticata lato provider e non risolve i permessi persistenti dopo
   riconfigurazione delle credenziali tra sessioni. Test mock HTTP coprono
   entrambi i casi di sostituzione account/chiave e non-send.
+- **H21 — permessi persistenti legati alla generazione della credenziale:**
+  ogni chiave API configurata manualmente ottiene in secure storage
+  un identificativo casuale a 192 bit, stabile ai riavvii e rinnovato
+  con ogni modifica della credenziale, **anche con lo stesso account e
+  la stessa chiave**. Credenziali vecchie vengono migrate nello stesso
+  store protetto, senza importare alcun consenso da registri legacy;
+  se la migrazione fallisce, il Cloud ordinario non perde la chiave ma
+  il trasporto gated rifiuta la condivisione.
+  La review continua a mostrare l'etichetta account, mentre chiavi
+  dei permessi e fingerprint contengono anche l'identificativo di
+  generazione. Nessun permesso `allowAlways` registrato con la sola
+  etichetta account viene riutilizzato dopo la migrazione.
+  `HybridCloudNativeWireSender` controlla la generazione corrente
+  insieme a provider, account, chiave esatta e token di cancellazione.
+  Anche Impostazioni -> Consensi Cloud usa questa identita protetta;
+  cambi chiave mentre un dialogo di modifica e aperto annullano la
+  scrittura. Test automatici includono persistenza e riavvio,
+  sostituzione credenziale con stesso nome, migrazione, mancata
+  ereditarieta dei permessi, UI e cancellazione durante review.
+  La generazione non prova un login verificato dal provider, quindi
+  il dispatcher Cloud in produzione rimane disattivato finche non
+  saranno completati bootstrap, E2E dispositivo e selezione account.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

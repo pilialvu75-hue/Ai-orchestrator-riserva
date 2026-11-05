@@ -50,6 +50,9 @@ final class HybridCloudNativeWireSender {
           }
           final current = _credentials.snapshotFor(providerId);
           return current.configured &&
+              _credentials.consentBindingFor(providerId) ==
+                  seal.disclosure.credentialBindingId &&
+              seal.disclosure.credentialBindingId != null &&
               !current.isExpired &&
               !current.fromEnvironmentFallback &&
               current.accountId == accountId &&
@@ -71,6 +74,9 @@ final class HybridCloudNativeWireSender {
               current.fromEnvironmentFallback ||
               current.accountId == null ||
               current.accountId != seal.disclosure.accountId ||
+              seal.disclosure.credentialBindingId == null ||
+              _credentials.consentBindingFor(providerId) !=
+                  seal.disclosure.credentialBindingId ||
               apiKey == null ||
               apiKey.isEmpty ||
               expectedCredentialSecret.isEmpty ||
