@@ -17,6 +17,22 @@ class AssistantNaturalNameCandidate {
   final String originalStatement;
 }
 
+/// Candidate for one non-sensitive, directly asserted vehicle-color fact.
+/// The vehicle's make, license plate and owner identity are never inferred.
+class AssistantNaturalCarColorCandidate {
+  const AssistantNaturalCarColorCandidate({
+    required this.color,
+    required this.language,
+    required this.originalStatement,
+  });
+
+  static const String recordKey = 'natural.user.car_color';
+
+  final String color;
+  final String language;
+  final String originalStatement;
+}
+
 abstract final class AssistantNaturalMemoryCandidateExtractor {
   static const int maxStatementChars = 96;
 
@@ -58,6 +74,275 @@ abstract final class AssistantNaturalMemoryCandidateExtractor {
     'here', 'there', 'sorry', 'hungry', 'busy', 'sure', 'lost',
     'confused', 'alone', 'sick', 'well', 'late', 'early',
   };
+
+  // Closed vocabulary reduces accidental collection of locations, secrets,
+  // identifiers, hypothetical statements, third-party attributes and prompts.
+  // Synonyms are language-local; never invent or translate a user's color.
+  static final List<({
+    String language,
+    RegExp pattern,
+    Set<String> colors,
+  })> _carColorDeclarations = [
+    (
+      language: 'it',
+      pattern: RegExp(r'^la mia (?:auto|macchina) è\s+(.+)
+    final statement = input.trim();
+    if (!_safeDirectStatement(statement)) return null;
+
+    final withoutPunctuation =
+        statement.replaceFirst(RegExp(r'[.!]$'), '').trim();
+    for (final declaration in _declarations) {
+      final match = declaration.pattern.firstMatch(withoutPunctuation);
+      if (match == null) continue;
+      final name = match.group(1)!.trim();
+      if (name.length < 2 ||
+          name.length > 32 ||
+          !_name.hasMatch(name) ||
+          _notNames.contains(name.toLowerCase())) {
+        return null;
+      }
+      return AssistantNaturalNameCandidate(
+        givenName: name,
+        language: declaration.language,
+        originalStatement: withoutPunctuation,
+      );
+    }
+    return null;
+  }
+}
+,
+          caseSensitive: false),
+      colors: {
+        'blu', 'rossa', 'rosso', 'nera', 'nero', 'bianca', 'bianco',
+        'grigia', 'grigio', 'verde', 'gialla', 'giallo',
+      },
+    ),
+    (
+      language: 'en',
+      pattern: RegExp(r'^my car is\s+(.+)
+    final statement = input.trim();
+    if (statement.isEmpty ||
+        statement.length > maxStatementChars ||
+        statement.contains('\n') ||
+        statement.contains('\r') ||
+        statement.contains('://') ||
+        statement.contains('@') ||
+        statement.contains('=') ||
+        statement.contains(':') ||
+        statement.contains('"') ||
+        statement.contains('“') ||
+        statement.contains('”') ||
+        statement.contains('«') ||
+        statement.contains('»') ||
+        statement.contains(String.fromCharCode(96)) ||
+        statement.endsWith('?')) {
+      return null;
+    }
+
+    final withoutPunctuation =
+        statement.replaceFirst(RegExp(r'[.!]$'), '').trim();
+    for (final declaration in _declarations) {
+      final match = declaration.pattern.firstMatch(withoutPunctuation);
+      if (match == null) continue;
+      final name = match.group(1)!.trim();
+      if (name.length < 2 ||
+          name.length > 32 ||
+          !_name.hasMatch(name) ||
+          _notNames.contains(name.toLowerCase())) {
+        return null;
+      }
+      return AssistantNaturalNameCandidate(
+        givenName: name,
+        language: declaration.language,
+        originalStatement: withoutPunctuation,
+      );
+    }
+    return null;
+  }
+}
+, caseSensitive: false),
+      colors: {'blue', 'red', 'black', 'white', 'grey', 'gray', 'green', 'yellow'},
+    ),
+    (
+      language: 'fr',
+      pattern: RegExp(r'^ma voiture est\s+(.+)
+    final statement = input.trim();
+    if (statement.isEmpty ||
+        statement.length > maxStatementChars ||
+        statement.contains('\n') ||
+        statement.contains('\r') ||
+        statement.contains('://') ||
+        statement.contains('@') ||
+        statement.contains('=') ||
+        statement.contains(':') ||
+        statement.contains('"') ||
+        statement.contains('“') ||
+        statement.contains('”') ||
+        statement.contains('«') ||
+        statement.contains('»') ||
+        statement.contains(String.fromCharCode(96)) ||
+        statement.endsWith('?')) {
+      return null;
+    }
+
+    final withoutPunctuation =
+        statement.replaceFirst(RegExp(r'[.!]$'), '').trim();
+    for (final declaration in _declarations) {
+      final match = declaration.pattern.firstMatch(withoutPunctuation);
+      if (match == null) continue;
+      final name = match.group(1)!.trim();
+      if (name.length < 2 ||
+          name.length > 32 ||
+          !_name.hasMatch(name) ||
+          _notNames.contains(name.toLowerCase())) {
+        return null;
+      }
+      return AssistantNaturalNameCandidate(
+        givenName: name,
+        language: declaration.language,
+        originalStatement: withoutPunctuation,
+      );
+    }
+    return null;
+  }
+}
+, caseSensitive: false),
+      colors: {
+        'bleue', 'bleu', 'rouge', 'noire', 'noir', 'blanche',
+        'blanc', 'grise', 'gris', 'verte', 'vert', 'jaune',
+      },
+    ),
+    (
+      language: 'es',
+      pattern: RegExp(r'^mi (?:coche|carro|auto) es\s+(.+)
+    final statement = input.trim();
+    if (statement.isEmpty ||
+        statement.length > maxStatementChars ||
+        statement.contains('\n') ||
+        statement.contains('\r') ||
+        statement.contains('://') ||
+        statement.contains('@') ||
+        statement.contains('=') ||
+        statement.contains(':') ||
+        statement.contains('"') ||
+        statement.contains('“') ||
+        statement.contains('”') ||
+        statement.contains('«') ||
+        statement.contains('»') ||
+        statement.contains(String.fromCharCode(96)) ||
+        statement.endsWith('?')) {
+      return null;
+    }
+
+    final withoutPunctuation =
+        statement.replaceFirst(RegExp(r'[.!]$'), '').trim();
+    for (final declaration in _declarations) {
+      final match = declaration.pattern.firstMatch(withoutPunctuation);
+      if (match == null) continue;
+      final name = match.group(1)!.trim();
+      if (name.length < 2 ||
+          name.length > 32 ||
+          !_name.hasMatch(name) ||
+          _notNames.contains(name.toLowerCase())) {
+        return null;
+      }
+      return AssistantNaturalNameCandidate(
+        givenName: name,
+        language: declaration.language,
+        originalStatement: withoutPunctuation,
+      );
+    }
+    return null;
+  }
+}
+,
+          caseSensitive: false),
+      colors: {
+        'azul', 'rojo', 'roja', 'negro', 'negra', 'blanco', 'blanca',
+        'gris', 'verde', 'amarillo', 'amarilla',
+      },
+    ),
+  ];
+
+  static bool _safeDirectStatement(String statement) {
+    return statement.isNotEmpty &&
+        statement.length <= maxStatementChars &&
+        !statement.contains('\n') &&
+        !statement.contains('\r') &&
+        !statement.contains('://') &&
+        !statement.contains('@') &&
+        !statement.contains('=') &&
+        !statement.contains(':') &&
+        !statement.contains('"') &&
+        !statement.contains('“') &&
+        !statement.contains('”') &&
+        !statement.contains('«') &&
+        !statement.contains('»') &&
+        !statement.contains(String.fromCharCode(96)) &&
+        !statement.endsWith('?');
+  }
+
+  static AssistantNaturalCarColorCandidate? extractDirectUserCarColor(
+      String input) {
+    final statement = input.trim();
+    if (!_safeDirectStatement(statement)) return null;
+
+    final withoutPunctuation =
+        statement.replaceFirst(RegExp(r'[.!]
+    final statement = input.trim();
+    if (statement.isEmpty ||
+        statement.length > maxStatementChars ||
+        statement.contains('\n') ||
+        statement.contains('\r') ||
+        statement.contains('://') ||
+        statement.contains('@') ||
+        statement.contains('=') ||
+        statement.contains(':') ||
+        statement.contains('"') ||
+        statement.contains('“') ||
+        statement.contains('”') ||
+        statement.contains('«') ||
+        statement.contains('»') ||
+        statement.contains(String.fromCharCode(96)) ||
+        statement.endsWith('?')) {
+      return null;
+    }
+
+    final withoutPunctuation =
+        statement.replaceFirst(RegExp(r'[.!]$'), '').trim();
+    for (final declaration in _declarations) {
+      final match = declaration.pattern.firstMatch(withoutPunctuation);
+      if (match == null) continue;
+      final name = match.group(1)!.trim();
+      if (name.length < 2 ||
+          name.length > 32 ||
+          !_name.hasMatch(name) ||
+          _notNames.contains(name.toLowerCase())) {
+        return null;
+      }
+      return AssistantNaturalNameCandidate(
+        givenName: name,
+        language: declaration.language,
+        originalStatement: withoutPunctuation,
+      );
+    }
+    return null;
+  }
+}
+), '').trim();
+    for (final declaration in _carColorDeclarations) {
+      final match = declaration.pattern.firstMatch(withoutPunctuation);
+      if (match == null) continue;
+      final color = match.group(1)!.trim().toLowerCase();
+      if (!declaration.colors.contains(color)) return null;
+      return AssistantNaturalCarColorCandidate(
+        color: color,
+        language: declaration.language,
+        originalStatement: withoutPunctuation,
+      );
+    }
+    return null;
+  }
 
   static AssistantNaturalNameCandidate? extractDirectUserName(String input) {
     final statement = input.trim();
