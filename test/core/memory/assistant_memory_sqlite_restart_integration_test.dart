@@ -683,11 +683,14 @@ void main() {
       userConfirmed: true,
     ), isTrue);
 
-    await sessions.moveToTrash('natural-origin');
-    expect((await sessions.listSessions(inTrash: true)).single.id,
+    // Rebind the session service after SQLite reopen: the first instance
+    // points at a closed connection from before the restart.
+    final reopenedSessions = ChatSessionStore.forTesting(database);
+    await reopenedSessions.moveToTrash('natural-origin');
+    expect((await reopenedSessions.listSessions(inTrash: true)).single.id,
         'natural-origin');
     final coordinator = TrashedChatPurgeCoordinator(
-      sessionStore: sessions,
+      sessionStore: reopenedSessions,
       conversationMemoryService: makeSemanticMemory(),
       memoryCaptureService: reviewed,
     );
@@ -696,7 +699,7 @@ void main() {
       userConfirmed: true,
     ), 1);
     expect(await database.query('chat_history'), isEmpty);
-    expect((await sessions.listSessions()).single.id, 'another-conversation');
+    expect((await reopenedSessions.listSessions()).single.id, 'another-conversation');
 
     // Reconstruct store and retrieval after closing the original SQLite
     // connection; this is independent of Qwen, Phi and Nemotron inference.
