@@ -62,6 +62,7 @@ function catalogue(env) {
       provider: providerLabel(url.toString()),
       bindingPresent,
       testApproved,
+      manualOnly: row.manualOnly === true,
       selectable: bindingPresent && testApproved,
     });
   }
