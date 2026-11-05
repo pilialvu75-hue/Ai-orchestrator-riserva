@@ -56,6 +56,21 @@ void main() {
     home: page,
   );
 
+  // A live progress spinner is intentionally indeterminate; pumpAndSettle
+  // cannot be used as a readiness signal during protected async reads.
+  // Wait for the actual empty-register state with bounded frames instead.
+  Future<void> waitForConsentReady(WidgetTester tester) async {
+    await tester.pump();
+    for (var i = 0; i < 12 &&
+        find.byKey(const Key('consent-empty')).evaluate().isEmpty; i++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      });
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.byKey(const Key('consent-empty')), findsOneWidget);
+  }
+
   testWidgets('normal Settings entry cannot grant Cloud consent without auth',
       (tester) async {
     await tester.pumpWidget(
@@ -92,7 +107,7 @@ void main() {
       sessionId: 'verified-test-chat',
       credentials: credentials,
     )));
-    await tester.pumpAndSettle();
+    await waitForConsentReady(tester);
     expect(find.byKey(const Key('consent-inactive')), findsNothing);
     expect(find.byKey(const Key('consent-empty')), findsOneWidget);
     await tester.tap(find.byKey(const Key('consent-add')));
@@ -158,7 +173,7 @@ void main() {
       sessionId: 'session-a',
       credentials: credentials,
     )));
-    await tester.pumpAndSettle();
+    await waitForConsentReady(tester);
     await tester.tap(find.byKey(const Key('consent-add')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('consent-apply')), findsOneWidget);
