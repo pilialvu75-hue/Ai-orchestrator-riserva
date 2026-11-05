@@ -3,6 +3,6 @@
   "operation": "deploy_private",
   "confirmation": "DEPLOY_PRIVATE_CANTIERE",
   "environment": "web-private-production",
-  "requestId": "aivexus-web-p0-menu-diagnostics-pr991-20261105-0024",
-  "reason": "Owner-authorized private production deploy of PR #991: hamburger menu, sanitized Cloud route diagnostics and zero-cost-only model selection. No changes to Cloudflare Access, provider routes, credentials or policies."
+  "requestId": "aivexus-web-p0-nemotron-ultra-free-selftest-config-20261105",
+  "reason": "Owner-authorized private Pages redeploy after Cloudflare production route nemotron-ultra-orchestrator selfTestFree=true was verified by workflow 42002172729. No changes to credentials, Access, other routes or Web runtime."
 }

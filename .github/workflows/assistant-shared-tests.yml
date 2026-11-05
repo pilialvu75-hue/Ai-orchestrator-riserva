@@ -56,6 +56,7 @@ jobs:
           test/core/runtime/inference/hybrid_cloud_disclosure_consent_test.dart
           test/core/runtime/inference/hybrid_cloud_native_wire_sender_test.dart
           test/core/runtime/inference/hybrid_cloud_runtime_consent_coordinator_test.dart
+          test/core/runtime/inference/hybrid_cloud_confirmed_memory_provenance_test.dart
           test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart
           test/core/runtime/inference/hybrid_cloud_runtime_dispatch_test.dart
           test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart
@@ -66,6 +67,7 @@ jobs:
           test/core/runtime/inference/local_prompt_templates_test.dart
           test/core/runtime/inference/inference_service_test.dart
           test/core/memory/assistant_durable_memory_store_test.dart
+          test/core/memory/assistant_natural_memory_candidate_extractor_test.dart
           test/core/memory/assistant_memory_sqlite_restart_integration_test.dart
           test/core/memory/assistant_memory_preference_candidate_test.dart
           test/core/memory/assistant_memory_selective_forget_test.dart
