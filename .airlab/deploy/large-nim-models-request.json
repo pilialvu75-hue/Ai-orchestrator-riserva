@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "operation": "read_only",
+  "confirmation": "OWNER_APPROVED_TWO_NVIDIA_NIM_PROTOTYPE_MODELS",
+  "environment": "web-private-production",
+  "models": [
+    "moonshotai/kimi-k2.6",
+    "deepseek-ai/deepseek-v4.1-flash"
+  ],
+  "requestId": "aivexus-web-two-large-nim-read-only-20261105"
+}
