@@ -137,3 +137,21 @@ test('malformed JSON response is safely classified', async () => {
   assert.equal(r.status, 502);
   assert.equal(r.body.error.failureKind, 'upstream_invalid_json');
 });
+
+test('reasoning token exhaustion is diagnosed without exposing hidden reasoning', async () => {
+  const r = await request({
+    routeId: 'deepseek-v41-flash-orchestrator',
+    mockResponse: () => new Response(JSON.stringify({
+      model: 'deepseek-ai/deepseek-v4.1-flash',
+      choices: [{
+        message: { content: '', reasoning_content: 'private synthetic chain' },
+        finish_reason: 'length',
+      }],
+      usage: { completion_tokens: 1536 },
+    }), { status: 200 }),
+  });
+  assert.equal(r.status, 502);
+  assert.equal(r.body.error.failureKind, 'output_token_limit');
+  assert.equal(r.body.error.routeId, 'deepseek-v41-flash-orchestrator');
+  assert.doesNotMatch(JSON.stringify(r.body), /private synthetic chain/);
+});
