@@ -716,6 +716,18 @@ consenso esplicito.
   la Chat ora indica che gli estratti sono preparati per la review e non
   dichiara prematuramente un upload riuscito. Test simulato, non prova
   di traffico reale su S24; risultati CI della HEAD ancora da confermare.
+- **H25 — rifiuto di consenso Cloud con prosecuzione HYBRID->LOCAL:**
+  il sender gated restituisce il motivo `InferenceErrorCode.cloudConsentDenied`,
+  anziche affidarsi al testo del messaggio. Una richiesta HYBRID di origine
+  Chat verificata puo quindi proseguire con `localOnly` dopo rifiuto
+  senza un secondo provider Cloud: il riferimento al provider Cloud e
+  la vecchia evidence vengono rimossi. Il recupero dei ricordi
+  confermati si verifica soltanto DOPO la scelta LOCAL, impedendo
+  trasferimenti impliciti di memoria privata. Non avviene fallback
+  per errori generici, Cloud ordinario, o dopo testo gia prodotto.
+  Test di routing e test del bundle con HTTP simulato nella suite
+  Assistant Shared Tests; il risultato CI di H25 va verificato.
+  Non ancora continuita con checkpoint/semantic resume reale.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
