@@ -30,8 +30,8 @@ jobs:
         run: |
           set -euo pipefail
           node --check scripts/airlab/web_p0_enroll_large_nim_models.mjs
-          node --check functions/api/cantiere/inference.js
-          node --check functions/api/cantiere/models.js
+          node --input-type=module --check < functions/api/cantiere/inference.js
+          node --input-type=module --check < functions/api/cantiere/models.js
       - name: Set up Flutter for cross-product model tests
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
