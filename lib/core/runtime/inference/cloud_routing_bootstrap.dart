@@ -235,6 +235,7 @@ abstract final class CloudRoutingBootstrap {
             imageVisionService: CloudChatImageVisionService(),
             localImageVisionService: AndroidChatLocalImageVisionService(),
             videoStoryboardService: AndroidChatVideoStoryboardService(),
+            consentGatedAssistantCloud: enableConsentGatedAssistantCloud,
             fileContextService: ChatFileContextService(
               indexService: sl<LocalDocumentIndexService>(),
               databaseHelper: sl<DatabaseHelper>(),

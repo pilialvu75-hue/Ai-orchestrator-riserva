@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart'
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_prompt_provenance.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_visual_attachment_guard.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -46,6 +47,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
     this.localImageVisionService,
     this.videoStoryboardService,
     this.fileContextService,
+    this.consentGatedAssistantCloud = false,
   })  : _orchestrator = orchestrator,
         _orchestratorProvider = orchestratorProvider;
 
@@ -65,6 +67,23 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
   final ChatImageVisionService? localImageVisionService;
   final ChatVideoStoryboardService? videoStoryboardService;
   final ChatFileContextService? fileContextService;
+
+  /// True only for the explicitly enabled consent-gated Assistant runtime.
+  /// The legacy Chat and on-device vision are unchanged by default.
+  final bool consentGatedAssistantCloud;
+
+  void _enforceCloudVisualConsentBoundary(List<ChatAttachment> attachments) {
+    if (HybridCloudVisualAttachmentGuard.shouldDeny(
+      consentGatedAssistantCloud: consentGatedAssistantCloud,
+      runtimeMode: runtimeSettingsService?.runtimeMode,
+      attachments: attachments,
+    )) {
+      throw const ServerFailure(
+        'Image/Video Cloud: anteprima e consenso per allegati visivi '
+        'non sono ancora disponibili. Nessun file e stato inviato al Cloud.',
+      );
+    }
+  }
 
   static const _uuid = Uuid();
   final Set<String> _activeSendSessions = <String>{};
@@ -169,6 +188,8 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
           try {
             final attachmentsSnapshot =
                 List<ChatAttachment>.unmodifiable(attachments);
+            // Fail closed before local persistence or any visual pre-processing.
+            _enforceCloudVisualConsentBoundary(attachmentsSnapshot);
             RuntimeEventLog.instance.emit(
               '[FORENSIC_CONVERSATION_START] session=$sessionId prompt_chars=${userPrompt.trim().length} attachments=${attachmentsSnapshot.length}',
             );
@@ -239,6 +260,8 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                   runtimeSettingsService?.runtimeMode == AiRuntimeMode.cloud;
               final ChatImageVisionResult vision;
               if (isCloud) {
+                // Runtime mode may have changed while history was assembled.
+                _enforceCloudVisualConsentBoundary(attachmentsSnapshot);
                 final selectedProvider = ChatImageVisionAutoRouter.select(
                   manualProvider: runtimeSettingsService?.manualCloudProvider,
                   automaticUseAllowed: (providerId) =>
@@ -322,6 +345,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                   'e un provider visivo manualmente.',
                 );
               }
+              _enforceCloudVisualConsentBoundary(attachmentsSnapshot);
               final provider = runtimeSettingsService?.manualCloudProvider;
               if (provider != 'openAi' && provider != 'gemini') {
                 throw const ServerFailure(

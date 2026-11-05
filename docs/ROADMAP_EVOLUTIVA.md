@@ -699,6 +699,15 @@ consenso esplicito.
   **Non ancora release:** mancano opt-in UI/Settings autenticati,
   selezione provider verificata sul dispositivo, gestione del consenso
   negato senza perdita dei ricordi Local e QA fisica.
+- **H23 — barriera agli allegati visivi nel trasporto Chat con consenso:**
+  il flag sperimentale `enableConsentGatedAssistantCloud` blocca il percorso
+  separato Image/Video Cloud prima di invio e conversione storyboard, poiche
+  l'anteprima corrente classifica testo e documenti, non pixel/fotogrammi.
+  Il controllo avviene all'ingresso e prima del trasporto visivo, anche dopo
+  eventuali cambi della modalita durante la preparazione. LOCAL e HYBRID
+  mantengono l'analisi locale delle immagini e la Chat installata mantiene
+  il flag predefinito false. Aggiunta regressione alla CI Assistant Shared
+  Tests: il suo esito sul commit H23 va ancora verificato. Nessuna release.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
