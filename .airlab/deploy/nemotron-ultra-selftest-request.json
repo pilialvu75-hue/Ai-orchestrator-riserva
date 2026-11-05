@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "operation": "check_ultra_free_self_test",
+  "operation": "authorize_ultra_free_self_test",
   "confirmation": "OWNER_AUTHORIZED_NVIDIA_ULTRA_FREE_PROTOTYPE",
   "environment": "web-private-production",
   "routeId": "nemotron-ultra-orchestrator",
   "model": "nvidia/nemotron-3-ultra-550b-a55b",
-  "requestId": "aivexus-web-p0-ultra-read-only-preflight-20261105"
+  "requestId": "aivexus-web-p0-ultra-authorize-production-20261105"
 }
