@@ -818,6 +818,88 @@ void main() {
       ), isEmpty);
     });
 
+    test('car-color fact from ordinary chat needs consent and owner review',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final preferences = await SharedPreferences.getInstance();
+      final consent = AssistantNaturalMemoryConsentService(
+        preferences: preferences,
+      );
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(
+          persistence: _PromptMemoryPersistence(),
+        ),
+      );
+      final capture = AssistantDurableMemoryCaptureService(
+        memoryService: memory,
+        now: () => DateTime.now().millisecondsSinceEpoch,
+      );
+      final delegate = _RecordingChatRepository();
+      var mode = AiRuntimeMode.local;
+      final repository = PromptResolvingChatRepository(
+        runtimeMode: () => mode,
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: capture,
+        naturalMemoryConsentService: consent,
+      );
+
+      await repository.sendMessage(
+        sessionId: 'car-first',
+        userPrompt: 'La mia auto è blu',
+      );
+      expect(await capture.loadReviewableNaturalCarColorCandidates(), isEmpty);
+
+      await consent.setEnabled(true);
+      mode = AiRuntimeMode.cloud;
+      await repository.sendMessage(
+        sessionId: 'car-first',
+        userPrompt: 'La mia auto è blu',
+      );
+      final staged =
+          (await capture.loadReviewableNaturalCarColorCandidates()).single;
+      expect(staged.content, 'La mia auto è blu');
+      expect(delegate.lastSystemPrompt,
+          isNot(contains('CONFIRMED DURABLE MEMORY')));
+      expect(await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ), isEmpty);
+
+      mode = AiRuntimeMode.local;
+      await repository.sendMessage(
+        sessionId: 'car-second',
+        userPrompt: 'What color is my car?',
+      );
+      expect(delegate.lastSystemPrompt,
+          isNot(contains('La mia auto è blu')));
+      expect(await capture.reviewNaturalCarColorCandidate(
+        reviewed: staged,
+        approve: true,
+        userConfirmed: true,
+      ), isTrue);
+
+      await repository.sendMessage(
+        sessionId: 'car-third',
+        userPrompt: 'What color is my car?',
+      );
+      expect(delegate.lastSystemPrompt, contains('La mia auto è blu'));
+
+      await consent.setEnabled(false);
+      await repository.sendMessage(
+        sessionId: 'car-fourth',
+        userPrompt: 'La mia auto è rossa',
+      );
+      expect(await capture.loadReviewableNaturalCarColorCandidates(), isEmpty);
+      expect((await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      )).single.content, 'La mia auto è blu');
+    });
+
     test('custom fixed-language prompt remains authoritative', () async {
       const fixedItalian = 'Always answer in Italian.';
       final fixture = await createService(<String, Object>{
