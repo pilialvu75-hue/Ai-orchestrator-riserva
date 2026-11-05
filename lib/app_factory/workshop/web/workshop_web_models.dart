@@ -15,6 +15,7 @@ final class WorkshopWebModelRoute {
     required this.bindingPresent,
     required this.testApproved,
     required this.selectable,
+    this.manualOnly = false,
   });
 
   final String routeId;
@@ -23,6 +24,7 @@ final class WorkshopWebModelRoute {
   final bool bindingPresent;
   final bool testApproved;
   final bool selectable;
+  final bool manualOnly;
 
   static WorkshopWebModelRoute? fromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -41,6 +43,7 @@ final class WorkshopWebModelRoute {
       provider: provider,
       bindingPresent: raw['bindingPresent'] == true,
       testApproved: raw['testApproved'] == true,
+      manualOnly: raw['manualOnly'] == true,
       selectable: raw['selectable'] == true &&
           raw['bindingPresent'] == true &&
           raw['testApproved'] == true,
