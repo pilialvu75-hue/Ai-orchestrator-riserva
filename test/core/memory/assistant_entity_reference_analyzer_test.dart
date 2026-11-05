@@ -56,7 +56,7 @@ void main() {
       'Nora è sovrappeso.',
     )!;
     final c = AssistantEntityReferenceAnalyzer.parseDirectUserStatement(
-      'Nora è sovrappeso.',
+      'Nóra è sovrappeso.',
     )!;
     expect(a.nameReferenceKey, b.nameReferenceKey);
     expect(a.nameReferenceKey, isNot(c.nameReferenceKey));
