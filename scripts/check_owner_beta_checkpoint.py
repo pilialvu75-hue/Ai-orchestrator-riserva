@@ -3,6 +3,8 @@
 
 Production releases still require Build & Release APK's workflow_dispatch
 with release_channel=beta, stable is never dispatched automatically.
+An explicitly labeled checkpoint PR merged by the repository owner may
+also authorize the beta after source CI passes.
 A public issue/comment cannot cause deployment unless both the issue and
 comment are owned by the actual repository owner, and the pinned issue
 number and exact current source SHA match.
@@ -18,6 +20,13 @@ def validate(source: str) -> list[str]:
         "  issue_comment:",
         "    types: [created]",
         "  pull_request:",
+        "types: [opened, reopened, synchronize, closed]",
+        "github.event.action == 'closed'",
+        "github.event.pull_request.merged == true",
+        "github.event.pull_request.base.ref == 'main'",
+        "github.event.pull_request.user.login == github.repository_owner",
+        "contains(github.event.pull_request.title, '[beta-checkpoint]')",
+        "'.pull_request.merge_commit_sha // \"\"'",
         "github.event.issue.number == 1008",
         "github.event.issue.pull_request == null",
         "github.event.issue.state == 'open'",
