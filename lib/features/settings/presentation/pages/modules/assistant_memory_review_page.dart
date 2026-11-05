@@ -1,21 +1,25 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
 import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 
-/// Explicit, developer-only preview for reviewing local memory proposals.
+/// Local review and explicit opt-in for staging natural memory proposals.
 ///
-/// No implicit chat capture, telemetry, network access or automatic approvals.
-/// The caller must only expose this page on a trusted single-user device;
-/// account-aware owner isolation is a separate release gate.
+/// Automatic proposal staging is off by default and limited to direct-user,
+/// attachment-free first-name declarations in ordinary chat. No proposal is
+/// promoted to confirmed memory or shared with Cloud without separate consent.
+/// Account-aware owner isolation remains a future multi-user release gate.
 class AssistantMemoryReviewPage extends StatefulWidget {
   const AssistantMemoryReviewPage({
     super.key,
     required this.captureService,
+    required this.consentService,
   });
 
   final AssistantDurableMemoryCaptureService captureService;
+  final AssistantNaturalMemoryConsentService consentService;
 
   @override
   State<AssistantMemoryReviewPage> createState() =>
@@ -31,6 +35,7 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
   bool _loading = true;
   bool _busy = false;
   bool _manualConsent = false;
+  bool _savingConsent = false;
 
   String _t(String key) =>
       AppLocalizations(Localizations.localeOf(context)).t('memory_review_$key');
@@ -78,6 +83,19 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(_t(key))),
     );
+  }
+
+  Future<void> _toggleChatSuggestions(bool enabled) async {
+    if (_savingConsent) return;
+    setState(() => _savingConsent = true);
+    try {
+      await widget.consentService.setEnabled(enabled);
+      if (mounted) setState(() {});
+    } on Object catch (_) {
+      _message('chat_consent_save_error');
+    } finally {
+      if (mounted) setState(() => _savingConsent = false);
+    }
   }
 
   Future<void> _propose() async {
@@ -255,6 +273,17 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
           children: [
             Text(
               _t('intro'),
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              value: widget.consentService.enabled,
+              onChanged: _savingConsent || _busy
+                  ? null
+                  : _toggleChatSuggestions,
+              title: Text(_t('chat_consent_title')),
+              subtitle: Text(_t('chat_consent_note')),
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.psychology_outlined),
             ),
             const SizedBox(height: 16),
             Text(
