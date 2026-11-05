@@ -35,7 +35,7 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 MinVersion=6.1sp1
 PrivilegesRequired=admin
-CloseApplications=force
+CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
 
