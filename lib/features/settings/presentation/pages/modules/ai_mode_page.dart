@@ -3,12 +3,10 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
-import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_disclosure_consent.dart';
-import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_local_identity.dart';
+import 'package:ai_orchestrator/core/runtime/inference/nvidia_nim_large_models.dart';
 import 'package:ai_orchestrator/features/settings/presentation/cloud_provider_access_summary.dart';
 import 'package:ai_orchestrator/features/settings/presentation/widgets/cloud_provider_access_card.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/custom_cloud_providers_page.dart';
-import 'package:ai_orchestrator/features/settings/presentation/pages/modules/hybrid_cloud_consent_settings_page.dart';
 
 class AiModePage extends StatefulWidget {
   const AiModePage({
@@ -64,40 +62,6 @@ class _AiModePageState extends State<AiModePage> {
       _budgetController.text = budget?.toString() ?? '';
       _loading = false;
     });
-  }
-
-  Future<void> _openCloudConsents() async {
-    // Per-install protected session: never mistake a public diagnostics ID
-    // for ownership or assume a Cloud account has been authenticated.
-    try {
-      final localIdentity = HybridCloudLocalIdentity.instance;
-      final session = await localIdentity.openSession();
-      if (!mounted) return;
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute<void>(
-          builder: (_) => HybridCloudConsentSettingsPage(
-            manager: HybridCloudDisclosureConsent(
-              backend: FlutterSecureCloudConsentStorage(),
-              authorizeOwnerSession: localIdentity.isAuthorized,
-            ),
-            ownerId: session.ownerId,
-            sessionId: session.sessionId,
-            credentials: _credentialStore,
-          ),
-        ),
-      );
-    } on Object {
-      // Secure storage unavailable or invalid: an inactive screen is safer
-      // than using a fabricated user ID or silently granting access.
-      if (!mounted) return;
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute<void>(
-          builder: (_) => const HybridCloudConsentSettingsPage(),
-        ),
-      );
-    }
   }
 
   void _selectProvider(String provider) {
@@ -300,15 +264,6 @@ class _AiModePageState extends State<AiModePage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                Card(child: ListTile(
-                  key: const Key('open-cloud-consents'),
-                  leading: const Icon(Icons.shield_outlined),
-                  title: Text(l10n.t('cloud_permission_title')),
-                  subtitle: Text(l10n.t('cloud_permission_subtitle')),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: _openCloudConsents,
-                )),
                 const SizedBox(height: 28),
                 const _SectionTitle('Cloud providers'),
                 const SizedBox(height: 10),
@@ -421,6 +376,46 @@ class _AiModePageState extends State<AiModePage> {
                   ),
                 ],
                 const SizedBox(height: 12),
+                if (_provider == 'nvidiaNim') ...<Widget>[
+                  const Text(
+                    'NVIDIA NIM · prototipi Cloud avanzati',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final model in NvidiaNimLargeModels.prototypeOptions)
+                    RadioListTile<String>(
+                      dense: true,
+                      title: Text(
+                        NvidiaNimLargeModels.labels[model] ?? model,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        model,
+                        style: const TextStyle(color: Colors.white54),
+                      ),
+                      value: model,
+                      groupValue: NvidiaNimLargeModels.isKnownPrototype(
+                        _modelController.text,
+                      )
+                          ? _modelController.text
+                          : null,
+                      onChanged: _saving
+                          ? null
+                          : (selected) {
+                              if (selected == null) return;
+                              setState(() => _modelController.text = selected);
+                            },
+                    ),
+                  const Text(
+                    'Questi modelli condividono la credenziale NVIDIA NIM. '
+                    'Sono disponibili per test/prototipazione, non '
+                    'automaticamente gratuiti per uso commerciale. '
+                    'In Hybrid valgono i consensi Cloud, le autorizzazioni '
+                    'di spesa e la scelta esplicita del provider.',
+                    style: TextStyle(color: Colors.white54, height: 1.3),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 TextField(
                   controller: _modelController,
                   autocorrect: false,

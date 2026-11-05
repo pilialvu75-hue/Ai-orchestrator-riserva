@@ -17,6 +17,21 @@ class AssistantNaturalNameCandidate {
   final String originalStatement;
 }
 
+/// A directly stated, review-only vehicle color. No owner is inferred.
+class AssistantNaturalCarColorCandidate {
+  const AssistantNaturalCarColorCandidate({
+    required this.color,
+    required this.language,
+    required this.originalStatement,
+  });
+
+  static const String recordKey = 'natural.user.car_color';
+
+  final String color;
+  final String language;
+  final String originalStatement;
+}
+
 abstract final class AssistantNaturalMemoryCandidateExtractor {
   static const int maxStatementChars = 96;
 
@@ -58,6 +73,81 @@ abstract final class AssistantNaturalMemoryCandidateExtractor {
     'here', 'there', 'sorry', 'hungry', 'busy', 'sure', 'lost',
     'confused', 'alone', 'sick', 'well', 'late', 'early',
   };
+
+  // Closed first-person and one-word color vocabulary: not arbitrary facts.
+  static final List<({
+    String language,
+    RegExp pattern,
+    Set<String> colors,
+  })> _carColorDeclarations = [
+    (
+      language: 'it',
+      pattern: RegExp(r'^la mia (?:auto|macchina) è\s+(.+)$',
+          caseSensitive: false),
+      colors: {
+        'blu', 'rossa', 'rosso', 'nera', 'nero', 'bianca', 'bianco',
+        'grigia', 'grigio', 'verde', 'gialla', 'giallo',
+      },
+    ),
+    (
+      language: 'en',
+      pattern: RegExp(r'^my car is\s+(.+)$', caseSensitive: false),
+      colors: {'blue', 'red', 'black', 'white', 'grey', 'gray', 'green', 'yellow'},
+    ),
+    (
+      language: 'fr',
+      pattern: RegExp(r'^ma voiture est\s+(.+)$', caseSensitive: false),
+      colors: {
+        'bleue', 'bleu', 'rouge', 'noire', 'noir', 'blanche',
+        'blanc', 'grise', 'gris', 'verte', 'vert', 'jaune',
+      },
+    ),
+    (
+      language: 'es',
+      pattern: RegExp(r'^mi (?:coche|carro|auto) es\s+(.+)$',
+          caseSensitive: false),
+      colors: {
+        'azul', 'rojo', 'roja', 'negro', 'negra', 'blanco', 'blanca',
+        'gris', 'verde', 'amarillo', 'amarilla',
+      },
+    ),
+  ];
+
+  static AssistantNaturalCarColorCandidate? extractDirectUserCarColor(
+      String input) {
+    final statement = input.trim();
+    if (statement.isEmpty ||
+        statement.length > maxStatementChars ||
+        statement.contains('\n') ||
+        statement.contains('\r') ||
+        statement.contains('://') ||
+        statement.contains('@') ||
+        statement.contains('=') ||
+        statement.contains(':') ||
+        statement.contains('"') ||
+        statement.contains('“') ||
+        statement.contains('”') ||
+        statement.contains('«') ||
+        statement.contains('»') ||
+        statement.contains(String.fromCharCode(96)) ||
+        statement.endsWith('?')) {
+      return null;
+    }
+
+    final clean = statement.replaceFirst(RegExp(r'[.!]$'), '').trim();
+    for (final declaration in _carColorDeclarations) {
+      final match = declaration.pattern.firstMatch(clean);
+      if (match == null) continue;
+      final color = match.group(1)!.trim().toLowerCase();
+      if (!declaration.colors.contains(color)) return null;
+      return AssistantNaturalCarColorCandidate(
+        color: color,
+        language: declaration.language,
+        originalStatement: clean,
+      );
+    }
+    return null;
+  }
 
   static AssistantNaturalNameCandidate? extractDirectUserName(String input) {
     final statement = input.trim();

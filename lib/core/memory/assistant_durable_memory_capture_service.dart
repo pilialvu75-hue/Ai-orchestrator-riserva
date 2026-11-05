@@ -203,20 +203,32 @@ final class AssistantDurableMemoryCaptureService {
 
   /// Direct-user, one-given-name proposal in IT/EN/FR/ES.
   ///
-  /// Both gates must be explicit. The method is not wired to ordinary chat
-  /// until a persistent and user-visible opt-in is implemented. Never pass
-  /// assistant output, Web, files or quoted transcripts to this method.
+  /// Both source and consent gates must be explicit. When called from chat,
+  /// [consentStillEnabled] is re-read inside the serialized write queue so a
+  /// revocation during another memory operation cannot stage a late proposal.
+  /// Never pass assistant output, Web, files or quoted transcripts here.
   /// No candidate is eligible for ordinary retrieval before owner review.
   Future<bool> proposeNaturalUserNameCandidate({
     required String userPrompt,
+    String? sessionId,
     bool consentEnabled = false,
     bool directUserMessage = false,
+    bool Function()? consentStillEnabled,
   }) {
-    if (!consentEnabled || !directUserMessage || _resetInProgress) {
+    final id = sessionId?.trim();
+    if (!consentEnabled ||
+        !directUserMessage ||
+        _resetInProgress ||
+        (id != null && (id.isEmpty || _purgedSessions.contains(id))) ||
+        (consentStillEnabled != null && !consentStillEnabled())) {
       return Future<bool>.value(false);
     }
     final operation = _pendingWrites.then((_) async {
-      if (_resetInProgress) return false;
+      if (_resetInProgress ||
+          (id != null && _purgedSessions.contains(id)) ||
+          (consentStillEnabled != null && !consentStillEnabled())) {
+        return false;
+      }
       final extracted =
           AssistantNaturalMemoryCandidateExtractor.extractDirectUserName(
               userPrompt);
@@ -295,6 +307,131 @@ final class AssistantDurableMemoryCaptureService {
     final finalText = (correctedContent ?? reviewed.content).trim();
     if (approve &&
         AssistantNaturalMemoryCandidateExtractor.extractDirectUserName(
+            finalText) == null) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) {
+      if (_resetInProgress) return Future<bool>.value(false);
+      return _memoryService.resolveUserStatementCandidate(
+        reviewed: reviewed,
+        approve: approve,
+        approvedContent: approve ? finalText : null,
+        reviewedAt: _now(),
+      );
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  /// Direct-user car-color proposal in IT/EN/FR/ES.
+  ///
+  /// Both source and consent gates must be explicit. When called from chat,
+  /// [consentStillEnabled] is re-read inside the serialized write queue so a
+  /// revocation during another memory operation cannot stage a late proposal.
+  /// Never pass assistant output, Web, files or quoted transcripts here.
+  /// No candidate is eligible for ordinary retrieval before owner review.
+  Future<bool> proposeNaturalUserCarColorCandidate({
+    required String userPrompt,
+    String? sessionId,
+    bool consentEnabled = false,
+    bool directUserMessage = false,
+    bool Function()? consentStillEnabled,
+  }) {
+    final id = sessionId?.trim();
+    if (!consentEnabled ||
+        !directUserMessage ||
+        _resetInProgress ||
+        (id != null && (id.isEmpty || _purgedSessions.contains(id))) ||
+        (consentStillEnabled != null && !consentStillEnabled())) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) async {
+      if (_resetInProgress ||
+          (id != null && _purgedSessions.contains(id)) ||
+          (consentStillEnabled != null && !consentStillEnabled())) {
+        return false;
+      }
+      final extracted =
+          AssistantNaturalMemoryCandidateExtractor.extractDirectUserCarColor(
+              userPrompt);
+      if (extracted == null) return false;
+      await _memoryService.recordUserCandidate(
+        recordKey: AssistantNaturalCarColorCandidate.recordKey,
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: extracted.originalStatement,
+        updatedAt: _now(),
+        reason: 'natural_direct_car_color:${extracted.language}',
+      );
+      return true;
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  /// Review-only; car-color candidates are never confirmed by the parser itself.
+  Future<List<AssistantDurableMemoryRecord>>
+      loadReviewableNaturalCarColorCandidates() async {
+    final records = await _memoryService.loadCandidates(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+    );
+    return List<AssistantDurableMemoryRecord>.unmodifiable(
+      records.where((record) {
+        if (record.recordKey != AssistantNaturalCarColorCandidate.recordKey ||
+            record.kind != AssistantMemoryKind.fact ||
+            record.source != AssistantMemorySource.userStatement) {
+          return false;
+        }
+        final parsed =
+            AssistantNaturalMemoryCandidateExtractor.extractDirectUserCarColor(
+                record.content);
+        return parsed != null &&
+            record.reason == 'natural_direct_car_color:${parsed.language}';
+      }),
+    );
+  }
+
+  /// Approve, correct or reject exactly the candidate displayed to the owner.
+  /// The SQLite store performs compare-and-swap under its scope write lock.
+  Future<bool> reviewNaturalCarColorCandidate({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    bool userConfirmed = false,
+    String? correctedContent,
+  }) {
+    if (!userConfirmed ||
+        _resetInProgress ||
+        reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.scopeId !=
+            AssistantDurableMemoryContextService.localUserScopeId ||
+        reviewed.status != AssistantMemoryStatus.candidate ||
+        reviewed.source != AssistantMemorySource.userStatement ||
+        reviewed.kind != AssistantMemoryKind.fact ||
+        reviewed.recordKey != AssistantNaturalCarColorCandidate.recordKey) {
+      return Future<bool>.value(false);
+    }
+
+    final original =
+        AssistantNaturalMemoryCandidateExtractor.extractDirectUserCarColor(
+            reviewed.content);
+    if (original == null ||
+        reviewed.reason != 'natural_direct_car_color:${original.language}' ||
+        (!approve && correctedContent != null)) {
+      return Future<bool>.value(false);
+    }
+
+    final finalText = (correctedContent ?? reviewed.content).trim();
+    if (approve &&
+        AssistantNaturalMemoryCandidateExtractor.extractDirectUserCarColor(
             finalText) == null) {
       return Future<bool>.value(false);
     }

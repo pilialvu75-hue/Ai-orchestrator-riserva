@@ -32,6 +32,34 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      # GitHub's hosted runner can be nearly full after SDK/Flutter setup.
+      # Reclaim only SDKs irrelevant to this Android native validation.
+      # Keep Flutter, Java, Android SDK platforms/tools, NDK, Gradle and caches.
+      - name: Reclaim unused hosted SDK disk before Android native validation
+        run: |
+          set -euo pipefail
+          echo 'Disk space before targeted SDK cleanup:'
+          df -h /
+
+          for unused_sdk in \
+            /usr/share/dotnet \
+            /usr/local/share/powershell \
+            /opt/ghc \
+            "${ANDROID_SDK_ROOT}/system-images"; do
+            if [ -d "$unused_sdk" ]; then
+              echo "Removing unused hosted SDK: $unused_sdk"
+              sudo rm -rf -- "$unused_sdk"
+            fi
+          done
+
+          echo 'Disk space after targeted SDK cleanup:'
+          df -h /
+          available_mb="$(df -Pm / | awk 'NR == 2 {print $4}')"
+          echo "android_validation_disk_available_mb=$available_mb"
+          if [ "$available_mb" -lt 6144 ]; then
+            echo "::warning::Less than 6 GiB free before Vulkan native validation."
+          fi
+
       - name: Ensure llama.cpp submodule
         run: |
           if [ ! -f third_party/llama.cpp/CMakeLists.txt ]; then
