@@ -658,6 +658,28 @@ Le anomalie di lingua, risposte inventate e date sono consegnate al
 filone qualita [#973](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/973),
 gestito da Work: **evitare PR concorrenti sugli stessi file di qualita**.
 
+### 17.3 bis — Aggiornamento operativo del 5 novembre 2026 (codice vs test fisici)
+
+Il piano e gli obiettivi di 17.1–17.6 restano invariati. Questo registro
+aggiorna le **evidenze di implementazione**, senza attribuire un PASS fisico
+alle modifiche che sono state controllate soltanto con GitHub Actions.
+
+| Tranche | Esito verificato nel repository | Stato reale / gate residuo |
+| --- | --- | --- |
+| ME-0 — persistenza e scope | [PR #993](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/993), integrazione test file-backed; [#994](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/994), eliminazione selettiva della chat nel cestino; [#995](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/995), barriere in-process contro scritture tardive. Tutte integrate con CI verde. | Mancano collaudo S24 (incluso STELLA73), protezioni persistenti ME-2 e verifica su ripristini/restart reali. Il pulsante di purge definitivo non e ancora esposto nella UI. |
+| ME-1 — presentazioni naturali | [#996](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/996), parser diretto IT/EN/FR/ES con review; [#998](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/998), opt-in locale persistente inizialmente OFF, revocabile e connesso alla chat ordinaria senza allegati. Integrate con CI verde. | Il riconoscimento crea soltanto candidati; conferma/correzione/rifiuto avvengono nella pagina Memoria. Non e ancora estrazione libera di conversazioni lunghe, e l'opt-in del dispositivo non e pairing multipiattaforma. |
+| ME-1 — primo fatto autobiografico oltre il nome | [#999](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/999), «La mia auto e blu» e equivalenti EN/FR/ES, parser conservativo, conferma umana e retrieval locale mirato. Integrata con CI verde. | Rimane da misurare falsi positivi, variazioni linguistiche, contraddizioni e qualità reale delle risposte con Qwen/Phi/Nemotron. |
+| ME-0 + ME-1 — regressione integrata | Prova file-backed SQLite in preparazione: candidato naturale NON recuperabile prima di review; conferma, eliminazione della chat originale, riavvio, recupero in nuova chat nelle 4 lingue, forget selettivo. | Il test automatico non sostituisce STELLA73, offline e il collaudo dell'aggiornamento distribuito su Galaxy S24 FE. |
+
+**Separazioni obbligatorie:** la chat eliminata, i record USER e i vettori
+semantici sono dati distinti; i candidati non sono fatti confermati.
+LOCAL non richiede provider esterni/Cloud; nei modi HYBRID/Cloud non
+aggiungere ricordi personali al prompt senza gli appositi consensi
+([#977](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/977)).
+Un test CI non e un test fisico, una build compilata non e una release
+installata, e il nuovo parser non corregge automaticamente le risposte
+allucinate dei modelli (filone [#973](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/973)).
+
 ### 17.4 — Piano per milestone con gate di accettazione
 
 | Milestone | Priorita | Deliverable e gate verificabile |
