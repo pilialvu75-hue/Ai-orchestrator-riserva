@@ -80,6 +80,7 @@ class UpdateChecker {
       final remoteLatest = _pickNewestManifest(
         fromManifest,
         fromGitHub,
+        preferredChannel,
       );
       if (remoteLatest != null) {
         final artifact = remoteLatest.artifactFor(targetPlatform);
@@ -185,10 +186,19 @@ class UpdateChecker {
   UpdateManifest? _pickNewestManifest(
     UpdateManifest? first,
     UpdateManifest? second,
+    ReleaseChannel preferredChannel,
   ) {
     if (first == null) return second;
     if (second == null) return first;
-    final comparison = _comparator.compare(second.version, first.version);
+    final comparison = _isNewerReleaseForChannel(
+      second,
+      first,
+      preferredChannel,
+    )
+        ? 1
+        : _isNewerReleaseForChannel(first, second, preferredChannel)
+            ? -1
+            : 0;
     _logVersion(
       'Comparing remote versions: first=${first.version} '
       'second=${second.version} compare=$comparison',
@@ -391,11 +401,13 @@ class UpdateChecker {
     return best;
   }
 
-  /// Android's official beta APK has a monotonically increasing build code,
+  /// Official Android and Windows betas have monotonically increasing build
+  /// codes. Desktop installers must honor a newer beta build when the owner
+  /// selected Beta; strict SemVer would incorrectly prefer an older stable.
   /// but PackageInfo drops the beta suffix. With explicit Beta opt-in,
   /// 1.0.15-beta+103581 must outrank older 1.0.15+103569 even though
   /// conventional SemVer ranks every stable above every beta of that base.
-  /// Limit this exception to known numeric four-segment *Android* releases
+  /// Limit this exception to known numeric four-segment Android/Windows releases
   /// with the same major/minor/patch. Other platforms and versions continue
   /// to follow SemVer. Never pick an older build or a malformed tag.
   bool _isNewerReleaseForChannel(
@@ -403,7 +415,8 @@ class UpdateChecker {
     UpdateManifest current,
     ReleaseChannel preferredChannel,
   ) {
-    if (targetPlatform == UpdateTargetPlatform.android &&
+    if ((targetPlatform == UpdateTargetPlatform.android ||
+            targetPlatform == UpdateTargetPlatform.windows) &&
         preferredChannel == ReleaseChannel.beta) {
       final a = _comparator.parse(candidate.version);
       final b = _comparator.parse(current.version);
