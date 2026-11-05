@@ -209,6 +209,7 @@ class InferenceRequest {
     String? trustedDocumentWebQuery,
     HybridCloudRuntimeSourceEvidence? trustedCloudSourceEvidence,
     bool discardTrustedCloudSourceEvidence = false,
+    bool discardCloudProviderId = false,
     int? maxTokens,
     double? temperature,
     bool? preserveMaxTokens,
@@ -254,7 +255,9 @@ class InferenceRequest {
       attemptId: attemptId ?? this.attemptId,
       checkpointId: checkpointId ?? this.checkpointId,
       routeDirective: routeDirective ?? this.routeDirective,
-      cloudProviderId: cloudProviderId ?? this.cloudProviderId,
+      cloudProviderId: discardCloudProviderId
+          ? null
+          : cloudProviderId ?? this.cloudProviderId,
       allowCloudProviderFailover:
           allowCloudProviderFailover ?? this.allowCloudProviderFailover,
       firstTokenTimeoutOverride:

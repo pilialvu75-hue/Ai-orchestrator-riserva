@@ -219,7 +219,50 @@ class Orchestrator {
       );
     }
 
+    // Only an opt-in HYBRID Cloud refusal with trusted Chat provenance
+    // may resume locally. No localized error-string matching or Cloud retry.
+    if (_runtimeSettingsService?.runtimeMode == AiRuntimeMode.hybrid &&
+        request.routeDirective == InferenceRouteDirective.cloudOnly &&
+        trustedCloudSourceEvidence != null &&
+        _cloudRuntimeProvider?.consentGated == true) {
+      return _streamHybridCloudWithLocalConsentFallback(
+        request: request,
+        originalUserQuestion: trustedCloudSourceEvidence.originalQuestion,
+      );
+    }
     return _inferenceService.stream(request);
+  }
+
+  TokenStream _streamHybridCloudWithLocalConsentFallback({
+    required InferenceRequest request,
+    required String originalUserQuestion,
+  }) async* {
+    var receivedAnswerText = false;
+    await for (final chunk in _inferenceService.stream(request)) {
+      if (!receivedAnswerText &&
+          chunk.isError &&
+          chunk.errorCode == InferenceErrorCode.cloudConsentDenied) {
+        final local = request.copyWith(
+          routeDirective: InferenceRouteDirective.localOnly,
+          allowCloudProviderFailover: false,
+          discardCloudProviderId: true,
+          discardTrustedCloudSourceEvidence: true,
+        );
+        final enricher = _hybridLocalMemoryPromptEnricher;
+        if (enricher == null) {
+          yield* _inferenceService.stream(local);
+        } else {
+          yield* _streamHybridLocalWithConfirmedMemory(
+            request: local,
+            enricher: enricher,
+            originalUserQuestion: originalUserQuestion,
+          );
+        }
+        return;
+      }
+      if (chunk.text.isNotEmpty) receivedAnswerText = true;
+      yield chunk;
+    }
   }
 
   TokenStream _streamHybridLocalWithConfirmedMemory({

@@ -387,7 +387,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         stopwatch.stop();
         // Refusal ends this dispatch. NEVER try another provider.
         yield InferenceResponse.error(
-          'Cloud disclosure was not approved.', providerId: provider,
+          'Cloud disclosure was not approved.',
+          providerId: provider,
+          errorCode: InferenceErrorCode.cloudConsentDenied,
         );
         return;
       } catch (error) {
