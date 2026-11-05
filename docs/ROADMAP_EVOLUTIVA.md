@@ -695,16 +695,16 @@ sostituzione, riverniciatura e seconda auto **non sono equivalenti**.
 **Prima fondazione operativa di entity resolution (questa tranche):**
 
 - Distinguere riferimento nominato, menzione anonima e identita verificata;
-  `person:name:jerome` e un'etichetta provvisoria, non un identificatore
+  `person:name:nora` e un'etichetta provvisoria, non un identificatore
   univoco. Due persone possono avere lo stesso nome. Non deduplicare
   persone per altezza, corporatura, sport, giudizi o successione delle chat.
 - Esempio di accettazione con sette frasi: «Il mio collega e un idiota»,
-  «Ho un collega alto», «Un collega si chiama Jerome»,
-  «Jerome e sovrappeso», «Mika fa tanto sport»,
-  «Kader e un mio collega», «Non mi piace il mio collega».
-  Collegamenti espliciti solo per il riferimento scritto «Jerome»;
-  Mika **non** diventa automaticamente collega e il collega alto non
-  diventa automaticamente Kader. Opinioni negative restano attribuite
+  «Ho un collega alto», «Un collega si chiama Nora»,
+  «Nora e sovrappeso», «Lino fa tanto sport»,
+  «Teo e un mio collega», «Non mi piace il mio collega».
+  Collegamenti espliciti solo per il riferimento scritto «Nora»;
+  Lino **non** diventa automaticamente collega e il collega alto non
+  diventa automaticamente Teo. Opinioni negative restano attribuite
   **all'utente**, non diventano fatti oggettivi su un terzo.
 - «La mia bicicletta e veloce» registra al massimo la valutazione
   dichiarata di una bici **non identificata**: nessuna deduzione su eta,
