@@ -93,6 +93,7 @@ class UpdateManager {
     required String currentVersion,
     bool? allowDebugSignatureMismatchBypass,
     bool enableAndroidBetaBuildNumberComparison = false,
+    bool enableWindowsBetaBuildNumberComparison = false,
     Dio? dio,
   })  : _updateChecker = updateChecker,
         _comparator = comparator,
@@ -103,6 +104,8 @@ class UpdateManager {
             allowDebugSignatureMismatchBypass ?? kDebugMode,
         _enableAndroidBetaBuildNumberComparison =
             enableAndroidBetaBuildNumberComparison,
+        _enableWindowsBetaBuildNumberComparison =
+            enableWindowsBetaBuildNumberComparison,
         _dio = dio ?? Dio(),
         state = ValueNotifier<UpdateState>(
           UpdateState.initial(
@@ -120,6 +123,7 @@ class UpdateManager {
   final String _currentVersion;
   final bool _allowDebugSignatureMismatchBypass;
   final bool _enableAndroidBetaBuildNumberComparison;
+  final bool _enableWindowsBetaBuildNumberComparison;
   final Dio _dio;
 
   final ValueNotifier<UpdateState> state;
@@ -995,10 +999,20 @@ class UpdateManager {
   /// With explicit beta opt-in, permit only same-base beta upgrades whose
   /// numeric APK build code is strictly greater. Ordinary SemVer ordering and
   /// other platforms remain unchanged; missing codes cannot bypass checks.
+  /// A beta-enabled platform may select a newer verified numeric build even
+  /// when the installed package version omitted the beta prerelease suffix.
+  /// Exposes the same comparison to desktop pending-installer validation.
+  @protected
+  int compareCandidateToInstalled(String candidateVersion) =>
+      _compareCandidateToInstalled(candidateVersion);
+
   int _compareCandidateToInstalled(String candidateVersion) {
     final conventional = _comparator.compare(candidateVersion, _currentVersion);
-    if (!_enableAndroidBetaBuildNumberComparison ||
-        !state.value.preferredChannel.allows(ReleaseChannel.beta)) {
+    final eligibleAndroid = _enableAndroidBetaBuildNumberComparison &&
+        state.value.preferredChannel.allows(ReleaseChannel.beta);
+    final eligibleWindows = _enableWindowsBetaBuildNumberComparison &&
+        state.value.preferredChannel == ReleaseChannel.beta;
+    if (!eligibleAndroid && !eligibleWindows) {
       return conventional;
     }
     final candidate = _comparator.parse(candidateVersion);
