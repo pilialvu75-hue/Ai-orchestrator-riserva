@@ -58,6 +58,12 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
   final AiRuntimeSettingsService _runtimeSettingsService;
   final CloudRuntimeProvider _cloudRuntimeProvider;
 
+  /// In protected HYBRID, outbound Web queries need their own consent.
+  /// Cloud request review does not authorize an earlier search-tool call.
+  bool get _gatedHybrid =>
+      _runtimeSettingsService.runtimeMode == AiRuntimeMode.hybrid &&
+      _cloudRuntimeProvider.consentGated;
+
   @override
   Future<InferenceResponse> handle(
     String input, {
@@ -69,21 +75,24 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       return InferenceResponse.finalChunk(text: clock, tokensGenerated: 0,
           providerId: 'device_clock');
     }
+    final protectedWebRequest = _gatedHybrid &&
+        _intentAnalyzer.analyze(input) == TaskType.webSearch;
+    final safeOffline = isOffline || protectedWebRequest;
     final effectiveSystemPrompt = await _enrichIfNeeded(
       input: input,
       sessionId: 'default',
       context: const <ChatTurn>[],
       systemPrompt: systemPrompt,
-      isOffline: isOffline,
+      isOffline: safeOffline,
     );
 
-    final unavailable = _unverifiedFreshFact(input, effectiveSystemPrompt, isOffline);
+    final unavailable = _unverifiedFreshFact(input, effectiveSystemPrompt, safeOffline);
     if (unavailable != null) return unavailable;
 
     return super.handle(
       input,
       systemPrompt: effectiveSystemPrompt,
-      isOffline: isOffline,
+      isOffline: safeOffline,
     );
   }
 
@@ -158,18 +167,24 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       );
     }
 
+    // Explicit Web intent passes through the base Orchestrator, which
+    // otherwise executes a separate external search before Cloud review.
+    // Force its search path to stay local in consent-gated HYBRID only.
+    final protectedWebRequest = _gatedHybrid &&
+        _intentAnalyzer.analyze(inferenceTopic) == TaskType.webSearch;
+    final safeOffline = isOffline || protectedWebRequest;
     final effectiveSystemPrompt = await _enrichIfNeeded(
       input: inferenceTopic,
       sessionId: sessionId,
       context: context,
       systemPrompt: systemPrompt,
-      isOffline: isOffline,
+      isOffline: safeOffline,
       maxTokens: maxTokens,
       temperature: temperature,
     );
 
     final unavailable =
-        _unverifiedFreshFact(inferenceTopic, effectiveSystemPrompt, isOffline);
+        _unverifiedFreshFact(inferenceTopic, effectiveSystemPrompt, safeOffline);
     if (unavailable != null) {
       yield unavailable;
       return;
@@ -180,7 +195,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       sessionId: sessionId,
       context: context,
       systemPrompt: effectiveSystemPrompt,
-      isOffline: isOffline,
+      isOffline: safeOffline,
       maxTokens: maxTokens,
       temperature: temperature,
       // Web/tool retrieval or rewritten sport follow-ups have a different
@@ -230,6 +245,11 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     double? temperature,
   }) async {
     final local = _runtimeSettingsService.runtimeMode == AiRuntimeMode.local;
+    if (_gatedHybrid) {
+      // Even a question classified as public freshness may embed private
+      // context. Do not search ahead of a source-specific consent review.
+      return systemPrompt;
+    }
     String? previousUserPrompt;
     if (AssistantWebSearchPolicy.isAnswerVerification(input) ||
         AssistantWebSearchPolicy.isSportsResultFollowUp(input)) {

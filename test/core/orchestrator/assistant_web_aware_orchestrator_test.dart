@@ -473,6 +473,49 @@ void main() {
     verifyNever(() => webSearch.execute(any()));
   });
 
+  test('consent-gated HYBRID freshness never searches the Web prematurely',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.consentGated).thenReturn(true);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    final evidence = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'gated-freshness',
+      originalQuestion: 'Verifica la tua risposta',
+      baseSystemPrompt: 'Base prompt.',
+      originalHistory: const <AiMessage>[],
+    );
+    await build().handleStream(
+      'Verifica la tua risposta',
+      sessionId: 'gated-freshness',
+      systemPrompt: 'Base prompt.',
+      context: const <ChatTurn>[
+        ChatTurn(role: ChatRole.user, content: 'Il tempo di domani a Lione'),
+      ],
+      trustedCloudSourceEvidence: evidence,
+    ).drain<void>();
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('consent-gated HYBRID explicit Web intent uses local no-Web route',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.consentGated).thenReturn(true);
+    final result = await build().handleStream(
+      'cerca su internet le ultime notizie',
+      sessionId: 'gated-explicit-web',
+      systemPrompt: 'Base instructions.',
+    ).toList();
+    expect(result.last.text, 'ok');
+    final request = verify(() => inference.stream(captureAny()))
+        .captured.single as InferenceRequest;
+    expect(request.routeDirective, InferenceRouteDirective.localOnly);
+    expect(request.isOffline, isTrue);
+    verifyNever(() => webSearch.execute(any()));
+  });
+
   test('HYBRID discards Chat provenance if Web results are injected',
       () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);

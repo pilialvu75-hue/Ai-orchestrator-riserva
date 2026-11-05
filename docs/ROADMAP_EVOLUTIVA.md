@@ -752,6 +752,17 @@ consenso esplicito.
   Una ricerca Web nel nuovo trasporto richiedera in futuro un consenso
   dedicato e provenienza verificata; questa protezione non copre ancora
   tutte le operazioni Web di altri flussi.
+- **H28 — tutela delle query Web pre-consenso in HYBRID:**
+  il router Web-aware cerca notizie, verifiche e risultati freschi
+  prima della selezione CLOUD/LOCAL. Quando usa il provider Cloud
+  `consentGated` in HYBRID, il pre-enrichment ora non puo interrogare
+  il Web esterno senza una review specifica. Gli intenti Web espliciti
+  passano al modello LOCAL senza eseguire il tool Web, tramite una
+  richiesta offline-per-quella-operazione; la modalita LOCAL scelta
+  dall'utente e la ricerca legacy non cambiano. Test di regressione
+  verificano zero chiamate Web e il routing locale per l'intento
+  Web esplicito. Non si promette aggiornamento live dei fatti
+  senza un consenso separato; CI della HEAD ancora da verificare.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
