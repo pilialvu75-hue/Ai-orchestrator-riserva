@@ -63,6 +63,7 @@ abstract final class CloudRoutingBootstrap {
     GetIt sl, {
     bool enableConsentGatedAssistantCloud = false,
   }) async {
+    await _unregisterIfPresent<HybridCloudAssistantRuntimeBundle>(sl);
     await _unregisterIfPresent<ChatRepository>(sl);
     await _unregisterIfPresent<Orchestrator>(sl);
     await _unregisterIfPresent<PlannerService>(sl);
@@ -161,6 +162,13 @@ abstract final class CloudRoutingBootstrap {
             ),
           )
         : null;
+    // Expose the exact same protected consent manager/identity to Settings.
+    // Never register this bundle in normal builds: Settings stays inactive.
+    if (assistantConsentBundle != null) {
+      sl.registerSingleton<HybridCloudAssistantRuntimeBundle>(
+        assistantConsentBundle,
+      );
+    }
 
     sl.registerLazySingleton<InferenceService>(
       () => DirectiveAwareInferenceService(

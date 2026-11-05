@@ -773,6 +773,27 @@ consenso esplicito.
   le ricerche Web ordinarie nella modalita LOCAL impostata dall'utente,
   ma vincola soltanto questa continuazione dopo diniego. CI della nuova
   HEAD da verificare, flag Cloud produttivo ancora false e nessuna release.
+- **H30 — prerequisiti build di collaudo HYBRID (solo sorgente):**
+  `RuntimeBootstrap` permette un flag Dart compile-time
+  `AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true`, di default FALSE
+  nelle release e negli aggiornamenti correnti. Solo le build QA
+  preparate esplicitamente collegano il sender gated al bootstrap.
+  `Modalita IA -> Consensi Cloud` apre la pagina inerte nelle build
+  ordinarie e, solo in una build QA attiva, le regole verificabili
+  mediante la medesima identita locale OS-protected del sender;
+  tale identita di installazione NON equivale a un login Cloud
+  e non autorizza sincronizzazione o multiutente.
+  Per OpenAI/Gemini e disponibile un campo esplicito etichetta account,
+  salvato insieme a una NUOVA API key nel record OS-protected:
+  le credenziali preesistenti prive di account NON diventano autorizzate
+  in automatico. La sostituzione chiave ruota la generazione di consenso.
+  CI verifica entrambi i valori del gate e test di consenso preesistenti.
+  Il bundle non viene registrato in modalita ordinaria; nessun invio
+  di dati privati o release e autorizzato da questo solo commit.
+  Windows Beta: download runtime CPU/Vulkan ufficiali ritenta fino
+  a 3 volte su errori HTTP transitori conservando entrambi gli hash
+  SHA-256 obbligatori. Il packaging macOS sqlite3 resta bloccato
+  finche non e verificata l'origine del file con SHA errato.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

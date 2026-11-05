@@ -3,6 +3,9 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/hybrid_cloud_consent_settings_page.dart';
+import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:ai_orchestrator/core/runtime/inference/nvidia_nim_large_models.dart';
 import 'package:ai_orchestrator/features/settings/presentation/cloud_provider_access_summary.dart';
 import 'package:ai_orchestrator/features/settings/presentation/widgets/cloud_provider_access_card.dart';
@@ -24,6 +27,7 @@ class _AiModePageState extends State<AiModePage> {
   late final AiRuntimeSettingsService _settingsService;
   final CloudCredentialStore _credentialStore = CloudCredentialStore.instance;
   final TextEditingController _apiKeyController = TextEditingController();
+  final TextEditingController _consentAccountController = TextEditingController();
   final TextEditingController _modelController = TextEditingController();
   final TextEditingController _budgetController = TextEditingController();
 
@@ -44,6 +48,7 @@ class _AiModePageState extends State<AiModePage> {
   @override
   void dispose() {
     _apiKeyController.dispose();
+    _consentAccountController.dispose();
     _modelController.dispose();
     _budgetController.dispose();
     super.dispose();
@@ -57,6 +62,8 @@ class _AiModePageState extends State<AiModePage> {
     setState(() {
       _runtimeMode = _settingsService.runtimeMode;
       _provider = provider;
+      _consentAccountController.text =
+          _credentialStore.snapshotFor(provider).accountId ?? '';
       _spendingMode = _settingsService.cloudSpendingMode;
       _modelController.text = _settingsService.cloudModelFor(provider);
       _budgetController.text = budget?.toString() ?? '';
@@ -68,6 +75,8 @@ class _AiModePageState extends State<AiModePage> {
     setState(() {
       _provider = provider;
       _apiKeyController.clear();
+      _consentAccountController.text =
+          _credentialStore.snapshotFor(provider).accountId ?? '';
       _modelController.text = _settingsService.cloudModelFor(provider);
       _obscureSecret = true;
     });
@@ -125,7 +134,15 @@ class _AiModePageState extends State<AiModePage> {
 
       final secret = _apiKeyController.text.trim();
       if (secret.isNotEmpty) {
-        await _credentialStore.setApiKey(_provider, secret);
+        // Bind the optional human-entered label to this exact key generation.
+        // A later replacement rotates the protected consent epoch.
+        await _credentialStore.setApiKey(
+          _provider,
+          secret,
+          accountId: _consentAccountController.text.trim().isEmpty
+              ? null
+              : _consentAccountController.text.trim(),
+        );
         _apiKeyController.clear();
       }
 
@@ -141,6 +158,43 @@ class _AiModePageState extends State<AiModePage> {
       );
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _openCloudConsentSettings() async {
+    final bundle = di.sl.isRegistered<HybridCloudAssistantRuntimeBundle>()
+        ? di.sl<HybridCloudAssistantRuntimeBundle>()
+        : null;
+    if (bundle == null) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => const HybridCloudConsentSettingsPage(),
+        ),
+      );
+      return;
+    }
+    try {
+      final principal = await bundle.identity.openSession();
+      if (!await bundle.identity
+          .isAuthorized(principal.ownerId, principal.sessionId)) {
+        throw StateError('Protected local session cannot be verified');
+      }
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => HybridCloudConsentSettingsPage(
+            manager: bundle.consent,
+            ownerId: principal.ownerId,
+            sessionId: principal.sessionId,
+            credentials: _credentialStore,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.t('cloud_permission_failed'))),
+      );
     }
   }
 
@@ -264,6 +318,16 @@ class _AiModePageState extends State<AiModePage> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                ListTile(
+                  key: const Key('cloud-consents-entry'),
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.shield_outlined),
+                  title: Text(l10n.t('cloud_permission_title')),
+                  subtitle: Text(l10n.t('cloud_permission_local_note')),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _openCloudConsentSettings,
+                ),
                 const SizedBox(height: 28),
                 const _SectionTitle('Cloud providers'),
                 const SizedBox(height: 10),
@@ -340,6 +404,25 @@ class _AiModePageState extends State<AiModePage> {
                   ),
                 ],
                 const SizedBox(height: 12),
+                if (_provider == 'openAi' || _provider == 'gemini') ...[
+                  TextField(
+                    key: const Key('cloud-consent-account-label'),
+                    controller: _consentAccountController,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Account label for Cloud consent',
+                      helperText: 'For internal HYBRID QA: save this label together '
+                          'with a new API key. A label is not provider login proof.',
+                      helperMaxLines: 3,
+                      helperStyle: TextStyle(color: Colors.white54),
+                      labelStyle: TextStyle(color: Colors.white70),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 TextField(
                   controller: _apiKeyController,
                   obscureText: _obscureSecret,
