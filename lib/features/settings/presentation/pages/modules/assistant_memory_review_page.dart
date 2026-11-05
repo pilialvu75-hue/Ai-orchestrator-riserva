@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 
@@ -50,8 +51,14 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     if (!mounted) return;
     setState(() => _loading = true);
     try {
-      final pending =
+      final preferences =
           await widget.captureService.loadReviewablePreferenceCandidates();
+      final names =
+          await widget.captureService.loadReviewableNaturalNameCandidates();
+      final pending = <AssistantDurableMemoryRecord>[
+        ...preferences,
+        ...names,
+      ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       final confirmed =
           await widget.captureService.loadReviewableConfirmedUserMemory();
       if (!mounted) return;
@@ -77,10 +84,17 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     if (_busy || !_manualConsent) return;
     setState(() => _busy = true);
     try {
-      final ok = await widget.captureService.proposeUserPreferenceCandidate(
+      var ok = await widget.captureService.proposeUserPreferenceCandidate(
         userPrompt: _text.text,
         consentEnabled: true,
       );
+      if (!ok) {
+        ok = await widget.captureService.proposeNaturalUserNameCandidate(
+          userPrompt: _text.text,
+          consentEnabled: true,
+          directUserMessage: true,
+        );
+      }
       if (!mounted) return;
       if (ok) {
         _text.clear();
@@ -159,12 +173,20 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     if (confirmed != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      final changed = await widget.captureService.reviewUserPreferenceCandidate(
-        reviewed: record,
-        approve: approve,
-        userConfirmed: true,
-        correctedContent: correctedContent,
-      );
+      final changed = record.recordKey ==
+              AssistantNaturalNameCandidate.recordKey
+          ? await widget.captureService.reviewNaturalNameCandidate(
+              reviewed: record,
+              approve: approve,
+              userConfirmed: true,
+              correctedContent: correctedContent,
+            )
+          : await widget.captureService.reviewUserPreferenceCandidate(
+              reviewed: record,
+              approve: approve,
+              userConfirmed: true,
+              correctedContent: correctedContent,
+            );
       if (!mounted) return;
       _message(changed
           ? (approve ? 'confirmed' : 'rejected')
