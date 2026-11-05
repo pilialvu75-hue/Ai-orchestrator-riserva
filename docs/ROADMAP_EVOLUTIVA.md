@@ -821,6 +821,50 @@ consenso esplicito.
   archivi portatili NON isolano automaticamente database, preferenze
   o credenziali. La CI H33 deve superare i suoi test; e' ancora
   necessario il collaudo su hardware reale con provider autorizzato.
+- **H34 — regola permanente: beta HYBRID multipiattaforma per milestone**
+  (direttiva owner 6 novembre 2026):
+  pubblicare occasionalmente una **beta di collaudo** quando HYBRID sia
+  sufficientemente funzionante e si ottenga un progresso concreto; non
+  effettuare release di routine a ogni commit e non aspettare che ogni
+  funzionalita' futura della roadmap sia completa. Cadenza guidata dai
+  gate, non da una scadenza arbitraria. Un controllo periodico dedicato
+  al readiness viene eseguito due volte a settimana; NON equivale a
+  autorizzazione a saltare test o inviare dati personali.
+  I workflow H32 Windows e H33 macOS/Linux con flag di consenso ON
+  hanno superato test runtime, GGUF e bundling su runner Actions:
+  **QA desktop CI PASS**, NON E2E fisico ne' rilascio/OTA.
+  La convalida Android e' ancora source-only. Il canale release
+  produttivo continua a compilare il flag di consenso su FALSE.
+
+  **Gate minimo per la prima beta HYBRID:** (1) integrare il branch
+  HYBRID su main dopo riconciliazione delle modifiche concorrenti;
+  (2) impostare e verificare il consenso protetto **solo nelle beta**
+  Android e desktop, senza abilitarlo nelle stabili o nelle build
+  preesistenti; (3) prove automatiche e almeno uno smoke E2E della
+  Chat reale: provider/account selezionato senza sostituzione
+  silenziosa, preview prima di qualunque invio, permesso una sola
+  volta/sempre, rifiuto e revoca senza leak, rotazione della chiave,
+  memoria confermata in HYBRID-LOCAL senza invio non autorizzato,
+  fallback LOCAL e recupero dopo interruzione rete quando supportati;
+  (4) CI verde per il **medesimo commit** Android, Windows, macOS,
+  Linux e, ove applicabile, Web; verifica runtime/local GGUF e
+  checksum degli asset; (5) Android firma e versionCode compatibili
+  con l'app installata, distribuzione **solo** da Impostazioni ->
+  Aggiornamenti (nessun APK manuale, uninstall o downgrade);
+  (6) pubblicazione con il meccanismo GitHub owner-beta-checkpoint
+  esistente, che avvia un Android beta autorizzato e i publisher
+  Windows Setup, macOS DMG e Linux .deb **dallo stesso SHA e tag**.
+  Verificare realmente che gli asset di tutte le piattaforme
+  compaiano nella release e che gli aggiornamenti siano raggiungibili
+  dall'app. La firma macOS ad-hoc e' ammissibile per l'uso privato
+  se OS la accetta; mai spacciare ad-hoc per notarizzazione.
+  Web richiede collaudo/deploy separato della sua implementazione,
+  non simulare un'app HYBRID Web nativa se non esiste.
+  Se un asset o un percorso essenziale fallisce, marcare beta
+  INCOMPLETA e correggere prima di annunciare release coordinata.
+  Ogni checkpoint deve riportare SHA/tag, piattaforme, risultato
+  installazione/OTA, difetti e prossime prove. Main e stabile
+  rimangono protetti mentre i gate sono aperti.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
