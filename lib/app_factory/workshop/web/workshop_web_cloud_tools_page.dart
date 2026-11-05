@@ -106,7 +106,7 @@ class _WorkshopWebCloudToolsPageState extends State<WorkshopWebCloudToolsPage> {
                     : Icons.radio_button_unchecked),
                 title: Text('${route.provider} · ${route.model}'),
                 subtitle: Text(
-                  '${_tr('Rotta')}: ${route.routeId}\n'
+                  '${_tr('Rotta')}: ${route.routeId}${route.manualOnly ? ' · MANUALE' : ''}\n'
                   '${_tr('Binding presente')}: ${route.bindingPresent ? _tr('Sì') : _tr('No')} · '
                   '${_tr('Test gratuito autorizzato')}: ${route.testApproved ? _tr('Sì') : _tr('No')}',
                 ),

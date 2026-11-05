@@ -1,0 +1,55 @@
+name: Large NVIDIA NIM Integration Contract
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/airlab/web_p0_enroll_large_nim_models.mjs'
+      - 'functions/api/cantiere/inference.js'
+      - 'functions/api/cantiere/models.js'
+      - 'lib/core/runtime/inference/nvidia_nim_large_models.dart'
+      - 'lib/app_factory/models/workshop_model_roles.dart'
+      - 'lib/features/settings/presentation/pages/modules/ai_mode_page.dart'
+      - '.github/workflows/web-large-nim-contract.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/airlab/web_p0_enroll_large_nim_models.mjs'
+      - '.github/workflows/web-large-nim-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-free-prototype-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate Cloudflare enrollment and broker syntax
+        run: |
+          set -euo pipefail
+          node --check scripts/airlab/web_p0_enroll_large_nim_models.mjs
+          node --input-type=module --check < functions/api/cantiere/inference.js
+          node --input-type=module --check < functions/api/cantiere/models.js
+      - name: Set up Flutter for cross-product model tests
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Resolve pinned dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Test independent Web and Hybrid model integration
+        run: |
+          flutter test test/app_factory/workshop/workshop_large_nvidia_models_test.dart
+          flutter test test/app_factory/workshop/workshop_large_nvidia_dispatch_test.dart
+          flutter test test/core/runtime/inference/nvidia_nim_large_hybrid_test.dart
+      - name: Assert both identities and manual-only safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq "moonshotai/kimi-k2.6" scripts/airlab/web_p0_enroll_large_nim_models.mjs
+          grep -Fq "deepseek-ai/deepseek-v4.1-flash" scripts/airlab/web_p0_enroll_large_nim_models.mjs
+          grep -Fq "manualOnly: true" scripts/airlab/web_p0_enroll_large_nim_models.mjs
+          grep -Fq "(!route.manualOnly || hasSelectedRoute)" functions/api/cantiere/inference.js

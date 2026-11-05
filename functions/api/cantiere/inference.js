@@ -101,6 +101,9 @@ function parseRoutes(env) {
         apiKeySecret,
         // Only explicitly authorized zero-cost routes may run synthetic tests.
         selfTestFree: row.selfTestFree === true,
+        // Large trial models can be selected explicitly without being
+        // silently used by AUTO/failover before a separate authorization.
+        manualOnly: row.manualOnly === true,
       });
     }
     if (valid.length > 0) result[capability] = valid;
@@ -442,6 +445,7 @@ export async function onRequest(context) {
   const routes = configuredRoutes.filter(
     (route) =>
       (!selfTest && !hasSelectedRoute || route.selfTestFree) &&
+      (!route.manualOnly || hasSelectedRoute) &&
       (!hasSelectedRoute || route.id === selectedRouteId),
   );
   // In manual mode, never silently fall back to a different (possibly
