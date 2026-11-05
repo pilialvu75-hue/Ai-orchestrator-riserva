@@ -809,6 +809,18 @@ consenso esplicito.
   ZIP portatile isolato + SHA256 + istruzioni. Non pubblica release
   o aggiornamenti Android. Serve comunque collaudo fisico e provider
   reale per dichiarare HYBRID pronto.
+- **H33 — QA con consenso attivo su macOS e Linux:**
+  Workflow isolato `.github/workflows/hybrid-consent-macos-linux-qa.yml`
+  per la sola PR #977 interna: compila macOS e Linux con
+  `AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true`, testa il gate
+  e i componenti Chat, esegue il motore GGUF reale e conserva
+  controlli nativi/signature/GUI delle pipeline desktop ordinarie.
+  Produce solo archivi portatili GitHub Actions, con SHA256 e README,
+  senza release, installer .deb o manifest OTA. Corretto il README
+  delle nuove build Windows QA per imporre un profilo OS separato:
+  archivi portatili NON isolano automaticamente database, preferenze
+  o credenziali. La CI H33 deve superare i suoi test; e' ancora
+  necessario il collaudo su hardware reale con provider autorizzato.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

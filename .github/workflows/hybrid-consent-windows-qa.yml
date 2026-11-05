@@ -96,7 +96,9 @@ jobs:
             ('Source commit: ' + $env:GITHUB_SHA)
             'HYBRID consent compile flag: ON. No API keys or approvals bundled.'
             'Only OpenAI and Gemini with an explicit account-bound securely saved key are supported.'
-            'Use an isolated extracted folder; do not replace your installed app.'
+            'WARNING: portable QA can share app databases and Windows credential storage under the SAME OS user.'
+            'Use a SEPARATE Windows test-user account or VM, never the user with your installed Aivexus.'
+            'Extract this archive in the test account. Do not replace the installed app.'
             'No OTA manifest, stable package or installed app is modified.'
           ) | Set-Content -Path 'HYBRID-QA-README.txt' -Encoding utf8
 
