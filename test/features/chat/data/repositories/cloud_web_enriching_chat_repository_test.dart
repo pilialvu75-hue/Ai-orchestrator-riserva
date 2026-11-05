@@ -36,7 +36,7 @@ void main() {
       expect(delegate.lastSystemPrompt, contains('https://example.test/weather'));
     });
 
-    test('consent-gated Cloud never pre-searches the user's private question',
+    test("consent-gated Cloud never pre-searches the user's private question",
         () async {
       final delegate = _CapturingChatRepository();
       final tool = _FakeWebSearchTool(
