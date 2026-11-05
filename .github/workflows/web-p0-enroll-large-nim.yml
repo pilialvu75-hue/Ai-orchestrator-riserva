@@ -1,0 +1,35 @@
+name: Web P0 Enroll Large NVIDIA NIM Models
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.airlab/deploy/large-nim-models-request.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-private-production
+  cancel-in-progress: false
+
+jobs:
+  enroll-large-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: web-private-production
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+    steps:
+      - name: Checkout approved request
+        uses: actions/checkout@v6
+      - name: Check enrollment script syntax
+        run: node --check scripts/airlab/web_p0_enroll_large_nim_models.mjs
+      - name: Read-only preflight or controlled manual-only enrollment
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/airlab/web_p0_enroll_large_nim_models.mjs
