@@ -39,20 +39,27 @@ function error(code, status) {
 
 // Only closed-vocabulary diagnostic fields leave the server. No upstream
 // error bodies, request headers, secret names or provider tokens are returned.
-function upstreamError(status, failureKind, routeId) {
-  const upstreamStatus =
+function upstreamError(status, failureKind, routeId, confirmedUpstreamStatus) {
+  // The broker may synthesize 502/503 for transport, timeouts or invalid data.
+  // Only include upstreamStatus when the provider actually returned that HTTP.
+  const brokerStatus =
     Number.isInteger(status) && status >= 400 && status <= 599 ? status : 502;
+  const upstreamStatus =
+    Number.isInteger(confirmedUpstreamStatus) &&
+    confirmedUpstreamStatus >= 400 && confirmedUpstreamStatus <= 599
+      ? confirmedUpstreamStatus
+      : null;
   return jsonResponse(
     {
       version: 1,
       error: {
         code: 'upstream_unavailable',
-        upstreamStatus,
+        ...(upstreamStatus !== null ? { upstreamStatus } : {}),
         ...(typeof failureKind === 'string' ? { failureKind } : {}),
         ...(typeof routeId === 'string' ? { routeId } : {}),
       },
     },
-    upstreamStatus,
+    brokerStatus,
   );
 }
 
@@ -338,6 +345,7 @@ async function callRoute(route, request) {
         return {
           ok: false,
           status: response.status,
+          upstreamStatus: response.status,
           failureKind: 'upstream_http_rejection',
         };
       }
@@ -525,6 +533,7 @@ export async function onRequest(context) {
   };
 
   let lastFailureStatus = 502;
+  let lastConfirmedUpstreamStatus;
   let lastFailureKind = 'upstream_unknown';
   let lastFailedRouteId;
   for (const route of routes) {
@@ -546,10 +555,14 @@ export async function onRequest(context) {
     }
     if (Number.isInteger(result?.status)) {
       lastFailureStatus = result.status;
+      lastConfirmedUpstreamStatus = result.upstreamStatus;
       lastFailureKind = result.failureKind || 'upstream_unknown';
       lastFailedRouteId = route.id;
     }
   }
 
-  return upstreamError(lastFailureStatus, lastFailureKind, lastFailedRouteId);
+  return upstreamError(
+    lastFailureStatus, lastFailureKind, lastFailedRouteId,
+    lastConfirmedUpstreamStatus,
+  );
 }
