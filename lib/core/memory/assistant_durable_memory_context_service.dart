@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 
 /// Builds a small, deterministic, confirmed-only memory context for ordinary
 /// Assistant chat. This service is retrieval-only: it never creates, confirms
@@ -67,6 +68,7 @@ class AssistantDurableMemoryContextService {
 
     final queryTerms = _terms(query);
     final broadMemoryRequest = _isBroadMemoryRequest(query);
+    final firstPersonNameRequest = _isDirectUserNameRequest(query);
     final historicalReference = _hasHistoricalReference(query);
     final ranked = <_RankedMemory>[];
 
@@ -80,6 +82,11 @@ class AssistantDurableMemoryContextService {
 
     for (final record in userRecords) {
       var score = _relevanceScore(record, queryTerms);
+      if (record.recordKey == AssistantNaturalNameCandidate.recordKey &&
+          firstPersonNameRequest &&
+          score < 40) {
+        score = 40;
+      }
       if (score == 0 && broadMemoryRequest) score = 2;
       if (score > 0) ranked.add(_RankedMemory(record: record, score: score));
     }
@@ -140,6 +147,33 @@ class AssistantDurableMemoryContextService {
       terms.add(match.group(0)!.toLowerCase());
     }
     return terms;
+  }
+
+  /// Narrow, first-person, multilingual lookup for a reviewed given name.
+  /// Third-party name questions do not qualify. No unconfirmed candidate is
+  /// available to this retrieval service in any case.
+  bool _isDirectUserNameRequest(String value) {
+    final normalized = value.toLowerCase().replaceAll('’', "'");
+    return _containsAny(normalized, const <String>[
+      'come mi chiamo',
+      'qual è il mio nome',
+      'qual e il mio nome',
+      'qual è il mio primo nome',
+      'il mio nome',
+      'what is my name',
+      "what's my name",
+      'what is my first name',
+      'my first name',
+      "comment je m'appelle",
+      'quel est mon prénom',
+      'quel est mon nom',
+      'mon prénom',
+      'como me llamo',
+      'cómo me llamo',
+      'cual es mi nombre',
+      'cuál es mi nombre',
+      'mi nombre',
+    ]);
   }
 
   bool _isBroadMemoryRequest(String value) {
