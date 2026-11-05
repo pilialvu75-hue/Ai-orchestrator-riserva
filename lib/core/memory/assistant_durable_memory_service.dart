@@ -64,6 +64,8 @@ class AssistantDurableMemoryService {
     required String content,
     required int updatedAt,
     String? reason,
+    String? before,
+    String? after,
   }) {
     return _store.upsert(
       AssistantDurableMemoryRecord(
@@ -76,6 +78,8 @@ class AssistantDurableMemoryService {
         updatedAt: updatedAt,
         status: AssistantMemoryStatus.candidate,
         reason: reason,
+        before: before,
+        after: after,
       ),
     );
   }
@@ -141,6 +145,22 @@ class AssistantDurableMemoryService {
       approve: approve,
       reviewedAt: reviewedAt,
       approvedContent: approvedContent,
+    );
+  }
+
+  /// Resolve a proposed, version-checked change to an existing car color.
+  /// Both the candidate and the old confirmed record are checked atomically.
+  Future<bool> resolveReviewedCarColorCorrection({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    required int reviewedAt,
+    String? correctedContent,
+  }) {
+    return _store.resolveReviewedCarColorCorrection(
+      reviewed: reviewed,
+      approve: approve,
+      reviewedAt: reviewedAt,
+      correctedContent: correctedContent,
     );
   }
 
