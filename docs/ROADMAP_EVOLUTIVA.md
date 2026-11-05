@@ -728,6 +728,17 @@ consenso esplicito.
   Test di routing e test del bundle con HTTP simulato nella suite
   Assistant Shared Tests; il risultato CI di H25 va verificato.
   Non ancora continuita con checkpoint/semantic resume reale.
+- **H26 — integrazione Chat reale -> consent -> HTTP simulato:**
+  prova integrata `ChatRepositoryImpl` con datasource in memoria e
+  `ConversationMemoryService` simulato, servizio di inferenza che
+  delega al provider consent-gated reale, credenziale/identita protette
+  fittizie, review Chat sintetica e HTTP OpenAI mock. Verifica la
+  provenienza generata dal ChatRepository, provider fissato,
+  contenuto esatto approvato, risposta salvata e mancato POST
+  quando la review nega consenso. Questa non e una prova di bootstrap
+  integrato, provider reale, UI Flutter fisica o connettivita S24;
+  i nuovi test entrano nella suite CI Ubuntu/macOS e non consentono
+  ancora l'attivazione del flag produttivo.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
