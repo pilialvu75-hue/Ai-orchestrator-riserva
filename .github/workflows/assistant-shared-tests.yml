@@ -51,6 +51,7 @@ jobs:
           test/features/chat/presentation/hybrid_cloud_chat_consent_gateway_test.dart
           test/features/settings/presentation/hybrid_cloud_consent_review_dialog_test.dart
           test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
+          test/features/settings/presentation/hybrid_cloud_consent_rekey_settings_test.dart
           test/core/runtime/inference/cloud_credential_store_test.dart
           test/core/runtime/inference/hybrid_cloud_disclosure_consent_test.dart
           test/core/runtime/inference/hybrid_cloud_native_wire_sender_test.dart
