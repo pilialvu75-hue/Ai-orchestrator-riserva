@@ -139,7 +139,7 @@ jobs:
               echo "All mandatory main CI workflows completed successfully"
               # The existing manual-dispatch release gate is deliberately
               # preserved; this trusted owner request generates that event.
-              gh workflow run build.yml --ref main -f release_channel=beta
+              gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_channel=beta
               echo "Authorized beta dispatch requested for main SHA $sha"
               exit 0
             fi
