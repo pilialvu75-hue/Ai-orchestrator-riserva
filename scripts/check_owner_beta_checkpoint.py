@@ -49,7 +49,7 @@ def validate(source: str) -> list[str]:
         '"Build macOS Desktop"',
         '(.conclusion // "pending")',
         'github.event_name ==',
-        'gh workflow run build.yml --ref main -f release_channel=beta',
+        'gh workflow run build.yml --repo \"$GITHUB_REPOSITORY\" --ref main -f release_channel=beta',
         'gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs"',
         "-f head_sha=\"$sha\" -f event=push",
         "-f head_sha=\"$sha\" -f event=workflow_dispatch",
@@ -62,7 +62,7 @@ def validate(source: str) -> list[str]:
         problems.append("Comment dispatcher must not activate on arbitrary push")
     if "gh workflow run build.yml --ref main -f release_channel=stable" in source:
         problems.append("Stable release must remain an explicitly manual channel")
-    if "gh workflow run build.yml --ref main -f release_channel=beta" not in source:
+    if "gh workflow run build.yml --repo \"$GITHUB_REPOSITORY\" --ref main -f release_channel=beta" not in source:
         problems.append("No authorized beta dispatch")
     if not re.search(r"(?m)^  authorize-and-dispatch:\s*$", source):
         problems.append("Missing owner-gated dispatch job")
