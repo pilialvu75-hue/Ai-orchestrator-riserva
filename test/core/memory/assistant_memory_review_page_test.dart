@@ -493,4 +493,48 @@ void main() {
     expect(await capture.loadReviewableNaturalNameCandidates(), isEmpty);
   });
 
+
+  testWidgets('car color manual proposal requires review to become a fact',
+      (tester) async {
+    initializeMemory();
+    await showPage(tester);
+    await tester.enterText(
+      find.byType(TextField).first,
+      'La mia auto è blu',
+    );
+    await tester.tap(find.text('Autorizzo questa singola proposta di prova'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Proponi per revisione'));
+    await tester.tap(find.text('Proponi per revisione'));
+    await tester.pumpAndSettle();
+
+    expect(
+      (await capture.loadReviewableNaturalCarColorCandidates()).single.content,
+      'La mia auto è blu',
+    );
+    expect(await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    ), isEmpty);
+
+    await tester.scrollUntilVisible(
+      find.text('Approva'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Approva'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Conferma'));
+    await tester.pumpAndSettle();
+
+    final saved = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    );
+    expect(saved, hasLength(1));
+    expect(saved.single.content, 'La mia auto è blu');
+    expect(saved.single.source, AssistantMemorySource.userExplicit);
+    expect(await capture.loadReviewableNaturalCarColorCandidates(), isEmpty);
+  });
+
 }
