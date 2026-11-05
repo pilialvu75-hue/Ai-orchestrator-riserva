@@ -349,13 +349,22 @@ async function callRoute(route, request) {
         return { ok: false, status: 502, failureKind: 'upstream_invalid_json' };
       }
 
-      const text = decoded?.choices?.[0]?.message?.content;
+      const choice = decoded?.choices?.[0];
+      const text = choice?.message?.content;
       if (
         typeof text !== 'string' ||
         !text.trim() ||
         text.length > MAX_OUTPUT_CHARS
       ) {
-        return { ok: false, status: 502, failureKind: 'no_final_text' };
+        // Reasoning models may exhaust their generation budget before a
+        // final answer. Report only the bounded failure class, never
+        // reasoning_content or the upstream response body.
+        const exhausted = choice?.finish_reason === 'length';
+        return {
+          ok: false,
+          status: 502,
+          failureKind: exhausted ? 'output_token_limit' : 'no_final_text',
+        };
       }
 
       const completionTokens = decoded?.usage?.completion_tokens;
