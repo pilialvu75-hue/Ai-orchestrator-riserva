@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
+import 'package:ai_orchestrator/core/runtime/inference/nvidia_nim_large_models.dart';
 import 'package:ai_orchestrator/features/settings/presentation/cloud_provider_access_summary.dart';
 import 'package:ai_orchestrator/features/settings/presentation/widgets/cloud_provider_access_card.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/custom_cloud_providers_page.dart';
@@ -375,6 +376,46 @@ class _AiModePageState extends State<AiModePage> {
                   ),
                 ],
                 const SizedBox(height: 12),
+                if (_provider == 'nvidiaNim') ...<Widget>[
+                  const Text(
+                    'NVIDIA NIM · prototipi Cloud avanzati',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final model in NvidiaNimLargeModels.prototypeOptions)
+                    RadioListTile<String>(
+                      dense: true,
+                      title: Text(
+                        NvidiaNimLargeModels.labels[model] ?? model,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        model,
+                        style: const TextStyle(color: Colors.white54),
+                      ),
+                      value: model,
+                      groupValue: NvidiaNimLargeModels.isKnownPrototype(
+                        _modelController.text,
+                      )
+                          ? _modelController.text
+                          : null,
+                      onChanged: _saving
+                          ? null
+                          : (selected) {
+                              if (selected == null) return;
+                              setState(() => _modelController.text = selected);
+                            },
+                    ),
+                  const Text(
+                    'Questi modelli condividono la credenziale NVIDIA NIM. '
+                    'Sono disponibili per test/prototipazione, non '
+                    'automaticamente gratuiti per uso commerciale. '
+                    'In Hybrid valgono i consensi Cloud, le autorizzazioni '
+                    'di spesa e la scelta esplicita del provider.',
+                    style: TextStyle(color: Colors.white54, height: 1.3),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 TextField(
                   controller: _modelController,
                   autocorrect: false,
