@@ -389,6 +389,63 @@ void main() {
     expect(requests.last.allowWebSearchTool, isFalse);
   });
 
+  for (final withMemoryCallback in <bool>[false, true]) {
+    test('HYBRID Cloud refusal never enables Web during LOCAL continuation '
+        '(memory callback: $withMemoryCallback)', () async {
+      when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+      when(() => cloud.consentGated).thenReturn(true);
+      when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+      when(() => cloud.recommendProviderFor(
+        any(), enforceAutomaticPolicy: true,
+      )).thenReturn('gemini');
+      final requests = <InferenceRequest>[];
+      when(() => inference.stream(any())).thenAnswer((call) {
+        final request = call.positionalArguments.single as InferenceRequest;
+        requests.add(request);
+        if (request.routeDirective == InferenceRouteDirective.cloudOnly) {
+          return Stream<InferenceResponse>.value(
+            InferenceResponse.error('Consent refused', providerId: 'gemini',
+              errorCode: InferenceErrorCode.cloudConsentDenied),
+          );
+        }
+        return Stream<InferenceResponse>.value(
+          InferenceResponse.finalChunk(text: 'LOCAL answer',
+            providerId: 'local', tokensGenerated: 1),
+        );
+      });
+      const question = 'Explain my private project';
+      final source = HybridCloudRuntimeSourceEvidence(
+        sessionId: 'cloud-denial-no-web',
+        originalQuestion: question,
+        baseSystemPrompt: 'Base rules.',
+        originalHistory: const <AiMessage>[],
+      );
+      final HybridLocalMemoryPromptEnricher? callback = withMemoryCallback
+          ? ({
+              required String baseSystemPrompt,
+              required String sessionId,
+              required String userPrompt,
+            }) async => baseSystemPrompt
+          : null;
+      final output = await build(hybridMemoryEnricher: callback).handleStream(
+        question,
+        sessionId: 'cloud-denial-no-web',
+        systemPrompt: 'Base rules.',
+        trustedCloudSourceEvidence: source,
+      ).toList();
+      expect(output.last.text, 'LOCAL answer');
+      expect(requests, hasLength(2));
+      expect(requests.first.routeDirective, InferenceRouteDirective.cloudOnly);
+      expect(requests.first.allowWebSearchTool, isTrue);
+      expect(requests.last.routeDirective, InferenceRouteDirective.localOnly);
+      expect(requests.last.allowWebSearchTool, isFalse);
+      expect(requests.last.allowCloudProviderFailover, isFalse);
+      expect(requests.last.cloudProviderId, isNull);
+      expect(requests.last.trustedCloudSourceEvidence, isNull);
+      verifyNever(() => webSearch.execute(any()));
+    });
+  }
+
   test('HYBRID other Cloud errors cannot trigger local consent fallback', () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
     when(() => cloud.consentGated).thenReturn(true);

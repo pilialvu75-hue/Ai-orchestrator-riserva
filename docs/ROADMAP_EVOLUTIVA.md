@@ -763,6 +763,16 @@ consenso esplicito.
   verificano zero chiamate Web e il routing locale per l'intento
   Web esplicito. Non si promette aggiornamento live dei fatti
   senza un consenso separato; CI della HEAD ancora da verificare.
+- **H29 — rifiuto Cloud senza query Web nel fallback LOCAL:**
+  il consenso Cloud negato avvia esclusivamente il modello LOCAL e non
+  autorizza un'ulteriore trasmissione della stessa domanda tramite un tool
+  di ricerca Web. Il fallback disabilita `allowWebSearchTool` anche quando
+  la memoria non aggiunge alcun testo o non e disponibile. Due regressioni
+  con rifiuto tipizzato e senza/con callback memoria invariata verificano
+  `localOnly`, assenza di failover e divieto Web. La modifica non spegne
+  le ricerche Web ordinarie nella modalita LOCAL impostata dall'utente,
+  ma vincola soltanto questa continuazione dopo diniego. CI della nuova
+  HEAD da verificare, flag Cloud produttivo ancora false e nessuna release.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

@@ -245,6 +245,9 @@ class Orchestrator {
         final local = request.copyWith(
           routeDirective: InferenceRouteDirective.localOnly,
           allowCloudProviderFailover: false,
+          // A Cloud refusal does not authorize an external Web-search call
+          // during LOCAL continuation, even when no memory was added.
+          allowWebSearchTool: false,
           discardCloudProviderId: true,
           discardTrustedCloudSourceEvidence: true,
         );
