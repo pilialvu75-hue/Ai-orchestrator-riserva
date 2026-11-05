@@ -299,8 +299,14 @@ void main() {
       (tester) async {
     final persistence = _PendingReadPersistence();
     initializeMemory(persistence: persistence);
+    final preferences = await SharedPreferences.getInstance();
     await tester.pumpWidget(MaterialApp(
-      home: AssistantMemoryReviewPage(captureService: capture),
+      home: AssistantMemoryReviewPage(
+        captureService: capture,
+        consentService: AssistantNaturalMemoryConsentService(
+          preferences: preferences,
+        ),
+      ),
     ));
     await tester.pump();
     await tester.pumpWidget(const SizedBox.shrink());
