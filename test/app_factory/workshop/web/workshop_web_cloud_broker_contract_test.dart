@@ -21,7 +21,7 @@ void main() {
     expect(inference, contains("'orchestration'"));
     expect(inference, contains('MAX_MESSAGES = 32'));
     expect(inference, contains('MAX_TOTAL_CHARS = 60000'));
-    expect(inference, contains('max_tokens: request.maxTokens'));
+    expect(inference, contains('max_tokens: params.maxTokens'));
     expect(inference, contains('Authorization:'));
     expect(inference, contains(r'Bearer ${apiKey}'));
 
@@ -59,9 +59,9 @@ void main() {
     // When every route fails, only the bounded numeric upstream HTTP status is
     // surfaced. This makes a physical Web test distinguish auth/rate/model
     // failures without exposing the endpoint, model binding, key or body.
-    expect(inference, contains('function upstreamError(status)'));
+    expect(inference, contains('function upstreamError(status, failureKind, routeId)'));
     expect(inference, contains('upstreamStatus'));
-    expect(inference, contains('return upstreamError(lastFailureStatus)'));
+    expect(inference, contains('return upstreamError(lastFailureStatus, lastFailureKind, lastFailedRouteId)'));
 
     // No concrete provider endpoint, key or model is a browser/source default.
     expect(inference, isNot(contains('api.openai.com')));

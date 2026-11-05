@@ -579,4 +579,206 @@ void main() {
     );
   });
 
+
+  test('natural names and car colors survive purge only after owner review',
+      () async {
+    // Disposable SQLite, identical USER / CONVERSATION scope semantics as
+    // production. No installed device data or online model is involved.
+    await database.execute('''
+      CREATE TABLE chat_sessions (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await database.execute('''
+      CREATE TABLE chat_history (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        timestamp INTEGER NOT NULL
+      )
+    ''');
+    await database.execute('''
+      CREATE TABLE document_chunks (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL,
+        document_path TEXT NOT NULL
+      )
+    ''');
+
+    final sessions = ChatSessionStore.forTesting(database);
+    await sessions.createSession('natural-origin');
+    await sessions.createSession('another-conversation');
+    await database.insert('chat_history', <String, Object>{
+      'id': 'origin-user-text',
+      'session_id': 'natural-origin',
+      'role': 'user',
+      'content': 'Mi chiamo Paolo. La mia auto è blu.',
+      'timestamp': 123,
+    });
+
+    var tick = 500;
+    final proposed = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+      now: () => ++tick,
+    );
+    expect(
+      await proposed.proposeNaturalUserNameCandidate(
+        sessionId: 'natural-origin',
+        userPrompt: 'Mi chiamo Paolo',
+        consentEnabled: true,
+        directUserMessage: true,
+      ),
+      isTrue,
+    );
+    expect(
+      await proposed.proposeNaturalUserCarColorCandidate(
+        sessionId: 'natural-origin',
+        userPrompt: 'La mia auto è blu',
+        consentEnabled: true,
+        directUserMessage: true,
+      ),
+      isTrue,
+    );
+
+    // Pending proposals persist across restart, but MUST stay excluded from
+    // ordinary chat retrieval until separately confirmed by the user.
+    await reopen();
+    expect(
+      await promptFor(
+        makeMemory(),
+        sessionId: 'another-conversation',
+        question: 'Come mi chiamo?',
+      ),
+      isNot(contains('CONFIRMED DURABLE MEMORY')),
+    );
+    expect(
+      await promptFor(
+        makeMemory(),
+        sessionId: 'another-conversation',
+        question: 'What color is my car?',
+      ),
+      isNot(contains('CONFIRMED DURABLE MEMORY')),
+    );
+
+    final reviewed = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+      now: () => ++tick,
+    );
+    final name = (await reviewed.loadReviewableNaturalNameCandidates()).single;
+    final color =
+        (await reviewed.loadReviewableNaturalCarColorCandidates()).single;
+    expect(name.content, 'Mi chiamo Paolo');
+    expect(color.content, 'La mia auto è blu');
+    expect(await reviewed.reviewNaturalNameCandidate(
+      reviewed: name,
+      approve: true,
+      userConfirmed: true,
+    ), isTrue);
+    expect(await reviewed.reviewNaturalCarColorCandidate(
+      reviewed: color,
+      approve: true,
+      userConfirmed: true,
+    ), isTrue);
+
+    // Rebind the session service after SQLite reopen: the first instance
+    // points at a closed connection from before the restart.
+    final reopenedSessions = ChatSessionStore.forTesting(database);
+    await reopenedSessions.moveToTrash('natural-origin');
+    expect((await reopenedSessions.listSessions(inTrash: true)).single.id,
+        'natural-origin');
+    final coordinator = TrashedChatPurgeCoordinator(
+      sessionStore: reopenedSessions,
+      conversationMemoryService: makeSemanticMemory(),
+      memoryCaptureService: reviewed,
+    );
+    expect(await coordinator.purgeTrashedSession(
+      sessionId: 'natural-origin',
+      userConfirmed: true,
+    ), 1);
+    expect(await database.query('chat_history'), isEmpty);
+    expect((await reopenedSessions.listSessions()).single.id, 'another-conversation');
+
+    // Reconstruct store and retrieval after closing the original SQLite
+    // connection; this is independent of Qwen, Phi and Nemotron inference.
+    await reopen();
+    for (final question in <String>[
+      'Come mi chiamo?',
+      "What's my name?",
+      "Quel est mon prénom ?",
+      '¿Cómo me llamo?',
+    ]) {
+      expect(
+        await promptFor(
+          makeMemory(),
+          sessionId: 'another-conversation',
+          question: question,
+        ),
+        contains('Mi chiamo Paolo'),
+        reason: question,
+      );
+    }
+    for (final question in <String>[
+      'Che colore è la mia auto?',
+      'What colour is my car?',
+      'De quelle couleur est ma voiture ?',
+      '¿De qué color es mi coche?',
+    ]) {
+      expect(
+        await promptFor(
+          makeMemory(),
+          sessionId: 'another-conversation',
+          question: question,
+        ),
+        contains('La mia auto è blu'),
+        reason: question,
+      );
+    }
+    expect(
+      await promptFor(
+        makeMemory(),
+        sessionId: 'another-conversation',
+        question: "Di che colore è l'auto di Marco?",
+      ),
+      isNot(contains('La mia auto è blu')),
+    );
+
+    // Selective forget is durable and must not erase a different,
+    // confirmed USER fact saved from the same original conversation.
+    final reloadedMemory = makeMemory();
+    final accepted = await reloadedMemory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    );
+    expect(accepted, hasLength(2));
+    final carColor = accepted.singleWhere(
+      (record) => record.recordKey == 'natural.user.car_color',
+    );
+    expect(
+      await reloadedMemory.removeReviewedConfirmedUserMemory(
+        reviewed: carColor,
+      ),
+      isTrue,
+    );
+    await reopen();
+    expect(
+      await promptFor(
+        makeMemory(),
+        sessionId: 'another-conversation',
+        question: 'Che colore è la mia auto?',
+      ),
+      isNot(contains('La mia auto è blu')),
+    );
+    expect(
+      await promptFor(
+        makeMemory(),
+        sessionId: 'another-conversation',
+        question: 'Come mi chiamo?',
+      ),
+      contains('Mi chiamo Paolo'),
+    );
+  });
+
 }

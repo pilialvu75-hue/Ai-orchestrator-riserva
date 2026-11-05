@@ -37,7 +37,9 @@ function error(code, status) {
   );
 }
 
-function upstreamError(status) {
+// Only closed-vocabulary diagnostic fields leave the server. No upstream
+// error bodies, request headers, secret names or provider tokens are returned.
+function upstreamError(status, failureKind, routeId) {
   const upstreamStatus =
     Number.isInteger(status) && status >= 400 && status <= 599 ? status : 502;
   return jsonResponse(
@@ -46,6 +48,8 @@ function upstreamError(status) {
       error: {
         code: 'upstream_unavailable',
         upstreamStatus,
+        ...(typeof failureKind === 'string' ? { failureKind } : {}),
+        ...(typeof routeId === 'string' ? { routeId } : {}),
       },
     },
     upstreamStatus,
@@ -265,10 +269,26 @@ async function resolvePendingResponse({
   return null;
 }
 
+// NVIDIA's two large trial models recommend different sampling from the
+// historical Nemotron self-test. The adjustment is used ONLY for the fixed
+// synthetic probe; ordinary Cantiere requests retain their own parameters.
+function selfTestGenerationFor(route) {
+  if (providerForEndpoint(route.endpoint) === 'NVIDIA NIM') {
+    if (route.model === 'moonshotai/kimi-k2.6') {
+      return { maxTokens: 1536, temperature: 1, topP: 1 };
+    }
+    if (route.model === 'deepseek-ai/deepseek-v4.1-flash') {
+      return { maxTokens: 1536, temperature: 1, topP: 0.95 };
+    }
+  }
+  return { maxTokens: 512, temperature: 0, topP: 1 };
+}
+
 async function callRoute(route, request) {
   const apiKey = request.env[route.apiKeySecret];
-  if (!apiKey) return null;
+  if (!apiKey) return { ok: false, status: 503, failureKind: 'binding_missing' };
 
+  const params = request.selfTest ? selfTestGenerationFor(route) : request;
   for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 80000);
@@ -283,9 +303,9 @@ async function callRoute(route, request) {
         body: JSON.stringify({
           model: route.model,
           messages: request.messages,
-          max_tokens: request.maxTokens,
-          temperature: request.temperature,
-          top_p: request.topP,
+          max_tokens: params.maxTokens,
+          temperature: params.temperature,
+          top_p: params.topP,
           stream: false,
         }),
         signal: controller.signal,
@@ -297,7 +317,11 @@ async function callRoute(route, request) {
         apiKey,
       });
       if (resolvedResponse == null) {
-        return { ok: false, status: 503 };
+        return {
+          ok: false,
+          status: 503,
+          failureKind: 'pending_response_unresolved',
+        };
       }
       response = resolvedResponse;
 
@@ -311,14 +335,18 @@ async function callRoute(route, request) {
           await sleep(delay);
           continue;
         }
-        return { ok: false, status: response.status };
+        return {
+          ok: false,
+          status: response.status,
+          failureKind: 'upstream_http_rejection',
+        };
       }
 
       let decoded;
       try {
         decoded = await response.json();
       } catch (_) {
-        return { ok: false, status: 502 };
+        return { ok: false, status: 502, failureKind: 'upstream_invalid_json' };
       }
 
       const text = decoded?.choices?.[0]?.message?.content;
@@ -327,7 +355,7 @@ async function callRoute(route, request) {
         !text.trim() ||
         text.length > MAX_OUTPUT_CHARS
       ) {
-        return { ok: false, status: 502 };
+        return { ok: false, status: 502, failureKind: 'no_final_text' };
       }
 
       const completionTokens = decoded?.usage?.completion_tokens;
@@ -350,13 +378,19 @@ async function callRoute(route, request) {
             : 0,
       };
     } catch (_) {
-      return { ok: false, status: 503 };
+      return {
+        ok: false,
+        status: 503,
+        failureKind: controller.signal.aborted
+          ? 'upstream_timeout'
+          : 'upstream_connection_error',
+      };
     } finally {
       clearTimeout(timer);
     }
   }
 
-  return { ok: false, status: 502 };
+  return { ok: false, status: 502, failureKind: 'upstream_unknown' };
 }
 
 export async function onRequest(context) {
@@ -463,6 +497,7 @@ export async function onRequest(context) {
   const request = {
     env: context.env,
     messages,
+    selfTest,
     maxTokens: selfTest
       ? 512
       : Math.round(boundedNumber(body.maxTokens, 1, 4096, 512)),
@@ -481,6 +516,8 @@ export async function onRequest(context) {
   };
 
   let lastFailureStatus = 502;
+  let lastFailureKind = 'upstream_unknown';
+  let lastFailedRouteId;
   for (const route of routes) {
     const result = await callRoute(route, request);
     if (result?.ok) {
@@ -500,8 +537,10 @@ export async function onRequest(context) {
     }
     if (Number.isInteger(result?.status)) {
       lastFailureStatus = result.status;
+      lastFailureKind = result.failureKind || 'upstream_unknown';
+      lastFailedRouteId = route.id;
     }
   }
 
-  return upstreamError(lastFailureStatus);
+  return upstreamError(lastFailureStatus, lastFailureKind, lastFailedRouteId);
 }

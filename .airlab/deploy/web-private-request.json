@@ -3,6 +3,6 @@
   "operation": "deploy_private",
   "confirmation": "DEPLOY_PRIVATE_CANTIERE",
   "environment": "web-private-production",
-  "requestId": "aivexus-web-p0-nemotron-ultra-free-selftest-config-20261105",
-  "reason": "Owner-authorized private Pages redeploy after Cloudflare production route nemotron-ultra-orchestrator selfTestFree=true was verified by workflow 42002172729. No changes to credentials, Access, other routes or Web runtime."
+  "requestId": "aivexus-web-nim-large-model-diagnostic-fix-20261105",
+  "reason": "Deploy verified PR #1002 to diagnose failed Kimi K2.6 and DeepSeek V4.1 Flash synthetic self-tests; preserve existing credentials, Cloudflare Access, Nemotron behavior and provider routes."
 }

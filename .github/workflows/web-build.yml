@@ -66,6 +66,9 @@ jobs:
           node --input-type=module --check < functions/api/cantiere/capabilities.js
           node --input-type=module --check < functions/api/cantiere/inference.js
 
+      - name: Test NVIDIA synthetic probes and safe failure classifications
+        run: node --test test/airlab/web_nvidia_selftest_diagnostics.mjs
+
       - name: Build ordinary Cantiere Web application
         run: flutter build web --release --target lib/web_main.dart
 

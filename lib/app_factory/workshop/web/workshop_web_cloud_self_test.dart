@@ -12,6 +12,8 @@ final class WorkshopWebCloudSelfTestResult {
     required this.elapsed,
     this.statusCode,
     this.errorCode,
+    this.failureKind,
+    this.upstreamStatus,
     this.provider,
     this.configuredModel,
     this.reportedModel,
@@ -24,6 +26,8 @@ final class WorkshopWebCloudSelfTestResult {
   final Duration elapsed;
   final int? statusCode;
   final String? errorCode;
+  final String? failureKind;
+  final int? upstreamStatus;
   final String? provider;
   final String? configuredModel;
   final String? reportedModel;
@@ -85,6 +89,22 @@ final class WorkshopWebCloudSelfTestClient {
         final error = decoded is Map ? decoded['error'] : null;
         final code = error is Map ? error['code'] : null;
         final notConfigured = code == 'self_test_not_configured';
+        final reason = error is Map ? error['failureKind'] : null;
+        const allowedReasons = <String>{
+          'binding_missing',
+          'pending_response_unresolved',
+          'upstream_http_rejection',
+          'upstream_invalid_json',
+          'no_final_text',
+          'upstream_timeout',
+          'upstream_connection_error',
+          'upstream_unknown',
+        };
+        final failureKind = reason is String && allowedReasons.contains(reason)
+            ? reason
+            : null;
+        final upstream = error is Map ? error['upstreamStatus'] : null;
+        final failedRoute = error is Map ? error['routeId'] : null;
         return WorkshopWebCloudSelfTestResult(
           passed: false,
           detail: notConfigured
@@ -95,6 +115,14 @@ final class WorkshopWebCloudSelfTestClient {
           elapsed: stopwatch.elapsed,
           statusCode: response.statusCode,
           errorCode: code is String ? code : null,
+          failureKind: failureKind,
+          upstreamStatus: upstream is int && upstream >= 400 && upstream <= 599
+              ? upstream
+              : null,
+          routeId: failedRoute is String &&
+                  RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$').hasMatch(failedRoute)
+              ? failedRoute
+              : null,
         );
       }
 
@@ -122,7 +150,11 @@ final class WorkshopWebCloudSelfTestClient {
       return WorkshopWebCloudSelfTestResult(
         passed: passed,
         detail: !markerMatches
-            ? 'Il modello non ha restituito esattamente il testo di prova.'
+            ? (decoded['text'] is String &&
+                      (decoded['text'] as String).trim().isNotEmpty
+                  ? 'Il modello ha restituito un testo finale, ma non esattamente il '
+                      'marcatore richiesto: inferenza presente, Self-Test non superato.'
+                  : 'Nessun testo finale valido nel risultato del broker.')
             : !attributionComplete
                 ? 'Testo corretto, ma provider/modello effettivo non '
                     'attribuibili completamente.'
