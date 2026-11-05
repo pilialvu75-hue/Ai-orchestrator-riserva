@@ -152,8 +152,8 @@ final class WorkshopWebCloudSelfTestClient {
         detail: !markerMatches
             ? (decoded['text'] is String &&
                       (decoded['text'] as String).trim().isNotEmpty
-                  ? 'Il modello ha restituito un testo finale, ma non il '
-                      'marcatore esatto: inferenza presente, Self-Test non superato.'
+                  ? 'Il modello ha restituito un testo finale, ma non esattamente il '
+                      'marcatore richiesto: inferenza presente, Self-Test non superato.'
                   : 'Nessun testo finale valido nel risultato del broker.')
             : !attributionComplete
                 ? 'Testo corretto, ma provider/modello effettivo non '
