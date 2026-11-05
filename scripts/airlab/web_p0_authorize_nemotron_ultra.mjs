@@ -42,7 +42,7 @@ try {
 }
 assert(
   authorization?.schemaVersion === 1 &&
-  authorization?.operation === 'authorize_ultra_free_self_test' &&
+  ['check_ultra_free_self_test', 'authorize_ultra_free_self_test'].includes(authorization?.operation) &&
   authorization?.environment === 'web-private-production' &&
   authorization?.routeId === routeId &&
   authorization?.model === modelId &&
@@ -153,6 +153,10 @@ assert(target.selfTestFree === undefined || target.selfTestFree === false,
   'UNEXPECTED_TEST_FLAG');
 assert(beforeRoutes.orchestration.length >= 2,
   'ROUTES_UNEXPECTEDLY_INCOMPLETE');
+if (authorization.operation === 'check_ultra_free_self_test') {
+  console.log(gate + '_READ_ONLY_PREFLIGHT_PASS');
+  process.exit(0);
+}
 const afterRoutes = structuredClone(beforeRoutes);
 const afterTarget = afterRoutes.orchestration.find((r) => r.id === routeId);
 afterTarget.selfTestFree = true;
