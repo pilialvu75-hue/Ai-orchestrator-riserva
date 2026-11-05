@@ -41,6 +41,13 @@ class ConversationMemoryService {
   /// Coalesces concurrent clear requests for the same session.
   final Map<String, Future<void>> _clearOperations = <String, Future<void>>{};
 
+  /// Per-session purge barrier. Successful irreversible deletion also
+  /// tombstones the session ID for this service instance, so delayed callbacks
+  /// cannot create a fresh semantic index for an already-deleted conversation.
+  /// This is not a replacement for the durable cross-device tombstone in ME-2.
+  final Set<String> _purgingSessions = <String>{};
+  final Set<String> _purgedSessions = <String>{};
+
   /// Global barrier used by the Settings Danger Zone.
   ///
   /// While active, semantic writes and recalls are rejected. Existing indexing
@@ -69,6 +76,41 @@ class ConversationMemoryService {
       return await operation();
     } finally {
       _globalResetInProgress = false;
+    }
+  }
+
+  /// Drain this session's queued embeddings before a destructive transaction.
+  ///
+  /// The caller is responsible for verifying user consent, draining durable
+  /// memory capture (runWithResetBarrier), and committing the SQLite purge in
+  /// [operation]. Other sessions keep indexing normally. No UI is wired here.
+  ///
+  /// If the transaction throws, the ID is not tombstoned, so the chat remains
+  /// recoverable. In-flight embeddings are still invalidated for safety.
+  Future<T> runWithSessionPurgeBarrier<T>(
+    String sessionId,
+    Future<T> Function() operation,
+  ) async {
+    final id = sessionId.trim();
+    if (id.isEmpty) throw ArgumentError('Session id must not be empty');
+    if (_purgedSessions.contains(id) ||
+        _purgingSessions.contains(id) ||
+        _clearingSessions.contains(id) ||
+        _globalResetInProgress) {
+      throw StateError('Session purge conflicts with another memory operation');
+    }
+
+    _purgingSessions.add(id);
+    _indexEpochs[id] = (_indexEpochs[id] ?? 0) + 1;
+    try {
+      final pending = _indexingTails[id];
+      if (pending != null) await pending;
+      // Even if the embedder was already running, no stale upsert is allowed.
+      final result = await operation();
+      _purgedSessions.add(id);
+      return result;
+    } finally {
+      _purgingSessions.remove(id);
     }
   }
 
@@ -302,7 +344,9 @@ class ConversationMemoryService {
       return;
     }
 
-    if (_clearingSessions.contains(sessionId)) {
+    if (_clearingSessions.contains(sessionId) ||
+        _purgingSessions.contains(sessionId) ||
+        _purgedSessions.contains(sessionId)) {
       debugPrint(
         '[EMBEDDING_STORE_SKIPPED] session=$sessionId message=$messageId reason=session_clearing',
       );
@@ -373,7 +417,10 @@ class ConversationMemoryService {
   }) async {
     final normalized = query.trim();
 
-    if (normalized.isEmpty || _globalResetInProgress) {
+    if (normalized.isEmpty ||
+        _globalResetInProgress ||
+        _purgingSessions.contains(sessionId) ||
+        _purgedSessions.contains(sessionId)) {
       return const <ChatTurn>[];
     }
 
@@ -466,6 +513,8 @@ class ConversationMemoryService {
 
   bool _isIndexWriteStale(String sessionId, int expectedEpoch) {
     return _globalResetInProgress ||
+        _purgingSessions.contains(sessionId) ||
+        _purgedSessions.contains(sessionId) ||
         _clearingSessions.contains(sessionId) ||
         (_indexEpochs[sessionId] ?? 0) != expectedEpoch;
   }

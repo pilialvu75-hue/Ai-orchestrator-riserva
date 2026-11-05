@@ -174,7 +174,11 @@ void main() {
       credentials: credentials,
     )));
     await waitForConsentReady(tester);
-    await tester.tap(find.byKey(const Key('consent-add')));
+    final addButton = find.byKey(const Key('consent-add'));
+    await tester.ensureVisible(addButton);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.widget<FilledButton>(addButton).onPressed, isNotNull);
+    await tester.tap(addButton);
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
     expect(find.byKey(const Key('consent-apply')), findsOneWidget);

@@ -294,4 +294,106 @@ void main() {
     expect(index.upsertCalls, 0);
     expect(index.clearCalls, 1);
   });
+
+  test('session purge invalidates a pending embedding and blocks future writes',
+      () async {
+    final embedding = _BlockingEmbeddingService();
+    final index = _RecordingSemanticIndex();
+    final service = _createService(
+      semanticIndex: index,
+      embeddingService: embedding,
+    );
+
+    await service.storeMessageEmbedding(
+      sessionId: 'assistant-purge',
+      messageId: 'old',
+      role: 'user',
+      content: 'informazione da eliminare',
+      timestamp: 1,
+    );
+    await pumpEventQueue();
+    expect(embedding.calls, 1);
+
+    var transactionCompleted = false;
+    final purge = service.runWithSessionPurgeBarrier(
+      'assistant-purge',
+      () async {
+        transactionCompleted = true;
+        return 1;
+      },
+    );
+    await pumpEventQueue();
+    expect(transactionCompleted, isFalse);
+    expect(index.upsertCalls, 0);
+
+    // A fresh enqueue while deletion is pending must never enter the queue.
+    await service.storeMessageEmbedding(
+      sessionId: 'assistant-purge',
+      messageId: 'during',
+      role: 'user',
+      content: 'nessun nuovo indice',
+      timestamp: 2,
+    );
+    expect(embedding.calls, 1);
+
+    embedding.blocker.complete(const <double>[1, 0, 0]);
+    expect(await purge, 1);
+    await pumpEventQueue();
+    expect(index.upsertCalls, 0);
+
+    // The successfully deleted session is tombstoned in this running service.
+    await service.storeMessageEmbedding(
+      sessionId: 'assistant-purge',
+      messageId: 'after',
+      role: 'assistant',
+      content: 'non resuscitare',
+      timestamp: 3,
+    );
+    await pumpEventQueue();
+    expect(index.upsertCalls, 0);
+    expect(embedding.calls, 1);
+    await expectLater(
+      service.runWithSessionPurgeBarrier('assistant-purge', () async => 1),
+      throwsStateError,
+    );
+
+    // Unrelated sessions are not blocked by this per-session barrier.
+    await service.storeMessageEmbedding(
+      sessionId: 'other-session',
+      messageId: 'kept',
+      role: 'user',
+      content: 'dato da conservare',
+      timestamp: 4,
+    );
+    await pumpEventQueue();
+    expect(index.upsertCalls, 1);
+  });
+
+  test('failed purge does not tombstone an existing session', () async {
+    final embedding = _BlockingEmbeddingService();
+    embedding.blocker.complete(const <double>[0, 1]);
+    final index = _RecordingSemanticIndex();
+    final service = _createService(
+      semanticIndex: index,
+      embeddingService: embedding,
+    );
+
+    await expectLater(
+      service.runWithSessionPurgeBarrier<int>(
+        'still-here',
+        () async => throw StateError('SQLite transaction refused'),
+      ),
+      throwsStateError,
+    );
+    await service.storeMessageEmbedding(
+      sessionId: 'still-here',
+      messageId: 'valid',
+      role: 'user',
+      content: 'ricordo dopo purge rifiutata',
+      timestamp: 5,
+    );
+    await pumpEventQueue();
+    expect(index.upsertCalls, 1);
+  });
+
 }
