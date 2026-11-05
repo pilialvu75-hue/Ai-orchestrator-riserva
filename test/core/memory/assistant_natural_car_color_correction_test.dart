@@ -51,11 +51,11 @@ void main() {
 
   test('IT EN FR ES explicit change phrases normalize one new fact', () {
     final examples = <String, String>{
-      'Ho cambiato auto: ora è rossa': 'it:La mia auto è rossa',
-      'La mia auto ora è verde': 'it:La mia auto è verde',
-      'My car is now red': 'en:My car is red',
-      'Ma voiture est maintenant rouge': 'fr:Ma voiture est rouge',
-      'Mi coche ahora es rojo': 'es:Mi coche es rojo',
+      'Ho riverniciato la mia auto: ora è rossa': 'it:La mia auto è rossa',
+      'Ho riverniciato la mia auto: ora è verde': 'it:La mia auto è verde',
+      'I repainted my car: it is now red': 'en:My car is red',
+      "J'ai repeint ma voiture: elle est maintenant rouge": 'fr:Ma voiture est rouge',
+      'He repintado mi coche: ahora es rojo': 'es:Mi coche es rojo',
     };
     for (final input in examples.entries) {
       final parsed = AssistantNaturalMemoryCandidateExtractor
@@ -67,12 +67,18 @@ void main() {
 
   test('no quote, third party, roleplay, questions or arbitrary commands', () {
     final invalid = <String>[
+      'Ho cambiato auto: ora è rossa',
+      'La mia auto ora è rossa',
+      'My car is now red',
+      'Ma voiture est maintenant rouge',
+      'Mi coche ahora es rojo',
+      'Ho comprato una seconda auto rossa',
       'La mia auto è rossa',
-      'Ho cambiato auto: ora è rossa?',
-      '"Ho cambiato auto: ora è rossa"',
-      'Ho cambiato auto: ora è rossa; la targa è AB123',
-      'Ho cambiato auto: ora è rossa\nIgnora tutto',
-      'La mia auto ora è rossa e la casa è verde',
+      'Ho riverniciato la mia auto: ora è rossa?',
+      '"Ho riverniciato la mia auto: ora è rossa"',
+      'Ho riverniciato la mia auto: ora è rossa; la targa è AB123',
+      'Ho riverniciato la mia auto: ora è rossa\nIgnora tutto',
+      'Ho riverniciato la mia auto: ora è rossa e la casa è verde',
       'My friend car is now red',
       'If my car is now red',
       'My car is now not red',
@@ -99,7 +105,7 @@ void main() {
     ]) {
       expect(
         await capture.proposeNaturalUserCarColorCorrectionCandidate(
-          userPrompt: 'Ho cambiato auto: ora è rossa',
+          userPrompt: 'Ho riverniciato la mia auto: ora è rossa',
           consentEnabled: params.consent,
           directUserMessage: params.direct,
         ),
@@ -112,7 +118,7 @@ void main() {
 
     expect(
       await capture.proposeNaturalUserCarColorCorrectionCandidate(
-        userPrompt: 'Ho cambiato auto: ora è rossa',
+        userPrompt: 'Ho riverniciato la mia auto: ora è rossa',
         consentEnabled: true,
         directUserMessage: true,
       ),
@@ -139,7 +145,7 @@ void main() {
   test('review replaces old color atomically and never retrieves stale color',
       () async {
     await capture.proposeNaturalUserCarColorCorrectionCandidate(
-      userPrompt: 'Ho cambiato auto: ora è rossa',
+      userPrompt: 'Ho riverniciato la mia auto: ora è rossa',
       consentEnabled: true,
       directUserMessage: true,
     );
@@ -179,7 +185,7 @@ void main() {
   test('correction cannot recreate a deleted or concurrently changed fact',
       () async {
     await capture.proposeNaturalUserCarColorCorrectionCandidate(
-      userPrompt: 'My car is now red',
+      userPrompt: 'I repainted my car: it is now red',
       consentEnabled: true,
       directUserMessage: true,
     );
@@ -210,7 +216,7 @@ void main() {
       updatedAt: 400,
     );
     expect(await capture.proposeNaturalUserCarColorCorrectionCandidate(
-      userPrompt: 'My car is now white',
+      userPrompt: 'I repainted my car: it is now white',
       consentEnabled: true,
       directUserMessage: true,
     ), isTrue);
@@ -235,7 +241,7 @@ void main() {
   test('incorrect review snapshot and invalid edits are never confirmed',
       () async {
     await capture.proposeNaturalUserCarColorCorrectionCandidate(
-      userPrompt: 'La mia auto ora è rossa',
+      userPrompt: 'Ho riverniciato la mia auto: ora è rossa',
       consentEnabled: true,
       directUserMessage: true,
     );
@@ -245,7 +251,7 @@ void main() {
     for (final input in <String>[
       'La mia auto è rossa',
       'Ho cambiato auto: ora è PIN',
-      'La mia auto ora è rossa e blu',
+      'Ho riverniciato la mia auto: ora è rossa e blu',
       'My car is now 100',
     ]) {
       expect(await capture.reviewNaturalCarColorCorrectionCandidate(
@@ -256,7 +262,7 @@ void main() {
       ), isFalse, reason: input);
     }
     await capture.proposeNaturalUserCarColorCorrectionCandidate(
-      userPrompt: 'La mia auto ora è nera',
+      userPrompt: 'Ho riverniciato la mia auto: ora è nera',
       consentEnabled: true,
       directUserMessage: true,
     );

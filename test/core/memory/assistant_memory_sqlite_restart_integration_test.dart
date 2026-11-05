@@ -801,7 +801,7 @@ void main() {
       now: () => ++tick,
     );
     expect(await capture.proposeNaturalUserCarColorCorrectionCandidate(
-      userPrompt: 'Ho cambiato auto: ora è rossa',
+      userPrompt: 'Ho riverniciato la mia auto: ora è rossa',
       consentEnabled: true,
       directUserMessage: true,
     ), isTrue);
@@ -846,7 +846,7 @@ void main() {
       now: () => ++tick,
     );
     expect(await proposed.proposeNaturalUserCarColorCorrectionCandidate(
-      userPrompt: 'My car is now black',
+      userPrompt: 'I repainted my car: it is now black',
       consentEnabled: true,
       directUserMessage: true,
     ), isTrue);

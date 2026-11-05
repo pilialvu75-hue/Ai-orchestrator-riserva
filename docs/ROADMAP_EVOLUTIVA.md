@@ -928,8 +928,10 @@ Esempi di conversazione normale, con dati sintetici:
 - «Preferisco Intel» oppure «Parlami normalmente in italiano»: riconoscere
   preferenze durevoli solo quando espresse come tali, con perimetro e
   provenienza.
-- «Ho cambiato auto: ora e rossa»: aggiornare il fatto pertinente, senza
-  conservare la versione vecchia come verita contemporanea.
+- «Ho cambiato auto: ora e rossa»: **non sovrascrivere** il colore
+  del veicolo precedente, perche la nuova auto potrebbe essere distinta.
+  Soltanto «Ho riverniciato la mia auto: ora e rossa» identifica
+  esplicitamente una modifica al medesimo oggetto (sempre con review).
 - «Quella soluzione non funzionava; questa e stata verificata»: conservare
   esito, condizioni e prove per riutilizzare una procedura, NON promuovere
   automaticamente il testo del modello a verita verificata.
@@ -1042,7 +1044,7 @@ alle modifiche che sono state controllate soltanto con GitHub Actions.
 | ME-0 — persistenza e scope | [PR #993](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/993), integrazione test file-backed; [#994](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/994), eliminazione selettiva della chat nel cestino; [#995](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/995), barriere in-process contro scritture tardive. Tutte integrate con CI verde. | Mancano collaudo S24 (incluso STELLA73), protezioni persistenti ME-2 e verifica su ripristini/restart reali. Il pulsante di purge definitivo non e ancora esposto nella UI. |
 | ME-1 — presentazioni naturali | [#996](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/996), parser diretto IT/EN/FR/ES con review; [#998](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/998), opt-in locale persistente inizialmente OFF, revocabile e connesso alla chat ordinaria senza allegati. Integrate con CI verde. | Il riconoscimento crea soltanto candidati; conferma/correzione/rifiuto avvengono nella pagina Memoria. Non e ancora estrazione libera di conversazioni lunghe, e l'opt-in del dispositivo non e pairing multipiattaforma. |
 | ME-1 — primo fatto autobiografico oltre il nome | [#999](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/999), «La mia auto e blu» e equivalenti EN/FR/ES, parser conservativo, conferma umana e retrieval locale mirato. Integrata con CI verde. | Rimane da misurare falsi positivi, variazioni linguistiche, contraddizioni e qualità reale delle risposte con Qwen/Phi/Nemotron. |
-| ME-0 + ME-1 — regressione integrata | Prova file-backed SQLite in preparazione: candidato naturale NON recuperabile prima di review; conferma, eliminazione della chat originale, riavvio, recupero in nuova chat nelle 4 lingue, forget selettivo. | Il test automatico non sostituisce STELLA73, offline e il collaudo dell'aggiornamento distribuito su Galaxy S24 FE. |
+| ME-0 + ME-1 — regressione integrata | [PR #1000](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/1000) integrata con CI verde: candidati invisibili prima della review, conferma, purge chat origine, riavvio SQLite, recupero nelle 4 lingue e forget selettivo. | Il test automatico non sostituisce STELLA73, offline e il collaudo fisico dell'aggiornamento su Galaxy S24 FE. |
 
 **Separazioni obbligatorie:** la chat eliminata, i record USER e i vettori
 semantici sono dati distinti; i candidati non sono fatti confermati.
@@ -1052,6 +1054,61 @@ aggiungere ricordi personali al prompt senza gli appositi consensi
 Un test CI non e un test fisico, una build compilata non e una release
 installata, e il nuovo parser non corregge automaticamente le risposte
 allucinate dei modelli (filone [#973](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/973)).
+
+### 17.3 ter — ME-2: identita, riferimenti e incertezza (5 novembre 2026)
+
+Il requisito chiave e **non confondere un attributo con una identita**.
+La vecchia chiave singola `natural.user.car_color` e una scorciatoia
+limitata a un veicolo gia accettato e riconosciuto; non e un ID veicolo.
+La [PR #1003](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/1003)
+ha introdotto correzioni revisionate e protette dalla versione, ma il
+test «Ho cambiato auto: ora e rossa» dimostra l'ambiguita di oggetto:
+sostituzione, riverniciatura e seconda auto **non sono equivalenti**.
+
+**Prima fondazione operativa di entity resolution (questa tranche):**
+
+- Distinguere riferimento nominato, menzione anonima e identita verificata;
+  `person:name:nora` e un'etichetta provvisoria, non un identificatore
+  univoco. Due persone possono avere lo stesso nome. Non deduplicare
+  persone per altezza, corporatura, sport, giudizi o successione delle chat.
+- Esempio di accettazione con sette frasi: «Il mio collega e un idiota»,
+  «Ho un collega alto», «Un collega si chiama Nora»,
+  «Nora e sovrappeso», «Lino fa tanto sport»,
+  «Teo e un mio collega», «Non mi piace il mio collega».
+  Collegamenti espliciti solo per il riferimento scritto «Nora»;
+  Lino **non** diventa automaticamente collega e il collega alto non
+  diventa automaticamente Teo. Opinioni negative restano attribuite
+  **all'utente**, non diventano fatti oggettivi su un terzo.
+- «La mia bicicletta e veloce» registra al massimo la valutazione
+  dichiarata di una bici **non identificata**: nessuna deduzione su eta,
+  acquisto, riparazioni o prestazioni misurate.
+- Un parser deterministico, locale e **transitorio** copre questi
+  esempi: restituisce riferimenti con attribuzione e incertezza ma non
+  salva profili terzi, non alimenta il prompt e non invia dati Cloud.
+  Questo e un *componente preparatorio testato*, non ancora la memoria
+  relazionale operativa della chat.
+
+**Gate successivi indispensabili per un grafo durevole:**
+
+1. Entita con identificatore persistente opaco, proprietario, versione,
+   relazioni ed eventi; riferimenti ambigui separati e dedup solo se
+   supportata da evidenza esplicita o revisione del proprietario.
+2. Politica di privacy distinta per dati di terzi, attributi sensibili
+   e giudizi soggettivi: nessuna profilazione automatica della rete
+   sociale, opt-in puntuale/review/revoca e controllo scope.
+3. UI di chiarimento soltanto quando serve a una risposta o a una
+   modifica; audit di provenienza e controllo di correzioni e forget.
+4. Collisione omonimi, pronomi, acquisto di secondo oggetto, trasferimenti
+   di proprieta, ambiguita temporali, riavvio SQLite e dispositivo
+   multipiattaforma, con test avversari e collaudo S24.
+
+**Correzione del gate esistente:** il parser ME-2 del colore deve
+accettare per l'aggiornamento dell'unico veicolo soltanto espressioni
+esplicite di riverniciatura della stessa auto in IT/EN/FR/ES. «Ho cambiato
+auto: ora e rossa», «My car is now red» e «Ho comprato una seconda auto
+rossa» non devono sovrascrivere la vecchia auto. L'affermazione puo
+essere compresa come evento ancora da disambiguare, non promossa a
+ricordo confermato.
 
 ### 17.4 — Piano per milestone con gate di accettazione
 

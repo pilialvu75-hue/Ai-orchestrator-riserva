@@ -8,6 +8,7 @@ on:
       - 'lib/native/runtime/windows/**'
       - 'test/core/**'
       - 'pubspec.*'
+      - '.github/workflows/owner-beta-checkpoint.yml'
       - '.github/workflows/assistant-shared-tests.yml'
   pull_request:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - 'lib/native/runtime/windows/**'
       - 'test/core/**'
       - 'pubspec.*'
+      - '.github/workflows/owner-beta-checkpoint.yml'
       - '.github/workflows/assistant-shared-tests.yml'
   workflow_dispatch:
 
@@ -31,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
@@ -77,6 +79,9 @@ jobs:
           test/core/memory/assistant_memory_preference_candidate_test.dart
           test/core/memory/assistant_memory_selective_forget_test.dart
           test/core/memory/assistant_memory_review_page_test.dart
+          test/core/memory/assistant_natural_car_color_candidate_test.dart
+          test/core/memory/assistant_natural_car_color_correction_test.dart
+          test/core/memory/assistant_entity_reference_analyzer_test.dart
           test/core/system/update
       - name: Verify explicitly opted-in QA build gate
         run: >-

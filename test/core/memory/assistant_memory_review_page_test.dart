@@ -552,7 +552,7 @@ void main() {
       updatedAt: 100,
     );
     expect(await capture.proposeNaturalUserCarColorCorrectionCandidate(
-      userPrompt: 'Ho cambiato auto: ora è rossa',
+      userPrompt: 'Ho riverniciato la mia auto: ora è rossa',
       consentEnabled: true,
       directUserMessage: true,
     ), isTrue);
@@ -563,12 +563,12 @@ void main() {
 
     await showPage(tester);
     await tester.scrollUntilVisible(
-      find.text('Ho cambiato auto: ora è rossa'),
+      find.text('Ho riverniciato la mia auto: ora è rossa'),
       160,
       scrollable: find.byType(Scrollable).first,
     );
     final proposal = find.ancestor(
-      of: find.text('Ho cambiato auto: ora è rossa'),
+      of: find.text('Ho riverniciato la mia auto: ora è rossa'),
       matching: find.byType(Card),
     );
     final approve = find.descendant(

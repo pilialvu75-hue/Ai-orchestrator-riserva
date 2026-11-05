@@ -11,6 +11,7 @@ on:
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/macos-build.yml'
+      - '.github/workflows/owner-beta-checkpoint.yml'
   push:
     branches:
       - main
@@ -25,6 +26,7 @@ on:
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/macos-build.yml'
+      - '.github/workflows/owner-beta-checkpoint.yml'
 
 permissions:
   contents: read
@@ -47,6 +49,9 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Verify transient DMG retry safety (mocked diskimages)
+        run: bash test/native/macos/verify_dmg_with_retry_test.sh
 
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
