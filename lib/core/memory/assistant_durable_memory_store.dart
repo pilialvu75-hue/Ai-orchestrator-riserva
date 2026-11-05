@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 
 abstract class AssistantDurableMemoryPersistence {
   Future<String?> read(String key);
@@ -187,7 +188,9 @@ class AssistantDurableMemoryStore {
     if (reviewed.scope != AssistantMemoryScope.user ||
         reviewed.status != AssistantMemoryStatus.candidate ||
         reviewed.source != AssistantMemorySource.userStatement ||
-        reviewed.kind != AssistantMemoryKind.preference ||
+        !(reviewed.kind == AssistantMemoryKind.preference ||
+            (reviewed.kind == AssistantMemoryKind.fact &&
+             reviewed.recordKey == AssistantNaturalNameCandidate.recordKey)) ||
         reviewedAt < 0 ||
         (approve && (approvedContent == null ||
             approvedContent.trim().isEmpty))) {
@@ -211,9 +214,11 @@ class AssistantDurableMemoryStore {
       final current = records[index];
       if (current.status != AssistantMemoryStatus.candidate ||
           current.source != AssistantMemorySource.userStatement ||
-          current.kind != AssistantMemoryKind.preference ||
+          current.kind != reviewed.kind ||
+          current.recordKey != reviewed.recordKey ||
           current.updatedAt != reviewed.updatedAt ||
           current.content != reviewed.content ||
+          current.reason != reviewed.reason ||
           reviewedAt < current.updatedAt) {
         return false;
       }

@@ -49,7 +49,7 @@ void main() {
     trustedCloudSourceEvidence: HybridCloudRuntimeSourceEvidence(
       sessionId: original.sessionId,
       originalQuestion: original.prompt,
-      baseSystemPrompt: original.systemPrompt,
+      baseSystemPrompt: original.systemPrompt!,
       originalHistory: const <AiMessage>[
         AiMessage(role: AiMessageRole.user, content: 'Earlier private text'),
       ],

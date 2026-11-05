@@ -1,27 +1,6 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
-
-/// Immutable evidence produced by the confirmed-only SQLite memory reader.
-///
-/// The words of memory records are never reclassified as application
-/// instructions, even when a stored record contains an instruction-like line.
-enum AssistantMemoryContextPartKind { applicationHeader, confirmedRecord }
-
-final class AssistantMemoryContextPart {
-  const AssistantMemoryContextPart._(this.text, this.kind);
-
-  final String text;
-  final AssistantMemoryContextPartKind kind;
-}
-
-final class AssistantConfirmedMemoryContext {
-  AssistantConfirmedMemoryContext._(List<AssistantMemoryContextPart> items)
-      : parts = List<AssistantMemoryContextPart>.unmodifiable(items),
-        text = items.map((item) => item.text).join();
-
-  final String text;
-  final List<AssistantMemoryContextPart> parts;
-}
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 
 /// Builds a small, deterministic, confirmed-only memory context for ordinary
 /// Assistant chat. This service is retrieval-only: it never creates, confirms
@@ -60,21 +39,7 @@ class AssistantDurableMemoryContextService {
     }
   }
 
-  /// Existing Local caller receives the exact same text as before.
   Future<String?> buildConfirmedContext({
-    required String sessionId,
-    required String userPrompt,
-  }) async {
-    final data = await buildConfirmedContextWithProvenance(
-      sessionId: sessionId,
-      userPrompt: userPrompt,
-    );
-    return data?.text;
-  }
-
-  /// Source-backed retrieval for future consent-controlled Cloud requests.
-  /// Only confirmed records from the real memory service can enter its parts.
-  Future<AssistantConfirmedMemoryContext?> buildConfirmedContextWithProvenance({
     required String sessionId,
     required String userPrompt,
   }) async {
@@ -103,6 +68,7 @@ class AssistantDurableMemoryContextService {
 
     final queryTerms = _terms(query);
     final broadMemoryRequest = _isBroadMemoryRequest(query);
+    final firstPersonNameRequest = _isDirectUserNameRequest(query);
     final historicalReference = _hasHistoricalReference(query);
     final ranked = <_RankedMemory>[];
 
@@ -116,6 +82,11 @@ class AssistantDurableMemoryContextService {
 
     for (final record in userRecords) {
       var score = _relevanceScore(record, queryTerms);
+      if (record.recordKey == AssistantNaturalNameCandidate.recordKey &&
+          firstPersonNameRequest &&
+          score < 40) {
+        score = 40;
+      }
       if (score == 0 && broadMemoryRequest) score = 2;
       if (score > 0) ranked.add(_RankedMemory(record: record, score: score));
     }
@@ -178,6 +149,33 @@ class AssistantDurableMemoryContextService {
     return terms;
   }
 
+  /// Narrow, first-person, multilingual lookup for a reviewed given name.
+  /// Third-party name questions do not qualify. No unconfirmed candidate is
+  /// available to this retrieval service in any case.
+  bool _isDirectUserNameRequest(String value) {
+    final normalized = value.toLowerCase().replaceAll('’', "'");
+    return _containsAny(normalized, const <String>[
+      'come mi chiamo',
+      'qual è il mio nome',
+      'qual e il mio nome',
+      'qual è il mio primo nome',
+      'il mio nome',
+      'what is my name',
+      "what's my name",
+      'what is my first name',
+      'my first name',
+      "comment je m'appelle",
+      'quel est mon prénom',
+      'quel est mon nom',
+      'mon prénom',
+      'como me llamo',
+      'cómo me llamo',
+      'cual es mi nombre',
+      'cuál es mi nombre',
+      'mi nombre',
+    ]);
+  }
+
   bool _isBroadMemoryRequest(String value) {
     final normalized = value.toLowerCase();
     return _containsAny(normalized, const <String>[
@@ -227,7 +225,7 @@ class AssistantDurableMemoryContextService {
     return false;
   }
 
-  AssistantConfirmedMemoryContext? _render(List<_RankedMemory> selected) {
+  String _render(List<_RankedMemory> selected) {
     const header =
         'CONFIRMED DURABLE MEMORY\n'
         'The entries below are confirmed Aivexus memories (origin labeled); '
@@ -235,11 +233,6 @@ class AssistantDurableMemoryContextService {
         'relevant. The latest user message overrides older memory. Do not '
         'invent details that are not present.';
     final buffer = StringBuffer(header);
-    final items = <AssistantMemoryContextPart>[
-      const AssistantMemoryContextPart._(
-        header, AssistantMemoryContextPartKind.applicationHeader,
-      ),
-    ];
     var renderedRecords = 0;
 
     for (final item in selected) {
@@ -248,29 +241,18 @@ class AssistantDurableMemoryContextService {
       if (remaining <= 4) break;
       if (candidate.length <= remaining) {
         buffer.write(candidate);
-        items.add(AssistantMemoryContextPart._(
-          candidate, AssistantMemoryContextPartKind.confirmedRecord,
-        ));
         renderedRecords++;
       } else {
         final shortened = _truncate(candidate, remaining);
         if (shortened.trim().length > 3) {
           buffer.write(shortened);
-          items.add(AssistantMemoryContextPart._(
-            shortened, AssistantMemoryContextPartKind.confirmedRecord,
-          ));
           renderedRecords++;
         }
         break;
       }
     }
 
-    if (renderedRecords == 0) return null;
-    final provenance = AssistantConfirmedMemoryContext._(items);
-    if (provenance.text != buffer.toString()) {
-      throw StateError('Confirmed memory provenance differs from local context');
-    }
-    return provenance;
+    return renderedRecords == 0 ? '' : buffer.toString();
   }
 
   String _renderRecord(AssistantDurableMemoryRecord record) {
