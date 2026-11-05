@@ -70,6 +70,13 @@ final class HybridCloudRuntimeConsentCoordinator {
       throw const HybridCloudConsentDenied();
     }
     final providerId = outbound.providerId;
+    // An explicit Cloud account/provider choice is a destination boundary.
+    // If the gated runtime filtered an unsupported provider and silently
+    // selected another one, reject BEFORE presenting consent or sending HTTP.
+    final pinned = source.cloudProviderId?.trim();
+    if (pinned != null && pinned.isNotEmpty && pinned != providerId) {
+      throw const HybridCloudConsentDenied();
+    }
     if (providerId != 'openAi' && providerId != 'gemini') {
       throw const HybridCloudConsentDenied();
     }

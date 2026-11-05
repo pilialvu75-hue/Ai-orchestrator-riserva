@@ -554,7 +554,7 @@ consenso esplicito.
   nella Chat e il controllo esatto del payload. Prevedere inoltre
   autorizzazione esplicita opzionale su tutti i provider approvati senza
   includere automaticamente provider/account futuri.
-- **Stato tecnico H10–H21 (#977, ancora DRAFT):** contratto di consenso,
+- **Stato tecnico H10–H22 (#977, ancora DRAFT):** contratto di consenso,
   revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
   OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
   `ChatFileContextService` conserva separatamente domanda, istruzioni e
@@ -676,6 +676,29 @@ consenso esplicito.
   La generazione non prova un login verificato dal provider, quindi
   il dispatcher Cloud in produzione rimane disattivato finche non
   saranno completati bootstrap, E2E dispositivo e selezione account.
+- **H22 — Chat Cloud opt-in collegata al trasporto gated reale:**
+  `HybridCloudAssistantRuntimeBundle` costruisce un provider Cloud
+  dedicato alla sola Chat con lo stesso protocollo reale delle sorgenti
+  OpenAI/Gemini: origini trusted da Chat, verifica destinatario e
+  credenziale, review del dialog visibile, permesso monouso e POST
+  HTTP nativo. Il provider ordinario registrato globalmente per
+  Cantiere, diagnostica e altre funzioni resta invariato.
+  `CloudRoutingBootstrap.configure` accetta il flag esplicito
+  `enableConsentGatedAssistantCloud`, che per il normale avvio
+  resta **false**: non attivare senza account/migrazione Settings,
+  collaudo E2E e test sul Galaxy S24 FE. Se abilitato, il provider
+  dedicato e passato sia al `DirectiveAwareInferenceService` della
+  Chat sia al router Hannibal; mancanza di UI, credenziali legate
+  a un account o evidenza trusted blocca l'invio. Solo OpenAI/Gemini
+  sono ammessi nel gate; nessun fallback al callback Cloud legacy.
+  `HybridCloudRuntimeConsentCoordinator` rifiuta ogni cambio
+  silenzioso da un provider fissato dall'utente a un provider diverso.
+  Test mock HTTP verificano invio approvato, dati esatti, esclusione
+  dei provider non supportati, rifiuto senza origine confermata
+  e blocco delle chiavi ambiente senza consenso account.
+  **Non ancora release:** mancano opt-in UI/Settings autenticati,
+  selezione provider verificata sul dispositivo, gestione del consenso
+  negato senza perdita dei ricordi Local e QA fisica.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
