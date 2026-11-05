@@ -48,6 +48,7 @@ void main() {
     when(() => webSearch.id).thenReturn('web_search');
     settings = _MockRuntimeSettings();
     cloud = _MockCloudRuntimeProvider();
+    when(() => cloud.consentGated).thenReturn(false);
 
     when(() => inference.stream(any())).thenAnswer(
       (_) => Stream<InferenceResponse>.value(
@@ -324,6 +325,95 @@ void main() {
     expect(selected.cloudProviderId, 'gemini');
     expect(selected.systemPrompt, 'Base Assistant rules.');
     expect(selected.trustedCloudSourceEvidence, same(original));
+  });
+
+  test('HYBRID consent denial resumes LOCAL with memory isolated', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.consentGated).thenReturn(true);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    final requests = <InferenceRequest>[];
+    when(() => inference.stream(any())).thenAnswer((call) {
+      final request = call.positionalArguments.single as InferenceRequest;
+      requests.add(request);
+      if (request.routeDirective == InferenceRouteDirective.cloudOnly) {
+        return Stream<InferenceResponse>.fromIterable([
+          InferenceResponse.notice('cloud_provider:gemini', providerId: 'gemini'),
+          InferenceResponse.error('Refused', providerId: 'gemini',
+            errorCode: InferenceErrorCode.cloudConsentDenied),
+        ]);
+      }
+      return Stream<InferenceResponse>.value(
+        InferenceResponse.finalChunk(text: 'LOCAL answer',
+          providerId: 'local', tokensGenerated: 1),
+      );
+    });
+    var reads = 0;
+    const question = 'Explain the architecture';
+    final evidence = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-denied',
+      originalQuestion: question,
+      baseSystemPrompt: 'Base rules.',
+      originalHistory: const <AiMessage>[],
+    );
+    final result = await build(
+      hybridMemoryEnricher: ({
+        required String baseSystemPrompt,
+        required String sessionId,
+        required String userPrompt,
+      }) async {
+        reads++;
+        expect(sessionId, 'hybrid-denied');
+        expect(userPrompt, question);
+        return baseSystemPrompt + '\\n\\nCONFIRMED PRIVATE MEMORY';
+      },
+    ).handleStream(
+      question,
+      sessionId: 'hybrid-denied',
+      systemPrompt: 'Base rules.',
+      trustedCloudSourceEvidence: evidence,
+    ).toList();
+
+    expect(result.last.text, 'LOCAL answer');
+    expect(reads, 1);
+    expect(requests, hasLength(2));
+    expect(requests.first.routeDirective, InferenceRouteDirective.cloudOnly);
+    expect(requests.first.cloudProviderId, 'gemini');
+    expect(requests.first.systemPrompt, isNot(contains('PRIVATE MEMORY')));
+    expect(requests.last.routeDirective, InferenceRouteDirective.localOnly);
+    expect(requests.last.cloudProviderId, isNull);
+    expect(requests.last.trustedCloudSourceEvidence, isNull);
+    expect(requests.last.systemPrompt, contains('CONFIRMED PRIVATE MEMORY'));
+    expect(requests.last.allowWebSearchTool, isFalse);
+  });
+
+  test('HYBRID other Cloud errors cannot trigger local consent fallback', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.consentGated).thenReturn(true);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    when(() => inference.stream(any())).thenAnswer((_) =>
+        Stream<InferenceResponse>.value(
+          InferenceResponse.error('Cloud provider unavailable'),
+        ));
+    final evidence = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-other-error',
+      originalQuestion: 'Explain architecture',
+      baseSystemPrompt: 'Base rules.',
+      originalHistory: const <AiMessage>[],
+    );
+    final output = await build().handleStream(
+      'Explain architecture',
+      sessionId: 'hybrid-other-error',
+      systemPrompt: 'Base rules.',
+      trustedCloudSourceEvidence: evidence,
+    ).toList();
+    expect(output.single.isError, isTrue);
+    verify(() => inference.stream(any())).called(1);
   });
 
   test('HYBRID LOCAL memory read failure preserves ordinary local answer',

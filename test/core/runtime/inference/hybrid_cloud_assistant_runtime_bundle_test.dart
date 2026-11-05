@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_assistant_ru
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_disclosure_consent.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/features/chat_memory/domain/chat_turn.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -157,6 +158,7 @@ void main() {
       cancellationToken: CancellationToken(),
     ).toList();
     expect(chunks.last.isError, isTrue);
+    expect(chunks.last.errorCode, InferenceErrorCode.cloudConsentDenied);
     expect(httpRequests, 0);
     expect(reviews, 0);
     client.close();
