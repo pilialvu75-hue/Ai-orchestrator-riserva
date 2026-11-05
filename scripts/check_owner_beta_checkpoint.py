@@ -30,7 +30,7 @@ def validate(source: str) -> list[str]:
         "  actions: write",
         "  contents: read",
         "  cancel-in-progress: false",
-        "^[0-9a-f]{40}",
+        "([0-9a-f]{40})$",
         "main_sha=",
         '[[ "$sha" != "$main_sha" ]]',
         '"Assistant Shared Tests"',
