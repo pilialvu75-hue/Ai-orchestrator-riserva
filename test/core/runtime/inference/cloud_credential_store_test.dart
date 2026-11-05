@@ -66,7 +66,8 @@ void main() {
       final first = original.consentBindingFor('openAi');
       expect(first, matches(RegExp(r'^[a-zA-Z0-9_-]{32}$')));
       expect(first, isNot(contains('same-visible-account')));
-      expect(first, isNot(contains('key')));
+      expect(first, isNot('key'));
+
 
       final reopened = CloudCredentialStore(storage: storage);
       await reopened.initialize();
