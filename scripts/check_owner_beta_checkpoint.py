@@ -60,7 +60,7 @@ def validate(source: str) -> list[str]:
             problems.append(f"Missing owner beta checkpoint gate: {marker}")
     if re.search(r"(?m)^  push:", source):
         problems.append("Comment dispatcher must not activate on arbitrary push")
-    if "gh workflow run build.yml --ref main -f release_channel=stable" in source:
+    if re.search(r"gh workflow run[^\n]*release_channel=stable\b", source):
         problems.append("Stable release must remain an explicitly manual channel")
     if "gh workflow run build.yml --repo \"$GITHUB_REPOSITORY\" --ref main -f release_channel=beta" not in source:
         problems.append("No authorized beta dispatch")
