@@ -69,6 +69,7 @@ class AssistantDurableMemoryContextService {
     final queryTerms = _terms(query);
     final broadMemoryRequest = _isBroadMemoryRequest(query);
     final firstPersonNameRequest = _isDirectUserNameRequest(query);
+    final firstPersonCarColorRequest = _isDirectUserCarColorRequest(query);
     final historicalReference = _hasHistoricalReference(query);
     final ranked = <_RankedMemory>[];
 
@@ -84,6 +85,11 @@ class AssistantDurableMemoryContextService {
       var score = _relevanceScore(record, queryTerms);
       if (record.recordKey == AssistantNaturalNameCandidate.recordKey &&
           firstPersonNameRequest &&
+          score < 40) {
+        score = 40;
+      }
+      if (record.recordKey == AssistantNaturalCarColorCandidate.recordKey &&
+          firstPersonCarColorRequest &&
           score < 40) {
         score = 40;
       }
@@ -152,6 +158,34 @@ class AssistantDurableMemoryContextService {
   /// Narrow, first-person, multilingual lookup for a reviewed given name.
   /// Third-party name questions do not qualify. No unconfirmed candidate is
   /// available to this retrieval service in any case.
+  /// Cross-language access to one explicitly approved color of *my* car.
+  /// Never match questions about another person's car or model-generated text.
+  bool _isDirectUserCarColorRequest(String value) {
+    final normalized = value.toLowerCase().replaceAll('’', "'");
+    return _containsAny(normalized, const <String>[
+      'che colore è la mia auto',
+      'di che colore è la mia auto',
+      'di che colore è la mia macchina',
+      'colore della mia auto',
+      'colore della mia macchina',
+      'what color is my car',
+      'what colour is my car',
+      "my car's color",
+      "my car's colour",
+      'color of my car',
+      'colour of my car',
+      'de quelle couleur est ma voiture',
+      'quelle est la couleur de ma voiture',
+      'couleur de ma voiture',
+      'de qué color es mi coche',
+      'de que color es mi coche',
+      'de qué color es mi carro',
+      'de que color es mi carro',
+      'color de mi coche',
+      'color de mi carro',
+    ]);
+  }
+
   bool _isDirectUserNameRequest(String value) {
     final normalized = value.toLowerCase().replaceAll('’', "'");
     return _containsAny(normalized, const <String>[
