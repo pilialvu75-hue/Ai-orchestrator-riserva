@@ -103,6 +103,7 @@ class DatabaseHelper {
     await _createUserPreferencesTable(db);
     await _createDocumentChunksTable(db);
     await _createSyncChangesTable(db);
+    await createChatArchiveCatalogTables(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -133,6 +134,50 @@ class DatabaseHelper {
     if (oldVersion < 6) {
       await _createChatSessionsTable(db);
     }
+    if (oldVersion < 7) {
+      await createChatArchiveCatalogTables(db);
+    }
+  }
+
+  /// Additive archive metadata migration: never moves/erases chat_history.
+  /// Also callable with an isolated in-memory DB from migration tests.
+  @visibleForTesting
+  static Future<void> createChatArchiveCatalogTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tableChatArchiveCatalog} (
+        archive_id TEXT PRIMARY KEY,
+        origin_device_id TEXT NOT NULL,
+        source_session_id TEXT NOT NULL,
+        storage_provider_id TEXT NOT NULL,
+        object_key TEXT NOT NULL,
+        ciphertext_sha256 TEXT NOT NULL,
+        ciphertext_bytes INTEGER NOT NULL CHECK(ciphertext_bytes > 0),
+        message_count INTEGER NOT NULL CHECK(message_count >= 0),
+        indexed_at_ms INTEGER NOT NULL,
+        remote_verified_at_ms INTEGER
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_chat_archive_source
+      ON ${AppConstants.tableChatArchiveCatalog}
+        (origin_device_id, source_session_id, indexed_at_ms)
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppConstants.tableChatArchiveMemoryLinks} (
+        memory_scope TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        archive_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        PRIMARY KEY(memory_scope, memory_key, archive_id, message_id),
+        FOREIGN KEY(archive_id) REFERENCES
+          ${AppConstants.tableChatArchiveCatalog}(archive_id)
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_chat_archive_memory
+      ON ${AppConstants.tableChatArchiveMemoryLinks}
+        (memory_scope, memory_key)
+    ''');
   }
 
   Future<void> _createChatHistoryTable(Database db) async {
