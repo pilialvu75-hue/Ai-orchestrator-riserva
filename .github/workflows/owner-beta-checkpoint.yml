@@ -2,6 +2,7 @@ name: Owner-authorized Aivexus beta checkpoint
 
 on:
   pull_request:
+    types: [opened, reopened, synchronize, closed]
     branches: [main]
     paths:
       - '.github/workflows/owner-beta-checkpoint.yml'
@@ -20,7 +21,7 @@ concurrency:
 
 jobs:
   contract:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -35,18 +36,26 @@ jobs:
             .github/workflows/windows-release-publish.yml
 
   authorize-and-dispatch:
-    # Owner command only. Public users cannot authorize a release.
-    # The exact existing checkpoint issue also prevents accidental triggers
-    # from unrelated GitHub issue/PR conversations.
+    # Authorized channels:
+    # - owner request in dedicated issue #1008 (normal recurring checkpoints)
+    # - explicitly marked checkpoint PR merged by the repository owner.
+    #   This also bootstraps the first fully automatic release.
     if: >-
-      github.event_name == 'issue_comment' &&
-      github.event.issue.number == 1008 &&
-      github.event.issue.pull_request == null &&
-      github.event.issue.state == 'open' &&
-      github.actor == github.repository_owner &&
-      github.event.issue.user.login == github.repository_owner &&
-      github.event.comment.user.login == github.repository_owner &&
-      startsWith(github.event.comment.body, '/aivexus beta-checkpoint ')
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 1008 &&
+       github.event.issue.pull_request == null &&
+       github.event.issue.state == 'open' &&
+       github.actor == github.repository_owner &&
+       github.event.issue.user.login == github.repository_owner &&
+       github.event.comment.user.login == github.repository_owner &&
+       startsWith(github.event.comment.body, '/aivexus beta-checkpoint ')) ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'closed' &&
+       github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.user.login == github.repository_owner &&
+       github.actor == github.repository_owner &&
+       contains(github.event.pull_request.title, '[beta-checkpoint]'))
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     env:
@@ -59,13 +68,24 @@ jobs:
           command -v gh
           command -v jq
 
-          # Never interpolate issue/comment text into executable shell.
-          request="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
-          if [[ ! "$request" =~ ^/aivexus[[:space:]]beta-checkpoint[[:space:]]([0-9a-f]{40})$ ]]; then
-            echo "::error::Invalid exact checkpoint command"
+          # No untrusted issue or PR text is ever run as shell code.
+          if [[ "$GITHUB_EVENT_NAME" == "issue_comment" ]]; then
+            request="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
+            if [[ ! "$request" =~ ^/aivexus[[:space:]]beta-checkpoint[[:space:]]([0-9a-f]{40})$ ]]; then
+              echo "::error::Invalid exact checkpoint command"
+              exit 1
+            fi
+            sha="$(echo "$request" | awk '{print $3}')"
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            sha="$(jq -r '.pull_request.merge_commit_sha // ""' "$GITHUB_EVENT_PATH")"
+            if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Invalid merged checkpoint SHA"
+              exit 1
+            fi
+          else
+            echo "::error::Unexpected triggering event"
             exit 1
           fi
-          sha="$(echo "$request" | awk '{print $3}')"
           main_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)"
           if [[ "$sha" != "$main_sha" ]]; then
             echo "::error::Checkpoint commit is not the current main head"
