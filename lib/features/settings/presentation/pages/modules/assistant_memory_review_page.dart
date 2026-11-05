@@ -60,9 +60,12 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
           await widget.captureService.loadReviewablePreferenceCandidates();
       final names =
           await widget.captureService.loadReviewableNaturalNameCandidates();
+      final carColors =
+          await widget.captureService.loadReviewableNaturalCarColorCandidates();
       final pending = <AssistantDurableMemoryRecord>[
         ...preferences,
         ...names,
+        ...carColors,
       ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       final confirmed =
           await widget.captureService.loadReviewableConfirmedUserMemory();
@@ -108,6 +111,13 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       );
       if (!ok) {
         ok = await widget.captureService.proposeNaturalUserNameCandidate(
+          userPrompt: _text.text,
+          consentEnabled: true,
+          directUserMessage: true,
+        );
+      }
+      if (!ok) {
+        ok = await widget.captureService.proposeNaturalUserCarColorCandidate(
           userPrompt: _text.text,
           consentEnabled: true,
           directUserMessage: true,
@@ -199,12 +209,19 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
               userConfirmed: true,
               correctedContent: correctedContent,
             )
-          : await widget.captureService.reviewUserPreferenceCandidate(
-              reviewed: record,
-              approve: approve,
-              userConfirmed: true,
-              correctedContent: correctedContent,
-            );
+          : record.recordKey == AssistantNaturalCarColorCandidate.recordKey
+              ? await widget.captureService.reviewNaturalCarColorCandidate(
+                  reviewed: record,
+                  approve: approve,
+                  userConfirmed: true,
+                  correctedContent: correctedContent,
+                )
+              : await widget.captureService.reviewUserPreferenceCandidate(
+                  reviewed: record,
+                  approve: approve,
+                  userConfirmed: true,
+                  correctedContent: correctedContent,
+                );
       if (!mounted) return;
       _message(changed
           ? (approve ? 'confirmed' : 'rejected')

@@ -143,13 +143,23 @@ class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryAct
         consent != null &&
         consent.enabled) {
       try {
-        await _durableMemoryCaptureService.proposeNaturalUserNameCandidate(
+        final nameProposed =
+            await _durableMemoryCaptureService.proposeNaturalUserNameCandidate(
           sessionId: sessionId,
           userPrompt: userPrompt,
           consentEnabled: true,
           directUserMessage: true,
           consentStillEnabled: () => consent.enabled,
         );
+        if (!nameProposed) {
+          await _durableMemoryCaptureService.proposeNaturalUserCarColorCandidate(
+            sessionId: sessionId,
+            userPrompt: userPrompt,
+            consentEnabled: true,
+            directUserMessage: true,
+            consentStillEnabled: () => consent.enabled,
+          );
+        }
       } catch (_) {
         onRuntimeNotice?.call(
           'Non è stato possibile aggiungere la proposta di memoria locale.',

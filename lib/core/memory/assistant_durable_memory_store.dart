@@ -190,7 +190,8 @@ class AssistantDurableMemoryStore {
         reviewed.source != AssistantMemorySource.userStatement ||
         !(reviewed.kind == AssistantMemoryKind.preference ||
             (reviewed.kind == AssistantMemoryKind.fact &&
-             reviewed.recordKey == AssistantNaturalNameCandidate.recordKey)) ||
+             (reviewed.recordKey == AssistantNaturalNameCandidate.recordKey ||
+              reviewed.recordKey == AssistantNaturalCarColorCandidate.recordKey))) ||
         reviewedAt < 0 ||
         (approve && (approvedContent == null ||
             approvedContent.trim().isEmpty))) {
