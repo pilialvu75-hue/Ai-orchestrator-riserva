@@ -1,5 +1,7 @@
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
@@ -166,6 +168,82 @@ class ChatSessionStore {
       where: '${AppConstants.colPrefKey} = ?',
       whereArgs: <String>['$_trashPreferencePrefix$sessionId'],
     );
+  }
+
+  /// Irreversibly purge *only* a chat that was previously moved to trash.
+  ///
+  /// This is a storage primitive, not a UI action: the caller must obtain
+  /// explicit confirmation and quiesce in-flight memory capture/indexing
+  /// before invoking it. No application path invokes it automatically.
+  ///
+  /// A USER-scoped confirmed memory is independent of the originating chat
+  /// and must survive. Conversation-scoped durable memory, chat vectors,
+  /// messages, title and trash marker are erased in one SQLite transaction.
+  Future<int> permanentlyDeleteTrashedSession(String sessionId) async {
+    final id = sessionId.trim();
+    if (id.isEmpty) throw ArgumentError('Session id must not be empty');
+
+    final db = await _database;
+    return db.transaction<int>((txn) async {
+      final exists = await txn.query(
+        AppConstants.tableChatSessions,
+        columns: const <String>['id'],
+        where: 'id = ?',
+        whereArgs: <String>[id],
+        limit: 1,
+      );
+      if (exists.isEmpty) throw StateError('Chat session not found');
+
+      final trashKey = '$_trashPreferencePrefix$id';
+      final trashed = await txn.query(
+        AppConstants.tableUserPreferences,
+        columns: <String>[AppConstants.colPrefKey],
+        where: '${AppConstants.colPrefKey} = ?',
+        whereArgs: <String>[trashKey],
+        limit: 1,
+      );
+      if (trashed.isEmpty) {
+        throw StateError('Move the chat to trash before permanent deletion');
+      }
+
+      await txn.delete(
+        AppConstants.tableDocumentChunks,
+        where: '${AppConstants.colDocumentId} = ?',
+        whereArgs: <String>['chat_memory:$id'],
+      );
+      final messagesRemoved = await txn.delete(
+        AppConstants.tableChatHistory,
+        where: '${AppConstants.colSessionId} = ?',
+        whereArgs: <String>[id],
+      );
+
+      // Only this conversation's private durable-memory scope is removed.
+      // Keep the USER scope, all other conversations and project memories.
+      final privateMemoryKey =
+          '${AssistantDurableMemoryStore.storagePrefix}'
+          '${AssistantMemoryScope.conversation.name}:${Uri.encodeComponent(id)}';
+      await txn.delete(
+        AppConstants.tableUserPreferences,
+        where: '${AppConstants.colPrefKey} IN (?, ?, ?)',
+        whereArgs: <String>[
+          '$_titlePreferencePrefix$id',
+          trashKey,
+          privateMemoryKey,
+        ],
+      );
+      await txn.delete(
+        AppConstants.tableUserPreferences,
+        where: '${AppConstants.colPrefKey} = ? AND '
+            '${AppConstants.colPrefValue} = ?',
+        whereArgs: <String>[activeSessionPreference, id],
+      );
+      await txn.delete(
+        AppConstants.tableChatSessions,
+        where: 'id = ?',
+        whereArgs: <String>[id],
+      );
+      return messagesRemoved;
+    });
   }
 
   /// Pinned sessions first, then most recent. User titles override titles

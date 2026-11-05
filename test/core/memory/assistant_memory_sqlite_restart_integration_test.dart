@@ -394,4 +394,139 @@ void main() {
       isNot(contains('lavanda')),
     );
   });
+
+  test('permanently purging a trashed chat preserves USER, isolates other chats',
+      () async {
+    // All records are synthetic and stored in a temporary file-backed SQLite.
+    await database.execute('''
+      CREATE TABLE chat_sessions (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await database.execute('''
+      CREATE TABLE chat_history (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        timestamp INTEGER NOT NULL
+      )
+    ''');
+    await database.execute('''
+      CREATE TABLE document_chunks (
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL,
+        document_path TEXT NOT NULL
+      )
+    ''');
+
+    const origin = 'origin/1'; // Exercise URI-encoded durable-memory scope.
+    final sessions = ChatSessionStore.forTesting(database);
+    await sessions.createSession(origin);
+    await sessions.createSession('next');
+    await sessions.renameSession(origin, 'Chat privata');
+    await sessions.selectSession(origin);
+    for (final id in <String>[origin, 'next']) {
+      await database.insert('chat_history', <String, Object>{
+        'id': 'message:$id',
+        'session_id': id,
+        'role': 'user',
+        'content': 'Messaggio $id',
+        'timestamp': id == origin ? 1 : 2,
+      });
+      await database.insert('document_chunks', <String, Object>{
+        'id': 'chunk:$id',
+        'document_id': 'chat_memory:$id',
+        'document_path': 'chat://$id/message:$id',
+      });
+    }
+    await database.insert('document_chunks', <String, Object>{
+      'id': 'project-chunk',
+      'document_id': 'project:docs',
+      'document_path': 'project://docs/test',
+    });
+
+    final capture = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+    );
+    expect(
+      await capture.applyExplicitUserInstruction(
+        sessionId: origin,
+        userPrompt: 'Ricorda che il codice della prova chat eliminata è STELLA73',
+      ),
+      isTrue,
+    );
+    expect(
+      await capture.applyExplicitUserInstruction(
+        sessionId: origin,
+        userPrompt: 'Ricorda solo in questa chat che il colore segreto è lavanda',
+      ),
+      isTrue,
+    );
+    expect(
+      await capture.applyExplicitUserInstruction(
+        sessionId: 'next',
+        userPrompt: 'Ricorda solo in questa chat che il segnale è turchese',
+      ),
+      isTrue,
+    );
+
+    // No accidental delete of a visible or nonexistent conversation.
+    await expectLater(
+      sessions.permanentlyDeleteTrashedSession('next'),
+      throwsStateError,
+    );
+    await expectLater(
+      sessions.permanentlyDeleteTrashedSession('unknown'),
+      throwsStateError,
+    );
+    expect(await database.query('chat_history'), hasLength(2));
+    expect(await database.query('document_chunks'), hasLength(3));
+
+    await sessions.moveToTrash(origin);
+    expect(await sessions.permanentlyDeleteTrashedSession(origin), 1);
+    expect(await sessions.listSessions(inTrash: true), isEmpty);
+    expect((await sessions.listSessions()).single.id, 'next');
+    expect((await database.query('chat_history')).single['session_id'], 'next');
+    final keptVectors = await database.query('document_chunks');
+    expect(keptVectors.map((r) => r['id']).toSet(),
+        <String>{'chunk:next', 'project-chunk'});
+    final prefs = await database.query('user_preferences');
+    final prefKeys = prefs.map((r) => r['pref_key']).toSet();
+    expect(prefKeys, isNot(contains('assistant.chat.title.$origin')));
+    expect(prefKeys, isNot(contains('assistant.chat.trash.$origin')));
+    expect(prefKeys, isNot(contains(
+        'assistant.durable_memory.v1:conversation:origin%2F1')));
+    expect(prefKeys, isNot(contains('assistant.chat.active_session')));
+    expect(prefKeys, contains('assistant.durable_memory.v1:user:local-user'));
+
+    await reopen();
+    expect((await ChatSessionStore.forTesting(database).listSessions())
+        .single.id, 'next');
+    expect(
+      await makeMemory().loadConfirmed(
+        scope: AssistantMemoryScope.conversation,
+        scopeId: origin,
+      ),
+      isEmpty,
+    );
+    expect(
+      await promptFor(makeMemory(), sessionId: 'next',
+          question: 'Qual è il codice della prova chat eliminata?'),
+      contains('STELLA73'),
+    );
+    expect(
+      await promptFor(makeMemory(), sessionId: 'next',
+          question: 'Qual è il segnale?'),
+      contains('turchese'),
+    );
+    expect(
+      await promptFor(makeMemory(), sessionId: origin,
+          question: 'Qual è il colore segreto?'),
+      isNot(contains('lavanda')),
+    );
+  });
+
 }
