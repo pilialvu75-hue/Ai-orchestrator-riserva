@@ -5,6 +5,7 @@ import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
@@ -677,6 +678,144 @@ void main() {
       );
       expect(delegate.lastSystemPrompt, contains('write in Italian'));
       expect(delegate.lastSystemPrompt, isNot(contains('write in French')));
+    });
+
+    test('natural first-name chat staging is default-off and revocable',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final preferences = await SharedPreferences.getInstance();
+      final consent = AssistantNaturalMemoryConsentService(
+        preferences: preferences,
+      );
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(
+          persistence: _PromptMemoryPersistence(),
+        ),
+      );
+      final capture = AssistantDurableMemoryCaptureService(
+        memoryService: memory,
+        now: () => 111,
+      );
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: capture,
+        naturalMemoryConsentService: consent,
+      );
+      Future<List<AssistantDurableMemoryRecord>> pending() =>
+          capture.loadReviewableNaturalNameCandidates();
+
+      expect(consent.enabled, isFalse);
+      await repository.sendMessage(
+        sessionId: 'name-one',
+        userPrompt: 'Mi chiamo Paolo',
+      );
+      expect(delegate.modelCalls, 1);
+      expect(await pending(), isEmpty);
+
+      await consent.setEnabled(true);
+      expect(consent.enabled, isTrue);
+      await repository.sendMessage(
+        sessionId: 'name-one',
+        userPrompt: 'Mi chiamo Paolo',
+      );
+      expect(delegate.modelCalls, 2);
+      expect((await pending()).single.content, 'Mi chiamo Paolo');
+      expect(await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ), isEmpty);
+      expect(delegate.lastSystemPrompt, isNot(contains('Mi chiamo Paolo')));
+
+      await consent.setEnabled(false);
+      final reconstructed = AssistantNaturalMemoryConsentService(
+        preferences: preferences,
+      );
+      expect(reconstructed.enabled, isFalse);
+      await repository.sendMessage(
+        sessionId: 'name-two',
+        userPrompt: 'Mi chiamo Davide',
+      );
+      expect(delegate.modelCalls, 3);
+      expect((await pending()).single.content, 'Mi chiamo Paolo');
+      // Disabling future capture does not silently destroy reviewable drafts.
+      expect(await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ), isEmpty);
+    });
+
+    test('consented ordinary chat filters attachments and specialized workers',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final preferences = await SharedPreferences.getInstance();
+      final consent = AssistantNaturalMemoryConsentService(
+        preferences: preferences,
+      );
+      await consent.setEnabled(true);
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(
+          persistence: _PromptMemoryPersistence(),
+        ),
+      );
+      final capture = AssistantDurableMemoryCaptureService(
+        memoryService: memory,
+      );
+      final delegate = _RecordingChatRepository();
+      final repository = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.cloud,
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: capture,
+        naturalMemoryConsentService: consent,
+      );
+
+      await repository.sendMessage(
+        sessionId: 'worker',
+        userPrompt: 'Mi chiamo Paolo',
+        systemPrompt: 'Specialized system prompt.',
+      );
+      await repository.sendMessage(
+        sessionId: 'attachment',
+        userPrompt: 'Mi chiamo Paolo',
+        attachments: const <ChatAttachment>[
+          ChatAttachment(
+            id: 'a1', type: ChatAttachmentType.file,
+            path: 'local:/test.txt', name: 'test.txt',
+          ),
+        ],
+      );
+      await repository.sendMessage(
+        sessionId: 'quoted',
+        userPrompt: '"Mi chiamo Paolo"',
+      );
+      expect(await capture.loadReviewableNaturalNameCandidates(), isEmpty);
+
+      await repository.sendMessage(
+        sessionId: 'natural-cloud',
+        userPrompt: "Je m'appelle Annabelle",
+      );
+      final review = await capture.loadReviewableNaturalNameCandidates();
+      expect(review, hasLength(1));
+      expect(review.single.content, "Je m'appelle Annabelle");
+      // Both confirmed and pending local personal memories stay out of the
+      // Cloud system prompt (the user's own current message is unchanged).
+      expect(delegate.lastSystemPrompt,
+          isNot(contains('CONFIRMED DURABLE MEMORY')));
+      expect(delegate.lastSystemPrompt,
+          isNot(contains('Je m\\'appelle Annabelle')));
+      expect(await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ), isEmpty);
     });
 
     test('custom fixed-language prompt remains authoritative', () async {
