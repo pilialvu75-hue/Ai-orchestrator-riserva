@@ -250,6 +250,48 @@ abstract final class WorkshopModelCatalogue {
     optional: true,
   );
 
+  /// Large prototype NVIDIA NIM models selectable per Workshop role.
+  /// No local download; NVIDIA authorization and Cloud consent are separate.
+  static const WorkshopModelDescriptor nvidiaKimiK26 =
+      WorkshopModelDescriptor(
+    id: 'moonshotai/kimi-k2.6',
+    displayName: 'Kimi K2.6 1T · NVIDIA Cloud',
+    repository: 'NVIDIA NIM',
+    filename: 'remote-moonshotai-kimi-k2.6',
+    quantization: 'CLOUD',
+    sizeBytes: 0,
+    source: AiModelSource.cloud,
+    roles: <AppAiRole>{
+      AppAiRole.workshopOrchestrator,
+      AppAiRole.architect,
+      AppAiRole.engineer,
+      AppAiRole.reviewer,
+    },
+    downloadUrl: '',
+    cloudProviderId: 'nvidiaNim',
+    optional: true,
+  );
+
+  static const WorkshopModelDescriptor nvidiaDeepSeekV41Flash =
+      WorkshopModelDescriptor(
+    id: 'deepseek-ai/deepseek-v4.1-flash',
+    displayName: 'DeepSeek V4.1 Flash 552B · NVIDIA Cloud',
+    repository: 'NVIDIA NIM',
+    filename: 'remote-deepseek-ai-v4.1-flash',
+    quantization: 'CLOUD',
+    sizeBytes: 0,
+    source: AiModelSource.cloud,
+    roles: <AppAiRole>{
+      AppAiRole.workshopOrchestrator,
+      AppAiRole.architect,
+      AppAiRole.engineer,
+      AppAiRole.reviewer,
+    },
+    downloadUrl: '',
+    cloudProviderId: 'nvidiaNim',
+    optional: true,
+  );
+
   /// Models shown in the Workshop selector.
   ///
   /// Assistant-only models stay outside this list.
@@ -261,6 +303,8 @@ abstract final class WorkshopModelCatalogue {
     reviewer,
     deepSeekV2Engineer,
     nvidiaNemotron3Ultra550b,
+    nvidiaKimiK26,
+    nvidiaDeepSeekV41Flash,
   ];
 
   /// Complete catalogue including Assistant-owned models.
