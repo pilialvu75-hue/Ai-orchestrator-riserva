@@ -175,7 +175,8 @@ void main() {
     )));
     await waitForConsentReady(tester);
     await tester.tap(find.byKey(const Key('consent-add')));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
     expect(find.byKey(const Key('consent-apply')), findsOneWidget);
     // A different credential with exactly the same visible account name.
     await credentials.setApiKey(
@@ -183,7 +184,8 @@ void main() {
     );
     expect(credentials.consentBindingFor('gemini'), isNot(previousGeneration));
     await tester.tap(find.byKey(const Key('consent-apply')));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
     expect(backend.data, isEmpty);
     final newRegistryAccount = HybridCloudDisclosure.registryAccountFor(
       accountId: 'visible-account',
