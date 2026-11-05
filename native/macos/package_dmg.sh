@@ -82,7 +82,7 @@ if [[ ! -s "$output_dmg" ]]; then
   exit 1
 fi
 
-hdiutil verify "$output_dmg"
+bash "$(dirname "$0")/verify_dmg_with_retry.sh" "$output_dmg"
 
 hdiutil attach \
   -readonly \
