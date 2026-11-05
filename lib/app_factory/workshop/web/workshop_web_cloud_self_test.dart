@@ -60,6 +60,9 @@ final class WorkshopWebCloudSelfTestClient {
             headers: const <String, String>{
               'Accept': 'application/json',
               'Content-Type': 'application/json',
+              // Ask Cloudflare Access to return HTTP 401 instead of a
+              // redirect/login HTML for expired browser sessions.
+              'X-Requested-With': 'XMLHttpRequest',
             },
             // No model, credential, prompt, or upstream URL is sent by Web.
             body: jsonEncode(<String, Object>{
@@ -73,15 +76,34 @@ final class WorkshopWebCloudSelfTestClient {
           )
           .timeout(timeout);
 
+      // Pages Functions do not issue 401: an unauthenticated response here
+      // comes from Cloudflare Access, before any NVIDIA route is invoked.
+      if (response.statusCode == 401) {
+        return WorkshopWebCloudSelfTestResult(
+          passed: false,
+          detail: 'Accesso Cloudflare scaduto o non autenticato: riaprire '
+              'https://aivexus.pages.dev ed eseguire un nuovo login.',
+          elapsed: stopwatch.elapsed,
+          statusCode: 401,
+          errorCode: 'access_login_required',
+        );
+      }
+
       dynamic decoded;
       try {
         decoded = jsonDecode(response.body);
       } on FormatException {
+        final isHtml =
+            (response.headers['content-type'] ?? '').toLowerCase().contains('text/html');
         return WorkshopWebCloudSelfTestResult(
           passed: false,
-          detail: 'Risposta non JSON dal broker (controllare Access e rete).',
+          detail: isHtml
+              ? 'Il broker ha ricevuto HTML anziché JSON: possibile pagina '
+                  'Cloudflare Access. Verificare la sessione e rifare il login.'
+              : 'Risposta non JSON dal broker (controllare Access e rete).',
           elapsed: stopwatch.elapsed,
           statusCode: response.statusCode,
+          errorCode: isHtml ? 'possible_access_login' : 'invalid_json',
         );
       }
 
