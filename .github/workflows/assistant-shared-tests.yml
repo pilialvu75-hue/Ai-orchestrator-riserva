@@ -9,6 +9,7 @@ on:
       - 'test/core/**'
       - 'pubspec.*'
       - '.github/workflows/assistant-shared-tests.yml'
+      - '.github/workflows/owner-beta-checkpoint.yml'
   pull_request:
     branches: [main]
     paths:
@@ -17,6 +18,7 @@ on:
       - 'test/core/**'
       - 'pubspec.*'
       - '.github/workflows/assistant-shared-tests.yml'
+      - '.github/workflows/owner-beta-checkpoint.yml'
   workflow_dispatch:
 
 permissions:
