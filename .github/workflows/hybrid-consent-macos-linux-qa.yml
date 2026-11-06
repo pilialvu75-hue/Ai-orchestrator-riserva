@@ -16,15 +16,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: hybrid-consent-macos-linux-qa-977
+  group: hybrid-consent-macos-linux-qa-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   macos-hybrid-qa:
     if: >-
-      github.event.pull_request.number == 977 &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.head_ref == 'feat/hybrid-granular-cloud-consent-899'
+      startsWith(github.head_ref, 'feat/hybrid-')
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -61,6 +60,7 @@ jobs:
           --dart-define=AIVEXUS_EXPECT_HYBRID_QA_ENABLED=true
           test/app/runtime_bootstrap_cloud_consent_flag_test.dart
           test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart
+          test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart
           test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart
           test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
 
@@ -300,9 +300,8 @@ jobs:
 
   linux-hybrid-qa:
     if: >-
-      github.event.pull_request.number == 977 &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.head_ref == 'feat/hybrid-granular-cloud-consent-899'
+      startsWith(github.head_ref, 'feat/hybrid-')
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
@@ -339,6 +338,7 @@ jobs:
           --dart-define=AIVEXUS_EXPECT_HYBRID_QA_ENABLED=true
           test/app/runtime_bootstrap_cloud_consent_flag_test.dart
           test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart
+          test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart
           test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart
           test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
 
