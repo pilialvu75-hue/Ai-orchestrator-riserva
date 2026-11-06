@@ -43,6 +43,7 @@ final class HybridCloudAssistantRuntimeBundle {
     bool Function(String provider)? automaticUseAllowed,
     bool Function(String provider, CloudTaskClass task)?
         automaticUseAllowedForTask,
+    DateTime Function()? now,
   }) {
     final identity = HybridCloudLocalIdentity(storage: protectedStorage);
     final consent = HybridCloudDisclosureConsent(
@@ -75,6 +76,7 @@ final class HybridCloudAssistantRuntimeBundle {
       preferredProvider: preferredProvider,
       automaticUseAllowed: automaticUseAllowed,
       automaticUseAllowedForTask: automaticUseAllowedForTask,
+      now: now,
     );
     return HybridCloudAssistantRuntimeBundle._(
       provider: provider,

@@ -51,6 +51,44 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
         self.assertIn("hybrid_consent_beta='false'", workflow)
 
 
+    def test_internal_hybrid_prs_enable_android_qa_without_publishing(self):
+        workflow = source(".github/workflows/assistant-android-source-validation.yml")
+        self.assertIn("github.event_name == 'pull_request'", workflow)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository",
+                      workflow)
+        self.assertIn("startsWith(github.head_ref, 'feat/hybrid-')", workflow)
+        self.assertNotIn("github.event.pull_request.number == 977", workflow)
+        self.assertIn("HYBRID_QA_OPT_IN", workflow)
+        self.assertIn('--dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="$HYBRID_QA_OPT_IN"', workflow)
+        self.assertIn("test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart",
+                      workflow)
+        self.assertNotIn("gh release upload", workflow)
+
+    def test_internal_hybrid_qa_is_reusable_on_all_desktop_platforms(self):
+        for path, job_count in (
+            (".github/workflows/hybrid-consent-windows-qa.yml", 1),
+            (".github/workflows/hybrid-consent-macos-linux-qa.yml", 2),
+        ):
+            with self.subTest(workflow=path):
+                workflow = source(path)
+                self.assertEqual(
+                    workflow.count("startsWith(github.head_ref, 'feat/hybrid-')"),
+                    job_count,
+                )
+                self.assertEqual(
+                    workflow.count(
+                        "github.event.pull_request.head.repo.full_name == github.repository"
+                    ), job_count,
+                )
+                self.assertNotIn("github.event.pull_request.number == 977",
+                                 workflow)
+                self.assertIn("${{ github.event.pull_request.number }}",
+                              workflow)
+                self.assertEqual(workflow.count(
+                    "test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart"
+                ), job_count)
+                self.assertNotIn("gh release upload", workflow)
+
     def test_desktop_publishers_verify_issued_manifest_before_build(self):
         for platform in ("windows", "macos", "linux"):
             with self.subTest(platform=platform):
