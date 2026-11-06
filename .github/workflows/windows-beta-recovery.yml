@@ -7,6 +7,7 @@ on:
       - release-request/windows
     paths:
       - 'release-requests/ship-windows.txt'
+      - '.github/workflows/windows-beta-recovery.yml'
   pull_request:
     branches:
       - main
