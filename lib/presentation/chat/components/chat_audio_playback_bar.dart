@@ -98,25 +98,42 @@ class ChatAudioPlaybackBar extends StatelessWidget {
               ),
               SizedBox(
                 height: 23,
-                child: SliderTheme(
-                  data: SliderThemeData(
-                    trackHeight: 3,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 6,
-                    ),
-                    overlayShape: SliderComponentShape.noOverlay,
-                  ),
-                  child: Slider(
-                    value: current.toDouble(),
-                    min: 0,
-                    max: limit > 0 ? limit.toDouble() : 1,
-                    onChanged: canScrub ? (_) {} : null,
-                    onChangeEnd: canScrub
-                        ? (ms) => onSeek?.call(
-                              Duration(milliseconds: ms.round()),
-                            )
-                        : null,
-                  ),
+                child: Builder(
+                  builder: (context) {
+                    // The parent receives measured playback ticks. A local
+                    // drag position prevents new ticks from fighting the
+                    // thumb while the user is scrubbing.
+                    double? draggingMs;
+                    return StatefulBuilder(
+                      builder: (context, setDragState) => SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 3,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 6,
+                          ),
+                          overlayShape: SliderComponentShape.noOverlay,
+                        ),
+                        child: Slider(
+                          value: (draggingMs ?? current.toDouble()).clamp(
+                            0.0, limit > 0 ? limit.toDouble() : 1.0,
+                          ),
+                          min: 0,
+                          max: limit > 0 ? limit.toDouble() : 1,
+                          onChanged: canScrub
+                              ? (ms) => setDragState(() => draggingMs = ms)
+                              : null,
+                          onChangeEnd: canScrub
+                              ? (ms) {
+                                  setDragState(() => draggingMs = null);
+                                  onSeek?.call(
+                                    Duration(milliseconds: ms.round()),
+                                  );
+                                }
+                              : null,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ],
