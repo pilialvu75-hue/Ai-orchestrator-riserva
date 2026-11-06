@@ -85,7 +85,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     bool Function(String provider, CloudTaskClass task)? automaticUseAllowedForTask,
     this.consentGated = false,
     HybridCloudConsentGatedQuery? consentGatedSend,
-  })  : _sendQuery = sendQuery,
+    DateTime Function()? now,
+  })  : _now = now ?? DateTime.now,
+        _sendQuery = sendQuery,
         _consentGatedSend = consentGatedSend,
         _supportedProviders = supportedProviders,
         _isProviderAvailable = isProviderAvailable,
@@ -113,6 +115,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   static const String automaticPolicyBlockedNotice =
       'Automatic Cloud selection is blocked by the spending policy. '
       'Choose a provider manually or change Cloud spending in Settings > AI mode.';
+
+  /// Wall clock for provider retry gates. Injected only by tests.
+  /// Production always uses the current local time.
+  final DateTime Function() _now;
 
   final Future<AiResponse> Function(String provider, AiRequest request)
       _sendQuery;
@@ -686,7 +692,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       return automaticPolicyBlockedNotice;
     }
 
-    final now = DateTime.now();
+    final now = _now();
     for (final provider in configured) {
       final health = _providerHealth[provider];
       if (health?.rateLimitedUntil?.isAfter(now) ?? false) {
@@ -727,7 +733,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     }
 
     final state = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
-    final now = DateTime.now();
+    final now = _now();
 
     if (state.rateLimitedUntil != null && state.rateLimitedUntil!.isAfter(now)) {
       return false;
@@ -775,7 +781,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     state.lastError = message;
     state.recordLatency(latencyMs);
 
-    final now = DateTime.now();
+    final now = _now();
     if (failure is CloudFailure) {
       // HTTP metadata is structured at repository level. Preserve its
       // classification and Retry-After here instead of parsing the UI message
@@ -817,7 +823,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
 
   CloudProviderStatusSnapshot _statusFor(String provider) {
     final health = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
-    final now = DateTime.now();
+    final now = _now();
     final configured = _isProviderAvailable(provider);
 
     if (!configured) {

@@ -1013,6 +1013,39 @@ consenso esplicito.
   piu test Python di handoff beta e test Flutter esistenti
   (consensi, local fallback, CLOUD legacy, audio, UI, Markdown).
   Nessun trasferimento di dati personali Cloud implicito.
+- **H47 — ripristino rete tra due domande HYBRID, test ad hoc:**
+  dopo una richiesta Cloud consentita che perde il trasporto, la
+  domanda corrente puo' finire in LOCAL senza ripetere HTTP Cloud.
+  L'assenza di rete rende il provider temporaneamente non
+  selezionabile; il ritorno della connessione NON avvia nessun
+  POST, nessun nuovo provider e nessun resume silenzioso. Soltanto
+  una **nuova domanda** puo' selezionare di nuovo lo stesso Cloud
+  trascorso il cooldown, e deve sottostare di nuovo alla review
+  `allowOnce`, a identita' account, credenziali e provenienza Chat.
+  Un orologio iniettabile **esclusivamente per test** permette
+  di avanzare deterministicamente il retry di 20 secondi senza
+  sleep, tempi lunghi o richieste reali. La nuova regressione
+  `hybrid_cloud_network_recovery_next_turn_test.dart` usa
+  `MockClient` (primo POST fallisce, nessun POST durante
+  cooldown, secondo POST su nuova domanda con consenso esplicito
+  e senza ricordi LOCAL nel payload). Il codice di produzione
+  usa `DateTime.now` come prima. Nessuna modifica a CLOUD
+  ordinario, caching, profili di sicurezza o consensi.
+
+  **Gate CI H47:** il vecchio controllo Android che abilitava
+  l'esperimento soltanto nella PR #977 chiusa ora ammette
+  le PR interne del medesimo repository con prefisso
+  `feat/hybrid-`; PR da fork, branch estranei e push `main`
+  mantengono il flag **false**, e nessun APK diagnostico viene
+  pubblicato. La suite condivisa e il QA Android eseguono il
+  nuovo test, mentre un test Python controlla il nuovo vincolo
+  CI. Il ramo H47 rimane source-only fino al superamento dei
+  workflow e al prossimo merge sperimentale periodico.
+
+  **Fuori da H47:** ripresa dei checkpoint semantici multipasso,
+  retry della medesima richiesta Cloud in volo e migrazione
+  automatica LOCAL->Cloud del testo gia' generato: questi
+  rimangono esplicitamente vietati/non implementati.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

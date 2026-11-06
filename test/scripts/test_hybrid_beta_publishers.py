@@ -51,6 +51,19 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
         self.assertIn("hybrid_consent_beta='false'", workflow)
 
 
+    def test_internal_hybrid_prs_enable_android_qa_without_publishing(self):
+        workflow = source(".github/workflows/assistant-android-source-validation.yml")
+        self.assertIn("github.event_name == 'pull_request'", workflow)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository",
+                      workflow)
+        self.assertIn("startsWith(github.head_ref, 'feat/hybrid-')", workflow)
+        self.assertNotIn("github.event.pull_request.number == 977", workflow)
+        self.assertIn("HYBRID_QA_OPT_IN", workflow)
+        self.assertIn('--dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="$HYBRID_QA_OPT_IN"', workflow)
+        self.assertIn("test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart",
+                      workflow)
+        self.assertNotIn("gh release upload", workflow)
+
     def test_desktop_publishers_verify_issued_manifest_before_build(self):
         for platform in ("windows", "macos", "linux"):
             with self.subTest(platform=platform):
