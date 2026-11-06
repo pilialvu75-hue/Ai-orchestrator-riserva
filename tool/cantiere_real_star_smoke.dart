@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:http/http.dart' as http;
+import 'package:crypto/crypto.dart' as crypto;
 
 /// A separate, opt-in real-model star production acceptance lane.
 ///
@@ -179,6 +180,7 @@ Future<void> main(List<String> args) async {
       'broker_model_ids_observed': true,
       'independent_model_generation_provenance_verified': false,
       'artifact_built': true,
+      'apk_sha256': crypto.sha256.convert(await apk.readAsBytes()).toString(),
       'emulator_visual_verified': false,
       'geometric_star_verified': false,
       'android_local_verified': false,
