@@ -193,20 +193,7 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: |
-            set -eu
-            APK="${{ runner.temp }}/first-app/cantiere-first-app.apk"
-            AAPT=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)
-            test -n "$AAPT"
-            test -x "$AAPT"
-            PACKAGE=$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" | head -n 1)
-            test -n "$PACKAGE"
-            python3 tool/cantiere_emulator_ui_probe.py \
-              --apk "$APK" \
-              --package "$PACKAGE" \
-              --out "${{ runner.temp }}/first-app-runtime"
-            echo "CANTIERE_EMULATOR_COUNTER_BEHAVIOR_GATE_COMPLETED"
-
+          script: python3 tool/cantiere_emulator_ui_probe.py --apk "${{ runner.temp }}/first-app/cantiere-first-app.apk" --package ai.orchestrator.generated.cantiere_first_app --out "${{ runner.temp }}/first-app-runtime"
 
       - name: Preserve emulator launch screenshot
         if: ${{ always() }}
