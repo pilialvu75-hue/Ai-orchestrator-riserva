@@ -50,8 +50,8 @@ def verify_experimental(text):
         raise AssertionError("EXPERIMENTAL_MANUAL_DISPATCH_MISSING")
     if not re.search(r"(?m)^permissions:\s*\n\s+contents:\s*read\s*$", text):
         raise AssertionError("EXPERIMENTAL_PERMISSIONS_NOT_READ_ONLY")
-    if not re.search(r"(?m)^      confirm_real_model_calls:\\s*$", text) or not re.search(
-        r"(?m)^        required: true\\s*$", text
+    if not re.search(r"(?m)^      confirm_real_model_calls:\s*$", text) or not re.search(
+        r"(?m)^        required: true\s*$", text
     ):
         raise AssertionError("EXPERIMENTAL_PER_RUN_CONSENT_MISSING")
     if not re.search(r"(?m)^  source-check:\s*$", text):
