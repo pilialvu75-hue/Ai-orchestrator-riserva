@@ -376,6 +376,15 @@ class VoiceLoopManager with RuntimeEventEmitter {
           }
         },
       );
+      // The engine can return normally when microphone permission, recorder,
+      // or recognizer is unavailable. Fail fast rather than reporting a
+      // misleading STT timeout 30 seconds later.
+      if (!_engine.isListening && !token.isCancelled && !_stopRequested) {
+        const message = 'Microfono o riconoscimento vocale non disponibile.';
+        logEvent(_tag, '[STT_NOT_LISTENING]');
+        onError?.call(message);
+        return;
+      }
     } catch (error) {
       if (!token.isCancelled &&
           !_stopRequested) {
