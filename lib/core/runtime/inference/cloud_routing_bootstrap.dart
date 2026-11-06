@@ -187,7 +187,10 @@ abstract final class CloudRoutingBootstrap {
         loadRuntimeMode: () =>
             sl<AiRuntimeSettingsService>().loadRuntimeMode(),
         runtimeProvider: assistantLocalRuntimeProvider,
-        cloudRuntimeProvider: assistantConsentBundle?.provider ?? sl<CloudRuntimeProvider>(),
+        // Preserve ordinary CLOUD providers (NVIDIA, Mistral, custom, etc.)
+        // while routing HYBRID through the exact approved OpenAI/Gemini gate.
+        cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
+        hybridConsentCloudRuntimeProvider: assistantConsentBundle?.provider,
         sessionManager: sl<RuntimeSessionManager>(),
         webSearchTool: assistantWebSearchTool,
         backgroundExecutionLeaseService:
@@ -233,7 +236,10 @@ abstract final class CloudRoutingBootstrap {
         durableMemoryCaptureService: durableMemoryCaptureService,
         naturalMemoryConsentService: sl<AssistantNaturalMemoryConsentService>(),
         delegate: CloudWebEnrichingChatRepository(
-          consentGatedAssistantCloud: enableConsentGatedAssistantCloud,
+          // This decorator is only active in explicit CLOUD. Its existing
+          // Web enrichment remains available; HYBRID Web is handled by the
+          // consent-aware AssistantWebAwareOrchestrator instead.
+          consentGatedAssistantCloud: false,
           runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
           webSearchTool: assistantWebSearchTool,
           delegate: ChatRepositoryImpl(
@@ -244,7 +250,10 @@ abstract final class CloudRoutingBootstrap {
             imageVisionService: CloudChatImageVisionService(),
             localImageVisionService: AndroidChatLocalImageVisionService(),
             videoStoryboardService: AndroidChatVideoStoryboardService(),
-            consentGatedAssistantCloud: enableConsentGatedAssistantCloud,
+            // Ordinary CLOUD preserves its visual and document behavior.
+            // HYBRID still validates trusted Chat provenance at the
+            // protected runtime boundary and never auto-shares attachments.
+            consentGatedAssistantCloud: false,
             fileContextService: ChatFileContextService(
               indexService: sl<LocalDocumentIndexService>(),
               databaseHelper: sl<DatabaseHelper>(),

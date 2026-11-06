@@ -965,6 +965,29 @@ consenso esplicito.
   verdi e la PR #977 sia stata integrata su main. Dopo la release,
   confermare effettivamente asset e checksum delle quattro
   piattaforme e test OTA tramite menu Impostazioni -> Aggiornamenti.
+- **H43 — nessuna regressione della modalita CLOUD ordinaria:**
+  `AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true` deve attivare
+  il consenso **solo sulle richieste HYBRID**, senza limitare i
+  provider esistenti (NVIDIA, Mistral, Claude, custom) nella modalita
+  CLOUD scelta esplicitamente. Il wrapper
+  `DirectiveAwareInferenceService` separa `runtimeDefault` e
+  `cloudOnly` in base al modo reale al momento della richiesta:
+  CLOUD usa il runtime originale con provider e funzionalita
+  preesistenti; HYBRID usa soltanto il runtime OpenAI/Gemini
+  verificato e non passa mai ad un provider Cloud non approvato.
+  I percorsi LOCAL rimangono invariati. Il decoratore Web e la
+  gestione visiva della Chat in CLOUD ripristinano il comportamento
+  originario, mentre HYBRID conserva controllo Web e provenienza
+  della richiesta prima di qualsiasi uscita.
+  Aggiunto test di regressione con modalita CLOUD e NVIDIA attivi,
+  switch a HYBRID protetto e rifiuto di una destinazione non
+  approvata; la suite condivisa ora esegue anche il test del
+  componente barra audio integrato da `main` e il routing
+  `DirectiveAwareInferenceService` su Ubuntu/macOS.
+  Gate release: H43 CI multipiattaforma PASS, merge su main,
+  firma Android e publish beta esclusivamente autorizzato.
+  Test manuali con provider reali e aggiornamenti in-app restano
+  necessari, nessuna release prodotta da questo commit.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

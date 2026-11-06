@@ -34,13 +34,37 @@ final class DirectiveAwareInferenceService extends InferenceService {
     required Future<AiRuntimeMode> Function() loadRuntimeMode,
     required LocalRuntimeProvider runtimeProvider,
     required CloudRuntimeProvider cloudRuntimeProvider,
+    CloudRuntimeProvider? hybridConsentCloudRuntimeProvider,
     required RuntimeSessionManager sessionManager,
     Tool? webSearchTool,
     CloudBackgroundExecutionLeaseService? backgroundExecutionLeaseService,
     CloudBackgroundExecutionJournal? backgroundExecutionJournal,
     CloudBackgroundRecoveryPolicy backgroundRecoveryPolicy =
         const CloudBackgroundRecoveryPolicy(),
-  })  : _backgroundExecutionLeaseService = backgroundExecutionLeaseService,
+  })  : _loadRequestedMode = loadRuntimeMode,
+        _ordinaryDefaultService = hybridConsentCloudRuntimeProvider == null
+            ? null
+            : InferenceService(
+                loadSelectedModel: loadSelectedModel,
+                loadRuntimeMode: loadRuntimeMode,
+                runtimeProvider: runtimeProvider,
+                cloudRuntimeProvider: cloudRuntimeProvider,
+                sessionManager: sessionManager,
+                webSearchTool: webSearchTool,
+              ),
+        _hybridCloudOnlyService = hybridConsentCloudRuntimeProvider == null
+            ? null
+            : InferenceService(
+                // A guarded HYBRID Cloud directive must never use LOCAL or
+                // fall back to an unreviewed legacy Cloud provider.
+                loadSelectedModel: () async => null,
+                loadRuntimeMode: () async => AiRuntimeMode.cloud,
+                runtimeProvider: runtimeProvider,
+                cloudRuntimeProvider: hybridConsentCloudRuntimeProvider,
+                sessionManager: sessionManager,
+                webSearchTool: webSearchTool,
+              ),
+        _backgroundExecutionLeaseService = backgroundExecutionLeaseService,
         _backgroundExecutionJournal = backgroundExecutionJournal,
         _backgroundRecoveryPolicy = backgroundRecoveryPolicy,
         _localOnlyService = InferenceService(
@@ -67,11 +91,17 @@ final class DirectiveAwareInferenceService extends InferenceService {
           loadSelectedModel: loadSelectedModel,
           loadRuntimeMode: loadRuntimeMode,
           runtimeProvider: runtimeProvider,
-          cloudRuntimeProvider: cloudRuntimeProvider,
+          // HYBRID default inference must fail closed; explicit CLOUD is
+          // restored through _ordinaryDefaultService when it is selected.
+          cloudRuntimeProvider:
+              hybridConsentCloudRuntimeProvider ?? cloudRuntimeProvider,
           sessionManager: sessionManager,
           webSearchTool: webSearchTool,
         );
 
+  final Future<AiRuntimeMode> Function() _loadRequestedMode;
+  final InferenceService? _ordinaryDefaultService;
+  final InferenceService? _hybridCloudOnlyService;
   final InferenceService _localOnlyService;
   final InferenceService _cloudOnlyService;
   final CloudBackgroundExecutionLeaseService? _backgroundExecutionLeaseService;
@@ -82,15 +112,40 @@ final class DirectiveAwareInferenceService extends InferenceService {
   TokenStream stream(InferenceRequest request) {
     switch (request.routeDirective) {
       case InferenceRouteDirective.runtimeDefault:
-        return super.stream(request);
+        if (_ordinaryDefaultService == null) return super.stream(request);
+        return _streamDefaultWithMode(request);
       case InferenceRouteDirective.localOnly:
         return _localOnlyService.stream(request);
       case InferenceRouteDirective.cloudOnly:
-        return _withCloudBackgroundExecution(
-          request,
-          _cloudOnlyService.stream(request),
-        );
+        if (_hybridCloudOnlyService == null) {
+          return _withCloudBackgroundExecution(
+            request,
+            _cloudOnlyService.stream(request),
+          );
+        }
+        return _streamCloudOnlyWithMode(request);
     }
+  }
+
+  // Ordinary CLOUD keeps all existing providers, auth, model selection and
+  // cache behavior. HYBRID (including any runtimeDefault caller) uses the
+  // consent-gated provider only, so no hidden legacy Cloud fallback is
+  // possible when a reviewer denies or a network request fails.
+  TokenStream _streamDefaultWithMode(InferenceRequest request) async* {
+    final mode = await _loadRequestedMode();
+    if (mode == AiRuntimeMode.cloud) {
+      yield* _ordinaryDefaultService!.stream(request);
+    } else {
+      yield* super.stream(request);
+    }
+  }
+
+  TokenStream _streamCloudOnlyWithMode(InferenceRequest request) async* {
+    final mode = await _loadRequestedMode();
+    final provider = mode == AiRuntimeMode.hybrid
+        ? _hybridCloudOnlyService!
+        : _cloudOnlyService;
+    yield* _withCloudBackgroundExecution(request, provider.stream(request));
   }
 
   TokenStream _withCloudBackgroundExecution(
@@ -156,5 +211,7 @@ final class DirectiveAwareInferenceService extends InferenceService {
     super.cancel(sessionId);
     _localOnlyService.cancel(sessionId);
     _cloudOnlyService.cancel(sessionId);
+    _hybridCloudOnlyService?.cancel(sessionId);
+    _ordinaryDefaultService?.cancel(sessionId);
   }
 }
