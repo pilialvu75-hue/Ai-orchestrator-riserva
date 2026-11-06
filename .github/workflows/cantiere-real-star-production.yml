@@ -81,6 +81,9 @@ jobs:
           test -s "$SOURCE"
           mkdir -p build/cantiere-real-star
           cp "$SOURCE" build/cantiere-real-star/cantiere-real-star.apk
+          RECEIPT="${RUNNER_TEMP}/cantiere-real-star/cantiere-real-star-provenance.json"
+          test -s "$RECEIPT"
+          cp "$RECEIPT" build/cantiere-real-star/model-provenance.json
           cd build/cantiere-real-star
           sha256sum cantiere-real-star.apk > cantiere-real-star.apk.sha256
       - uses: actions/upload-artifact@v6
