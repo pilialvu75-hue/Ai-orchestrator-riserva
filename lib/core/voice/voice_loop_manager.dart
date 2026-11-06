@@ -151,8 +151,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       await _engine.stopSpeaking();
     } catch (_) {}
 
-    _sessionActive = false;
-
+    // Session stays active until _runLoop completes; a new turn cannot race.
     logEvent(
       _tag,
       '[SESSION_STOP_REQUESTED]',
@@ -302,6 +301,9 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     final sttCompleter =
         Completer<String>();
+    token.onCancel(() {
+      if (!sttCompleter.isCompleted) sttCompleter.complete('');
+    });
 
     void completeStt(
       String text,
@@ -369,6 +371,12 @@ class VoiceLoopManager with RuntimeEventEmitter {
           }
         },
       );
+      if (!_engine.isListening && !token.isCancelled && !_stopRequested) {
+        const message = 'Microfono o riconoscimento vocale non disponibile.';
+        logEvent(_tag, '[STT_NOT_LISTENING]');
+        onError?.call(message);
+        return;
+      }
     } catch (error) {
       if (!token.isCancelled &&
           !_stopRequested) {
@@ -561,6 +569,40 @@ class VoiceLoopManager with RuntimeEventEmitter {
     final sentenceBoundaryPattern =
         RegExp(r'[.!?\n]');
 
+    // Ordered playback continues independently of token ingestion.
+    // At most two queued speech operations are kept pending.
+    Future<void> playbackTail = Future<void>.value();
+    final pendingPlayback = <Future<void>>[];
+    bool playbackFailed = false;
+
+    Future<void> queueSpeech(String text) async {
+      if (pendingPlayback.length >= 2) {
+        await pendingPlayback.removeAt(0);
+      }
+      if (_disposed || token.isCancelled || _stopRequested ||
+          playbackFailed) {
+        return;
+      }
+      playbackTail = playbackTail.then((_) async {
+        if (_disposed || token.isCancelled || _stopRequested ||
+            playbackFailed) {
+          return;
+        }
+        try {
+          await _engine.speak(text);
+        } catch (error) {
+          playbackFailed = true;
+          if (!token.isCancelled && !_stopRequested && !_disposed) {
+            final message = 'Voice output failed: $error';
+            logEvent(_tag, '[TTS_ERROR] $message');
+            onError?.call(message);
+          }
+        }
+      });
+      pendingPlayback.add(playbackTail);
+    }
+
+
     await for (
       final response in inferenceStream
     ) {
@@ -648,26 +690,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
         logEvent(_tag, '[VOICE_LATENCY] first_tts_request_ms=$firstTtsMs');
       }
 
-      try {
-        await _engine.speak(
-          speakChunk,
-        );
-      } catch (error) {
-        if (!token.isCancelled &&
-            !_stopRequested) {
-          final message =
-              'Voice output failed: $error';
-
-          logEvent(
-            _tag,
-            '[TTS_ERROR] $message',
-          );
-
-          onError?.call(message);
-        }
-
-        break;
-      }
+      await queueSpeech(speakChunk);
+      if (playbackFailed) break;
     }
 
     // -----------------------------------------------------------------------
@@ -686,6 +710,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
             .trim();
 
     if (trailing.isEmpty) {
+      await Future.wait(pendingPlayback);
       return;
     }
 
@@ -700,24 +725,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       logEvent(_tag, '[VOICE_LATENCY] first_tts_request_ms=$firstTtsMs');
     }
 
-    try {
-      await _engine.speak(
-        trailing,
-      );
-    } catch (error) {
-      if (!token.isCancelled &&
-          !_stopRequested) {
-        final message =
-            'Voice output failed: $error';
-
-        logEvent(
-          _tag,
-          '[TTS_TRAILING_ERROR] '
-          '$message',
-        );
-
-        onError?.call(message);
-      }
-    }
+    await queueSpeech(trailing);
+    await Future.wait(pendingPlayback);
   }
 }
