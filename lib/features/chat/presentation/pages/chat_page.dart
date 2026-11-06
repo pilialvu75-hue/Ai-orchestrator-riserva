@@ -2230,6 +2230,20 @@ class _ChatBodyState
                 onStop: () => unawaited(_audioPlayback.stop()),
                 onRestart: () => unawaited(_audioPlayback.restart()),
                 onClose: _audioPlayback.close,
+                realTransport: _audioPlayback.canSeek,
+                isPaused: _audioPlayback.isPaused,
+                position: _audioPlayback.measuredPlayback.position,
+                buffered: _audioPlayback.measuredPlayback.buffered,
+                complete: _audioPlayback.measuredPlayback.complete,
+                onPause: () => unawaited(_audioPlayback.pause()),
+                onResume: () => unawaited(_audioPlayback.resume()),
+                onBack: () => unawaited(
+                  _audioPlayback.skip(const Duration(seconds: -10)),
+                ),
+                onForward: () => unawaited(
+                  _audioPlayback.skip(const Duration(seconds: 10)),
+                ),
+                onSeek: (position) => unawaited(_audioPlayback.seek(position)),
               ),
 
             ChatInputBar(
