@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
+import 'package:ai_orchestrator/core/voice/live_voice_latency.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
@@ -439,6 +440,10 @@ class VoiceLoopManager with RuntimeEventEmitter {
       'chars=${spokenText.length}',
     );
 
+    // Start after the user's speech is fully recognized. These metrics never
+    // contain the transcript, and TTS_REQUEST does not imply audible output.
+    final latency = LiveVoiceLatency();
+
     // -----------------------------------------------------------------------
     // 2. RESOLVE ACTIVE LOCAL MODEL
     // -----------------------------------------------------------------------
@@ -588,6 +593,11 @@ class VoiceLoopManager with RuntimeEventEmitter {
         continue;
       }
 
+      final firstTokenMs = latency.recordFirstTokenMs();
+      if (firstTokenMs != null) {
+        logEvent(_tag, '[VOICE_LATENCY] first_token_ms=$firstTokenMs');
+      }
+
       tokenBuffer.write(
         chunk,
       );
@@ -632,6 +642,11 @@ class VoiceLoopManager with RuntimeEventEmitter {
         'chars=${speakChunk.length} '
         'final=${response.isFinal}',
       );
+
+      final firstTtsMs = latency.recordFirstTtsRequestMs();
+      if (firstTtsMs != null) {
+        logEvent(_tag, '[VOICE_LATENCY] first_tts_request_ms=$firstTtsMs');
+      }
 
       try {
         await _engine.speak(
@@ -679,6 +694,11 @@ class VoiceLoopManager with RuntimeEventEmitter {
       '[TTS_TRAILING_CHUNK] '
       'chars=${trailing.length}',
     );
+
+    final firstTtsMs = latency.recordFirstTtsRequestMs();
+    if (firstTtsMs != null) {
+      logEvent(_tag, '[VOICE_LATENCY] first_tts_request_ms=$firstTtsMs');
+    }
 
     try {
       await _engine.speak(
