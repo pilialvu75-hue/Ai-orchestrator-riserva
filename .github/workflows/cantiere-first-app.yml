@@ -145,3 +145,67 @@ jobs:
           path: build/cantiere-first-app/
           if-no-files-found: error
           retention-days: 14
+
+  first-app-emulator:
+    name: Install and launch actual generated APK on Android emulator
+    needs: first-app-android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Download APK from guarded Cantiere production
+        uses: actions/download-artifact@v6
+        with:
+          name: cantiere-first-app-android
+          path: "${{ runner.temp }}/first-app"
+
+      - name: Verify downloaded APK identity and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ runner.temp }}/first-app"
+          test -s cantiere-first-app.apk
+          sha256sum -c cantiere-first-app.apk.sha256
+
+      - name: Enable KVM acceleration for emulator
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install, launch and observe generated app on real Android emulator
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            APK="${{ runner.temp }}/first-app/cantiere-first-app.apk"
+            AAPT="${ANDROID_HOME}/build-tools/35.0.0/aapt"
+            test -x "$AAPT"
+            PACKAGE=$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" | head -n 1)
+            test -n "$PACKAGE"
+            adb install -r "$APK"
+            adb shell pm path "$PACKAGE" | grep -q '^package:'
+            adb logcat -c
+            adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 8
+            adb shell pidof "$PACKAGE" | grep -Eq '[0-9]+'
+            mkdir -p "${{ runner.temp }}/first-app-runtime"
+            adb exec-out screencap -p > "${{ runner.temp }}/first-app-runtime/launch.png"
+            test -s "${{ runner.temp }}/first-app-runtime/launch.png"
+            echo "CANTIERE_EMULATOR_LAUNCH_PASS package=$PACKAGE api=35"
+            echo "This is a deterministic counter fixture, NOT real-model star generation or S24 physical acceptance."
+
+      - name: Preserve emulator launch screenshot
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: cantiere-first-app-emulator-evidence
+          path: ${{ runner.temp }}/first-app-runtime/
+          if-no-files-found: warn
+          retention-days: 7
