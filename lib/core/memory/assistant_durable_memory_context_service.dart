@@ -1,6 +1,8 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
+import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
+import 'package:ai_orchestrator/core/memory/assistant_entity_reference_analyzer.dart';
 
 /// Immutable evidence produced by the confirmed-only SQLite memory reader.
 ///
@@ -118,6 +120,23 @@ class AssistantDurableMemoryContextService {
     }
 
     for (final record in userRecords) {
+      // A reviewed third-party assertion is only relevant when the query
+      // explicitly mentions its written name. Shared attributes such as
+      // "alto" must never retrieve facts about a different colleague, and
+      // autobiographical "cosa sai di me" must not enumerate third parties.
+      if (record.recordKey
+          .startsWith(AssistantManualEntityReferenceCandidate.keyPrefix)) {
+        final claim = AssistantEntityReferenceAnalyzer.parseDirectUserStatement(
+          record.content,
+        );
+        final name = claim?.namedReference;
+        final nameTerms = name == null ? const <String>{} : _terms(name);
+        // Short aliases (e.g. "Li") have no indexed >=3-character token.
+        // An empty match set must never authorize recall of a third party.
+        if (nameTerms.isEmpty || !nameTerms.every(queryTerms.contains)) {
+          continue;
+        }
+      }
       // Never answer questions about someone else's vehicle with a
       // confirmed autobiographical car-color record.
       if (record.recordKey == AssistantNaturalCarColorCandidate.recordKey &&

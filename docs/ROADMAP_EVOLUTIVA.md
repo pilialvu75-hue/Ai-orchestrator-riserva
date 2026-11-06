@@ -988,6 +988,31 @@ consenso esplicito.
   firma Android e publish beta esclusivamente autorizzato.
   Test manuali con provider reali e aggiornamenti in-app restano
   necessari, nessuna release prodotta da questo commit.
+- **H45 — merge periodico dei rami sperimentali, test ad hoc obbligatori**
+  (direttiva owner 6 novembre 2026): non trattenere il codice
+  sperimentale fino al prodotto completo. A milestone funzionanti
+  integrare periodicamente su `main` per verificare il comportamento
+  reale e far emergere difetti cross-feature, preservando un flag OFF
+  nelle versioni ordinarie e la separazione della release beta.
+  Prima di ogni merge ricostruire le differenze con `main`,
+  riconciliare manualmente i conflitti senza perdere progressi
+  concorrenti, e aggiungere regressioni mirate per i percorsi
+  che si incrociano. Il merge non equivale automaticamente a
+  pubblicazione, installazione o autorizzazione a inviare memoria.
+  Dopo il merge rifare le CI sullo SHA **di main** prima del
+  checkpoint beta; proseguire i filoni incompleti in nuovi branch.
+
+  Per questo checkpoint: unire i nuovi controlli ME-2 sui
+  referenti nominati con la provenienza confermata HYBRID,
+  senza divulgare informazioni su Jerome/Kader in risposte
+  relative all'altra persona o in una domanda autobiografica.
+  Conservare il nuovo ponte del checkpoint owner: attesa della
+  release Android completata con successo prima del publisher
+  Windows, oltre all'attivazione HYBRID esplicita solo per beta.
+  Test ad hoc `assistant_hybrid_merge_identity_regression_test.dart`
+  piu test Python di handoff beta e test Flutter esistenti
+  (consensi, local fallback, CLOUD legacy, audio, UI, Markdown).
+  Nessun trasferimento di dati personali Cloud implicito.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

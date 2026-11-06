@@ -1,5 +1,6 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
 import 'package:flutter/material.dart';
@@ -64,7 +65,10 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
           await widget.captureService.loadReviewableNaturalCarColorCandidates();
       final corrections = await widget.captureService
           .loadReviewableNaturalCarColorCorrectionCandidates();
+      final entityReferences = await widget.captureService
+          .loadReviewableManualEntityReferenceCandidates();
       final pending = <AssistantDurableMemoryRecord>[
+        ...entityReferences,
         ...preferences,
         ...names,
         ...carColors,
@@ -129,6 +133,13 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       if (!ok) {
         ok = await widget.captureService
             .proposeNaturalUserCarColorCorrectionCandidate(
+          userPrompt: _text.text,
+          consentEnabled: true,
+          directUserMessage: true,
+        );
+      }
+      if (!ok) {
+        ok = await widget.captureService.proposeManualEntityReferenceCandidate(
           userPrompt: _text.text,
           consentEnabled: true,
           directUserMessage: true,
@@ -212,7 +223,15 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     if (confirmed != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      final changed = record.recordKey ==
+      final changed = record.recordKey.startsWith(
+              AssistantManualEntityReferenceCandidate.keyPrefix)
+          ? await widget.captureService.reviewManualEntityReferenceCandidate(
+              reviewed: record,
+              approve: approve,
+              userConfirmed: true,
+              correctedContent: correctedContent,
+            )
+          : record.recordKey ==
               AssistantNaturalNameCandidate.recordKey
           ? await widget.captureService.reviewNaturalNameCandidate(
               reviewed: record,

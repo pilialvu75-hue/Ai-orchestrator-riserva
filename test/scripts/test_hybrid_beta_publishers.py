@@ -38,6 +38,18 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
         self.assertIn('if [[ "$sha" != "$main_sha" ]]', workflow)
         self.assertIn('-f hybrid_consent_beta="$hybrid_consent_beta"', workflow)
         self.assertEqual(workflow.count("gh workflow run build.yml"), 1)
+        self.assertEqual(
+            workflow.count("gh workflow run windows-release-publish.yml"), 1
+        )
+        self.assertIn("release_state\" == \"success\"", workflow)
+        self.assertIn("main changed during Android release", workflow)
+        self.assertIn('-f android_run_id="$release_run_id"', workflow)
+        self.assertLess(
+            workflow.index('if [[ "$release_state" == "success" ]]'),
+            workflow.index("gh workflow run windows-release-publish.yml"),
+        )
+        self.assertIn("hybrid_consent_beta='false'", workflow)
+
 
     def test_desktop_publishers_verify_issued_manifest_before_build(self):
         for platform in ("windows", "macos", "linux"):

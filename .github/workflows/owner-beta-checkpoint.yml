@@ -155,8 +155,52 @@ jobs:
                   exit 1
                 fi
               fi
+              # GITHUB_TOKEN workflow_dispatch does not trigger a workflow_run.
+              # Explicitly bridge Android SUCCESS to the Windows publisher
+              # only after verifying SHA, release channel and run conclusion.
               gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_channel=beta -f hybrid_consent_beta="$hybrid_consent_beta"
               echo "Authorized beta dispatch requested for main SHA $sha, HYBRID opt-in=$hybrid_consent_beta"
+              release_run_id=""
+              for release_attempt in $(seq 1 80); do
+                main_now="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)"
+                if [[ "$main_now" != "$sha" ]]; then
+                  echo "::error::main changed during Android release"
+                  exit 1
+                fi
+                release_runs="$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs" \
+                  -f head_sha="$sha" -f event=workflow_dispatch -f per_page=30)"
+                release_run_id="$(jq -r --arg sha "$sha" '
+                  [.workflow_runs[] |
+                    select(.name == "Build & Release APK" and
+                           .head_sha == $sha and
+                           .event == "workflow_dispatch")] |
+                  sort_by(.id) | last | (.id // empty)
+                ' <<<"$release_runs")"
+                if [[ -n "$release_run_id" ]]; then
+                  release_state="$(jq -r --argjson id "$release_run_id" '
+                    .workflow_runs[] | select(.id == $id) |
+                    (.conclusion // "pending")
+                  ' <<<"$release_runs")"
+                  if [[ "$release_state" == "success" ]]; then
+                    break
+                  fi
+                  if [[ "$release_state" != "pending" ]]; then
+                    echo "::error::Android release $release_run_id concluded $release_state"
+                    exit 1
+                  fi
+                fi
+                sleep 30
+              done
+              if [[ -z "$release_run_id" || "$release_state" != "success" ]]; then
+                echo "::error::Timed out waiting for the authorized Android release"
+                exit 1
+              fi
+              # The publisher independently verifies workflow completion,
+              # exact source SHA, release tag, version and authorized channel.
+              gh workflow run windows-release-publish.yml \
+                --repo "$GITHUB_REPOSITORY" --ref main \
+                -f android_run_id="$release_run_id"
+              echo "Windows publisher explicitly dispatched for authorized Android run $release_run_id"
               exit 0
             fi
             sleep 45
