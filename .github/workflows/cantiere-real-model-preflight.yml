@@ -15,8 +15,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Verify synthetic contract tests without network
-        run: python3 -m unittest -v test_cantiere_real_model_preflight
-        working-directory: tool
+        run: python3 -m unittest -v tool.test_cantiere_real_model_preflight
       - name: Query four real Cantiere model capabilities (opt-in only)
         env:
           CANTIERE_BROKER_URL: ${{ vars.CANTIERE_BROKER_URL }}
