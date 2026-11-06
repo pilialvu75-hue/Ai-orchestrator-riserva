@@ -29,7 +29,6 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
 
     private var resourceTelemetry: ResourceTelemetry? = null
-    private var pcmReadAloud: PcmReadAloudBridge? = null
 
     private val channelName = "com.aiorchestrator/android_intents"
     private val sherpaVoiceChannelName = "com.aiorchestrator/sherpa_onnx_voice"
@@ -71,8 +70,7 @@ class MainActivity : FlutterActivity() {
         LocalImageTextBridge.register(this, flutterEngine)
         LocalPdfTextBridge.register(this, flutterEngine)
         VideoStoryboardBridge.register(flutterEngine)
-        pcmReadAloud?.close()
-        pcmReadAloud = PcmReadAloudBridge.register(applicationContext, flutterEngine)
+        PcmReadAloudBridge.register(applicationContext, flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
         registerMlcNativeChannel(flutterEngine)
@@ -88,8 +86,6 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         resourceTelemetry?.close()
         resourceTelemetry = null
-        pcmReadAloud?.close()
-        pcmReadAloud = null
         releaseVoiceAudioFocus()
         super.onDestroy()
     }
