@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 final class _ProtectedStorage implements HybridCloudConsentStorage {
   final entries = <String, String>{};
   bool rejectWrites = false;
+  bool rejectNextProgressUpdate = false;
 
   @override
   Future<String?> read(String key) async => entries[key];
@@ -15,6 +16,11 @@ final class _ProtectedStorage implements HybridCloudConsentStorage {
   @override
   Future<void> write(String key, String value) async {
     if (rejectWrites) throw StateError('secure storage unavailable');
+    if (rejectNextProgressUpdate &&
+        key.startsWith('aivexus.hybrid.progress.v1.')) {
+      rejectNextProgressUpdate = false;
+      throw StateError('simulated crash between receipt and H48 update');
+    }
     entries[key] = value;
   }
 
@@ -98,6 +104,29 @@ void main() {
       ownerId: 'owner1', sessionId: 'chat1', taskId: 'task1');
     expect(checkpoint!.completedSteps, 0);
     expect(await read(1), isNull);
+  });
+
+
+  test('H49a orphan receipt after failed H48 progress is never visible',
+      () async {
+    storage.rejectNextProgressUpdate = true;
+    await expectLater(
+      step(0, HybridCheckpointExecutor.cloud, 'received result'),
+      throwsStateError);
+    expect((await journal.load(
+      ownerId: 'owner1', sessionId: 'chat1', taskId: 'task1'))!.revision, 0);
+    expect(await read(1), isNull);
+
+    // A conflicting replacement cannot claim the orphaned step.
+    await expectLater(
+      step(0, HybridCheckpointExecutor.local, 'different output'),
+      throwsStateError);
+    expect(await read(1), isNull);
+
+    // Replaying exactly the already-stored verified result can finalize
+    // progress; no Cloud inference or HTTP is executed by this store.
+    await step(0, HybridCheckpointExecutor.cloud, 'received result');
+    expect((await read(1))?.output, 'received result');
   });
 
   test('H49a progress revision rejects replay, missing and stale steps',
