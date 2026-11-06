@@ -84,6 +84,7 @@ internal class PcmReadAloudMediaService : Service() {
     private var focusRequest: AudioFocusRequest? = null
     private var resumeAfterFocus = false
     private var foregroundReady = false
+    private var mediaDurationMs = -1L
     private val mainHandler = Handler(Looper.getMainLooper())
     private val updatePlayback = object : Runnable {
         override fun run() {
@@ -238,6 +239,18 @@ internal class PcmReadAloudMediaService : Service() {
         val playing = status["playing"] == true
         val pos = (status["positionMs"] as? Long) ?: 0L
         val buffered = (status["bufferedMs"] as? Long) ?: 0L
+        if (buffered != mediaDurationMs) {
+            // Duration is measured generated PCM, not a fabricated estimate.
+            // The final duration becomes stable when synthesis completes.
+            mediaDurationMs = buffered
+            session.setMetadata(
+                MediaMetadata.Builder()
+                    .putString(MediaMetadata.METADATA_KEY_TITLE, "Lettura AIVEXUS")
+                    .putString(MediaMetadata.METADATA_KEY_ARTIST, "Offline")
+                    .putLong(MediaMetadata.METADATA_KEY_DURATION, buffered)
+                    .build()
+            )
+        }
         val state = when {
             playing -> PlaybackState.STATE_PLAYING
             paused -> PlaybackState.STATE_PAUSED
