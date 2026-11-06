@@ -7,6 +7,7 @@ on:
     paths:
       - 'tool/cantiere_first_app_smoke.dart'
       - 'tool/cantiere_local_build_smoke.dart'
+      - 'tool/cantiere_emulator_ui_probe.py'
       - 'test/app_factory/workshop/cantiere_first_app_smoke_test.dart'
       - 'test/app_factory/workshop/workshop_generated_star_negative_gate_test.dart'
       - 'lib/app_factory/**'
@@ -154,6 +155,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout black-box emulator probe
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify emulator probe Python syntax
+        run: python3 -m py_compile tool/cantiere_emulator_ui_probe.py
+
       - name: Download APK from guarded Cantiere production
         uses: actions/download-artifact@v6
         with:
@@ -190,17 +199,12 @@ jobs:
             test -x "$AAPT"
             PACKAGE=$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" | head -n 1)
             test -n "$PACKAGE"
-            adb install -r "$APK"
-            adb shell pm path "$PACKAGE" | grep -q '^package:'
-            adb logcat -c
-            adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
-            sleep 8
-            adb shell pidof "$PACKAGE" | grep -Eq '[0-9]+'
-            mkdir -p "${{ runner.temp }}/first-app-runtime"
-            adb exec-out screencap -p > "${{ runner.temp }}/first-app-runtime/launch.png"
-            test -s "${{ runner.temp }}/first-app-runtime/launch.png"
-            echo "CANTIERE_EMULATOR_LAUNCH_PASS package=$PACKAGE api=35"
-            echo "This is a deterministic counter fixture, NOT real-model star generation or S24 physical acceptance."
+            python3 tool/cantiere_emulator_ui_probe.py \
+              --apk "$APK" \
+              --package "$PACKAGE" \
+              --out "${{ runner.temp }}/first-app-runtime"
+            echo "CANTIERE_EMULATOR_COUNTER_BEHAVIOR_GATE_COMPLETED"
+
 
       - name: Preserve emulator launch screenshot
         if: ${{ always() }}
