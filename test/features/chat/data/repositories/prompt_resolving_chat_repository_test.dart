@@ -935,7 +935,8 @@ void main() {
         sessionId: 'attachment',
         userPrompt: 'Jerome è alto',
         attachments: const <ChatAttachment>[
-          ChatAttachment(id: 'file', type: ChatAttachmentType.file),
+          ChatAttachment(id: 'file', type: ChatAttachmentType.file,
+              path: 'local:/test.txt', name: 'test.txt'),
         ],
       );
       expect(await capture.loadReviewableManualEntityReferenceCandidates(),
