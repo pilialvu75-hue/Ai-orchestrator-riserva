@@ -115,6 +115,49 @@ void main() {
     expect(result?.output, 'other winner');
   });
 
+
+  test('H50 owner revoked while LOCAL runs prevents committing output',
+      () async {
+    await expectLater(run((_, __) async {
+      access = false;
+      return const HybridVerifiedStepResult(
+        output: 'result after revocation', provenance: 'local-validated');
+    }), throwsStateError);
+    access = true;
+    expect((await journal.load(
+      ownerId: 'owner1', sessionId: 'chat1',
+      taskId: 'task1'))!.completedSteps, 0);
+    expect(await evidence.loadCompletedStep(
+      ownerId: 'owner1', sessionId: 'chat1',
+      taskId: 'task1', step: 1), isNull);
+  });
+
+  test('H50 simultaneous LOCAL attempts can commit only one first step',
+      () async {
+    final outcomes = await Future.wait(<Future<bool>>[
+      run((instruction, previous) async {
+        expect(instruction, 'first local');
+        return const HybridVerifiedStepResult(
+          output: 'first candidate', provenance: 'local-validated');
+      }).then((_) => true).catchError((Object _) => false),
+      run((instruction, previous) async {
+        expect(instruction, 'first local');
+        return const HybridVerifiedStepResult(
+          output: 'second candidate', provenance: 'local-validated');
+      }).then((_) => true).catchError((Object _) => false),
+    ]);
+    expect(outcomes.where((ok) => ok), hasLength(1));
+    final progress = await journal.load(
+      ownerId: 'owner1', sessionId: 'chat1', taskId: 'task1');
+    expect(progress!.completedSteps, 1);
+    final result = await evidence.loadCompletedStep(
+      ownerId: 'owner1', sessionId: 'chat1',
+      taskId: 'task1', step: 1);
+    expect(result, isNotNull);
+    expect(<String>['first candidate', 'second candidate'],
+        contains(result!.output));
+  });
+
   test('H50 owner revocation blocks even the LOCAL execution', () async {
     access = false;
     var invoked = false;
