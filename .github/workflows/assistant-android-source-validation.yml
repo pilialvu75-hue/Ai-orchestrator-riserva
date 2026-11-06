@@ -160,6 +160,7 @@ jobs:
             test/core/runtime/inference/hybrid_semantic_step_evidence_store_test.dart \
             test/core/runtime/inference/hybrid_immutable_step_plan_store_test.dart \
             test/core/runtime/inference/hybrid_resume_preflight_test.dart \
+            test/core/runtime/inference/hybrid_h49_integrated_checkpoint_test.dart \
             test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart \
             test/features/chat/presentation/hybrid_cloud_chat_consent_gateway_test.dart \
             test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
