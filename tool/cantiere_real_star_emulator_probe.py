@@ -97,11 +97,26 @@ def compare_images(before, after):
             if sum(abs(old[i] - new[i]) for i in range(3)) >= 75:
                 changed += 1
     dark_ratio, change_ratio = dark / samples, changed / samples
+    # A central interactive star should change in the inner quarter, not
+    # only in a toolbar, notification or peripheral animation.
+    inner_changed, inner_total = 0, 0
+    for y in range(height * 3 // 8, height * 5 // 8, max(1, height // 120)):
+        for x in range(width * 3 // 8, width * 5 // 8, max(1, width // 120)):
+            old, new = pixel_at(a, x, y), pixel_at(b, x, y)
+            inner_total += 1
+            if sum(abs(old[i] - new[i]) for i in range(3)) >= 75:
+                inner_changed += 1
+    inner_change_ratio = inner_changed / inner_total
     if dark_ratio < 0.55:
         raise AssertionError(f"INITIAL_BACKGROUND_NOT_DARK ratio={dark_ratio:.3f}")
-    if not 0.006 <= change_ratio <= 0.55:
-        raise AssertionError(f"STAR_TAP_COLOR_CHANGE_NOT_OBSERVED ratio={change_ratio:.3f}")
-    return {"dark_ratio": round(dark_ratio, 4), "changed_ratio": round(change_ratio, 4),
+    if not 0.006 <= change_ratio <= 0.55 or inner_change_ratio < 0.015:
+        raise AssertionError(
+            f"STAR_TAP_COLOR_CHANGE_NOT_OBSERVED ratio={change_ratio:.3f} "
+            f"inner={inner_change_ratio:.3f}"
+        )
+    return {"dark_ratio": round(dark_ratio, 4),
+            "changed_ratio": round(change_ratio, 4),
+            "inner_change_ratio": round(inner_change_ratio, 4),
             "sample_count": samples, "changed_samples": changed}
 
 
@@ -138,10 +153,20 @@ def run(apk, package, out):
         time.sleep(2)
         after = adb("exec-out", "screencap", "-p", binary=True)
         (out / "after.png").write_bytes(after)
-        metrics = compare_images(before, after)
-        receipt.update(metrics)
+        first_metrics = compare_images(before, after)
+        # A second independent tap rejects a one-off loading animation or
+        # splash-to-app transition as evidence of interactive color changes.
+        adb("shell", "input", "tap", str(x), str(y))
+        time.sleep(2)
+        second = adb("exec-out", "screencap", "-p", binary=True)
+        (out / "after-second-tap.png").write_bytes(second)
+        second_metrics = compare_images(before, second)
+        receipt["tap_one"] = first_metrics
+        receipt["tap_two"] = second_metrics
         receipt["ui_color_change_verified"] = True
-        print("CANTIERE_REAL_STAR_EMULATOR_COLOR_CHANGE_PASS " + json.dumps(metrics))
+        receipt["tap_count_verified"] = 2
+        print("CANTIERE_REAL_STAR_EMULATOR_TWO_TAPS_PASS " + json.dumps(
+            {"first": first_metrics, "second": second_metrics}))
     except Exception as exc:
         receipt["failure"] = type(exc).__name__ + ": " + str(exc)
         raise
