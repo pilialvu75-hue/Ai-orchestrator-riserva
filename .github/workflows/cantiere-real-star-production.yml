@@ -1,0 +1,85 @@
+name: Cantiere Real Model Star Production
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tool/cantiere_real_star_smoke.dart'
+      - '.github/workflows/cantiere-real-star-production.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Resolve checked-in dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze isolated real-star producer
+        run: dart analyze tool/cantiere_real_star_smoke.dart
+
+  real-star-opt-in:
+    if: github.event_name == 'workflow_dispatch'
+    needs: source-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Resolve Cantiere dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Create isolated empty Android workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter create --platforms=android --project-name=cantiere_real_star --org=ai.orchestrator.generated "${RUNNER_TEMP}/cantiere-real-star"
+      - name: Generate real-model star through production Cantiere
+        shell: bash
+        env:
+          CANTIERE_ZERO_COST_ROUTES_VERIFIED: ${{ vars.CANTIERE_ZERO_COST_ROUTES_VERIFIED }}
+          CANTIERE_BROKER_URL: ${{ vars.CANTIERE_BROKER_URL }}
+          CANTIERE_CF_ACCESS_CLIENT_ID: ${{ secrets.CANTIERE_CF_ACCESS_CLIENT_ID }}
+          CANTIERE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CANTIERE_CF_ACCESS_CLIENT_SECRET }}
+          CANTIERE_FLUTTER_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/flutter
+          CANTIERE_DART_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/dart
+        run: |
+          set -euo pipefail
+          dart run tool/cantiere_real_star_smoke.dart "${RUNNER_TEMP}/cantiere-real-star"
+      - name: Verify Android APK exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="${RUNNER_TEMP}/cantiere-real-star/build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$SOURCE"
+          mkdir -p build/cantiere-real-star
+          cp "$SOURCE" build/cantiere-real-star/cantiere-real-star.apk
+          cd build/cantiere-real-star
+          sha256sum cantiere-real-star.apk > cantiere-real-star.apk.sha256
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cantiere-real-star-apk-unverified-ui
+          path: build/cantiere-real-star/
+          if-no-files-found: error
+          retention-days: 7
