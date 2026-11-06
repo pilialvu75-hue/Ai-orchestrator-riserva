@@ -153,6 +153,36 @@ void main() {
     expect(confirmed.single.source, AssistantMemorySource.userExplicit);
   });
 
+  test('local retrieval never confuses named colleagues or exposes them as me',
+      () async {
+    await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Jerome è alto',
+      consentEnabled: true,
+      directUserMessage: true,
+    );
+    final pending =
+        (await capture.loadReviewableManualEntityReferenceCandidates()).single;
+    expect(await capture.reviewManualEntityReferenceCandidate(
+      reviewed: pending,
+      approve: true,
+      userConfirmed: true,
+    ), isTrue);
+
+    final context = AssistantDurableMemoryContextService(memoryService: memory);
+    expect(await context.buildConfirmedContext(
+      sessionId: 'new-chat-another-model',
+      userPrompt: 'Jerome è alto?',
+    ), contains('Jerome è alto'));
+    expect(await context.buildConfirmedContext(
+      sessionId: 'new-chat-another-model',
+      userPrompt: 'Kader è alto?',
+    ), isNull);
+    expect(await context.buildConfirmedContext(
+      sessionId: 'new-chat-another-model',
+      userPrompt: 'Cosa sai di me?',
+    ), isNull);
+  });
+
   test('rejected candidate never enters confirmed recall', () async {
     await capture.proposeManualEntityReferenceCandidate(
       userPrompt: 'Mika fa tanto sport',
