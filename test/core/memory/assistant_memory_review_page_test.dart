@@ -589,4 +589,135 @@ void main() {
         isEmpty);
   });
 
+
+  testWidgets('ME-2 named colleague needs single-action consent and UI review',
+      (tester) async {
+    initializeMemory();
+    await showPage(tester);
+    await tester.enterText(find.byType(TextField).first, 'Jerome è alto');
+
+    // The review page must not stage even a named fact without this action's
+    // explicit owner consent. The persistent chat opt-in is a separate toggle.
+    final propose = find.widgetWithText(
+      FilledButton, 'Proponi per revisione',
+    );
+    expect(tester.widget<FilledButton>(propose).onPressed, isNull);
+    expect(await capture.loadReviewableManualEntityReferenceCandidates(),
+        isEmpty);
+
+    await tester.tap(find.text('Autorizzo questa singola proposta di prova'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(propose);
+    await tester.tap(propose);
+    await tester.pumpAndSettle();
+
+    final pending =
+        await capture.loadReviewableManualEntityReferenceCandidates();
+    expect(pending, hasLength(1));
+    expect(pending.single.content, 'Jerome è alto');
+    expect(
+      tester.widget<CheckboxListTile>(
+        find.byType(CheckboxListTile),
+      ).value,
+      isFalse,
+    );
+    expect(
+      await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ),
+      isEmpty,
+    );
+
+    await tester.scrollUntilVisible(
+      find.text('Approva'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Approva'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confermi il ricordo?'), findsOneWidget);
+    await tester.tap(find.text('Annulla'));
+    await tester.pumpAndSettle();
+    expect(await capture.loadReviewableManualEntityReferenceCandidates(),
+        hasLength(1));
+
+    await tester.ensureVisible(find.text('Approva'));
+    await tester.tap(find.text('Approva'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Conferma'));
+    await tester.pumpAndSettle();
+
+    final confirmed = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    );
+    expect(confirmed, hasLength(1));
+    expect(confirmed.single.content, 'Jerome è alto');
+    expect(await capture.loadReviewableManualEntityReferenceCandidates(),
+        isEmpty);
+
+    final context = AssistantDurableMemoryContextService(
+      memoryService: memory,
+    );
+    expect(
+      await context.buildConfirmedContext(
+        sessionId: 'second-chat',
+        userPrompt: 'Jerome è alto?',
+      ),
+      contains('Jerome è alto'),
+    );
+    expect(
+      await context.buildConfirmedContext(
+        sessionId: 'second-chat',
+        userPrompt: 'Kader è alto?',
+      ),
+      isNull,
+    );
+    expect(
+      await context.buildConfirmedContext(
+        sessionId: 'second-chat',
+        userPrompt: 'Cosa sai di me?',
+      ),
+      isNull,
+    );
+  });
+
+  testWidgets('ME-2 correction cannot silently rename Jerome as Kader',
+      (tester) async {
+    initializeMemory();
+    expect(
+      await capture.proposeManualEntityReferenceCandidate(
+        userPrompt: 'Jerome è alto',
+        consentEnabled: true,
+        directUserMessage: true,
+      ),
+      isTrue,
+    );
+    await showPage(tester);
+    await tester.scrollUntilVisible(
+      find.text('Correggi'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Correggi'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kader è alto'), findsNothing);
+    await tester.enterText(find.byType(TextFormField), 'Kader è alto');
+    await tester.tap(find.text('Continua'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confermi il ricordo?'), findsOneWidget);
+    await tester.tap(find.text('Conferma'));
+    await tester.pumpAndSettle();
+    expect(
+      await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ),
+      isEmpty,
+    );
+    expect(await capture.loadReviewableManualEntityReferenceCandidates(),
+        hasLength(1));
+  });
+
 }
