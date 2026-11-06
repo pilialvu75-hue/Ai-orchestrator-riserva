@@ -185,7 +185,8 @@ jobs:
           script: |
             set -euo pipefail
             APK="${{ runner.temp }}/first-app/cantiere-first-app.apk"
-            AAPT="${ANDROID_HOME}/build-tools/35.0.0/aapt"
+            AAPT=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)
+            test -n "$AAPT"
             test -x "$AAPT"
             PACKAGE=$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p" | head -n 1)
             test -n "$PACKAGE"
