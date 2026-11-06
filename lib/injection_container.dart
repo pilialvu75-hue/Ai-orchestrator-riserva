@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/context_window_manager.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
 import 'package:ai_orchestrator/core/memory/fabric/memory_fabric_record.dart';
@@ -197,6 +198,11 @@ Future<void> initDependencies({
   );
   sl.registerLazySingleton<AssistantNaturalMemoryConsentService>(
     () => AssistantNaturalMemoryConsentService(
+      preferences: sl<SharedPreferences>(),
+    ),
+  );
+  sl.registerLazySingleton<AssistantRelationalMemoryConsentService>(
+    () => AssistantRelationalMemoryConsentService(
       preferences: sl<SharedPreferences>(),
     ),
   );
