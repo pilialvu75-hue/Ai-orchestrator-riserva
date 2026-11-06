@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -85,6 +87,16 @@ internal class PcmReadAloudMediaService : Service() {
     private var resumeAfterFocus = false
     private var foregroundReady = false
     private var mediaDurationMs = -1L
+    private var noisyReceiverRegistered = false
+    private val becomingNoisy = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            // Wired/A2DP disconnect would otherwise blast speech through the
+            // phone speaker. Treat this as explicit pause, never auto-resume.
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                pause()
+            }
+        }
+    }
     private val mainHandler = Handler(Looper.getMainLooper())
     private val updatePlayback = object : Runnable {
         override fun run() {
@@ -111,6 +123,16 @@ internal class PcmReadAloudMediaService : Service() {
         notificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        // Protected system broadcast; receiver is active only while this
+        // media service exists and cannot leak through Activity recreation.
+        val noisyFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(becomingNoisy, noisyFilter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(becomingNoisy, noisyFilter)
+        }
+        noisyReceiverRegistered = true
         notificationManager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL,
@@ -359,6 +381,10 @@ internal class PcmReadAloudMediaService : Service() {
     }
 
     override fun onDestroy() {
+        if (noisyReceiverRegistered) {
+            unregisterReceiver(becomingNoisy)
+            noisyReceiverRegistered = false
+        }
         foregroundReady = false
         mainHandler.removeCallbacks(updatePlayback)
         focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
