@@ -517,6 +517,526 @@ consenso esplicito.
    fonti, protezione prompt injection. Memorizzare conoscenza validata e skill,
    non promettere fine-tuning dei pesi automatico.
 
+### Gate M4-C — Consenso per l'effettiva divulgazione Cloud in HYBRID
+
+- **Conoscenza Aivexus, decisione dell'utente.** Il modello LOCAL che esegue
+  realmente un passaggio HYBRID recupera le memorie pertinenti e confermate
+  autorizzate sul dispositivo; la protezione #972 che le escludeva in HYBRID
+  prima del routing resta un gate TEMPORANEO fino al collegamento sicuro.
+- La modalità Cloud/HYBRID **non equivale** a consenso implicito per tutti i
+  ricordi. Prima di qualsiasi invio l'utente deve sapere il provider/account
+  destinatario, l'esatto testo del payload, il motivo, la fonte (domanda,
+  cronologia, memoria, RAG, documenti/allegati, strumenti, istruzioni) e il
+  livello di riservatezza. Non soltanto i ricordi SQLite possono essere privati.
+- Per ogni categoria e provider: **solo questa volta**, **sempre per questa
+  categoria con questo destinatario**, **approva ora e chiedi ogni volta in
+  futuro**, **nega questa volta**, **non condividere (persistente)**.
+  Memorizzazione protetta, dashboard Impostazioni per revisione/revoca,
+  propagazione delle cancellazioni/forget e nessuna replica automatica.
+  I contenuti non classificati non ottengono permessi automatici permanenti.
+- Se una sezione non è autorizzata, impedire l'invio dell'intero vecchio
+  payload; ricomporre un prompt senza quella sezione oppure proseguire Local
+  e chiedere il consenso pertinente. Nessun fallimento nascosto né dati
+  classificati inventati da un modello: serve un assemblatore trusted che
+  certifichi che i segmenti coprono **esattamente** il testo inviato.
+- **LOCAL = senza provider IA esterni/Cloud**: non significa per forza
+  assenza totale di Internet. Strumenti Web, retrieval remoto, download e sync
+  sono servizi separati e soggetti alle rispettive impostazioni/consensi. Non
+  inviare mai prompt o ricordi ai provider IA remoti tramite fallback implicito.
+  L'inferenza LOCAL deve continuare a funzionare anche senza connessione.
+- **Impostazioni → Modalità IA → Consensi Cloud**: sottomenu per consultare,
+  modificare e revocare regole per fonte e sensibilità, provider e account.
+  L'autorizzazione «solo questa volta» non viene salvata. Il sottomenu
+  e la finestra di review sono realizzati nella PR #977. Una identità locale
+  protetta per installazione abilita la gestione delle regole sul dispositivo,
+  ma **non autentica l'utente nei provider Cloud** e non basta per autorizzare
+  il dispatch. Collegare in seguito la verifica del destinatario, il dialogo
+  nella Chat e il controllo esatto del payload. Prevedere inoltre
+  autorizzazione esplicita opzionale su tutti i provider approvati senza
+  includere automaticamente provider/account futuri.
+- **Stato tecnico H10–H22 (#977, ancora DRAFT):** contratto di consenso,
+  revoca e permessi monouso, dialogo/UI multilingue, invio nativo mock
+  OpenAI/Gemini e risposta nel formato Aivexus. Il produttore reale RAG
+  `ChatFileContextService` conserva separatamente domanda, istruzioni e
+  estratti senza cambiare il prompt LOCAL (H11). Il retrieval reale di
+  `AssistantDurableMemoryContextService` espone intestazione applicativa e
+  record confermati, senza includere candidati (H12). L'assemblatore
+  `HybridCloudTrustedRequestAssembler` verifica che domanda, cronologia,
+  RAG e memorie corrispondano **esattamente** all'`AiRequest` da autorizzare,
+  impedendo append invisibili (H13).
+- **H14 — trasporto con consenso davvero separato (solo opt-in):**
+  `CloudRuntimeProvider(consentGated: true)` richiede una callback
+  `consentGatedSend` dedicata. Senza di essa rifiuta la richiesta;
+  non esegue mai il vecchio `sendQuery`, non usa cache Cloud, non tenta
+  automaticamente un altro provider nemmeno su errore generico. La richiesta
+  viene prima proiettata nelle forme realmente serializzate da OpenAI/Gemini.
+  `HybridCloudRuntimeConsentCoordinator` collega le prove originali,
+  l'identità locale protetta, credenziale con account esplicito,
+  assemblatore H13, review, permesso monouso e invio native HTTP in un
+  test completo con client mock. Sorgente o dialogo assenti = nessun HTTP.
+  Il percorso applicativo ordinario NON è stato abilitato.
+- **H15 — annullamento durante review e revoca prima di HTTP:** il token
+  della richiesta segue il percorso `CloudRuntimeProvider` ->
+  `HybridCloudRuntimeConsentCoordinator` -> manager di consenso ->
+  permesso monouso -> native HTTP. Annullare la conversazione mentre è
+  visibile il dialogo impedisce sia il POST sia nuovi permessi persistenti;
+  un ulteriore controllo sincrono del token è fatto nel punto in cui
+  `dispatchApproved` avvia realmente il client HTTP. Test simulano un
+  dialogo sospeso, l'annullamento prima di rispondere e l'annullamento
+  dopo un permesso ottenuto, prima dell'avvio HTTP.
+- **H16 — provenienza dalla Chat realmente attraversata dal runtime:**
+  `ChatRepositoryImpl` genera un oggetto di provenienza per le domande
+  inviate con routing Cloud diretto, usando la vera domanda originale,
+  l'istantanea della cronologia recuperata, le istruzioni ricevute e, ove
+  presente, la provenienza dell'estratto `ChatFileContextService`. Dati
+  immagine/video/allegati non ricondotti a un documento verificato rimangono
+  privi di evidenza e saranno negati dal gate se attivato. La nuova proprietà
+  tipizzata di `InferenceRequest` è in RAM, preservata da `copyWith`
+  e mai serializzata nei metadata HTTP.
+- `InferenceService` aggiunge normalmente data/ora e fuso orario
+  dell'app al system prompt. H16 lega anche questa aggiunta al testo esatto
+  realmente creato dal runtime; se un'altra fase ha alterato il sistema,
+  elimina l'evidenza senza cambiare il percorso LOCAL/Cloud esistente.
+  `HybridCloudTrustedRequestAssembler` include il suffisso certificato
+  nella review, mentre `HybridCloudRuntimeConsentCoordinator` controlla
+  che la cronologia Cloud ottimizzata sia solo una sottosequenza dei turni
+  realmente letti dalla Chat, senza aggiunte o riordinamenti.
+- **H17 — gateway di approvazione nella vera pagina Chat:** il nuovo
+  `HybridCloudChatConsentGateway` mostra il dialogo già localizzato
+  IT/FR/EN/ES soltanto quando la pagina Chat è montata, il suo ID conversazione
+  corrisponde alla richiesta e un invio è attivo. La pagina registra un
+  binding revocabile, invalida i dialoghi pendenti quando si apre o si
+  ripristina un'altra conversazione, all'inizio di un nuovo invio, al recupero
+  da blocco e durante dispose. Il gateway rimuove soltanto la rotta esatta
+  della review, senza chiudere pagine o dialoghi estranei; una risposta tardiva,
+  il cambio pagina e l'annullamento ritornano una mappa vuota e NON un
+  consenso. Le scelte non persistono qui: soltanto il consent manager possiede
+  tale responsabilità. Il coordinatore dispone di `chatReview` con l'ID
+  sessione Chat e la condizione `requestStillActive` separati dall'identità
+  locale owner.
+- **H18 — provenienza fino alla decisione di Hannibal in HYBRID:**
+  `ChatRepositoryImpl` assegna la stessa prova tipizzata usata dal percorso
+  Cloud anche al percorso `Orchestrator.handleStream`. Hannibal trasporta
+  la prova immutata attraverso `InferenceRequest` quando sceglie un provider
+  Cloud per una domanda ordinaria, con contesto e istruzioni effettivamente
+  identiche; la perde intenzionalmente in caso di risultato Web/tool aggiunto,
+  argomento riscritto, prompt con marker Web offline per documenti, allegati
+  senza fonte verificata. `AssistantWebAwareOrchestrator` scarta la prova
+  dopo arricchimento Web, senza interrompere l'inferenza LOCAL/Cloud
+  preesistente. Test con router HYBRID mock certificano mantenimento nei
+  percorsi invariati ed esclusione dei risultati Web/estratti modificati.
+- Test widget reali del gate H17 inseriti nella pipeline CI condivisa
+  su Ubuntu e macOS, insieme al dialogo di review multilingue preesistente.
+  Non scambiare il solo verde dei sorgenti Android per test UI eseguiti.
+- **H19 — memoria confermata SOLO nel ramo Hybrid->LOCAL:**
+  dopo la decisione reale `Orchestrator._routeRequest`, se Hannibal ha scelto
+  `localOnly` e la prova deriva dalla chat corrente, usa
+  `AssistantDurableMemoryContextService.augmentSystemPrompt` per recuperare
+  soltanto ricordi pertinenti e confermati in SQLite. La ricerca non avviene
+  prima della decisione di routing e non cambia la risposta quando la memoria
+  non è pertinente o il database non è disponibile. L'aggiunta avviene su
+  una `InferenceRequest` **localOnly**, senza fallback ad altri provider IA,
+  senza evidence Cloud riutilizzabile e con Web/tool-call disabilitati
+  quando la memoria entra nel prompt (evita che un tool dinamico trasformi
+  un ricordo in una query di rete). Se Hannibal sceglie Cloud, il retrieval
+  privato non è nemmeno invocato: restano solo domanda, contesto e dati
+  già condivisibili secondo regole preesistenti, senza memoria durevole.
+  Il servizio LOCAL nativo non viene alterato; nessuna nuova tabella DB.
+- **H20 — revalidazione della credenziale Cloud alla frontiera HTTP:**
+  il coordinatore acquisisce in memoria la chiave esatta del provider prima
+  di mostrare l'anteprima e la passa soltanto al sender gated, senza salvarla
+  nelle decisioni, nel prompt, nei log o nel fingerprint della disclosure.
+  Il `HybridCloudNativeWireSender` confronta sincronicamente la chiave
+  attuale con quella fissata prima della review, nel punto immediatamente
+  precedente al POST. Cambio di chiave durante la review, persino con
+  provider e nome account identici, impedisce l'invio. L'attestazione
+  riguarda la singola richiesta; NON dimostra ancora l'identita
+  autenticata lato provider e non risolve i permessi persistenti dopo
+  riconfigurazione delle credenziali tra sessioni. Test mock HTTP coprono
+  entrambi i casi di sostituzione account/chiave e non-send.
+- **H21 — permessi persistenti legati alla generazione della credenziale:**
+  ogni chiave API configurata manualmente ottiene in secure storage
+  un identificativo casuale a 192 bit, stabile ai riavvii e rinnovato
+  con ogni modifica della credenziale, **anche con lo stesso account e
+  la stessa chiave**. Credenziali vecchie vengono migrate nello stesso
+  store protetto, senza importare alcun consenso da registri legacy;
+  se la migrazione fallisce, il Cloud ordinario non perde la chiave ma
+  il trasporto gated rifiuta la condivisione.
+  La review continua a mostrare l'etichetta account, mentre chiavi
+  dei permessi e fingerprint contengono anche l'identificativo di
+  generazione. Nessun permesso `allowAlways` registrato con la sola
+  etichetta account viene riutilizzato dopo la migrazione.
+  `HybridCloudNativeWireSender` controlla la generazione corrente
+  insieme a provider, account, chiave esatta e token di cancellazione.
+  Anche Impostazioni -> Consensi Cloud usa questa identita protetta;
+  cambi chiave mentre un dialogo di modifica e aperto annullano la
+  scrittura. Test automatici includono persistenza e riavvio,
+  sostituzione credenziale con stesso nome, migrazione, mancata
+  ereditarieta dei permessi, UI e cancellazione durante review.
+  La generazione non prova un login verificato dal provider, quindi
+  il dispatcher Cloud in produzione rimane disattivato finche non
+  saranno completati bootstrap, E2E dispositivo e selezione account.
+- **H22 — Chat Cloud opt-in collegata al trasporto gated reale:**
+  `HybridCloudAssistantRuntimeBundle` costruisce un provider Cloud
+  dedicato alla sola Chat con lo stesso protocollo reale delle sorgenti
+  OpenAI/Gemini: origini trusted da Chat, verifica destinatario e
+  credenziale, review del dialog visibile, permesso monouso e POST
+  HTTP nativo. Il provider ordinario registrato globalmente per
+  Cantiere, diagnostica e altre funzioni resta invariato.
+  `CloudRoutingBootstrap.configure` accetta il flag esplicito
+  `enableConsentGatedAssistantCloud`, che per il normale avvio
+  resta **false**: non attivare senza account/migrazione Settings,
+  collaudo E2E e test sul Galaxy S24 FE. Se abilitato, il provider
+  dedicato e passato sia al `DirectiveAwareInferenceService` della
+  Chat sia al router Hannibal; mancanza di UI, credenziali legate
+  a un account o evidenza trusted blocca l'invio. Solo OpenAI/Gemini
+  sono ammessi nel gate; nessun fallback al callback Cloud legacy.
+  `HybridCloudRuntimeConsentCoordinator` rifiuta ogni cambio
+  silenzioso da un provider fissato dall'utente a un provider diverso.
+  Test mock HTTP verificano invio approvato, dati esatti, esclusione
+  dei provider non supportati, rifiuto senza origine confermata
+  e blocco delle chiavi ambiente senza consenso account.
+  **Non ancora release:** mancano opt-in UI/Settings autenticati,
+  selezione provider verificata sul dispositivo, gestione del consenso
+  negato senza perdita dei ricordi Local e QA fisica.
+- **H23 — barriera agli allegati visivi nel trasporto Chat con consenso:**
+  il flag sperimentale `enableConsentGatedAssistantCloud` blocca il percorso
+  separato Image/Video Cloud prima di invio e conversione storyboard, poiche
+  l'anteprima corrente classifica testo e documenti, non pixel/fotogrammi.
+  Il controllo avviene all'ingresso e prima del trasporto visivo, anche dopo
+  eventuali cambi della modalita durante la preparazione. LOCAL e HYBRID
+  mantengono l'analisi locale delle immagini e la Chat installata mantiene
+  il flag predefinito false. Aggiunta regressione alla CI Assistant Shared
+  Tests: il suo esito sul commit H23 va ancora verificato. Nessuna release.
+- **H24 — regressione del ChatRepository effettivo e avviso documentale:**
+  test con datasource fittizio e impostazione Cloud dimostra che la Chat
+  opt-in rifiuta Image/Video prima della scrittura del messaggio, della
+  creazione del contesto e di qualsiasi inferenza; il test si aggiunge
+  alla CI condivisa Ubuntu/macOS. Per documenti Cloud con gate attivo,
+  la Chat ora indica che gli estratti sono preparati per la review e non
+  dichiara prematuramente un upload riuscito. Test simulato, non prova
+  di traffico reale su S24; risultati CI della HEAD ancora da confermare.
+- **H25 — rifiuto di consenso Cloud con prosecuzione HYBRID->LOCAL:**
+  il sender gated restituisce il motivo `InferenceErrorCode.cloudConsentDenied`,
+  anziche affidarsi al testo del messaggio. Una richiesta HYBRID di origine
+  Chat verificata puo quindi proseguire con `localOnly` dopo rifiuto
+  senza un secondo provider Cloud: il riferimento al provider Cloud e
+  la vecchia evidence vengono rimossi. Il recupero dei ricordi
+  confermati si verifica soltanto DOPO la scelta LOCAL, impedendo
+  trasferimenti impliciti di memoria privata. Non avviene fallback
+  per errori generici, Cloud ordinario, o dopo testo gia prodotto.
+  Test di routing e test del bundle con HTTP simulato nella suite
+  Assistant Shared Tests; il risultato CI di H25 va verificato.
+  Non ancora continuita con checkpoint/semantic resume reale.
+- **H26 — integrazione Chat reale -> consent -> HTTP simulato:**
+  prova integrata `ChatRepositoryImpl` con datasource in memoria e
+  `ConversationMemoryService` simulato, servizio di inferenza che
+  delega al provider consent-gated reale, credenziale/identita protette
+  fittizie, review Chat sintetica e HTTP OpenAI mock. Verifica la
+  provenienza generata dal ChatRepository, provider fissato,
+  contenuto esatto approvato, risposta salvata e mancato POST
+  quando la review nega consenso. Questa non e una prova di bootstrap
+  integrato, provider reale, UI Flutter fisica o connettivita S24;
+  i nuovi test entrano nella suite CI Ubuntu/macOS e non consentono
+  ancora l'attivazione del flag produttivo.
+- **H27 — nessuna ricerca Web anticipata senza consenso:**
+  l'adattatore Chat Cloud `CloudWebEnrichingChatRepository` possiede un
+  percorso separato per cercare automaticamente domande aggiornate su
+  motori pubblici prima della review Cloud. Nel trasporto sperimentale
+  gated ora la ricerca preventiva e proibita, per impedire che testo
+  personale venga trasmesso a servizi Web senza informativa specifica.
+  La domanda originale passa intatta al consent gateway; il percorso
+  Web legacy, con flag disattivato, resta invariato. Test di regressione
+  verificano zero chiamate al Web tool nel gated Cloud e il normale
+  percorso legacy gia collaudato. I risultati CI H27 sono da verificare.
+  Una ricerca Web nel nuovo trasporto richiedera in futuro un consenso
+  dedicato e provenienza verificata; questa protezione non copre ancora
+  tutte le operazioni Web di altri flussi.
+- **H28 — tutela delle query Web pre-consenso in HYBRID:**
+  il router Web-aware cerca notizie, verifiche e risultati freschi
+  prima della selezione CLOUD/LOCAL. Quando usa il provider Cloud
+  `consentGated` in HYBRID, il pre-enrichment ora non puo interrogare
+  il Web esterno senza una review specifica. Gli intenti Web espliciti
+  passano al modello LOCAL senza eseguire il tool Web, tramite una
+  richiesta offline-per-quella-operazione; la modalita LOCAL scelta
+  dall'utente e la ricerca legacy non cambiano. Test di regressione
+  verificano zero chiamate Web e il routing locale per l'intento
+  Web esplicito. Non si promette aggiornamento live dei fatti
+  senza un consenso separato; CI della HEAD ancora da verificare.
+- **H29 — rifiuto Cloud senza query Web nel fallback LOCAL:**
+  il consenso Cloud negato avvia esclusivamente il modello LOCAL e non
+  autorizza un'ulteriore trasmissione della stessa domanda tramite un tool
+  di ricerca Web. Il fallback disabilita `allowWebSearchTool` anche quando
+  la memoria non aggiunge alcun testo o non e disponibile. Due regressioni
+  con rifiuto tipizzato e senza/con callback memoria invariata verificano
+  `localOnly`, assenza di failover e divieto Web. La modifica non spegne
+  le ricerche Web ordinarie nella modalita LOCAL impostata dall'utente,
+  ma vincola soltanto questa continuazione dopo diniego. CI della nuova
+  HEAD da verificare, flag Cloud produttivo ancora false e nessuna release.
+- **H30 — prerequisiti build di collaudo HYBRID (solo sorgente):**
+  `RuntimeBootstrap` permette un flag Dart compile-time
+  `AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true`, di default FALSE
+  nelle release e negli aggiornamenti correnti. Solo le build QA
+  preparate esplicitamente collegano il sender gated al bootstrap.
+  `Modalita IA -> Consensi Cloud` apre la pagina inerte nelle build
+  ordinarie e, solo in una build QA attiva, le regole verificabili
+  mediante la medesima identita locale OS-protected del sender;
+  tale identita di installazione NON equivale a un login Cloud
+  e non autorizza sincronizzazione o multiutente.
+  Per OpenAI/Gemini e disponibile un campo esplicito etichetta account,
+  salvato insieme a una NUOVA API key nel record OS-protected:
+  le credenziali preesistenti prive di account NON diventano autorizzate
+  in automatico. La sostituzione chiave ruota la generazione di consenso.
+  CI verifica entrambi i valori del gate e test di consenso preesistenti.
+  Il bundle non viene registrato in modalita ordinaria; nessun invio
+  di dati privati o release e autorizzato da questo solo commit.
+  Windows Beta: download runtime CPU/Vulkan ufficiali ritenta fino
+  a 3 volte su errori HTTP transitori conservando entrambi gli hash
+  SHA-256 obbligatori. Il packaging macOS sqlite3 resta bloccato
+  finche non e verificata l'origine del file con SHA errato.
+- **H31 — riconciliazione con main (5 novembre):** dopo confronto
+  a tre versioni da `b795b3b`, sono preservate 17 modifiche Web/NVIDIA
+  e memoria ME-2 indipendenti; `app_localizations.dart` integra
+  le otto sostituzioni testo ME-2 nelle cinque lingue mantenendo
+  le nuove traduzioni H7/H21 dei consensi Cloud. Merge a due
+  genitori nel SOLO branch draft #977; main intatto, nessuna release.
+  Verificare la CI completa di questa HEAD prima di attivare QA.
+- **H32 — collaudo Windows HYBRID compile-time ON:**
+  il workflow autonomo `.github/workflows/hybrid-consent-windows-qa.yml`
+  esegue esclusivamente sulla PR #977 interna test di consenso con
+  flag QA attivo, build Windows release con lo stesso flag, integra
+  CPU e Vulkan ufficiali con SHA256 pin, prova GGUF Local e produce
+  ZIP portatile isolato + SHA256 + istruzioni. Non pubblica release
+  o aggiornamenti Android. Serve comunque collaudo fisico e provider
+  reale per dichiarare HYBRID pronto.
+- **H33 — QA con consenso attivo su macOS e Linux:**
+  Workflow isolato `.github/workflows/hybrid-consent-macos-linux-qa.yml`
+  per la sola PR #977 interna: compila macOS e Linux con
+  `AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true`, testa il gate
+  e i componenti Chat, esegue il motore GGUF reale e conserva
+  controlli nativi/signature/GUI delle pipeline desktop ordinarie.
+  Produce solo archivi portatili GitHub Actions, con SHA256 e README,
+  senza release, installer .deb o manifest OTA. Corretto il README
+  delle nuove build Windows QA per imporre un profilo OS separato:
+  archivi portatili NON isolano automaticamente database, preferenze
+  o credenziali. La CI H33 deve superare i suoi test; e' ancora
+  necessario il collaudo su hardware reale con provider autorizzato.
+- **H34 — regola permanente: beta HYBRID multipiattaforma per milestone**
+  (direttiva owner 6 novembre 2026):
+  pubblicare occasionalmente una **beta di collaudo** quando HYBRID sia
+  sufficientemente funzionante e si ottenga un progresso concreto; non
+  effettuare release di routine a ogni commit e non aspettare che ogni
+  funzionalita' futura della roadmap sia completa. Cadenza guidata dai
+  gate, non da una scadenza arbitraria. Un controllo periodico dedicato
+  al readiness viene eseguito due volte a settimana; NON equivale a
+  autorizzazione a saltare test o inviare dati personali.
+  I workflow H32 Windows e H33 macOS/Linux con flag di consenso ON
+  hanno superato test runtime, GGUF e bundling su runner Actions:
+  **QA desktop CI PASS**, NON E2E fisico ne' rilascio/OTA.
+  La convalida Android e' ancora source-only. Il canale release
+  produttivo continua a compilare il flag di consenso su FALSE.
+
+  **Gate minimo per la prima beta HYBRID:** (1) integrare il branch
+  HYBRID su main dopo riconciliazione delle modifiche concorrenti;
+  (2) impostare e verificare il consenso protetto **solo nelle beta**
+  Android e desktop, senza abilitarlo nelle stabili o nelle build
+  preesistenti; (3) prove automatiche e almeno uno smoke E2E della
+  Chat reale: provider/account selezionato senza sostituzione
+  silenziosa, preview prima di qualunque invio, permesso una sola
+  volta/sempre, rifiuto e revoca senza leak, rotazione della chiave,
+  memoria confermata in HYBRID-LOCAL senza invio non autorizzato,
+  fallback LOCAL e recupero dopo interruzione rete quando supportati;
+  (4) CI verde per il **medesimo commit** Android, Windows, macOS,
+  Linux e, ove applicabile, Web; verifica runtime/local GGUF e
+  checksum degli asset; (5) Android firma e versionCode compatibili
+  con l'app installata, distribuzione **solo** da Impostazioni ->
+  Aggiornamenti (nessun APK manuale, uninstall o downgrade);
+  (6) pubblicazione con il meccanismo GitHub owner-beta-checkpoint
+  esistente, che avvia un Android beta autorizzato e i publisher
+  Windows Setup, macOS DMG e Linux .deb **dallo stesso SHA e tag**.
+  Verificare realmente che gli asset di tutte le piattaforme
+  compaiano nella release e che gli aggiornamenti siano raggiungibili
+  dall'app. La firma macOS ad-hoc e' ammissibile per l'uso privato
+  se OS la accetta; mai spacciare ad-hoc per notarizzazione.
+  Web richiede collaudo/deploy separato della sua implementazione,
+  non simulare un'app HYBRID Web nativa se non esiste.
+  Se un asset o un percorso essenziale fallisce, marcare beta
+  INCOMPLETA e correggere prima di annunciare release coordinata.
+  Ogni checkpoint deve riportare SHA/tag, piattaforme, risultato
+  installazione/OTA, difetti e prossime prove. Main e stabile
+  rimangono protetti mentre i gate sono aperti.
+- **H36 — attestazione verificata per la futura beta coordinata:**
+  i sorgenti dei workflow publisher vengono predisposti per compilare
+  il consenso HYBRID **solo** quando l'owner seleziona esplicitamente
+  `hybrid_consent_beta=true` nel workflow Android beta autorizzato.
+  Il default rimane false per beta ordinarie, stable, nightly, dev e CI.
+  Se qualcuno tenta di attivare il gate fuori dal canale beta, il
+  workflow fallisce prima di compilare o pubblicare.
+
+  `scripts/hybrid_beta_release_manifest.py` produce un'attestazione
+  senza segreti, allegata alla release Android, con SHA commit
+  sorgente, run number, tag SemVer, canale e flag. I publisher
+  Windows/macOS/Linux leggono la release già autorizzata, verificano
+  che tag, SHA e run number corrispondano precisamente a quelli
+  della build Android, poi applicano lo stesso flag Dart alle
+  proprie build. Un'attestazione mancante/incoerente in una release
+  di nuovo formato e' un errore; release legacy prive dello script
+  restano con il gate spento. L'attestazione verifica la provenienza
+  della release, **non** e' una firma digitale autonoma.
+  Test automatici separati verificano beta ON, default OFF,
+  stable/nightly/dev non attivabili, SHA/tag/run errati, manomissioni,
+  collegamento alle quattro build e gate publisher preesistenti.
+  Non sono mai disattivati SHA256 dei runtime, firma Android o
+  controlli privacy.
+
+  Questa modifica preparatoria e' **solo nel branch draft #977**
+  finche' non saranno superati test Chat reale, interruzioni rete,
+  permessi revocati, resume LOCAL e QA fisico. Il comando owner
+  `/aivexus beta-checkpoint <SHA>` esistente continua a generare
+  una beta ordinaria con consenso HYBRID spento, finche' non viene
+  esplicitamente esteso/autorizzato. Nessuna release in questa fase.
+- **H38 — Android HYBRID QA con flag realmente ON, senza OTA:**
+  estesa la CI `Assistant Android Source Validation` affinche'
+  soltanto la PR interna #977 sul branch HYBRID compili il suo APK
+  **debug effimero** ARM64 con
+  `AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true`; per ogni altro
+  PR/ref il flag resta false. Prima della compilazione viene testato
+  il valore del bootstrap con define ON/OFF, i test di runtime
+  consent-gated e integrazione Chat, il widget del dialogo con
+  sessione visibile, l'impostazione Consensi Cloud; poi rimangono
+  obbligatori l'audit delle esportazioni FFI arm64 e hash del
+  pacchetto. La compilazione serve soltanto a rilevare regressioni
+  Flutter/Gradle/native su Android, NON firma un rilascio beta,
+  NON carica l'APK come release, NON installa sui dispositivi.
+  Dopo CI PASS restano da verificare test fisico sul S24 FE,
+  canale OTA firmato approvato, assenza di leak di memoria e
+  passaggio LOCAL/Cloud su rete interrotta e ripristinata.
+- **H40 — continuita HYBRID quando il trasporto Cloud cade:**
+  primo passo del requisito Cloud->LOCAL->Cloud, senza introdurre
+  ripetizioni di invii Cloud o nuovo Web automatico. Il sender HTTP
+  consent-gated riconosce **solo** `http.ClientException` e
+  `TimeoutException` al confine della richiesta gia' autorizzata
+  e le converte in una causa tipizzata senza contenuto privato.
+  Una risposta HTTP (inclusi 401, 429, 503), un rifiuto di consenso,
+  un parser fallito o un'eccezione generica NON sono perdita di rete.
+  Il runtime produce `InferenceErrorCode.cloudTransportUnavailable`,
+  registra il provider temporaneamente indisponibile e non prova
+  mai un secondo provider Cloud nella stessa richiesta.
+
+  Solo un'origine Chat verificata, modo HYBRID, trasporto protetto
+  e zero testo Cloud gia' prodotto consentono a Hannibal di proseguire
+  **quella singola domanda** in LOCAL. Il nuovo InferenceRequest
+  scarta provider Cloud, evidenza Cloud e failover, vieta ricerche Web
+  automatiche e arricchisce memoria confermata soltanto dopo
+  `localOnly`. L'annullamento non attiva il fallback.
+  Test con rete mock che cade dopo un solo invio autorizzato,
+  assenza di retry Cloud, zero leak, risposta 401/429/503,
+  provenienza non verificata e stream gia' parzialmente prodotto.
+  La perdita di rete dopo un HTTP inviato puo' lasciare incerto
+  se il server abbia elaborato il payload: non ritentare il POST.
+
+  **Rimane fuori da H40** la continuita semantica multipasso
+  con checkpoint persistenti, la ripresa di un task Cloud iniziato,
+  la rigenerazione di contesto dopo riavvio, nonche' il
+  reinstradamento automatico LOCAL->Cloud al ritorno della rete.
+  Questi richiedono un journal e test end-to-end separati.
+  H40 e' una modifica nel solo branch draft #977 finche' i
+  nuovi workflow CI e i test fisici non risultano verificati;
+  nessuna beta e' pubblicata da questa sola modifica.
+- **H41 — checkpoint beta con consenso HYBRID esplicito:**
+  Il comando owner preesistente `/aivexus beta-checkpoint <SHA>`
+  continua a rilasciare la beta ordinaria con gate HYBRID OFF.
+  Il nuovo comando separato `/aivexus hybrid-beta-checkpoint <SHA>`,
+  valido **solo** come commento dell'owner sull'issue #1008 aperta,
+  seleziona l'input beta `hybrid_consent_beta=true`.
+  Un checkpoint proveniente dal merge di una PR non puo' abilitare
+  HYBRID implicitamente. Restano le verifiche obbligatorie:
+  autore e attore owner, corpo esatto SHA corrente di main,
+  nessun secondo run Android per lo stesso SHA, cinque suite CI
+  post-merge verdi su main, presenza del flag protetto nel
+  workflow sorgente. Il comando non esegue testo utente come
+  shell, non abilita la stabile e mantiene l'unico workflow
+  downstream di release Android per tutti i publisher desktop.
+  Test statici Python nel gate CI verificano i confini owner,
+  idempotenza e differenza beta normale/HYBRID.
+
+  **H41 non e' una pubblicazione**: e' solo un percorso per un
+  checkpoint HYBRID deliberato, quando i gate H40/Android sono
+  verdi e la PR #977 sia stata integrata su main. Dopo la release,
+  confermare effettivamente asset e checksum delle quattro
+  piattaforme e test OTA tramite menu Impostazioni -> Aggiornamenti.
+- **H43 — nessuna regressione della modalita CLOUD ordinaria:**
+  `AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true` deve attivare
+  il consenso **solo sulle richieste HYBRID**, senza limitare i
+  provider esistenti (NVIDIA, Mistral, Claude, custom) nella modalita
+  CLOUD scelta esplicitamente. Il wrapper
+  `DirectiveAwareInferenceService` separa `runtimeDefault` e
+  `cloudOnly` in base al modo reale al momento della richiesta:
+  CLOUD usa il runtime originale con provider e funzionalita
+  preesistenti; HYBRID usa soltanto il runtime OpenAI/Gemini
+  verificato e non passa mai ad un provider Cloud non approvato.
+  I percorsi LOCAL rimangono invariati. Il decoratore Web e la
+  gestione visiva della Chat in CLOUD ripristinano il comportamento
+  originario, mentre HYBRID conserva controllo Web e provenienza
+  della richiesta prima di qualsiasi uscita.
+  Aggiunto test di regressione con modalita CLOUD e NVIDIA attivi,
+  switch a HYBRID protetto e rifiuto di una destinazione non
+  approvata; la suite condivisa ora esegue anche il test del
+  componente barra audio integrato da `main` e il routing
+  `DirectiveAwareInferenceService` su Ubuntu/macOS.
+  Gate release: H43 CI multipiattaforma PASS, merge su main,
+  firma Android e publish beta esclusivamente autorizzato.
+  Test manuali con provider reali e aggiornamenti in-app restano
+  necessari, nessuna release prodotta da questo commit.
+- **H45 — merge periodico dei rami sperimentali, test ad hoc obbligatori**
+  (direttiva owner 6 novembre 2026): non trattenere il codice
+  sperimentale fino al prodotto completo. A milestone funzionanti
+  integrare periodicamente su `main` per verificare il comportamento
+  reale e far emergere difetti cross-feature, preservando un flag OFF
+  nelle versioni ordinarie e la separazione della release beta.
+  Prima di ogni merge ricostruire le differenze con `main`,
+  riconciliare manualmente i conflitti senza perdere progressi
+  concorrenti, e aggiungere regressioni mirate per i percorsi
+  che si incrociano. Il merge non equivale automaticamente a
+  pubblicazione, installazione o autorizzazione a inviare memoria.
+  Dopo il merge rifare le CI sullo SHA **di main** prima del
+  checkpoint beta; proseguire i filoni incompleti in nuovi branch.
+
+  Per questo checkpoint: unire i nuovi controlli ME-2 sui
+  referenti nominati con la provenienza confermata HYBRID,
+  senza divulgare informazioni su Jerome/Kader in risposte
+  relative all'altra persona o in una domanda autobiografica.
+  Conservare il nuovo ponte del checkpoint owner: attesa della
+  release Android completata con successo prima del publisher
+  Windows, oltre all'attivazione HYBRID esplicita solo per beta.
+  Test ad hoc `assistant_hybrid_merge_identity_regression_test.dart`
+  piu test Python di handoff beta e test Flutter esistenti
+  (consensi, local fallback, CLOUD legacy, audio, UI, Markdown).
+  Nessun trasferimento di dati personali Cloud implicito.
+- **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
+  ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
+  ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher
+  gated nel bootstrap e senza consenso in Chat attivo. Mancano destinatario
+  Cloud/account verificato per la review, prove E2E con HTTP reale e test
+  fisici S24 FE. I permessi non autorizzano replica o invio automatico della
+  memoria.
+- I dati utente/documenti/ricordi e cronologia con sensibilità non verificata
+  restano `unknown`: sono autorizzabili soltanto per una richiesta, non con
+  permesso permanente; contenuti con false direttive `[SYSTEM]` rimangono
+  dati della fonte. Servono classificazione affidabile, provenienza dei
+  risultati Web/tool, allegati binari e trasporti oltre OpenAI/Gemini.
+  **Il percorso H14 funziona nei test con HTTP simulato, non nella Chat
+  produttiva:** UI review e sorgenti typed sono ora disponibili in Chat,
+  ma bisogna ancora propagare l'evidenza trusted lungo Hannibal/Hybrid
+  senza aggiunte da Web/tool, agganciare il coordinator al bootstrap
+  con un destinatario Cloud effettivamente verificato e completare
+  l'E2E sul Galaxy S24 FE.
+- PR #975 è il checkpoint sperimentale separato. #899 governa la memoria,
+  #973 HYBRID, #948 OTA. Non dichiarare prodotto completo né pubblicare
+  release sulla sola base di test source-only.
+- Massimizzare completezza e accuratezza con verifica e fonti senza promettere
+  risposte **esaustive al 100%**, impossibili da garantire.
+
 ### Invarianti e prove
 
 - Nessun modello, plugin o servizio remoto diventa proprietario dei ricordi.
@@ -531,6 +1051,7 @@ consenso esplicito.
 - CI condivisa e QA delle piattaforme sono necessari, ma una CI verde non
   sostituisce un test fisico. Distribuzione Android solo tramite
   **Impostazioni → Aggiornamenti**, senza reinstallazione né reset delle chat.
+
 ## 17. Progetto unico MEMORIA EVOLUTIVA AIVEXUS — visione, stato e piano operativo (4 novembre 2026)
 
 Questa sezione e la **specifica operativa complessiva** della memoria evolutiva. Integra,

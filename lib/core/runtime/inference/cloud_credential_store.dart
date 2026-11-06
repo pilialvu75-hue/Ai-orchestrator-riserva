@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:ai_orchestrator/core/runtime/inference/cloud_provider_catalog.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -70,6 +71,11 @@ final class CloudCredentialStore {
   static final CloudCredentialStore instance = CloudCredentialStore();
 
   static const String _keyPrefix = 'ai_orchestrator.cloud.credential.v1.';
+  static final Random _secureRandom = Random.secure();
+
+  static String _freshConsentEpoch() => base64UrlEncode(
+    List<int>.generate(24, (_) => _secureRandom.nextInt(256)),
+  ).replaceAll('=', '');
 
   final CloudSecretStorage _storage;
   final Map<String, _CloudCredentialRecord> _records =
@@ -105,6 +111,18 @@ final class CloudCredentialStore {
         final record = _CloudCredentialRecord.decode(encoded);
         if (record.providerId == providerId && record.secret.trim().isNotEmpty) {
           _records[providerId] = record;
+          // Migrate old keys without inheriting legacy consent grants.
+          // On failed secure write, regular Cloud remains usable but this
+          // credential cannot participate in a gated Cloud disclosure.
+          if (record.consentEpoch == null) {
+            final migrated = record.withConsentEpoch(_freshConsentEpoch());
+            try {
+              await _storage.write(_storageKey(providerId), migrated.encode());
+              _records[providerId] = migrated;
+            } catch (_) {
+              // Fail closed for consent identity only.
+            }
+          }
         }
       } catch (_) {
         // A corrupt secret entry must not prevent app startup or expose data.
@@ -126,6 +144,17 @@ final class CloudCredentialStore {
   }
 
   bool hasCredential(String providerId) => secretFor(providerId) != null;
+
+  /// Private generation of the secured credential, not its human label.
+  /// Persisted over restart and rotated even when a user re-enters
+  /// exactly the same key/account. Never returns a secret or env fallback.
+  String? consentBindingFor(String providerId) {
+    final record = _records[providerId];
+    if (record == null || !_recordIsUsable(record) ||
+        record.accountId == null || record.accountId!.isEmpty ||
+        record.consentEpoch == null) return null;
+    return record.consentEpoch;
+  }
 
   CloudCredentialSnapshot snapshotFor(String providerId) {
     final record = _records[providerId];
@@ -171,6 +200,7 @@ final class CloudCredentialStore {
         kind: CloudCredentialKind.apiKey,
         secret: secret,
         accountId: _normalizedNullable(accountId),
+        consentEpoch: _freshConsentEpoch(),
       ),
     );
   }
@@ -204,6 +234,7 @@ final class CloudCredentialStore {
         secret: secret,
         accountId: _normalizedNullable(accountId),
         expiresAt: expiresAt?.toUtc(),
+        consentEpoch: _freshConsentEpoch(),
       ),
     );
   }
@@ -259,6 +290,7 @@ final class _CloudCredentialRecord {
     required this.secret,
     this.accountId,
     this.expiresAt,
+    this.consentEpoch,
   });
 
   final String providerId;
@@ -266,6 +298,16 @@ final class _CloudCredentialRecord {
   final String secret;
   final String? accountId;
   final DateTime? expiresAt;
+  final String? consentEpoch;
+
+  _CloudCredentialRecord withConsentEpoch(String epoch) => _CloudCredentialRecord(
+    providerId: providerId,
+    kind: kind,
+    secret: secret,
+    accountId: accountId,
+    expiresAt: expiresAt,
+    consentEpoch: epoch,
+  );
 
   bool get isExpired =>
       expiresAt != null && !expiresAt!.isAfter(DateTime.now().toUtc());
@@ -277,6 +319,7 @@ final class _CloudCredentialRecord {
         'secret': secret,
         'accountId': accountId,
         'expiresAt': expiresAt?.toUtc().toIso8601String(),
+        'consentEpoch': consentEpoch,
       });
 
   factory _CloudCredentialRecord.decode(String encoded) {
@@ -303,12 +346,16 @@ final class _CloudCredentialRecord {
     }
 
     final expiresAtRaw = data['expiresAt']?.toString();
+    final epoch = data['consentEpoch']?.toString();
+    final validEpoch = epoch != null &&
+        RegExp(r'^[a-zA-Z0-9_-]{32}$').hasMatch(epoch);
 
     return _CloudCredentialRecord(
       providerId: providerId,
       kind: kind.first,
       secret: secret,
       accountId: data['accountId']?.toString(),
+      consentEpoch: validEpoch ? epoch : null,
       expiresAt: expiresAtRaw == null || expiresAtRaw.isEmpty
           ? null
           : DateTime.tryParse(expiresAtRaw)?.toUtc(),

@@ -5,20 +5,40 @@ on:
     branches: [main, codex/assistant-local-reliability, codex/assistant-freshness-followup]
     paths:
       - 'lib/core/**'
+      - 'lib/presentation/chat/**'
+      - 'lib/features/chat/presentation/pages/chat_page.dart'
+      - 'test/presentation/chat/**'
       - 'lib/native/runtime/windows/**'
       - 'test/core/**'
       - 'pubspec.*'
-      - '.github/workflows/assistant-shared-tests.yml'
       - '.github/workflows/owner-beta-checkpoint.yml'
+      - '.github/workflows/assistant-shared-tests.yml'
+      - 'scripts/hybrid_beta_release_manifest.py'
+      - 'test/scripts/test_hybrid_beta_release_manifest.py'
+      - 'test/scripts/test_hybrid_beta_publishers.py'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/windows-release-publish.yml'
+      - '.github/workflows/macos-release-publish.yml'
+      - '.github/workflows/linux-release-publish.yml'
   pull_request:
     branches: [main]
     paths:
       - 'lib/core/**'
+      - 'lib/presentation/chat/**'
+      - 'lib/features/chat/presentation/pages/chat_page.dart'
+      - 'test/presentation/chat/**'
       - 'lib/native/runtime/windows/**'
       - 'test/core/**'
       - 'pubspec.*'
-      - '.github/workflows/assistant-shared-tests.yml'
       - '.github/workflows/owner-beta-checkpoint.yml'
+      - '.github/workflows/assistant-shared-tests.yml'
+      - 'scripts/hybrid_beta_release_manifest.py'
+      - 'test/scripts/test_hybrid_beta_release_manifest.py'
+      - 'test/scripts/test_hybrid_beta_publishers.py'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/windows-release-publish.yml'
+      - '.github/workflows/macos-release-publish.yml'
+      - '.github/workflows/linux-release-publish.yml'
   workflow_dispatch:
 
 permissions:
@@ -44,12 +64,36 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get --enforce-lockfile
+      - name: Verify fail-closed HYBRID beta release attestation and publisher parity
+        run: python3 -m unittest discover -s test/scripts -p 'test_hybrid_beta_*.py'
+      - name: Verify existing owner and Android publisher release gates
+        run: |
+          python3 scripts/check_owner_beta_checkpoint.py .github/workflows/owner-beta-checkpoint.yml
+          python3 scripts/check_android_release_gate.py .github/workflows/build.yml .github/workflows/macos-release-publish.yml .github/workflows/linux-release-publish.yml .github/workflows/windows-release-publish.yml
       - name: Verify shared Assistant behavior
         run: >-
           flutter test
+          test/app/runtime_bootstrap_cloud_consent_flag_test.dart
           test/core/tools/assistant_device_clock_test.dart
           test/core/tools/assistant_web_search_policy_test.dart
           test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
+          test/features/chat/presentation/hybrid_cloud_chat_consent_gateway_test.dart
+          test/presentation/chat/components/chat_audio_playback_bar_test.dart
+          test/features/settings/presentation/hybrid_cloud_consent_review_dialog_test.dart
+          test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
+          test/features/settings/presentation/hybrid_cloud_consent_rekey_settings_test.dart
+          test/core/runtime/inference/cloud_credential_store_test.dart
+          test/core/runtime/inference/hybrid_cloud_disclosure_consent_test.dart
+          test/core/runtime/inference/hybrid_cloud_native_wire_sender_test.dart
+          test/core/runtime/inference/hybrid_cloud_runtime_consent_coordinator_test.dart
+          test/core/runtime/inference/hybrid_cloud_runtime_source_evidence_test.dart
+          test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart
+          test/core/runtime/inference/hybrid_cloud_visual_attachment_guard_test.dart
+          test/features/chat/data/repositories/chat_repository_visual_consent_test.dart
+          test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart
+          test/features/chat/data/repositories/cloud_web_enriching_chat_repository_test.dart
+          test/core/runtime/inference/hybrid_cloud_runtime_dispatch_test.dart
+          test/core/runtime/inference/directive_aware_inference_service_test.dart
           test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart
           test/core/runtime/inference/completion_output_test.dart
           test/native/runtime/windows/windows_vulkan_device_test.dart
@@ -58,6 +102,7 @@ jobs:
           test/core/runtime/inference/local_prompt_templates_test.dart
           test/core/runtime/inference/inference_service_test.dart
           test/core/memory/assistant_durable_memory_store_test.dart
+          test/core/memory/assistant_natural_memory_candidate_extractor_test.dart
           test/core/memory/assistant_memory_sqlite_restart_integration_test.dart
           test/core/memory/assistant_memory_preference_candidate_test.dart
           test/core/memory/assistant_memory_selective_forget_test.dart
@@ -66,4 +111,11 @@ jobs:
           test/core/memory/assistant_natural_car_color_correction_test.dart
           test/core/memory/assistant_entity_reference_analyzer_test.dart
           test/core/memory/assistant_manual_entity_reference_candidate_test.dart
+          test/core/memory/assistant_hybrid_merge_identity_regression_test.dart
           test/core/system/update
+      - name: Verify explicitly opted-in QA build gate
+        run: >-
+          flutter test
+          --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true
+          --dart-define=AIVEXUS_EXPECT_HYBRID_QA_ENABLED=true
+          test/app/runtime_bootstrap_cloud_consent_flag_test.dart

@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/runtime/background/cloud_background_executi
 import 'package:ai_orchestrator/core/runtime/background/cloud_background_execution_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_consent_denied.dart';
 import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
@@ -88,6 +89,117 @@ void main() {
     expect(cloudCalls, 1);
     expect(localCalls, 0);
     expect(selectedModelLoads, 0);
+  });
+
+  test('explicit CLOUD keeps legacy providers while HYBRID uses reviewed Cloud',
+      () async {
+    var mode = AiRuntimeMode.cloud;
+    var legacyCalls = 0;
+    var approvedCalls = 0;
+    final local = _CountingLocalRuntimeProvider(onStream: () {
+      fail('An explicit Cloud directive must not execute LOCAL');
+    });
+    final ordinary = CloudRuntimeProvider(
+      sendQuery: (String provider, AiRequest request) async {
+        legacyCalls++;
+        expect(provider, 'nvidiaNim');
+        return AiResponse(
+          text: 'Ordinary NVIDIA answer',
+          model: 'model-nvidia-test',
+          tokensUsed: 2,
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+        );
+      },
+      supportedProviders: () => <String>['nvidiaNim'],
+      isProviderAvailable: (_) => true,
+      providerDisplayName: ([name]) => name ?? 'NVIDIA',
+      preferredProvider: () => 'nvidiaNim',
+      automaticUseAllowed: (_) => true,
+    );
+    final reviewed = CloudRuntimeProvider(
+      consentGated: true,
+      sendQuery: (_, __) async {
+        fail('HYBRID must never call unreviewed Cloud transport');
+        throw StateError('Unreviewed Cloud');
+      },
+      consentGatedSend: (source, outbound, token) async {
+        // The real coordinator rejects unsupported pinned destinations even
+        // when the provider catalog contains a permitted alternative.
+        if (source.cloudProviderId != outbound.providerId) {
+          throw const HybridCloudConsentDenied();
+        }
+        approvedCalls++;
+        expect(outbound.providerId, 'openAi');
+        return AiResponse(
+          text: 'Reviewed HYBRID answer',
+          model: 'gpt-test',
+          tokensUsed: 3,
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+        );
+      },
+      supportedProviders: () => <String>['openAi'],
+      isProviderAvailable: (_) => true,
+      providerDisplayName: ([name]) => name ?? 'OpenAI',
+      preferredProvider: () => 'openAi',
+      modelForProvider: (_) => 'gpt-test',
+      automaticUseAllowed: (_) => true,
+    );
+    final service = DirectiveAwareInferenceService(
+      loadSelectedModel: () async => null,
+      loadRuntimeMode: () async => mode,
+      runtimeProvider: local,
+      cloudRuntimeProvider: ordinary,
+      hybridConsentCloudRuntimeProvider: reviewed,
+      sessionManager: RuntimeSessionManager(),
+    );
+
+    final cloud = await service.stream(const InferenceRequest(
+      sessionId: 'explicit-cloud-with-hybrid-qa-on',
+      prompt: 'Test existing NVIDIA Cloud',
+      routeDirective: InferenceRouteDirective.cloudOnly,
+      cloudProviderId: 'nvidiaNim',
+      allowCloudProviderFailover: false,
+    )).toList();
+    expect(cloud.last.isError, isFalse);
+    expect(cloud.last.text, 'Ordinary NVIDIA answer');
+    expect(legacyCalls, 1);
+    expect(approvedCalls, 0);
+
+    // A runtimeDefault request in ordinary CLOUD also keeps the original
+    // provider; it cannot accidentally go through the HYBRID gate.
+    final defaultCloud = await service.stream(const InferenceRequest(
+      sessionId: 'default-cloud-with-hybrid-qa-on',
+      prompt: 'Test regular Cloud fallback selection',
+    )).toList();
+    expect(defaultCloud.last.text, 'Ordinary NVIDIA answer');
+    expect(legacyCalls, 2);
+    expect(approvedCalls, 0);
+
+    mode = AiRuntimeMode.hybrid;
+    final hybrid = await service.stream(const InferenceRequest(
+      sessionId: 'protected-hybrid',
+      prompt: 'Test guarded Cloud choice',
+      routeDirective: InferenceRouteDirective.cloudOnly,
+      cloudProviderId: 'openAi',
+      allowCloudProviderFailover: false,
+    )).toList();
+    expect(hybrid.last.isError, isFalse);
+    expect(hybrid.last.text, 'Reviewed HYBRID answer');
+    expect(approvedCalls, 1);
+    expect(legacyCalls, 2);
+
+    // An unsupported provider in HYBRID must fail closed instead of
+    // silently using the normal NVIDIA Cloud transport.
+    final denied = await service.stream(const InferenceRequest(
+      sessionId: 'unsupported-protected-provider',
+      prompt: 'Do not select unreviewed NVIDIA silently',
+      routeDirective: InferenceRouteDirective.cloudOnly,
+      cloudProviderId: 'nvidiaNim',
+      allowCloudProviderFailover: false,
+    )).toList();
+    expect(denied.last.isError, isTrue);
+    expect(approvedCalls, 1);
+    expect(legacyCalls, 2);
   });
 
   test('cloudOnly holds one Android background lease until stream completion',

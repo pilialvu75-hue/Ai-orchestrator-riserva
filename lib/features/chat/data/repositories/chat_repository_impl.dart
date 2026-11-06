@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:uuid/uuid.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
+import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
 import 'package:ai_orchestrator/core/error/exceptions.dart';
 import 'package:ai_orchestrator/core/error/failures.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
@@ -13,6 +14,9 @@ import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.da
 import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_forensics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_prompt_provenance.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_visual_attachment_guard.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
@@ -43,6 +47,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
     this.localImageVisionService,
     this.videoStoryboardService,
     this.fileContextService,
+    this.consentGatedAssistantCloud = false,
   })  : _orchestrator = orchestrator,
         _orchestratorProvider = orchestratorProvider;
 
@@ -62,6 +67,23 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
   final ChatImageVisionService? localImageVisionService;
   final ChatVideoStoryboardService? videoStoryboardService;
   final ChatFileContextService? fileContextService;
+
+  /// True only for the explicitly enabled consent-gated Assistant runtime.
+  /// The legacy Chat and on-device vision are unchanged by default.
+  final bool consentGatedAssistantCloud;
+
+  void _enforceCloudVisualConsentBoundary(List<ChatAttachment> attachments) {
+    if (HybridCloudVisualAttachmentGuard.shouldDeny(
+      consentGatedAssistantCloud: consentGatedAssistantCloud,
+      runtimeMode: runtimeSettingsService?.runtimeMode,
+      attachments: attachments,
+    )) {
+      throw const ServerFailure(
+        'Image/Video Cloud: anteprima e consenso per allegati visivi '
+        'non sono ancora disponibili. Nessun file e stato inviato al Cloud.',
+      );
+    }
+  }
 
   static const _uuid = Uuid();
   final Set<String> _activeSendSessions = <String>{};
@@ -166,6 +188,8 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
           try {
             final attachmentsSnapshot =
                 List<ChatAttachment>.unmodifiable(attachments);
+            // Fail closed before local persistence or any visual pre-processing.
+            _enforceCloudVisualConsentBoundary(attachmentsSnapshot);
             RuntimeEventLog.instance.emit(
               '[FORENSIC_CONVERSATION_START] session=$sessionId prompt_chars=${userPrompt.trim().length} attachments=${attachmentsSnapshot.length}',
             );
@@ -236,6 +260,8 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                   runtimeSettingsService?.runtimeMode == AiRuntimeMode.cloud;
               final ChatImageVisionResult vision;
               if (isCloud) {
+                // Runtime mode may have changed while history was assembled.
+                _enforceCloudVisualConsentBoundary(attachmentsSnapshot);
                 final selectedProvider = ChatImageVisionAutoRouter.select(
                   manualProvider: runtimeSettingsService?.manualCloudProvider,
                   automaticUseAllowed: (providerId) =>
@@ -319,6 +345,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                   'e un provider visivo manualmente.',
                 );
               }
+              _enforceCloudVisualConsentBoundary(attachmentsSnapshot);
               final provider = runtimeSettingsService?.manualCloudProvider;
               if (provider != 'openAi' && provider != 'gemini') {
                 throw const ServerFailure(
@@ -394,6 +421,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
 
             String effectivePrompt = normalizedPrompt;
             var hasDocumentContext = false;
+            HybridCloudPromptProvenance? documentPromptProvenance;
             if (attachmentsSnapshot.any(
               (item) => item.type == ChatAttachmentType.file,
             )) {
@@ -424,10 +452,14 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
               if (fileContext != null) {
                 hasDocumentContext = true;
                 effectivePrompt = fileContext.prompt;
+                documentPromptProvenance = fileContext.provenance;
                 onRuntimeNotice?.call(
                   mode == AiRuntimeMode.cloud
-                      ? 'File: estratti locali recuperati; inviati al '
-                          'provider Cloud selezionato con la tua domanda.'
+                      ? consentGatedAssistantCloud
+                          ? 'File: estratti locali preparati; in attesa '
+                              'della revisione e del consenso Cloud.'
+                          : 'File: estratti locali recuperati; inviati al '
+                              'provider Cloud selezionato con la tua domanda.'
                       : 'File: estratti recuperati dal RAG locale.',
                 );
               }
@@ -466,6 +498,12 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                   : null,
               systemPrompt: systemPrompt,
               context: contextSnapshot,
+              originalUserQuestion: normalizedPrompt,
+              documentPromptProvenance: documentPromptProvenance,
+              mayBuildCloudEvidence: attachmentsSnapshot.isEmpty ||
+                  (hasDocumentContext && documentPromptProvenance != null &&
+                      attachmentsSnapshot.every((item) =>
+                          item.type == ChatAttachmentType.file)),
             );
             final streamCompleter = Completer<void>();
             final abortSignal = Completer<void>();
@@ -637,9 +675,37 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
     required String? documentWebQuery,
     required String? systemPrompt,
     required List<ChatTurn> context,
+    required String originalUserQuestion,
+    required HybridCloudPromptProvenance? documentPromptProvenance,
+    required bool mayBuildCloudEvidence,
   }) {
     final settings = runtimeSettingsService;
     final directInference = inferenceService;
+    // This evidence is produced at the real Chat/SQLite source boundary.
+    // Any already injected Web result has unknown provenance and must NOT
+    // be labeled as a regular app instruction for Cloud consent.
+    final trustedEvidence = mayBuildCloudEvidence &&
+            settings != null &&
+            (settings.runtimeMode == AiRuntimeMode.cloud ||
+                settings.runtimeMode == AiRuntimeMode.hybrid) &&
+            !AssistantWebSearchPolicy.hasInjectedContext(
+              prompt: prompt,
+              systemPrompt: systemPrompt,
+            )
+        ? HybridCloudRuntimeSourceEvidence(
+            sessionId: sessionId,
+            originalQuestion: originalUserQuestion,
+            baseSystemPrompt: systemPrompt ?? '',
+            originalHistory: <AiMessage>[
+              for (final turn in context)
+                AiMessage(
+                  role: AiMessageRole.values.byName(turn.role.name),
+                  content: turn.content,
+                ),
+            ],
+            documentPrompt: documentPromptProvenance,
+          )
+        : null;
 
     if (settings?.runtimeMode == AiRuntimeMode.cloud && directInference != null) {
       final manualProvider = settings!.manualCloudProvider;
@@ -665,6 +731,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
           routeDirective: InferenceRouteDirective.cloudOnly,
           cloudProviderId: manualProvider,
           allowCloudProviderFailover: automaticProviderSelection,
+          trustedCloudSourceEvidence: trustedEvidence,
         ),
       );
     }
@@ -684,6 +751,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
       systemPrompt: systemPrompt,
       documentContext: documentContext,
       documentWebQuery: documentWebQuery,
+      trustedCloudSourceEvidence: trustedEvidence,
     );
   }
 

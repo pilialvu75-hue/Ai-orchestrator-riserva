@@ -21,6 +21,9 @@ import 'package:ai_orchestrator/core/runtime/background/cloud_background_executi
 import 'package:ai_orchestrator/core/runtime/inference/assistant_web_continuation_local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/assistant_resident_local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/cloud_credential_store.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_disclosure_consent.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle.dart';
 import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -31,6 +34,8 @@ import 'package:ai_orchestrator/core/tools/search/expiring_search_cache.dart';
 import 'package:ai_orchestrator/core/tools/search/fallback_search_provider.dart';
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
+import 'package:ai_orchestrator/features/chat/presentation/services/hybrid_cloud_chat_consent_gateway.dart';
+import 'package:ai_orchestrator/features/cloud_ai/domain/repositories/ai_repository.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_local_image_vision_service.dart';
@@ -50,7 +55,15 @@ import 'package:ai_orchestrator/features/local_ai/domain/repositories/local_ai_r
 /// Keeping this separate from the main container minimizes regression risk for
 /// the large Local/voice/build dependency graph.
 abstract final class CloudRoutingBootstrap {
-  static Future<void> configure(GetIt sl) async {
+  /// The explicit opt-in is an integration/QA gate, not an implicit upgrade
+  /// of every existing Cloud account. The release bootstrap calls this with
+  /// the default (false), preserving the original Cloud Chat transport until
+  /// verified account setup and on-device acceptance are completed.
+  static Future<void> configure(
+    GetIt sl, {
+    bool enableConsentGatedAssistantCloud = false,
+  }) async {
+    await _unregisterIfPresent<HybridCloudAssistantRuntimeBundle>(sl);
     await _unregisterIfPresent<ChatRepository>(sl);
     await _unregisterIfPresent<Orchestrator>(sl);
     await _unregisterIfPresent<PlannerService>(sl);
@@ -127,6 +140,36 @@ abstract final class CloudRoutingBootstrap {
       ),
     );
 
+    // This bundle is bound to the ACTUAL Chat review gateway and to the
+    // existing OS-protected local identity. It is opt-in until tested on a
+    // physical device and ordinary Cloud credentials can be migrated safely.
+    // It NEVER replaces the global CloudRuntimeProvider used by Workshop.
+    final assistantConsentBundle = enableConsentGatedAssistantCloud
+        ? HybridCloudAssistantRuntimeBundle.create(
+            credentials: CloudCredentialStore.instance,
+            protectedStorage: FlutterSecureCloudConsentStorage(),
+            client: sl<http.Client>(),
+            supportedProviders: () => sl<AiRepository>().supportedProviders,
+            isProviderAvailable: (provider) =>
+                sl<AiRepository>().isProviderAvailable(provider),
+            providerDisplayName: ([provider]) =>
+                sl<AiRepository>().providerDisplayName(provider),
+            chatReview: (chatSessionId, review, isRequestActive) =>
+                HybridCloudChatConsentGateway.instance.ask(
+              chatSessionId: chatSessionId,
+              review: review,
+              isRequestActive: isRequestActive,
+            ),
+          )
+        : null;
+    // Expose the exact same protected consent manager/identity to Settings.
+    // Never register this bundle in normal builds: Settings stays inactive.
+    if (assistantConsentBundle != null) {
+      sl.registerSingleton<HybridCloudAssistantRuntimeBundle>(
+        assistantConsentBundle,
+      );
+    }
+
     sl.registerLazySingleton<InferenceService>(
       () => DirectiveAwareInferenceService(
         loadSelectedModel: () async {
@@ -144,7 +187,10 @@ abstract final class CloudRoutingBootstrap {
         loadRuntimeMode: () =>
             sl<AiRuntimeSettingsService>().loadRuntimeMode(),
         runtimeProvider: assistantLocalRuntimeProvider,
+        // Preserve ordinary CLOUD providers (NVIDIA, Mistral, custom, etc.)
+        // while routing HYBRID through the exact approved OpenAI/Gemini gate.
         cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
+        hybridConsentCloudRuntimeProvider: assistantConsentBundle?.provider,
         sessionManager: sl<RuntimeSessionManager>(),
         webSearchTool: assistantWebSearchTool,
         backgroundExecutionLeaseService:
@@ -167,7 +213,18 @@ abstract final class CloudRoutingBootstrap {
         plannerService: sl<PlannerService>(),
         webSearchTool: assistantWebSearchTool,
         runtimeSettingsService: sl<AiRuntimeSettingsService>(),
-        cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
+        cloudRuntimeProvider: assistantConsentBundle?.provider ?? sl<CloudRuntimeProvider>(),
+        // Memory is resolved AFTER Hannibal chooses localOnly, never as part
+        // of an HYBRID shared prompt that might be forwarded to Cloud.
+        hybridLocalMemoryPromptEnricher: ({
+          required String baseSystemPrompt,
+          required String sessionId,
+          required String userPrompt,
+        }) => durableMemoryContextService.augmentSystemPrompt(
+          baseSystemPrompt: baseSystemPrompt,
+          sessionId: sessionId,
+          userPrompt: userPrompt,
+        ),
       ),
     );
 
@@ -179,6 +236,10 @@ abstract final class CloudRoutingBootstrap {
         durableMemoryCaptureService: durableMemoryCaptureService,
         naturalMemoryConsentService: sl<AssistantNaturalMemoryConsentService>(),
         delegate: CloudWebEnrichingChatRepository(
+          // This decorator is only active in explicit CLOUD. Its existing
+          // Web enrichment remains available; HYBRID Web is handled by the
+          // consent-aware AssistantWebAwareOrchestrator instead.
+          consentGatedAssistantCloud: false,
           runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
           webSearchTool: assistantWebSearchTool,
           delegate: ChatRepositoryImpl(
@@ -189,6 +250,10 @@ abstract final class CloudRoutingBootstrap {
             imageVisionService: CloudChatImageVisionService(),
             localImageVisionService: AndroidChatLocalImageVisionService(),
             videoStoryboardService: AndroidChatVideoStoryboardService(),
+            // Ordinary CLOUD preserves its visual and document behavior.
+            // HYBRID still validates trusted Chat provenance at the
+            // protected runtime boundary and never auto-shares attachments.
+            consentGatedAssistantCloud: false,
             fileContextService: ChatFileContextService(
               indexService: sl<LocalDocumentIndexService>(),
               databaseHelper: sl<DatabaseHelper>(),

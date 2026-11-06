@@ -23,6 +23,13 @@ class RuntimeBootstrap {
 
   static Future<void>? _servicesInitialization;
 
+  /// Opt-in for an explicitly compiled INTERNAL HYBRID QA binary only.
+  /// Ordinary OTA/release workflows do not set this build-time define.
+  /// It is not a user-configurable runtime switch.
+  static const bool experimentalConsentGateEnabled =
+      bool.fromEnvironment('AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA',
+          defaultValue: false);
+
   static const String _versionFallback = '1.0.12+12';
   static const VersionParser _versionParser = VersionParser();
 
@@ -104,7 +111,10 @@ class RuntimeBootstrap {
       telemetry: di.sl<AbstractTelemetryService>(),
     );
 
-    await CloudRoutingBootstrap.configure(di.sl);
+    await CloudRoutingBootstrap.configure(
+      di.sl,
+      enableConsentGatedAssistantCloud: experimentalConsentGateEnabled,
+    );
   }
 
   Future<void> _initializeCustomCloudProviders() async {

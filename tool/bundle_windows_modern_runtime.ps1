@@ -3,7 +3,9 @@ $ErrorActionPreference = 'Stop'
 $modernWork = Join-Path $env:RUNNER_TEMP 'llama-b11753-modern'
 New-Item -ItemType Directory -Path $modernWork -Force | Out-Null
 $modernArchive = Join-Path $modernWork 'runtime.zip'
-Invoke-WebRequest 'https://github.com/ggml-org/llama.cpp/releases/download/b11753/llama-b11753-bin-win-cpu-x64.zip' -OutFile $modernArchive
+# Network gateways sometimes return transient 504s for official release
+# assets. Retry only the HTTP transfer; the pinned SHA256 is still mandatory.
+Invoke-WebRequest 'https://github.com/ggml-org/llama.cpp/releases/download/b11753/llama-b11753-bin-win-cpu-x64.zip' -OutFile $modernArchive -MaximumRetryCount 3 -RetryIntervalSec 8
 if ((Get-FileHash -LiteralPath $modernArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '1a88a6a6b7dc18b3b0b064239cfc2d03a3b74e4f565a9b875dadc9cedbc73285') { throw 'Official runtime SHA256 mismatch' }
 $modernExpanded = Join-Path $modernWork 'expanded'
 Expand-Archive -LiteralPath $modernArchive -DestinationPath $modernExpanded -Force
@@ -21,7 +23,7 @@ foreach ($requiredModern in @('llama-completion.exe','llama-completion-impl.dll'
 Write-Output 'Verified official b11753 CPU runtime bundled for Windows 10/11; legacy helper unchanged.'
 
 $vulkanArchive = Join-Path $modernWork 'vulkan.zip'
-Invoke-WebRequest 'https://github.com/ggml-org/llama.cpp/releases/download/b11753/llama-b11753-bin-win-vulkan-x64.zip' -OutFile $vulkanArchive
+Invoke-WebRequest 'https://github.com/ggml-org/llama.cpp/releases/download/b11753/llama-b11753-bin-win-vulkan-x64.zip' -OutFile $vulkanArchive -MaximumRetryCount 3 -RetryIntervalSec 8
 if ((Get-FileHash -LiteralPath $vulkanArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd994930aa5739c77d14f34599e0b905ea86c04e53a6ba7ec94a317bbc5e0effd') { throw 'Official Vulkan runtime SHA256 mismatch' }
 $vulkanExpanded = Join-Path $modernWork 'vulkan-expanded'
 Expand-Archive -LiteralPath $vulkanArchive -DestinationPath $vulkanExpanded -Force

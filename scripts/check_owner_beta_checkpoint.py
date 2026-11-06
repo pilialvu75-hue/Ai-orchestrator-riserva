@@ -34,6 +34,11 @@ def validate(source: str) -> list[str]:
         "github.event.issue.user.login == github.repository_owner",
         "github.event.comment.user.login == github.repository_owner",
         "startsWith(github.event.comment.body, '/aivexus beta-checkpoint ')",
+        "startsWith(github.event.comment.body, '/aivexus hybrid-beta-checkpoint ')",
+        "hybrid_consent_beta='false'",
+        "requested_type=",
+        "if [[ \"$requested_type\" == 'hybrid-beta-checkpoint' ]]",
+        "-f hybrid_consent_beta=\"$hybrid_consent_beta\"",
         "github.event_name == 'issue_comment'",
         "github.event_name == 'pull_request'",
         "  actions: write",
@@ -49,7 +54,7 @@ def validate(source: str) -> list[str]:
         '"Build macOS Desktop"',
         '(.conclusion // "pending")',
         'github.event_name ==',
-        'gh workflow run build.yml --repo \"$GITHUB_REPOSITORY\" --ref main -f release_channel=beta',
+        'gh workflow run build.yml --repo \"$GITHUB_REPOSITORY\" --ref main -f release_channel=beta -f hybrid_consent_beta=\"$hybrid_consent_beta\"',
         'gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs"',
         "-f head_sha=\"$sha\" -f event=push",
         "-f head_sha=\"$sha\" -f event=workflow_dispatch",
@@ -62,7 +67,7 @@ def validate(source: str) -> list[str]:
         problems.append("Comment dispatcher must not activate on arbitrary push")
     if re.search(r"gh workflow run[^\n]*release_channel=stable\b", source):
         problems.append("Stable release must remain an explicitly manual channel")
-    if "gh workflow run build.yml --repo \"$GITHUB_REPOSITORY\" --ref main -f release_channel=beta" not in source:
+    if "gh workflow run build.yml --repo \"$GITHUB_REPOSITORY\" --ref main -f release_channel=beta -f hybrid_consent_beta=\"$hybrid_consent_beta\"" not in source:
         problems.append("No authorized beta dispatch")
     if not re.search(r"(?m)^  authorize-and-dispatch:\s*$", source):
         problems.append("Missing owner-gated dispatch job")

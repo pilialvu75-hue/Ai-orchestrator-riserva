@@ -48,7 +48,8 @@ jobs:
        github.actor == github.repository_owner &&
        github.event.issue.user.login == github.repository_owner &&
        github.event.comment.user.login == github.repository_owner &&
-       startsWith(github.event.comment.body, '/aivexus beta-checkpoint ')) ||
+       (startsWith(github.event.comment.body, '/aivexus beta-checkpoint ') ||
+        startsWith(github.event.comment.body, '/aivexus hybrid-beta-checkpoint '))) ||
       (github.event_name == 'pull_request' &&
        github.event.action == 'closed' &&
        github.event.pull_request.merged == true &&
@@ -68,14 +69,20 @@ jobs:
           command -v gh
           command -v jq
 
-          # No untrusted issue or PR text is ever run as shell code.
+          # Only an exact owner issue comment can opt a beta into HYBRID.
+          # A merged PR checkpoint always keeps the HYBRID gate OFF.
+          hybrid_consent_beta='false'
           if [[ "$GITHUB_EVENT_NAME" == "issue_comment" ]]; then
             request="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
-            if [[ ! "$request" =~ ^/aivexus[[:space:]]beta-checkpoint[[:space:]]([0-9a-f]{40})$ ]]; then
+            if [[ ! "$request" =~ ^/aivexus[[:space:]](beta-checkpoint|hybrid-beta-checkpoint)[[:space:]]([0-9a-f]{40})$ ]]; then
               echo "::error::Invalid exact checkpoint command"
               exit 1
             fi
-            sha="$(echo "$request" | awk '{print $3}')"
+            requested_type="${BASH_REMATCH[1]}"
+            sha="${BASH_REMATCH[2]}"
+            if [[ "$requested_type" == 'hybrid-beta-checkpoint' ]]; then
+              hybrid_consent_beta='true'
+            fi
           elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             sha="$(jq -r '.pull_request.merge_commit_sha // ""' "$GITHUB_EVENT_PATH")"
             if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
@@ -139,11 +146,20 @@ jobs:
               echo "All mandatory main CI workflows completed successfully"
               # The existing manual-dispatch release gate is deliberately
               # preserved; this trusted owner request generates that event.
-              # Dispatches made with GITHUB_TOKEN do NOT emit workflow_run
-              # events for dependent workflows. Explicitly bridge the verified
-              # Android run to the Windows publisher after success instead.
-              gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_channel=beta
-              echo "Authorized beta dispatch requested for main SHA $sha"
+              # The opted-in beta must compile from a main commit with the
+              # explicit protected HYBRID flag. An older source is rejected.
+              if [[ "$hybrid_consent_beta" == 'true' ]]; then
+                build_yaml="$(gh api "repos/$GITHUB_REPOSITORY/contents/.github/workflows/build.yml?ref=$sha" --jq .content | base64 -d)"
+                if ! grep -Fq 'hybrid_consent_beta:' <<<"$build_yaml"; then
+                  echo "::error::Source lacks the opt-in HYBRID beta gate"
+                  exit 1
+                fi
+              fi
+              # GITHUB_TOKEN workflow_dispatch does not trigger a workflow_run.
+              # Explicitly bridge Android SUCCESS to the Windows publisher
+              # only after verifying SHA, release channel and run conclusion.
+              gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_channel=beta -f hybrid_consent_beta="$hybrid_consent_beta"
+              echo "Authorized beta dispatch requested for main SHA $sha, HYBRID opt-in=$hybrid_consent_beta"
               release_run_id=""
               for release_attempt in $(seq 1 80); do
                 main_now="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)"

@@ -20,6 +20,14 @@ enum InferenceTerminalState {
   modelUnavailable,
 }
 
+/// Typed reason for privacy-sensitive routing, not localized error text.
+enum InferenceErrorCode {
+  cloudConsentDenied,
+
+  /// Approved Cloud HTTP transport returned no usable response.
+  cloudTransportUnavailable,
+}
+
 class InferenceResponse {
   const InferenceResponse({
     required this.text,
@@ -30,6 +38,7 @@ class InferenceResponse {
     this.isFinal = false,
     this.isError = false,
     this.errorMessage,
+    this.errorCode,
     this.runtimeNotice,
     this.terminalState,
   });
@@ -48,6 +57,7 @@ class InferenceResponse {
   final bool isFinal;
   final bool isError;
   final String? errorMessage;
+  final InferenceErrorCode? errorCode;
   final String? runtimeNotice;
 
   /// Set on every response where [isFinal] is `true`.
@@ -94,6 +104,7 @@ class InferenceResponse {
     String message, {
     InferenceTerminalState state = InferenceTerminalState.failed,
     String? providerId,
+    InferenceErrorCode? errorCode,
   }) {
     return InferenceResponse(
       text: '',
@@ -102,6 +113,7 @@ class InferenceResponse {
       isFinal: true,
       isError: true,
       errorMessage: message,
+      errorCode: errorCode,
       terminalState: state,
     );
   }
