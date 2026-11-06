@@ -860,4 +860,152 @@ void main() {
     expect(unchanged, isNot(contains('My car is black')));
   });
 
+
+  test('ME-2 reviewed named facts persist across SQLite reopen and new chat',
+      () async {
+    final capture = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+    );
+    for (final statement in <String>[
+      'Jerome è alto',
+      'Kader è un mio collega',
+    ]) {
+      expect(
+        await capture.proposeManualEntityReferenceCandidate(
+          userPrompt: statement,
+          consentEnabled: true,
+          directUserMessage: true,
+        ),
+        isTrue,
+      );
+    }
+
+    // Candidates are persisted but never injected in an ordinary prompt.
+    await reopen();
+    var memory = makeMemory();
+    var prompt = await promptFor(
+      memory,
+      sessionId: 'chat-before-review',
+      question: 'Jerome è alto?',
+    );
+    expect(prompt, isNot(contains('CONFIRMED DURABLE MEMORY')));
+    final review = AssistantDurableMemoryCaptureService(
+      memoryService: memory,
+    );
+    final pending = await review.loadReviewableManualEntityReferenceCandidates();
+    expect(pending, hasLength(2));
+    final jerome = pending.singleWhere((record) =>
+        record.content == 'Jerome è alto');
+    final kader = pending.singleWhere((record) =>
+        record.content == 'Kader è un mio collega');
+
+    // Only the exact owner-reviewed snapshots may become confirmed.
+    expect(
+      await review.reviewManualEntityReferenceCandidate(
+        reviewed: jerome,
+        approve: true,
+        userConfirmed: true,
+      ),
+      isTrue,
+    );
+    expect(
+      await review.reviewManualEntityReferenceCandidate(
+        reviewed: kader,
+        approve: false,
+        userConfirmed: true,
+      ),
+      isTrue,
+    );
+
+    await reopen();
+    memory = makeMemory();
+    prompt = await promptFor(
+      memory,
+      sessionId: 'new-chat-after-restart',
+      question: 'Jerome è alto?',
+    );
+    expect(prompt, contains('Jerome è alto'));
+    expect(prompt, isNot(contains('Kader è un mio collega')));
+    expect(
+      await promptFor(
+        memory,
+        sessionId: 'another-model-chat',
+        question: 'Kader è alto?',
+      ),
+      isNot(contains('Jerome è alto')),
+    );
+    expect(
+      await promptFor(
+        memory,
+        sessionId: 'another-model-chat',
+        question: 'Cosa sai di me?',
+      ),
+      isNot(contains('Jerome è alto')),
+    );
+
+    // Selective forgetting must remove the reviewed fact from future chats.
+    final confirmed = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+    );
+    expect(confirmed, hasLength(1));
+    final forget = AssistantDurableMemoryCaptureService(
+      memoryService: memory,
+    );
+    expect(
+      await forget.forgetReviewedConfirmedUserMemory(
+        reviewed: confirmed.single,
+        userConfirmed: true,
+      ),
+      isTrue,
+    );
+    await reopen();
+    expect(
+      await promptFor(
+        makeMemory(),
+        sessionId: 'final-chat',
+        question: 'Jerome è alto?',
+      ),
+      isNot(contains('CONFIRMED DURABLE MEMORY')),
+    );
+  });
+
+  test('ME-2 denied manual consent leaves SQLite empty after restart',
+      () async {
+    final capture = AssistantDurableMemoryCaptureService(
+      memoryService: makeMemory(),
+    );
+    expect(
+      await capture.proposeManualEntityReferenceCandidate(
+        userPrompt: 'Mika fa tanto sport',
+        consentEnabled: false,
+        directUserMessage: true,
+      ),
+      isFalse,
+    );
+    expect(
+      await capture.proposeManualEntityReferenceCandidate(
+        userPrompt: 'Mika fa tanto sport',
+        consentEnabled: true,
+        directUserMessage: false,
+      ),
+      isFalse,
+    );
+    await reopen();
+    final memory = makeMemory();
+    expect(
+      await AssistantDurableMemoryCaptureService(
+        memoryService: memory,
+      ).loadReviewableManualEntityReferenceCandidates(),
+      isEmpty,
+    );
+    expect(
+      await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      ),
+      isEmpty,
+    );
+  });
+
 }
