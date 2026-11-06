@@ -8,6 +8,7 @@ Uses only Python standard library. No source instrumentation or synthetic APK.
 import argparse
 import hashlib
 import json
+import math
 import struct
 import subprocess
 import sys
@@ -120,6 +121,66 @@ def compare_images(before, after):
             "sample_count": samples, "changed_samples": changed}
 
 
+def star_silhouette_metrics(before, after):
+    """Detect five radial lobes in the actual tap-changed central silhouette.
+
+    Heuristic pixel geometry, not proof of how the model authored the app.
+    Rejects ordinary circles, squares, filled rectangles and one-color screens.
+    """
+    a, b = png_pixels(before), png_pixels(after)
+    if a[:3] != b[:3]:
+        raise AssertionError("STAR_GEOMETRY_SCREENSHOT_MISMATCH")
+    width, height = a[:2]
+    points = []
+    step = max(1, min(width, height) // 320)
+    for y in range(height // 4, 3 * height // 4, step):
+        for x in range(width // 6, 5 * width // 6, step):
+            old, new = pixel_at(a, x, y), pixel_at(b, x, y)
+            if sum(abs(old[i] - new[i]) for i in range(3)) >= 75:
+                points.append((x, y))
+    if len(points) < 80:
+        raise AssertionError("STAR_SILHOUETTE_TOO_SMALL")
+    min_x, max_x = min(x for x, _ in points), max(x for x, _ in points)
+    min_y, max_y = min(y for _, y in points), max(y for _, y in points)
+    span_x, span_y = max_x - min_x, max_y - min_y
+    if span_x < width * 0.07 or span_y < height * 0.045:
+        raise AssertionError("STAR_SILHOUETTE_NOT_VISIBLE")
+    cx, cy = (min_x + max_x) / 2, (min_y + max_y) / 2
+    if abs(cx - width / 2) > width * 0.13 or abs(cy - height / 2) > height * 0.14:
+        raise AssertionError("STAR_SILHOUETTE_NOT_CENTERED")
+    # Normalize non-square screenshot aspect ratio before sampling radius.
+    scale_x, scale_y = max(span_x / 2, 1), max(span_y / 2, 1)
+    bins = 72
+    radii = [0.0] * bins
+    for x, y in points:
+        dx, dy = (x - cx) / scale_x, (y - cy) / scale_y
+        angle = math.atan2(dy, dx) % (2 * math.pi)
+        idx = int(angle / (2 * math.pi) * bins) % bins
+        radii[idx] = max(radii[idx], math.hypot(dx, dy))
+    # Gaps in an outline or antialiasing can leave bins empty.
+    if sum(v > 0 for v in radii) < 66:
+        raise AssertionError("STAR_SILHOUETTE_ANGULAR_GAPS")
+    for i in range(bins):
+        if radii[i] == 0:
+            radii[i] = (radii[(i - 1) % bins] + radii[(i + 1) % bins]) / 2
+    mean = sum(radii) / bins
+    def harmonic(n):
+        real = sum(r * math.cos(2 * math.pi * n * k / bins) for k, r in enumerate(radii))
+        imag = sum(r * math.sin(2 * math.pi * n * k / bins) for k, r in enumerate(radii))
+        return math.hypot(real, imag) / (bins * mean)
+    five, four = harmonic(5), harmonic(4)
+    if five < 0.085 or five < four * 1.3:
+        raise AssertionError(
+            f"FIVE_POINT_STAR_GEOMETRY_NOT_OBSERVED harmonic5={five:.3f} harmonic4={four:.3f}"
+        )
+    return {
+        "five_point_harmonic": round(five, 4),
+        "four_point_harmonic": round(four, 4),
+        "visible_width_ratio": round(span_x / width, 4),
+        "visible_height_ratio": round(span_y / height, 4),
+    }
+
+
 def adb(*args, binary=False):
     result = subprocess.run(["adb", *args], capture_output=True, timeout=60)
     if result.returncode != 0:
@@ -154,6 +215,7 @@ def run(apk, package, out):
         after = adb("exec-out", "screencap", "-p", binary=True)
         (out / "after.png").write_bytes(after)
         first_metrics = compare_images(before, after)
+        shape_metrics = star_silhouette_metrics(before, after)
         # A second independent tap rejects a one-off loading animation or
         # splash-to-app transition as evidence of interactive color changes.
         adb("shell", "input", "tap", str(x), str(y))
@@ -162,6 +224,8 @@ def run(apk, package, out):
         (out / "after-second-tap.png").write_bytes(second)
         second_metrics = compare_images(after, second)
         receipt["tap_one"] = first_metrics
+        receipt["star_silhouette"] = shape_metrics
+        receipt["geometric_star_shape_verified"] = True
         receipt["tap_two"] = second_metrics
         receipt["ui_color_change_verified"] = True
         receipt["tap_count_verified"] = 2
