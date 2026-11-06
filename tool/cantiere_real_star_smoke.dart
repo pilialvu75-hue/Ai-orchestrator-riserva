@@ -61,6 +61,7 @@ Future<void> main(List<String> args) async {
   }
 
   final client = http.Client();
+  final roleEvidence = <String, List<String>>{};
   final buildLab = WorkshopBuildLab(providers: <WorkshopBuildProvider>[
     WorkshopLocalBuildProvider(
       configuration: WorkshopLocalBuildConfiguration(
@@ -84,6 +85,7 @@ Future<void> main(List<String> args) async {
           accessClientId: clientId,
           accessClientSecret: clientSecret,
           capability: WorkshopWebCloudRolePolicy.capabilityForRole(role).id,
+          roleEvidence: roleEvidence,
         ),
       ),
   };
@@ -161,6 +163,35 @@ Future<void> main(List<String> args) async {
     if (!await apk.exists() || await apk.length() == 0) {
       throw StateError('REAL_STAR_APK_MISSING');
     }
+    const requiredCapabilities = <String>[
+      'orchestration', 'architecture_reasoning', 'coding', 'review',
+    ];
+    if (requiredCapabilities.any((capability) =>
+        roleEvidence[capability] == null ||
+        roleEvidence[capability]!.isEmpty)) {
+      throw StateError('REAL_STAR_FOUR_ROLE_EVIDENCE_INCOMPLETE');
+    }
+    final evidence = <String, Object?>{
+      'gate': 'REAL_STAR_PRODUCTION_BUILD',
+      'production_lifecycle': 'existing_cantiere',
+      'inference': 'cloudflare_protected_broker',
+      'four_roles_replied': true,
+      'model_generation_verified_by_provenance': true,
+      'artifact_built': true,
+      'emulator_visual_verified': false,
+      'geometric_star_verified': false,
+      'android_local_verified': false,
+      'windows_local_verified': false,
+      'role_receipts': <String, Object?>{
+        for (final capability in requiredCapabilities)
+          capability: <String, Object?>{
+            'successful_calls': roleEvidence[capability]!.length,
+            'models': roleEvidence[capability]!.toSet().toList()..sort(),
+          },
+      },
+    };
+    await File('${workspace.path}/cantiere-real-star-provenance.json')
+        .writeAsString(const JsonEncoder.withIndent('  ').convert(evidence));
     stdout.writeln('[REAL_STAR] stage=artifact status=ready bytes=${await apk.length()}');
     stdout.writeln('CANTIERE_REAL_STAR_APK=${apk.path}');
     stdout.writeln('REAL_STAR_MODEL_PRODUCTION_BUILD_PASS');
@@ -179,6 +210,7 @@ final class _AccessBrokerProvider implements RuntimeInferenceProvider {
     required this.accessClientId,
     required this.accessClientSecret,
     required this.capability,
+    required this.roleEvidence,
   });
 
   final http.Client client;
@@ -186,6 +218,7 @@ final class _AccessBrokerProvider implements RuntimeInferenceProvider {
   final String accessClientId;
   final String accessClientSecret;
   final String capability;
+  final Map<String, List<String>> roleEvidence;
 
   @override
   TokenStream streamInference({
@@ -269,6 +302,8 @@ final class _AccessBrokerProvider implements RuntimeInferenceProvider {
         yield InferenceResponse.error('REAL_STAR_CANCELLED', providerId: 'web_auto');
         return;
       }
+      roleEvidence.putIfAbsent(capability, () => <String>[])
+          .add((json['model'] as String).trim());
       yield InferenceResponse.finalChunk(
         text: (json['text'] as String).trim(),
         model: (json['model'] as String).trim(),
