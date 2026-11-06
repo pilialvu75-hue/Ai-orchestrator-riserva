@@ -1,4 +1,8 @@
+export 'package:ai_orchestrator/core/voice/read_aloud_transport.dart' show TtsAudioSink;
 import 'dart:typed_data';
+
+import 'package:ai_orchestrator/core/voice/android_pcm_tts_audio_sink.dart';
+import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 
 import 'package:ai_orchestrator/core/voice/kokoro_worker.dart';
 import 'package:ai_orchestrator/core/voice/tts_text_plan.dart';
@@ -63,16 +67,6 @@ typedef KokoroTtsGenerationRunner = Future<KokoroTtsGeneratedAudio> Function(
 
 typedef KokoroAssetsProvider = Future<Map<String, String>?> Function();
 
-abstract interface class TtsAudioSink {
-  bool get isPlaying;
-
-  void push(Float32List samples, int sampleRate);
-
-  void stop();
-
-  void dispose();
-}
-
 /// Audio sink for isolated Kokoro output.
 ///
 /// [AudioStreamPlayer.stop] deliberately invalidates its current native
@@ -126,7 +120,7 @@ final class AudioStreamTtsAudioSink implements TtsAudioSink {
 /// options and the generated Float32 PCM are transferred.
 final class IsolatedKokoroVoiceEngine
     with RuntimeEventEmitter
-    implements VoiceEngine {
+    implements VoiceEngine, ReadAloudVoiceEngine {
   IsolatedKokoroVoiceEngine({
     required VoiceEngine delegate,
     String Function()? languageCode,
@@ -138,7 +132,10 @@ final class IsolatedKokoroVoiceEngine
         _generationRunner =
             generationRunner,
         _assetsProvider = assetsProvider ?? KokoroAssets.verifiedPaths,
-        _audioSink = audioSink ?? AudioStreamTtsAudioSink();
+        _audioSink = audioSink ??
+            (!kIsWeb && defaultTargetPlatform == TargetPlatform.android
+                ? AndroidPcmTtsAudioSink()
+                : AudioStreamTtsAudioSink());
 
   static const String _tag = 'VOICE_ENGINE';
 
@@ -159,6 +156,43 @@ final class IsolatedKokoroVoiceEngine
 
   @override
   bool get isSpeaking => _audioSink.isPlaying;
+
+  ReadAloudSink? get _readAloudSink {
+    final sink = _audioSink;
+    return sink is ReadAloudSink ? sink as ReadAloudSink : null;
+  }
+
+  @override
+  bool get supportsRealReadAloudControls => _readAloudSink != null;
+
+  @override
+  ReadAloudSnapshot get readAloudSnapshot =>
+      _readAloudSink?.snapshot ?? const ReadAloudSnapshot();
+
+  @override
+  Future<void> pauseReadAloud() async {
+    await _readAloudSink?.pauseReadAloud();
+  }
+
+  @override
+  Future<void> resumeReadAloud() async {
+    await _readAloudSink?.resumeReadAloud();
+  }
+
+  @override
+  Future<void> seekReadAloud(Duration position) async {
+    await _readAloudSink?.seekReadAloud(position);
+  }
+
+  @override
+  Future<void> skipReadAloud(Duration offset) async {
+    await _readAloudSink?.skipReadAloud(offset);
+  }
+
+  @override
+  Future<ReadAloudSnapshot> refreshReadAloud() async =>
+      await _readAloudSink?.refreshReadAloud() ?? const ReadAloudSnapshot();
+
 
   @override
   Future<VoiceEngineStatus> inspect() async {
@@ -220,6 +254,9 @@ final class IsolatedKokoroVoiceEngine
   }
 
   Future<void> _speakRequest(String sanitized, int generation) async {
+    // Every explicit read-aloud request gets a new PCM timeline. This is
+    // independent of chat navigation; generated phrases remain seekable.
+    await _readAloudSink?.beginReadAloud();
     final preparation = Stopwatch()..start();
     final assets = await _assetsProvider();
     logEvent(_tag, '[TTS_PREPARE_TIMING] asset_ms=${preparation.elapsedMilliseconds}');
@@ -248,6 +285,9 @@ final class IsolatedKokoroVoiceEngine
       if (_disposed || generation != _lifecycleGeneration) return;
       await _speakPhrase(phrases[index], assets, speed,
           detectTtsLanguage(phrases[index], defaultLang), generation, index);
+    }
+    if (!_disposed && generation == _lifecycleGeneration) {
+      await _readAloudSink?.finishReadAloud();
     }
   }
 
@@ -340,7 +380,12 @@ final class IsolatedKokoroVoiceEngine
     _lifecycleGeneration++;
 
     try {
-      _audioSink.stop();
+      final readAloud = _readAloudSink;
+      if (readAloud != null) {
+        await readAloud.stopReadAloud();
+      } else {
+        _audioSink.stop();
+      }
     } on Object {
       logEvent(_tag, '[TTS_STOP_WARN] isolated_audio_sink_failed');
     }

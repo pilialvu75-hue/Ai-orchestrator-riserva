@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
+import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 import 'package:ai_orchestrator/core/voice/voice_text_normalizer.dart';
 
 class VoiceOutputService {
@@ -31,10 +32,43 @@ class VoiceOutputService {
   /// - tap su un altro messaggio -> interrompe il precedente e riproduce
   ///   quello nuovo
   String? _activeNormalizedText;
+  int _requestGeneration = 0;
 
   VoiceEngineStatus? get lastStatus => _lastStatus;
 
   bool get isSpeaking => _engine.isSpeaking;
+
+  ReadAloudVoiceEngine? get _transport {
+    final engine = _engine;
+    if (engine is! ReadAloudVoiceEngine) return null;
+    final transport = engine as ReadAloudVoiceEngine;
+    return transport.supportsRealReadAloudControls ? transport : null;
+  }
+
+  bool get supportsRealReadAloudControls => _transport != null;
+
+  ReadAloudSnapshot get readAloudSnapshot =>
+      _transport?.readAloudSnapshot ?? const ReadAloudSnapshot();
+
+  Future<ReadAloudSnapshot> refreshReadAloud() async =>
+      await _transport?.refreshReadAloud() ?? const ReadAloudSnapshot();
+
+  Future<void> pauseReadAloud() async {
+    await _transport?.pauseReadAloud();
+  }
+
+  Future<void> resumeReadAloud() async {
+    await _transport?.resumeReadAloud();
+  }
+
+  Future<void> skipReadAloud(Duration delta) async {
+    await _transport?.skipReadAloud(delta);
+  }
+
+  Future<void> seekReadAloud(Duration position) async {
+    await _transport?.seekReadAloud(position);
+  }
+
 
   Future<bool> initialize() async {
     if (_lastStatus?.initialized == true) {
@@ -64,7 +98,9 @@ class VoiceOutputService {
       return Future<void>.value();
     }
 
+    final requestToken = ++_requestGeneration;
     return _enqueue(() async {
+      if (requestToken != _requestGeneration) return;
       final currentlySpeaking =
           _engine.isSpeaking;
 
@@ -104,6 +140,7 @@ class VoiceOutputService {
        * funzionare indipendentemente dalla Live e dal riconoscimento vocale.
        */
       await _engine.speak(normalized);
+      if (requestToken != _requestGeneration) return;
 
       // Impostiamo il testo attivo soltanto dopo che il comando speak è
       // stato consegnato correttamente al motore.
@@ -124,12 +161,18 @@ class VoiceOutputService {
   }
 
   /// Interrompe sempre qualsiasi riproduzione TTS in corso.
-  Future<void> stopSpeaking() {
-    return _enqueue(() async {
+  Future<void> stopSpeaking() async {
+    ++_requestGeneration;
+    if (supportsRealReadAloudControls) {
+      // Do not wait for synthesis of every phrase in a long answer.
       await _engine.stopSpeaking();
-
       _activeNormalizedText = null;
-
+      await _refreshStatusSafely();
+      return;
+    }
+    await _enqueue(() async {
+      await _engine.stopSpeaking();
+      _activeNormalizedText = null;
       await _refreshStatusSafely();
     });
   }

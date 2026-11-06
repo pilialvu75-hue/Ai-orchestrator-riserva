@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
+import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:flutter/foundation.dart';
 
@@ -20,16 +21,47 @@ class ChatAudioPlaybackController extends ChangeNotifier {
   bool _busy = false;
   int _generation = 0;
   Timer? _poll;
+  bool _pollInFlight = false;
+  ReadAloudSnapshot _playback = const ReadAloudSnapshot();
 
   bool get isOpen => _text != null;
   bool get isPlaying => _playing;
   bool get isBusy => _busy;
+  bool get canSeek => _output.supportsRealReadAloudControls;
+  bool get isPaused => _playback.paused;
+  ReadAloudSnapshot get measuredPlayback => _playback;
 
   void _watch() {
     _poll?.cancel();
-    _poll = Timer.periodic(const Duration(milliseconds: 400), (_) {
+    _poll = Timer.periodic(const Duration(milliseconds: 250), (_) async {
       if (_text == null) {
         _poll?.cancel();
+        return;
+      }
+      if (canSeek) {
+        if (_pollInFlight) return;
+        _pollInFlight = true;
+        try {
+          final state = await _output.refreshReadAloud();
+          if (_text == null) return;
+          final playing = state.playing;
+          final busy = _busy && state.buffered == Duration.zero &&
+              !state.complete;
+          if (state.position != _playback.position ||
+              state.buffered != _playback.buffered ||
+              state.complete != _playback.complete ||
+              state.paused != _playback.paused ||
+              playing != _playing || busy != _busy) {
+            _playback = state;
+            _playing = playing;
+            _busy = busy;
+            notifyListeners();
+          }
+        } catch (error) {
+          debugPrint('PCM playback status unavailable: $error');
+        } finally {
+          _pollInFlight = false;
+        }
         return;
       }
       final speaking = _output.isSpeaking;
@@ -50,6 +82,7 @@ class ChatAudioPlaybackController extends ChangeNotifier {
       if (token != _generation) return;
       _playing = false;
     }
+    if (canSeek) _playback = _output.readAloudSnapshot;
     _busy = false;
     notifyListeners();
   }
@@ -58,6 +91,7 @@ class ChatAudioPlaybackController extends ChangeNotifier {
     if (text.trim().isEmpty) return Future<void>.value();
     final token = ++_generation;
     _text = text;
+    _playback = const ReadAloudSnapshot();
     _busy = true;
     notifyListeners();
     _watch();
@@ -84,11 +118,44 @@ class ChatAudioPlaybackController extends ChangeNotifier {
     });
   }
 
+  Future<void> pause() async {
+    if (!canSeek || _text == null || _busy) return;
+    await _output.pauseReadAloud();
+    _playback = await _output.refreshReadAloud();
+    _playing = _playback.playing;
+    notifyListeners();
+  }
+
+  Future<void> resume() async {
+    if (!canSeek || _text == null || _busy) return;
+    await _output.resumeReadAloud();
+    _playback = await _output.refreshReadAloud();
+    _playing = _playback.playing;
+    notifyListeners();
+  }
+
+  Future<void> skip(Duration offset) async {
+    if (!canSeek || _text == null || _busy) return;
+    await _output.skipReadAloud(offset);
+    _playback = await _output.refreshReadAloud();
+    _playing = _playback.playing;
+    notifyListeners();
+  }
+
+  Future<void> seek(Duration position) async {
+    if (!canSeek || _text == null || _busy) return;
+    await _output.seekReadAloud(position);
+    _playback = await _output.refreshReadAloud();
+    _playing = _playback.playing;
+    notifyListeners();
+  }
+
   void close() {
     if (_text == null) return;
     ++_generation;
     _text = null;
     _poll?.cancel();
+    _playback = const ReadAloudSnapshot();
     _playing = false;
     _busy = false;
     notifyListeners();
