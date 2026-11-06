@@ -22,6 +22,13 @@ class RealStarScreenshotGateTests(unittest.TestCase):
         self.assertGreater(result["changed_ratio"], 0.006)
         self.assertTrue(png_pixels(after)[0] == 90)
 
+    def test_peripheral_change_fails_central_gate(self):
+        before = png(96, 128, lambda x, y: (0, 0, 0))
+        # Changed area lies in tested canvas but outside the inner center.
+        after = png(96, 128, lambda x, y: (255, 0, 0) if 18 < x < 30 and 52 <= y < 67 else (0, 0, 0))
+        with self.assertRaisesRegex(AssertionError, "COLOR_CHANGE"):
+            compare_images(before, after)
+
     def test_static_screen_fails(self):
         screenshot = png(60, 90, lambda x, y: (0, 0, 0))
         with self.assertRaisesRegex(AssertionError, "COLOR_CHANGE"):
