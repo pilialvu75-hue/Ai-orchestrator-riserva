@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// Compact voice mini-player styled like a waveform pill.
-/// The waveform is decorative: mp_audio_stream has no native seek/pause
-/// API. Real time/progress will be added with the background media player.
+/// Compact mini-player: Android uses measured PCM play-head time and a real
+/// draggable seek track; platforms still using mp_audio_stream retain the
+/// explicitly decorative waveform and honest stop/restart controls.
+/// Foreground MediaSession playback is a separate Android follow-up (#967).
 class ChatAudioPlaybackBar extends StatelessWidget {
   const ChatAudioPlaybackBar({
     super.key,
