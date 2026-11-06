@@ -36,12 +36,17 @@ def config_from_env(env):
     }
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def send_json(origin, headers, path, payload=None):
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     method = "GET" if payload is None else "POST"
     request = urllib.request.Request(origin + path, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(request, timeout=95) as response:
+        with urllib.request.build_opener(_NoRedirect).open(request, timeout=95) as response:
             raw = response.read(32769)
             if len(raw) > 32768:
                 raise ValueError("RESPONSE_TOO_LARGE")
