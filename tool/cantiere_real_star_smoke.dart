@@ -326,13 +326,22 @@ final class _AccessBrokerProvider implements RuntimeInferenceProvider {
         );
         return;
       }
-      final response = await http.Response.fromStream(stream);
-      if (!(response.headers['content-type'] ?? '').contains('json') ||
-          response.bodyBytes.length > 1024 * 1024) {
+      if (!(stream.headers['content-type'] ?? '').contains('json')) {
         yield InferenceResponse.error('REAL_STAR_INVALID_BROKER_PAYLOAD', providerId: 'web_auto');
         return;
       }
-      final json = jsonDecode(response.body);
+      // Enforce the response cap as bytes arrive, not after buffering an
+      // untrusted upstream response in full.
+      const maximumResponseBytes = 1024 * 1024;
+      final responseBytes = <int>[];
+      await for (final chunk in stream.stream.timeout(const Duration(seconds: 95))) {
+        if (responseBytes.length + chunk.length > maximumResponseBytes) {
+          yield InferenceResponse.error('REAL_STAR_BROKER_RESPONSE_TOO_LARGE', providerId: 'web_auto');
+          return;
+        }
+        responseBytes.addAll(chunk);
+      }
+      final json = jsonDecode(utf8.decode(responseBytes));
       if (json is! Map || json['text'] is! String ||
           (json['text'] as String).trim().isEmpty ||
           json['model'] is! String ||
