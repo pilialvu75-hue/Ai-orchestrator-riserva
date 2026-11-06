@@ -107,42 +107,11 @@ class ChatAudioPlaybackBar extends StatelessWidget {
               ),
               SizedBox(
                 height: 23,
-                child: Builder(
-                  builder: (context) {
-                    // The parent receives measured playback ticks. A local
-                    // drag position prevents new ticks from fighting the
-                    // thumb while the user is scrubbing.
-                    double? draggingMs;
-                    return StatefulBuilder(
-                      builder: (context, setDragState) => SliderTheme(
-                        data: SliderThemeData(
-                          trackHeight: 3,
-                          thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 6,
-                          ),
-                          overlayShape: SliderComponentShape.noOverlay,
-                        ),
-                        child: Slider(
-                          value: (draggingMs ?? current.toDouble()).clamp(
-                            0.0, limit > 0 ? limit.toDouble() : 1.0,
-                          ).toDouble(),
-                          min: 0,
-                          max: limit > 0 ? limit.toDouble() : 1,
-                          onChanged: canScrub
-                              ? (ms) => setDragState(() => draggingMs = ms)
-                              : null,
-                          onChangeEnd: canScrub
-                              ? (ms) {
-                                  setDragState(() => draggingMs = null);
-                                  onSeek?.call(
-                                    Duration(milliseconds: ms.round()),
-                                  );
-                                }
-                              : null,
-                        ),
-                      ),
-                    );
-                  },
+                child: _MeasuredSeekSlider(
+                  positionMs: current,
+                  bufferedMs: limit,
+                  enabled: canScrub,
+                  onSeek: onSeek,
                 ),
               ),
             ],
@@ -263,6 +232,59 @@ class _WaveformDecoration extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Own state is stable across the 250-ms PCM clock refresh. A parent rebuild
+/// cannot snap the thumb back while the user is dragging a long recording.
+class _MeasuredSeekSlider extends StatefulWidget {
+  const _MeasuredSeekSlider({
+    required this.positionMs,
+    required this.bufferedMs,
+    required this.enabled,
+    required this.onSeek,
+  });
+
+  final int positionMs;
+  final int bufferedMs;
+  final bool enabled;
+  final ValueChanged<Duration>? onSeek;
+
+  @override
+  State<_MeasuredSeekSlider> createState() => _MeasuredSeekSliderState();
+}
+
+class _MeasuredSeekSliderState extends State<_MeasuredSeekSlider> {
+  double? _draggingMs;
+
+  @override
+  Widget build(BuildContext context) {
+    final max = widget.bufferedMs > 0
+        ? widget.bufferedMs.toDouble()
+        : 1.0;
+    final value = (_draggingMs ?? widget.positionMs.toDouble())
+        .clamp(0.0, max).toDouble();
+    return SliderTheme(
+      data: SliderThemeData(
+        trackHeight: 3,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+        overlayShape: SliderComponentShape.noOverlay,
+      ),
+      child: Slider(
+        value: value,
+        min: 0,
+        max: max,
+        onChanged: widget.enabled
+            ? (value) => setState(() => _draggingMs = value)
+            : null,
+        onChangeEnd: widget.enabled
+            ? (value) {
+                setState(() => _draggingMs = null);
+                widget.onSeek?.call(Duration(milliseconds: value.round()));
+              }
+            : null,
       ),
     );
   }
