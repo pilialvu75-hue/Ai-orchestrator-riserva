@@ -183,6 +183,31 @@ void main() {
     ), isNull);
   });
 
+  test('short name cannot bypass named third-party retrieval guard', () async {
+    await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Li è alto',
+      consentEnabled: true,
+      directUserMessage: true,
+    );
+    final pending =
+        (await capture.loadReviewableManualEntityReferenceCandidates()).single;
+    expect(await capture.reviewManualEntityReferenceCandidate(
+      reviewed: pending,
+      approve: true,
+      userConfirmed: true,
+    ), isTrue);
+
+    final context = AssistantDurableMemoryContextService(memoryService: memory);
+    expect(await context.buildConfirmedContext(
+      sessionId: 'different-chat',
+      userPrompt: 'Chi è alto?',
+    ), isNull);
+    expect(await context.buildConfirmedContext(
+      sessionId: 'different-chat',
+      userPrompt: 'Cosa sai di me?',
+    ), isNull);
+  });
+
   test('rejected candidate never enters confirmed recall', () async {
     await capture.proposeManualEntityReferenceCandidate(
       userPrompt: 'Mika fa tanto sport',
