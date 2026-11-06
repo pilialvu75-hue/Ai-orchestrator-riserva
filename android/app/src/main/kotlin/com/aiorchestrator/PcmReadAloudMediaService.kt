@@ -205,9 +205,16 @@ internal class PcmReadAloudMediaService : Service() {
                     try {
                         startForeground(NOTIFICATION_ID, makeNotification())
                         foregroundReady = true
-                        requestFocus()
-                        mainHandler.post(updatePlayback)
-                        completeStartup(this, null)
+                        if (!requestFocus()) {
+                            // Android 17 may reject audio focus without an
+                            // eligible user-initiated foreground context.
+                            // Never claim a playable session in that case.
+                            completeStartup(null, "Audio focus denied: cannot start playback")
+                            finishPlayback()
+                        } else {
+                            mainHandler.post(updatePlayback)
+                            completeStartup(this, null)
+                        }
                     } catch (error: Exception) {
                         completeStartup(null, error.message ?: "Foreground media startup failed")
                         stopSelf()
