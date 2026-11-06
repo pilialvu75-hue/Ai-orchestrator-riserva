@@ -41,6 +41,7 @@ class WindowsUpdateManager extends UpdateManager {
           preferences: preferences,
           intentHandler: intentHandler,
           currentVersion: currentVersion,
+          enableWindowsBetaBuildNumberComparison: true,
           dio: dio,
         );
 
@@ -284,7 +285,10 @@ class WindowsUpdateManager extends UpdateManager {
     final pending = await _readPendingInstaller();
     if (pending == null) return;
 
-    if (_windowsComparator.compare(_windowsCurrentVersion, pending.version) >= 0) {
+    // A verified beta build with a higher numeric build code is newer when
+    // Beta is selected, even though conventional SemVer ranks stable higher.
+    // Reuse the same rule as update discovery to avoid deleting the installer.
+    if (compareCandidateToInstalled(pending.version) <= 0) {
       await _clearPendingInstaller(deleteFile: true);
       if (state.value.status == UpdateStatus.readyToInstall) {
         state.value = state.value.copyWith(
