@@ -8,6 +8,8 @@ on:
       - 'tool/cantiere_real_star_smoke.dart'
       - 'tool/cantiere_real_star_emulator_probe.py'
       - 'tool/test_cantiere_real_star_emulator_probe.py'
+      - 'tool/cantiere_real_star_receipt_gate.py'
+      - 'tool/test_cantiere_real_star_receipt_gate.py'
       - '.github/workflows/cantiere-real-star-production.yml'
   workflow_dispatch:
 
@@ -35,6 +37,8 @@ jobs:
         run: |
           python3 -m py_compile tool/cantiere_real_star_emulator_probe.py tool/test_cantiere_real_star_emulator_probe.py
           python3 -m unittest -v tool.test_cantiere_real_star_emulator_probe
+          python3 -m py_compile tool/cantiere_real_star_receipt_gate.py tool/test_cantiere_real_star_receipt_gate.py
+          python3 -m unittest -v tool.test_cantiere_real_star_receipt_gate
 
   real-star-opt-in:
     if: github.event_name == 'workflow_dispatch'
@@ -84,6 +88,7 @@ jobs:
           RECEIPT="${RUNNER_TEMP}/cantiere-real-star/cantiere-real-star-provenance.json"
           test -s "$RECEIPT"
           cp "$RECEIPT" build/cantiere-real-star/model-provenance.json
+          python3 tool/cantiere_real_star_receipt_gate.py --apk "$SOURCE" --receipt "$RECEIPT"
           cd build/cantiere-real-star
           sha256sum cantiere-real-star.apk > cantiere-real-star.apk.sha256
       - uses: actions/upload-artifact@v6
@@ -115,6 +120,7 @@ jobs:
           cd "${RUNNER_TEMP}/real-star"
           test -s cantiere-real-star.apk
           sha256sum -c cantiere-real-star.apk.sha256
+          python3 tool/cantiere_real_star_receipt_gate.py --apk cantiere-real-star.apk --receipt model-provenance.json
       - name: Enable KVM acceleration
         shell: bash
         run: |
