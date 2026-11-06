@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -38,6 +39,20 @@ final class HybridSemanticStepEvidenceStore {
   static const _version = 1;
   static const _maxOutputBytes = 8192;
   static const _maxProvenanceBytes = 512;
+
+  static Future<void> _tail = Future<void>.value();
+
+  Future<T> _serial<T>(Future<T> Function() operation) {
+    final result = Completer<T>();
+    _tail = _tail.then((_) async {
+      try {
+        result.complete(await operation());
+      } catch (error, stack) {
+        result.completeError(error, stack);
+      }
+    });
+    return result.future;
+  }
 
   final HybridCloudConsentStorage _storage;
   final HybridProgressCheckpointJournal _journal;
@@ -84,7 +99,7 @@ final class HybridSemanticStepEvidenceStore {
     required int expectedRevision,
     required HybridCheckpointExecutor executor,
     required HybridVerifiedStepResult result,
-  }) async {
+  }) => _serial(() async {
     if (executor == HybridCheckpointExecutor.none) {
       throw ArgumentError.value(executor, 'executor');
     }
@@ -138,7 +153,7 @@ final class HybridSemanticStepEvidenceStore {
       expectedRevision: expectedRevision,
       executor: executor,
     );
-  }
+  });
 
   /// A receipt never becomes visible unless H48 certifies that stage complete.
   Future<HybridVerifiedStepResult?> loadCompletedStep({
