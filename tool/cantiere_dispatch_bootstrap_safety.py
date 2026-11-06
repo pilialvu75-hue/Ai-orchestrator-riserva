@@ -50,6 +50,10 @@ def verify_experimental(text):
         raise AssertionError("EXPERIMENTAL_MANUAL_DISPATCH_MISSING")
     if not re.search(r"(?m)^permissions:\s*\n\s+contents:\s*read\s*$", text):
         raise AssertionError("EXPERIMENTAL_PERMISSIONS_NOT_READ_ONLY")
+    if not re.search(r"(?m)^      confirm_real_model_calls:\\s*$", text) or not re.search(
+        r"(?m)^        required: true\\s*$", text
+    ):
+        raise AssertionError("EXPERIMENTAL_PER_RUN_CONSENT_MISSING")
     if not re.search(r"(?m)^  source-check:\s*$", text):
         raise AssertionError("EXPERIMENTAL_SOURCE_CHECK_MISSING")
     for job in ("real-star-opt-in", "real-star-emulator"):
@@ -58,7 +62,7 @@ def verify_experimental(text):
             text,
         )
         if match is None or not re.search(
-            r"(?m)^    if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs/heads/cantiere/real-star-after-bootstrap-20261106'\s*$",
+            r"(?m)^    if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs/heads/cantiere/real-star-after-bootstrap-20261106' && inputs\.confirm_real_model_calls == 'AUTHORIZE_REAL_MODEL_CALLS'\s*$",
             match.group(1),
         ):
             raise AssertionError("EXPERIMENTAL_JOB_NOT_MANUAL_ONLY: " + job)
