@@ -5,8 +5,9 @@ import 'dart:typed_data';
 ///
 /// This is NOT speech recognition, voice identification, or echo cancellation.
 /// Callers must supply microphone PCM that has already passed a separately
-/// validated echo-suppression stage. Until that stage is available, pass
-/// [echoSuppressed] = false; the gate will never request interruption.
+/// validated echo-suppression and speech activity detector stages. Until
+/// both exist and are verified, pass false for their confirmations; the
+/// gate will never request interruption.
 class BargeInEnergyGate {
   BargeInEnergyGate({
     this.sampleRate = 16000,
@@ -34,12 +35,16 @@ class BargeInEnergyGate {
   ///
   /// [echoSuppressed] must mean that AEC/echo rejection was verified by the
   /// audio pipeline, not merely enabled in platform settings.
+  /// [speechConfirmed] must be supplied by a real voice-activity detector:
+  /// energy alone cannot distinguish speech from music, taps or loud noise.
   bool process(
     Float32List samples, {
     required bool assistantSpeaking,
     required bool echoSuppressed,
+    required bool speechConfirmed,
   }) {
-    if (!assistantSpeaking || !echoSuppressed || samples.isEmpty) {
+    if (!assistantSpeaking || !echoSuppressed || !speechConfirmed ||
+        samples.isEmpty) {
       reset();
       return false;
     }
