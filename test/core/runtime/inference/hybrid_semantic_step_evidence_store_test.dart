@@ -127,6 +127,30 @@ void main() {
     await expectLater(read(1), throwsStateError);
   });
 
+
+  test('H49a competing receipts cannot overwrite the winning step',
+      () async {
+    final results = await Future.wait(
+      <Future<bool>>[
+        step(0, HybridCheckpointExecutor.cloud, 'cloud result')
+            .then((_) => true).catchError((Object _) => false),
+        step(0, HybridCheckpointExecutor.local, 'different local result')
+            .then((_) => true).catchError((Object _) => false),
+      ],
+    );
+    expect(results.where((ok) => ok), hasLength(1));
+    expect((await journal.load(
+      ownerId: 'owner1', sessionId: 'chat1',
+      taskId: 'task1'))!.completedSteps, 1);
+    final first = await read(1);
+    expect(first?.output, 'cloud result');
+    await expectLater(
+      step(1, HybridCheckpointExecutor.local, 'next result'),
+      completes,
+    );
+    expect((await read(1))?.output, 'cloud result');
+  });
+
   test('H49a non-received results and missing provenance cannot commit',
       () async {
     await expectLater(
