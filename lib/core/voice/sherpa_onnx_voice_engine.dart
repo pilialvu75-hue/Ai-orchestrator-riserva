@@ -37,7 +37,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   static const String _tag = 'VOICE_ENGINE';
 
   static const int _sampleRate = 16000;
-  static const int _channels = 1;
 
   static const int _minSttEncoderBytes = 600 * 1024 * 1024;
   static const int _minSttDecoderBytes = 10 * 1024 * 1024;
