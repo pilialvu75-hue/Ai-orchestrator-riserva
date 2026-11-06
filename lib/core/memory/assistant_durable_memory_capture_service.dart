@@ -203,20 +203,31 @@ final class AssistantDurableMemoryCaptureService {
     return operation;
   }
 
-  /// A manually submitted named reference, never inferred from model output.
+  /// A directly written named-person statement, never model-inferred.
   ///
-  /// Separate per-action consent is mandatory; this is deliberately NOT called
-  /// from ordinary chat, even when name-capture opt-in is enabled.
+  /// Manual review uses per-action consent. Ordinary chat may call this only
+  /// with the *separate* named-people opt-in and a live revocation callback.
+  /// Both paths produce review-only candidates, never confirmed memories.
   Future<bool> proposeManualEntityReferenceCandidate({
     required String userPrompt,
+    String? sessionId,
     bool consentEnabled = false,
     bool directUserMessage = false,
+    bool Function()? consentStillEnabled,
   }) {
-    if (!consentEnabled || !directUserMessage || _resetInProgress) {
+    if (!consentEnabled ||
+        !directUserMessage ||
+        _resetInProgress ||
+        (sessionId != null && _purgedSessions.contains(sessionId.trim())) ||
+        (consentStillEnabled != null && !consentStillEnabled())) {
       return Future<bool>.value(false);
     }
     final operation = _pendingWrites.then((_) async {
-      if (_resetInProgress) return false;
+      if (_resetInProgress ||
+          (sessionId != null && _purgedSessions.contains(sessionId.trim())) ||
+          (consentStillEnabled != null && !consentStillEnabled())) {
+        return false;
+      }
       final key =
           AssistantManualEntityReferenceCandidate.recordKeyFor(userPrompt);
       if (key == null) return false;
