@@ -911,6 +911,38 @@ consenso esplicito.
   Dopo CI PASS restano da verificare test fisico sul S24 FE,
   canale OTA firmato approvato, assenza di leak di memoria e
   passaggio LOCAL/Cloud su rete interrotta e ripristinata.
+- **H40 — continuita HYBRID quando il trasporto Cloud cade:**
+  primo passo del requisito Cloud->LOCAL->Cloud, senza introdurre
+  ripetizioni di invii Cloud o nuovo Web automatico. Il sender HTTP
+  consent-gated riconosce **solo** `http.ClientException` e
+  `TimeoutException` al confine della richiesta gia' autorizzata
+  e le converte in una causa tipizzata senza contenuto privato.
+  Una risposta HTTP (inclusi 401, 429, 503), un rifiuto di consenso,
+  un parser fallito o un'eccezione generica NON sono perdita di rete.
+  Il runtime produce `InferenceErrorCode.cloudTransportUnavailable`,
+  registra il provider temporaneamente indisponibile e non prova
+  mai un secondo provider Cloud nella stessa richiesta.
+
+  Solo un'origine Chat verificata, modo HYBRID, trasporto protetto
+  e zero testo Cloud gia' prodotto consentono a Hannibal di proseguire
+  **quella singola domanda** in LOCAL. Il nuovo InferenceRequest
+  scarta provider Cloud, evidenza Cloud e failover, vieta ricerche Web
+  automatiche e arricchisce memoria confermata soltanto dopo
+  `localOnly`. L'annullamento non attiva il fallback.
+  Test con rete mock che cade dopo un solo invio autorizzato,
+  assenza di retry Cloud, zero leak, risposta 401/429/503,
+  provenienza non verificata e stream gia' parzialmente prodotto.
+  La perdita di rete dopo un HTTP inviato puo' lasciare incerto
+  se il server abbia elaborato il payload: non ritentare il POST.
+
+  **Rimane fuori da H40** la continuita semantica multipasso
+  con checkpoint persistenti, la ripresa di un task Cloud iniziato,
+  la rigenerazione di contesto dopo riavvio, nonche' il
+  reinstradamento automatico LOCAL->Cloud al ritorno della rete.
+  Questi richiedono un journal e test end-to-end separati.
+  H40 e' una modifica nel solo branch draft #977 finche' i
+  nuovi workflow CI e i test fisici non risultano verificati;
+  nessuna beta e' pubblicata da questa sola modifica.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

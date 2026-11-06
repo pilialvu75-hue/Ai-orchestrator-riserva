@@ -236,4 +236,95 @@ void main() {
     expect(httpRequests, 0);
     client.close();
   });
+
+  test('approved HTTP transport failure is typed; no Cloud retry or leak',
+      () async {
+    final credentials = CloudCredentialStore(storage: _Secrets());
+    await credentials.initialize();
+    await credentials.setApiKey(
+      'openAi', 'synthetic-network-secret', accountId: 'account-one',
+    );
+    var reviews = 0;
+    var httpSends = 0;
+    final client = MockClient((request) async {
+      httpSends++;
+      expect(request.headers['authorization'],
+          'Bearer synthetic-network-secret');
+      throw http.ClientException('NETWORK FAILURE with private details');
+    });
+    final bundle = HybridCloudAssistantRuntimeBundle.create(
+      credentials: credentials,
+      protectedStorage: _ConsentMemory(),
+      client: client,
+      supportedProviders: () => <String>['gemini', 'openAi'],
+      isProviderAvailable: (_) => true,
+      providerDisplayName: ([name]) => name ?? 'Cloud',
+      modelForProvider: (_) => 'gpt-test',
+      preferredProvider: () => 'openAi',
+      automaticUseAllowed: (_) => true,
+      chatReview: (session, review, isActive) async {
+        reviews++;
+        expect(session, 'real-chat-1');
+        return <HybridDisclosureScope, HybridCloudConsentChoice>{
+          for (final scope in review.needsConsent)
+            scope: HybridCloudConsentChoice.allowOnce,
+        };
+      },
+    );
+    final result = await bundle.provider.streamInference(
+      request: authenticatedQuestion().copyWith(
+        allowCloudProviderFailover: true,
+      ),
+      cancellationToken: CancellationToken(),
+    ).toList();
+    expect(result.last.isError, isTrue);
+    expect(result.last.errorCode,
+        InferenceErrorCode.cloudTransportUnavailable);
+    expect(result.last.errorMessage, isNot(contains('private details')));
+    expect(result.last.errorMessage,
+        isNot(contains('synthetic-network-secret')));
+    expect(reviews, 1);
+    expect(httpSends, 1); // Never retry via Gemini or a second Cloud HTTP.
+    client.close();
+  });
+
+  test('HTTP auth/quota/provider failures are NOT typed as connectivity loss',
+      () async {
+    for (final status in <int>[401, 429, 503]) {
+      final credentials = CloudCredentialStore(storage: _Secrets());
+      await credentials.initialize();
+      await credentials.setApiKey(
+        'openAi', 'synthetic-secret', accountId: 'account-one',
+      );
+      var sends = 0;
+      final client = MockClient((_) async {
+        sends++;
+        return http.Response('PROVIDER PRIVATE ERROR', status);
+      });
+      final bundle = HybridCloudAssistantRuntimeBundle.create(
+        credentials: credentials,
+        protectedStorage: _ConsentMemory(),
+        client: client,
+        supportedProviders: () => <String>['openAi'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([name]) => name ?? 'Cloud',
+        modelForProvider: (_) => 'gpt-test',
+        automaticUseAllowed: (_) => true,
+        chatReview: (_, review, __) async =>
+            <HybridDisclosureScope, HybridCloudConsentChoice>{
+          for (final scope in review.needsConsent)
+            scope: HybridCloudConsentChoice.allowOnce,
+        },
+      );
+      final result = await bundle.provider.streamInference(
+        request: authenticatedQuestion(),
+        cancellationToken: CancellationToken(),
+      ).toList();
+      expect(result.last.isError, isTrue, reason: 'HTTP $status');
+      expect(result.last.errorCode, isNull, reason: 'HTTP $status');
+      expect(result.last.errorMessage, isNot(contains('PROVIDER PRIVATE')));
+      expect(sends, 1, reason: 'HTTP $status');
+      client.close();
+    }
+  });
 }

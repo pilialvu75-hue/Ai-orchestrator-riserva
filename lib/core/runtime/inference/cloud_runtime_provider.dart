@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cloud_task_class.dart';
 import 'package:ai_orchestrator/core/runtime/inference/conversation_context_limits.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_consent_denied.dart';
+import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_transport_unavailable.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_native_request_projection.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
@@ -391,6 +392,28 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
           providerId: provider,
           errorCode: InferenceErrorCode.cloudConsentDenied,
         );
+        return;
+      } on HybridCloudTransportUnavailable catch (error) {
+        stopwatch.stop();
+        // Only the reviewed native HTTP transport raised this typed cause.
+        // Update provider health for an offline-friendly HYBRID decision on
+        // later requests, without disclosing the request or retrying Cloud.
+        _markFailure(provider, error,
+            'Approved Cloud connection unavailable.',
+            stopwatch.elapsedMilliseconds);
+        if (cancellationToken.isCancelled) {
+          yield InferenceResponse.error(
+            'Inference cancelled.',
+            state: InferenceTerminalState.cancelled,
+            providerId: provider,
+          );
+        } else {
+          yield InferenceResponse.error(
+            'Approved Cloud connection unavailable.',
+            providerId: provider,
+            errorCode: InferenceErrorCode.cloudTransportUnavailable,
+          );
+        }
         return;
       } catch (error) {
         stopwatch.stop();

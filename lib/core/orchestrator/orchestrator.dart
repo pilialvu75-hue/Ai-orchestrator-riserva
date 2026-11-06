@@ -219,13 +219,14 @@ class Orchestrator {
       );
     }
 
-    // Only an opt-in HYBRID Cloud refusal with trusted Chat provenance
-    // may resume locally. No localized error-string matching or Cloud retry.
+    // Only a typed consent refusal or approved HTTP transport failure with
+    // trusted Chat provenance may continue locally. Never interpret generic
+    // provider errors, exception text, quota or auth status as network loss.
     if (_runtimeSettingsService?.runtimeMode == AiRuntimeMode.hybrid &&
         request.routeDirective == InferenceRouteDirective.cloudOnly &&
         trustedCloudSourceEvidence != null &&
         _cloudRuntimeProvider?.consentGated == true) {
-      return _streamHybridCloudWithLocalConsentFallback(
+      return _streamHybridCloudWithLocalSafetyFallback(
         request: request,
         originalUserQuestion: trustedCloudSourceEvidence.originalQuestion,
       );
@@ -233,7 +234,7 @@ class Orchestrator {
     return _inferenceService.stream(request);
   }
 
-  TokenStream _streamHybridCloudWithLocalConsentFallback({
+  TokenStream _streamHybridCloudWithLocalSafetyFallback({
     required InferenceRequest request,
     required String originalUserQuestion,
   }) async* {
@@ -241,7 +242,8 @@ class Orchestrator {
     await for (final chunk in _inferenceService.stream(request)) {
       if (!receivedAnswerText &&
           chunk.isError &&
-          chunk.errorCode == InferenceErrorCode.cloudConsentDenied) {
+          (chunk.errorCode == InferenceErrorCode.cloudConsentDenied ||
+           chunk.errorCode == InferenceErrorCode.cloudTransportUnavailable)) {
         final local = request.copyWith(
           routeDirective: InferenceRouteDirective.localOnly,
           allowCloudProviderFailover: false,

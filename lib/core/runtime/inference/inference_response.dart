@@ -21,7 +21,12 @@ enum InferenceTerminalState {
 }
 
 /// Typed reason for privacy-sensitive routing, not localized error text.
-enum InferenceErrorCode { cloudConsentDenied }
+enum InferenceErrorCode {
+  cloudConsentDenied,
+
+  /// Approved Cloud HTTP transport returned no usable response.
+  cloudTransportUnavailable,
+}
 
 class InferenceResponse {
   const InferenceResponse({

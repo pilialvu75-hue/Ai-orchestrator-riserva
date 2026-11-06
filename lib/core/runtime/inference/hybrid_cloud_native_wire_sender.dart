@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
@@ -9,6 +10,7 @@ import 'package:http/http.dart' as http;
 
 import 'hybrid_cloud_ai_request_seal.dart';
 import 'hybrid_cloud_disclosure_consent.dart';
+import 'hybrid_cloud_transport_unavailable.dart';
 
 /// A deliberately opt-in and UNWIRED native HTTP sender for approved requests.
 ///
@@ -58,7 +60,7 @@ final class HybridCloudNativeWireSender {
               current.accountId == accountId &&
               accountId.isNotEmpty;
         },
-        trustedSend: (AiRequest approved) {
+        trustedSend: (AiRequest approved) async {
           final providerId = approved.providerId;
           if (providerId == null ||
               (providerId != 'openAi' && providerId != 'gemini')) {
@@ -120,7 +122,15 @@ final class HybridCloudNativeWireSender {
           }
           // POST starts under the in-isolate one-use consent gate. It is
           // released for concurrent revocation once the request starts.
-          return _client.post(endpoint, headers: headers, body: body);
+          try {
+            return await _client.post(endpoint, headers: headers, body: body);
+          } on http.ClientException {
+            // Only approved HTTP failures get a typed network cause.
+            // Never leak provider URI, prompt, exception body or credentials.
+            throw const HybridCloudTransportUnavailable();
+          } on TimeoutException {
+            throw const HybridCloudTransportUnavailable();
+          }
         },
       );
 }

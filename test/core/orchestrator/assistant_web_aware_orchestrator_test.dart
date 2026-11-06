@@ -446,6 +446,126 @@ void main() {
     });
   }
 
+
+  test('HYBRID approved Cloud connectivity loss continues LOCAL with no Web'
+      ' and no private memory sent to Cloud', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.consentGated).thenReturn(true);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    final requests = <InferenceRequest>[];
+    when(() => inference.stream(any())).thenAnswer((call) {
+      final request = call.positionalArguments.single as InferenceRequest;
+      requests.add(request);
+      if (request.routeDirective == InferenceRouteDirective.cloudOnly) {
+        return Stream<InferenceResponse>.fromIterable([
+          InferenceResponse.notice('cloud_provider:gemini',
+              providerId: 'gemini'),
+          InferenceResponse.error('Connection unavailable',
+              providerId: 'gemini',
+              errorCode: InferenceErrorCode.cloudTransportUnavailable),
+        ]);
+      }
+      return Stream<InferenceResponse>.value(
+        InferenceResponse.finalChunk(
+          text: 'LOCAL resumed safely', providerId: 'local',
+          tokensGenerated: 3),
+      );
+    });
+    var memoryReads = 0;
+    const question = 'Summarize my private project';
+    final provenance = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-network-drop', originalQuestion: question,
+      baseSystemPrompt: 'Base rules.',
+      originalHistory: const <AiMessage>[],
+    );
+    final response = await build(hybridMemoryEnricher: ({
+      required String baseSystemPrompt,
+      required String sessionId,
+      required String userPrompt,
+    }) async {
+      memoryReads++;
+      expect(sessionId, 'hybrid-network-drop');
+      return '$baseSystemPrompt\\nCONFIRMED PRIVATE MEMORY';
+    }).handleStream(
+      question,
+      sessionId: 'hybrid-network-drop',
+      systemPrompt: 'Base rules.',
+      trustedCloudSourceEvidence: provenance,
+    ).toList();
+    expect(response.last.text, 'LOCAL resumed safely');
+    expect(requests, hasLength(2));
+    expect(memoryReads, 1);
+    expect(requests.first.routeDirective, InferenceRouteDirective.cloudOnly);
+    expect(requests.first.systemPrompt, isNot(contains('PRIVATE MEMORY')));
+    expect(requests.first.cloudProviderId, 'gemini');
+    expect(requests.last.routeDirective, InferenceRouteDirective.localOnly);
+    expect(requests.last.cloudProviderId, isNull);
+    expect(requests.last.trustedCloudSourceEvidence, isNull);
+    expect(requests.last.allowCloudProviderFailover, isFalse);
+    expect(requests.last.allowWebSearchTool, isFalse);
+    expect(requests.last.systemPrompt, contains('CONFIRMED PRIVATE MEMORY'));
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('HYBRID connectivity failure cannot resume without trusted Chat evidence',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.consentGated).thenReturn(true);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    when(() => inference.stream(any())).thenAnswer((_) =>
+        Stream<InferenceResponse>.value(InferenceResponse.error(
+          'Connection unavailable',
+          errorCode: InferenceErrorCode.cloudTransportUnavailable,
+        )));
+    final output = await build().handleStream(
+      'Explain architecture',
+      sessionId: 'unknown-provenance',
+      systemPrompt: 'Base rules.',
+      // No trustedCloudSourceEvidence: never automatically enrich
+      // or continue an unverified Cloud prompt locally.
+    ).toList();
+    expect(output.last.isError, isTrue);
+    verify(() => inference.stream(any())).called(1);
+  });
+
+  test('HYBRID Cloud partial answer is never duplicated by LOCAL fallback',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.consentGated).thenReturn(true);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    when(() => inference.stream(any())).thenAnswer((_) =>
+        Stream<InferenceResponse>.fromIterable([
+          InferenceResponse.token(text: 'Cloud already answered a little',
+              providerId: 'gemini'),
+          InferenceResponse.error('Connection unavailable',
+              errorCode: InferenceErrorCode.cloudTransportUnavailable),
+        ]));
+    final provenance = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'hybrid-partial-cloud',
+      originalQuestion: 'Explain architecture',
+      baseSystemPrompt: 'Base rules.',
+      originalHistory: const <AiMessage>[],
+    );
+    final result = await build().handleStream(
+      'Explain architecture',
+      sessionId: 'hybrid-partial-cloud',
+      systemPrompt: 'Base rules.',
+      trustedCloudSourceEvidence: provenance,
+    ).toList();
+    expect(result.first.text, 'Cloud already answered a little');
+    expect(result.last.isError, isTrue);
+    verify(() => inference.stream(any())).called(1);
+  });
+
   test('HYBRID other Cloud errors cannot trigger local consent fallback', () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
     when(() => cloud.consentGated).thenReturn(true);
