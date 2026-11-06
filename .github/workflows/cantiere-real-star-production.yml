@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'tool/cantiere_real_star_smoke.dart'
+      - 'tool/cantiere_real_star_emulator_probe.py'
+      - 'tool/test_cantiere_real_star_emulator_probe.py'
       - '.github/workflows/cantiere-real-star-production.yml'
   workflow_dispatch:
 
@@ -29,6 +31,10 @@ jobs:
         run: flutter pub get --enforce-lockfile
       - name: Analyze isolated real-star producer
         run: dart analyze tool/cantiere_real_star_smoke.dart
+      - name: Validate black-box star probe and negative controls
+        run: |
+          python3 -m py_compile tool/cantiere_real_star_emulator_probe.py tool/test_cantiere_real_star_emulator_probe.py
+          python3 -m unittest -v tool.test_cantiere_real_star_emulator_probe
 
   real-star-opt-in:
     if: github.event_name == 'workflow_dispatch'
@@ -82,4 +88,49 @@ jobs:
           name: cantiere-real-star-apk-unverified-ui
           path: build/cantiere-real-star/
           if-no-files-found: error
+          retention-days: 7
+
+  real-star-emulator:
+    if: github.event_name == 'workflow_dispatch'
+    needs: real-star-opt-in
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout visual acceptance probe
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Download actual real-model-produced APK
+        uses: actions/download-artifact@v6
+        with:
+          name: cantiere-real-star-apk-unverified-ui
+          path: "${{ runner.temp }}/real-star"
+      - name: Verify APK SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/real-star"
+          test -s cantiere-real-star.apk
+          sha256sum -c cantiere-real-star.apk.sha256
+      - name: Enable KVM acceleration
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install generated star APK and verify visual color change
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: python3 tool/cantiere_real_star_emulator_probe.py --apk "${{ runner.temp }}/real-star/cantiere-real-star.apk" --package ai.orchestrator.generated.cantiere_real_star --out "${{ runner.temp }}/real-star-visual"
+      - name: Preserve visual evidence regardless of outcome
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: cantiere-real-star-visual-evidence
+          path: ${{ runner.temp }}/real-star-visual/
+          if-no-files-found: warn
           retention-days: 7
