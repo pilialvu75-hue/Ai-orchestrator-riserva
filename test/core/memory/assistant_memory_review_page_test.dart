@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
@@ -98,6 +99,51 @@ void main() {
     ), isFalse);
     expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
         isFalse);
+  });
+
+  testWidgets('named people consent is independent and default-off',
+      (tester) async {
+    initializeMemory();
+    final preferences = await SharedPreferences.getInstance();
+    final relationalConsent = AssistantRelationalMemoryConsentService(
+      preferences: preferences,
+    );
+    expect(relationalConsent.enabled, isFalse);
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('it'),
+      supportedLocales: const [Locale('it'), Locale('en'), Locale('fr'), Locale('es')],
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: AssistantMemoryReviewPage(
+        captureService: capture,
+        consentService: AssistantNaturalMemoryConsentService(
+          preferences: preferences,
+        ),
+        relationalConsentService: relationalConsent,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final switches = find.byType(SwitchListTile);
+    expect(switches, findsNWidgets(2));
+    expect(tester.widget<SwitchListTile>(switches.first).value, isFalse);
+    expect(tester.widget<SwitchListTile>(switches.last).value, isFalse);
+
+    await tester.tap(switches.last);
+    await tester.pumpAndSettle();
+    expect(relationalConsent.enabled, isTrue);
+    expect(
+      preferences.getBool(AssistantNaturalMemoryConsentService.preferenceKey),
+      isNull,
+    );
+
+    await tester.tap(switches.last);
+    await tester.pumpAndSettle();
+    expect(relationalConsent.enabled, isFalse);
   });
 
   testWidgets('no proposal is written without per-action consent',
