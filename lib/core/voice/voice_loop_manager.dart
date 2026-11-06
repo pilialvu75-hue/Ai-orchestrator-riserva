@@ -150,8 +150,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
       await _engine.stopSpeaking();
     } catch (_) {}
 
-    _sessionActive = false;
-
+    // Keep the turn active until _runLoop has actually completed. Otherwise
+    // a new Live turn can race with a still-running microphone or playback.
     logEvent(
       _tag,
       '[SESSION_STOP_REQUESTED]',
@@ -301,6 +301,14 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     final sttCompleter =
         Completer<String>();
+
+    // Release a pending STT wait immediately on Stop/Close. Without this,
+    // a cancelled turn can stay stuck until the 30 second STT timeout.
+    token.onCancel(() {
+      if (!sttCompleter.isCompleted) {
+        sttCompleter.complete('');
+      }
+    });
 
     void completeStt(
       String text,
