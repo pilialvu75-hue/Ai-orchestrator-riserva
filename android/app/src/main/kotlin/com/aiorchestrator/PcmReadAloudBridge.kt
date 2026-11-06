@@ -221,7 +221,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
     companion object {
         private const val CHANNEL = "com.aiorchestrator/tts_pcm_transport"
 
-        fun register(context: Context, engine: FlutterEngine) {
+        fun register(context: Context, engine: FlutterEngine): PcmReadAloudBridge {
             val transport = PcmReadAloudBridge(context.applicationContext)
             MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
                 .setMethodCallHandler { call, result ->
@@ -288,6 +288,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
                         result.error("PCM_TRANSPORT", error.message, null)
                     }
                 }
+            return transport
         }
     }
 }
