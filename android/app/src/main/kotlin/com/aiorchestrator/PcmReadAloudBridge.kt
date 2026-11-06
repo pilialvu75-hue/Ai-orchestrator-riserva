@@ -297,13 +297,11 @@ internal class PcmReadAloudBridge(private val context: Context) {
                                 result.success(null)
                             }
                             "pause" -> {
-                                transport.pause()
-                                service.updateMediaState()
+                                service.pause()
                                 result.success(transport.status())
                             }
                             "resume" -> {
-                                transport.resume()
-                                service.updateMediaState()
+                                service.play()
                                 result.success(transport.status())
                             }
                             "seek" -> {
@@ -315,11 +313,9 @@ internal class PcmReadAloudBridge(private val context: Context) {
                                 result.success(transport.status())
                             }
                             "seekRelative" -> {
-                                transport.seek(
-                                    call.argument<Number>("milliseconds")?.toLong() ?: 0L,
-                                    relative = true
+                                service.jump(
+                                    call.argument<Number>("milliseconds")?.toLong() ?: 0L
                                 )
-                                service.updateMediaState()
                                 result.success(transport.status())
                             }
                             "status" -> result.success(transport.status())
