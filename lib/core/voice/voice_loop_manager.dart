@@ -556,6 +556,40 @@ class VoiceLoopManager with RuntimeEventEmitter {
     final sentenceBoundaryPattern =
         RegExp(r'[.!?\n]');
 
+    // Keep token consumption independent from audio playback, but bound the
+    // number of buffered phrases to avoid unbounded RAM usage on Android.
+    // The chain serializes playback so phrases remain in spoken order.
+    Future<void> playbackTail = Future<void>.value();
+    final pendingPlayback = <Future<void>>[];
+    bool playbackFailed = false;
+
+    Future<void> queueSpeech(String text) async {
+      if (pendingPlayback.length >= 2) {
+        await pendingPlayback.removeAt(0);
+      }
+      if (_disposed || token.isCancelled || _stopRequested ||
+          playbackFailed) {
+        return;
+      }
+      playbackTail = playbackTail.then((_) async {
+        if (_disposed || token.isCancelled || _stopRequested ||
+            playbackFailed) {
+          return;
+        }
+        try {
+          await _engine.speak(text);
+        } catch (error) {
+          playbackFailed = true;
+          if (!token.isCancelled && !_stopRequested && !_disposed) {
+            final message = 'Voice output failed: $error';
+            logEvent(_tag, '[TTS_ERROR] $message');
+            onError?.call(message);
+          }
+        }
+      });
+      pendingPlayback.add(playbackTail);
+    }
+
     await for (
       final response in inferenceStream
     ) {
@@ -633,24 +667,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
         'final=${response.isFinal}',
       );
 
-      try {
-        await _engine.speak(
-          speakChunk,
-        );
-      } catch (error) {
-        if (!token.isCancelled &&
-            !_stopRequested) {
-          final message =
-              'Voice output failed: $error';
-
-          logEvent(
-            _tag,
-            '[TTS_ERROR] $message',
-          );
-
-          onError?.call(message);
-        }
-
+      await queueSpeech(speakChunk);
+      if (playbackFailed) {
         break;
       }
     }
@@ -671,6 +689,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
             .trim();
 
     if (trailing.isEmpty) {
+      await Future.wait(pendingPlayback);
       return;
     }
 
@@ -680,24 +699,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       'chars=${trailing.length}',
     );
 
-    try {
-      await _engine.speak(
-        trailing,
-      );
-    } catch (error) {
-      if (!token.isCancelled &&
-          !_stopRequested) {
-        final message =
-            'Voice output failed: $error';
-
-        logEvent(
-          _tag,
-          '[TTS_TRAILING_ERROR] '
-          '$message',
-        );
-
-        onError?.call(message);
-      }
-    }
+    await queueSpeech(trailing);
+    await Future.wait(pendingPlayback);
   }
 }
