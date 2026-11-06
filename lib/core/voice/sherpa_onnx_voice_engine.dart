@@ -14,6 +14,17 @@ import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 import 'package:ai_orchestrator/core/voice/audio_stream_player.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 
+/// Request Android capture-side echo/noise processing without assuming it is
+/// enabled or effective. This does NOT authorize barge-in until verified AEC
+/// and VAD have been independently integrated and tested on device.
+RecordConfig liveAsrRecordConfig({required bool isAndroid}) => RecordConfig(
+  encoder: AudioEncoder.pcm16bits,
+  sampleRate: 16000,
+  numChannels: 1,
+  echoCancel: isAndroid,
+  noiseSuppress: isAndroid,
+);
+
 class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   SherpaOnnxVoiceEngine({
     VoiceModelPaths? modelPaths,
@@ -26,7 +37,6 @@ class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
   static const String _tag = 'VOICE_ENGINE';
 
   static const int _sampleRate = 16000;
-  static const int _channels = 1;
 
   static const int _minSttEncoderBytes = 600 * 1024 * 1024;
   static const int _minSttDecoderBytes = 10 * 1024 * 1024;
@@ -642,12 +652,11 @@ logEvent(
         '[ASR_BEFORE_START_STREAM]',
       );
 
+      // record 5.x supports best-effort AEC/NS on Android PCM streams.
+      // Availability is NOT proof that the platform has attached the effect;
+      // automatic barge-in remains disabled until verified separately.
       final audioStream = await _recorder.startStream(
-        const RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          sampleRate: _sampleRate,
-          numChannels: _channels,
-        ),
+        liveAsrRecordConfig(isAndroid: Platform.isAndroid),
       );
 
       if (_disposed) {
