@@ -105,9 +105,11 @@ final class WorkshopInferenceProviderAdapter
       );
     }
 
-    // LOCAL / explicitly network-free Workshop execution is authoritative.
-    // A previously selected remote role model must never silently override it.
-    if (request.isOffline && descriptor.source == AiModelSource.cloud) {
+    // Both a network-free request and an explicit LOCAL-only route must
+    // override a remote role assignment before reaching any provider.
+    if ((request.isOffline ||
+            request.routeDirective == InferenceRouteDirective.localOnly) &&
+        descriptor.source == AiModelSource.cloud) {
       return Stream<InferenceResponse>.error(
         StateError(
           'Workshop LOCAL request cannot route role "${_role.id}" '
@@ -140,8 +142,14 @@ final class WorkshopInferenceProviderAdapter
       return _inferenceService.stream(workshopRequest);
     }
 
+    // Model selection and network-tool availability are independent.
+    // LOCAL inference may still use explicitly allowed Web research tools,
+    // but the model tokens themselves must never route to a Cloud provider.
     final workshopRequest = request.copyWith(
       modelId: workshopModelId,
+      routeDirective: InferenceRouteDirective.localOnly,
+      discardCloudProviderId: true,
+      allowCloudProviderFailover: false,
     );
 
     return _inferenceService.stream(
