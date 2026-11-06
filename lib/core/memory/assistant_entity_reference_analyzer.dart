@@ -98,6 +98,8 @@ abstract final class AssistantEntityReferenceAnalyzer {
       RegExp(r'^(.+) è sovrappeso$', caseSensitive: false);
   static final RegExp _namedSport =
       RegExp(r'^(.+) fa tanto sport$', caseSensitive: false);
+  static final RegExp _namedTall =
+      RegExp(r'^(.+) è alto$', caseSensitive: false);
 
   static AssistantEntityReferenceAnalysis analyzeDirectUserStatements(
       Iterable<String> statements) {
@@ -191,6 +193,17 @@ abstract final class AssistantEntityReferenceAnalyzer {
         value: 'auto_attuale_rossa',
       );
     }
+    // Explicit repainting refers to the same vehicle, but does not prove
+    // a durable vehicle identity or authorize automatic memory storage.
+    if (normalized == 'ho riverniciato la mia auto: ora è rossa' ||
+        normalized == 'ho riverniciato la stessa auto: ora è rossa') {
+      return unknown(
+        kind: AssistantEntityReferenceKind.vehicle,
+        claim: AssistantEntityClaimKind.event,
+        predicate: 'riverniciatura_stessa_auto_dichiarata',
+        value: 'rossa',
+      );
+    }
     if (normalized == 'ho comprato una seconda auto rossa') {
       return unknown(
         kind: AssistantEntityReferenceKind.vehicle,
@@ -248,6 +261,13 @@ abstract final class AssistantEntityReferenceAnalyzer {
           kind: AssistantEntityClaimKind.description,
           predicate: 'attivita_dichiarata',
           value: 'tanto_sport',
+        ) ??
+        namedMatch(
+          _namedTall,
+          kind: AssistantEntityClaimKind.description,
+          predicate: 'altezza_dichiarata',
+          value: 'alto',
+          sensitive: true,
         );
   }
 }
