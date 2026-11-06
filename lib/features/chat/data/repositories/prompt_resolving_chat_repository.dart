@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/core/config/ai/system_prompt_config.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
@@ -25,12 +26,14 @@ class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryAct
     required AiRuntimeMode Function() runtimeMode,
     AssistantDurableMemoryCaptureService? durableMemoryCaptureService,
     AssistantNaturalMemoryConsentService? naturalMemoryConsentService,
+    AssistantRelationalMemoryConsentService? relationalMemoryConsentService,
   })  : _delegate = delegate,
         _systemPromptService = systemPromptService,
         _durableMemoryContextService = durableMemoryContextService,
         _runtimeMode = runtimeMode,
         _durableMemoryCaptureService = durableMemoryCaptureService,
-        _naturalMemoryConsentService = naturalMemoryConsentService;
+        _naturalMemoryConsentService = naturalMemoryConsentService,
+        _relationalMemoryConsentService = relationalMemoryConsentService;
 
   final ChatRepository _delegate;
   final AssistantSystemPromptService _systemPromptService;
@@ -38,6 +41,7 @@ class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryAct
   final AiRuntimeMode Function() _runtimeMode;
   final AssistantDurableMemoryCaptureService? _durableMemoryCaptureService;
   final AssistantNaturalMemoryConsentService? _naturalMemoryConsentService;
+  final AssistantRelationalMemoryConsentService? _relationalMemoryConsentService;
 
   @override
   Future<ChatMessage> persistVerifiedMemoryAction({
@@ -175,6 +179,31 @@ class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryAct
       } catch (_) {
         onRuntimeNotice?.call(
           'Non è stato possibile aggiungere la proposta di memoria locale.',
+        );
+      }
+    }
+
+    // Third-party facts require their own default-off permission. The
+    // existing user-name/car-color consent must never authorize this path.
+    // The capture queue rechecks revocation before writing to local storage.
+    final relationalConsent = _relationalMemoryConsentService;
+    if (isOrdinary &&
+        attachments.isEmpty &&
+        _durableMemoryCaptureService != null &&
+        relationalConsent != null &&
+        relationalConsent.enabled) {
+      try {
+        await _durableMemoryCaptureService
+            .proposeManualEntityReferenceCandidate(
+          sessionId: sessionId,
+          userPrompt: userPrompt,
+          consentEnabled: true,
+          directUserMessage: true,
+          consentStillEnabled: () => relationalConsent.enabled,
+        );
+      } catch (_) {
+        onRuntimeNotice?.call(
+          'Non è stato possibile aggiungere la proposta relazionale locale.',
         );
       }
     }

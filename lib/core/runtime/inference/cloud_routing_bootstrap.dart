@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.d
 import 'package:ai_orchestrator/core/config/storage/config_repository.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/assistant_web_aware_orchestrator.dart';
@@ -235,6 +236,7 @@ abstract final class CloudRoutingBootstrap {
         runtimeMode: () => sl<AiRuntimeSettingsService>().runtimeMode,
         durableMemoryCaptureService: durableMemoryCaptureService,
         naturalMemoryConsentService: sl<AssistantNaturalMemoryConsentService>(),
+        relationalMemoryConsentService: sl<AssistantRelationalMemoryConsentService>(),
         delegate: CloudWebEnrichingChatRepository(
           // This decorator is only active in explicit CLOUD. Its existing
           // Web enrichment remains available; HYBRID Web is handled by the

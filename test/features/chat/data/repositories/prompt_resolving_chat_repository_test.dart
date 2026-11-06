@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
@@ -816,6 +817,130 @@ void main() {
         scope: AssistantMemoryScope.user,
         scopeId: AssistantDurableMemoryContextService.localUserScopeId,
       ), isEmpty);
+    });
+
+    test('named colleagues from chat require separate opt-in and review',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final prefs = await SharedPreferences.getInstance();
+      final nameConsent = AssistantNaturalMemoryConsentService(
+        preferences: prefs,
+      );
+      final peopleConsent = AssistantRelationalMemoryConsentService(
+        preferences: prefs,
+      );
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(
+          persistence: _PromptMemoryPersistence(),
+        ),
+      );
+      final capture = AssistantDurableMemoryCaptureService(
+        memoryService: memory,
+        now: () => 331,
+      );
+      final delegate = _RecordingChatRepository();
+      final repo = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: capture,
+        naturalMemoryConsentService: nameConsent,
+        relationalMemoryConsentService: peopleConsent,
+      );
+      Future<List<AssistantDurableMemoryRecord>> pending() =>
+          capture.loadReviewableManualEntityReferenceCandidates();
+
+      expect(peopleConsent.enabled, isFalse);
+      await nameConsent.setEnabled(true);
+      await repo.sendMessage(
+        sessionId: 'original',
+        userPrompt: 'Jerome è alto',
+      );
+      // Consent for first names and cars does NOT cover other people.
+      expect(await pending(), isEmpty);
+
+      await peopleConsent.setEnabled(true);
+      await repo.sendMessage(
+        sessionId: 'original',
+        userPrompt: 'Jerome è alto',
+      );
+      expect((await pending()).single.content, 'Jerome è alto');
+      expect(
+        await memory.loadConfirmed(
+          scope: AssistantMemoryScope.user,
+          scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        ),
+        isEmpty,
+      );
+      final review = (await pending()).single;
+      expect(await capture.reviewManualEntityReferenceCandidate(
+        reviewed: review,
+        approve: true,
+        userConfirmed: true,
+      ), isTrue);
+      await repo.sendMessage(
+        sessionId: 'other-chat',
+        userPrompt: 'Jerome è alto?',
+      );
+      expect(delegate.lastSystemPrompt, contains('Jerome è alto'));
+      await repo.sendMessage(
+        sessionId: 'other-chat',
+        userPrompt: 'Kader è alto?',
+      );
+      expect(delegate.lastSystemPrompt, isNot(contains('Jerome è alto')));
+
+      await peopleConsent.setEnabled(false);
+      await repo.sendMessage(
+        sessionId: 'other-chat',
+        userPrompt: 'Kader è un mio collega',
+      );
+      expect(await pending(), isEmpty);
+    });
+
+    test('named colleague staging rejects attachments and specialized workers',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final prefs = await SharedPreferences.getInstance();
+      final peopleConsent = AssistantRelationalMemoryConsentService(
+        preferences: prefs,
+      );
+      await peopleConsent.setEnabled(true);
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(
+          persistence: _PromptMemoryPersistence(),
+        ),
+      );
+      final capture = AssistantDurableMemoryCaptureService(
+        memoryService: memory,
+      );
+      final repo = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
+        delegate: _RecordingChatRepository(),
+        systemPromptService: fixture.service,
+        durableMemoryContextService: AssistantDurableMemoryContextService(
+          memoryService: memory,
+        ),
+        durableMemoryCaptureService: capture,
+        relationalMemoryConsentService: peopleConsent,
+      );
+      await repo.sendMessage(
+        sessionId: 'specialized',
+        userPrompt: 'Jerome è alto',
+        systemPrompt: 'Specialized worker prompt.',
+      );
+      await repo.sendMessage(
+        sessionId: 'attachment',
+        userPrompt: 'Jerome è alto',
+        attachments: const <ChatAttachment>[
+          ChatAttachment(id: 'file', type: ChatAttachmentType.file,
+              path: 'local:/test.txt', name: 'test.txt'),
+        ],
+      );
+      expect(await capture.loadReviewableManualEntityReferenceCandidates(),
+          isEmpty);
     });
 
     test('car-color fact from ordinary chat needs consent and owner review',
