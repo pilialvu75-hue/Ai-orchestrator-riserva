@@ -370,32 +370,43 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
   }
 
   Future<void> _runLiveLoop() async {
+    // Run successive voice turns until the user closes Live or a real error
+    // occurs. The manager owns each STT -> inference -> TTS turn; restarting
+    // only after its Future completes prevents overlapping mic sessions.
     try {
-      await widget.voiceLoopManager.startLiveSession(
-        onError: (message) {
-          if (!mounted || _closing) {
-            return;
+      while (mounted && !_closing) {
+        var turnFailed = false;
+        try {
+          await widget.voiceLoopManager.startLiveSession(
+            onError: (message) {
+              turnFailed = true;
+              if (!mounted || _closing) {
+                return;
+              }
+              _showError(message);
+              _syncUiStateFromEngine();
+            },
+            onSubtitle: (_, __) {
+              if (!mounted || _closing) {
+                return;
+              }
+              _syncUiStateFromEngine();
+            },
+          );
+        } catch (error) {
+          turnFailed = true;
+          if (mounted && !_closing) {
+            _showError('Errore durante la sessione Live: $error');
           }
+        }
 
-          _showError(message);
-          _syncUiStateFromEngine();
-        },
-        onSubtitle: (_, __) {
-          if (!mounted || _closing) {
-            return;
-          }
+        if (!mounted || _closing || turnFailed) {
+          break;
+        }
 
-          _syncUiStateFromEngine();
-        },
-      );
-    } catch (error) {
-      if (!mounted || _closing) {
-        return;
+        // Yield between turns so UI updates and cancellation can be observed.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
       }
-
-      _showError(
-        'Errore durante la sessione Live: $error',
-      );
     } finally {
       if (mounted && !_closing) {
         _sessionStarted = false;
