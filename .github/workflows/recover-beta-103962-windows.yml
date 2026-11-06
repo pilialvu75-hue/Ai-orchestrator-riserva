@@ -1,0 +1,63 @@
+name: Recover Windows Asset for Authorized Beta 103962
+
+# One-time explicit owner-controlled recovery: only this dedicated request branch and file.
+on:
+  push:
+    branches:
+      - release-request/windows-103962
+    paths:
+      - release-requests/windows-103962.txt
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: authorized-windows-beta-103962-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover-and-dispatch:
+    if: github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' && github.ref == 'refs/heads/release-request/windows-103962'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify explicit one-time request and Android run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          request="release-requests/windows-103962.txt"
+          run_id="42264072102"
+          source_sha="c614ecca1ae66b8a5e32edd8f8f965746f117aef"
+          old_wrong_sha="c4703660dff543b156acc4e5ccb71fa85f28a4b7"
+          tag="v1.0.15-beta+103962"
+          printf 'android_run_id=%s\nsource_sha=%s\nrelease_tag=%s\n' "$run_id" "$source_sha" "$tag" > "$RUNNER_TEMP/expected-request.txt"
+          cmp -s "$request" "$RUNNER_TEMP/expected-request.txt" || { echo "::error::Request does not match the specifically authorized beta"; exit 1; }
+          run_json="$(gh api "repos/$repo/actions/runs/$run_id")"
+          echo "$run_json" | jq -e --arg sha "$source_sha" '
+            .name == "Build & Release APK" and
+            .event == "workflow_dispatch" and
+            .status == "completed" and .conclusion == "success" and
+            .head_branch == "main" and .head_sha == $sha and
+            .run_number == 3962' >/dev/null
+          gh release view "$tag" --repo "$repo" --json assets,isPrerelease \
+            --jq '(.isPrerelease == true) and ([.assets[].name] | index("app-release.apk") != null and index("app-release.aab") != null)' | grep -Fxq true
+          current_sha="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')"
+          if [[ "$current_sha" == "$old_wrong_sha" ]]; then
+            # Correct the existing tag to match the exact compiled & signed Android source.
+            gh api -X PATCH "repos/$repo/git/refs/tags/$tag" \
+              -f sha="$source_sha" -F force=true >/dev/null
+          elif [[ "$current_sha" != "$source_sha" ]]; then
+            echo "::error::Unexpected tag SHA; refusing to rewrite a third-party change"
+            exit 1
+          fi
+          test "$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')" = "$source_sha"
+          gh workflow run windows-release-publish.yml --repo "$repo" --ref main -f android_run_id="$run_id"
+          echo "Authorized Windows publish workflow dispatched for $tag at $source_sha."
