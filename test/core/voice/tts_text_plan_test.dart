@@ -8,6 +8,13 @@ void main() {
     expect(detectTtsLanguage('Ciao, come stai? Questa è la risposta.', 'fr'), 'it');
     expect(detectTtsLanguage('Voici votre réponse en français.', 'it'), 'fr');
   });
+  test('routes Spanish phrases with confident language cues', () {
+    expect(detectTtsLanguage('Hola, buenos días, ¿cómo estás?', 'it'), 'es');
+    expect(detectTtsLanguage('Gracias por la respuesta en español.', 'fr'), 'es');
+    expect(detectTtsLanguage('Hola Roberto', 'es-ES'), 'es');
+    expect(detectTtsLanguage('Hola Roberto', 'fr-FR'), 'fr');
+  });
+
   test('names numbers and ambiguous words retain the chosen locale', () {
     expect(detectTtsLanguage('Roberto 123', 'fr-FR'), 'fr');
     expect(detectTtsLanguage('Paris', 'it'), 'it');
