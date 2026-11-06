@@ -41,20 +41,26 @@ def verify(text):
 
 
 def verify_experimental(text):
-    """Separate fail-closed manual acceptance policy; NOT a default-branch pass."""
+    """Fail closed on real-star workflows, with no automatic provider launch."""
     if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
         raise AssertionError("EXPERIMENTAL_REQUIRES_PULL_REQUEST")
     if os.environ.get("GITHUB_HEAD_REF") != "cantiere/real-star-after-bootstrap-20261106":
         raise AssertionError("EXPERIMENTAL_BRANCH_NOT_ALLOWLISTED")
-    if not re.search(r"(?m)^on:\\s*\\n(?:[^\\n]*\\n)*?\\s+workflow_dispatch:\\s*$", text):
+    if not re.search(r"(?m)^  workflow_dispatch:\s*$", text):
         raise AssertionError("EXPERIMENTAL_MANUAL_DISPATCH_MISSING")
-    if not re.search(r"(?m)^permissions:\\s*\\n\\s+contents:\\s*read\\s*$", text):
+    if not re.search(r"(?m)^permissions:\s*\n\s+contents:\s*read\s*$", text):
         raise AssertionError("EXPERIMENTAL_PERMISSIONS_NOT_READ_ONLY")
-    if not re.search(r"(?m)^  source-check:\\s*$", text):
+    if not re.search(r"(?m)^  source-check:\s*$", text):
         raise AssertionError("EXPERIMENTAL_SOURCE_CHECK_MISSING")
     for job in ("real-star-opt-in", "real-star-emulator"):
-        pattern = r"(?ms)^  " + re.escape(job) + r":\\s*\\n(?:(?!^  [a-zA-Z0-9_-]+:).)*?^    if: github\\.event_name == 'workflow_dispatch'\\s*$"
-        if not re.search(pattern, text):
+        match = re.search(
+            r"(?ms)^  " + re.escape(job) + r":\s*\n(.*?)(?=^  [a-zA-Z0-9_-]+:\s*$|\Z)",
+            text,
+        )
+        if match is None or not re.search(
+            r"(?m)^    if: github\.event_name == 'workflow_dispatch'\s*$",
+            match.group(1),
+        ):
             raise AssertionError("EXPERIMENTAL_JOB_NOT_MANUAL_ONLY: " + job)
     for marker in (
         "CANTIERE_ZERO_COST_ROUTES_VERIFIED",
@@ -65,7 +71,12 @@ def verify_experimental(text):
     ):
         if marker not in text:
             raise AssertionError("EXPERIMENTAL_REQUIRED_GATE_MISSING: " + marker)
-    for forbidden in (r"(?m)^\\s+push:", r"(?m)^\\s+schedule:", r"pull_request_target", r"continue-on-error:\\s*true"):
+    for forbidden in (
+        r"(?m)^  push:",
+        r"(?m)^  schedule:",
+        r"pull_request_target",
+        r"continue-on-error:\s*true",
+    ):
         if re.search(forbidden, text):
             raise AssertionError("EXPERIMENTAL_FORBIDDEN_DIRECTIVE: " + forbidden)
 
