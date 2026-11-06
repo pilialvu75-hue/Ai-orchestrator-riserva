@@ -895,6 +895,22 @@ consenso esplicito.
   `/aivexus beta-checkpoint <SHA>` esistente continua a generare
   una beta ordinaria con consenso HYBRID spento, finche' non viene
   esplicitamente esteso/autorizzato. Nessuna release in questa fase.
+- **H38 — Android HYBRID QA con flag realmente ON, senza OTA:**
+  estesa la CI `Assistant Android Source Validation` affinche'
+  soltanto la PR interna #977 sul branch HYBRID compili il suo APK
+  **debug effimero** ARM64 con
+  `AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true`; per ogni altro
+  PR/ref il flag resta false. Prima della compilazione viene testato
+  il valore del bootstrap con define ON/OFF, i test di runtime
+  consent-gated e integrazione Chat, il widget del dialogo con
+  sessione visibile, l'impostazione Consensi Cloud; poi rimangono
+  obbligatori l'audit delle esportazioni FFI arm64 e hash del
+  pacchetto. La compilazione serve soltanto a rilevare regressioni
+  Flutter/Gradle/native su Android, NON firma un rilascio beta,
+  NON carica l'APK come release, NON installa sui dispositivi.
+  Dopo CI PASS restano da verificare test fisico sul S24 FE,
+  canale OTA firmato approvato, assenza di leak di memoria e
+  passaggio LOCAL/Cloud su rete interrotta e ripristinata.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

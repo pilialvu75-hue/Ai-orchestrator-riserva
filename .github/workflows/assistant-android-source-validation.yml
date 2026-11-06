@@ -6,6 +6,9 @@ on:
     branches: [main]
     paths:
       - 'lib/core/**'
+      - 'lib/app/runtime_bootstrap.dart'
+      - 'lib/features/chat/**'
+      - 'lib/features/settings/presentation/**'
       - 'lib/native/**'
       - 'native/android/**'
       - 'android/**'
@@ -22,6 +25,13 @@ jobs:
   android-source:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    # Only the internal PR #977 can enable the experimental gate in CI.
+    # Ordinary app/CI/release builds remain OFF; no APK is published here.
+    env:
+      HYBRID_QA_OPT_IN: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 977 && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feat/hybrid-granular-cloud-consent-899' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
     defaults:
       run:
         shell: bash
@@ -134,6 +144,18 @@ jobs:
         run: flutter pub get --enforce-lockfile
       - name: Test Assistant resource policy and runtime
         run: flutter test test/core/runtime/inference test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
+      - name: Verify HYBRID consent gate for actual Android QA branch
+        run: |
+          set -euo pipefail
+          [[ "$HYBRID_QA_OPT_IN" == "true" || "$HYBRID_QA_OPT_IN" == "false" ]]
+          flutter test \
+            --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="$HYBRID_QA_OPT_IN" \
+            --dart-define=AIVEXUS_EXPECT_HYBRID_QA_ENABLED="$HYBRID_QA_OPT_IN" \
+            test/app/runtime_bootstrap_cloud_consent_flag_test.dart \
+            test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart \
+            test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart \
+            test/features/chat/presentation/hybrid_cloud_chat_consent_gateway_test.dart \
+            test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
       - name: Create ephemeral debug signing identity for CI only
         run: |
           set -euo pipefail
@@ -142,7 +164,7 @@ jobs:
             keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
       - name: Compile ARM64 debug APK for validation only
-        run: flutter build apk --debug --target-platform android-arm64
+        run: flutter build apk --debug --target-platform android-arm64 --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="$HYBRID_QA_OPT_IN"
       - name: Verify packaged ARM64 bridge exports
         run: |
           set -euo pipefail
@@ -153,3 +175,5 @@ jobs:
             grep -Fxq "$symbol" /tmp/assistant-source-exports.txt || { echo "::error::Missing bridge export $symbol"; exit 1; }
           done
           sha256sum build/app/outputs/flutter-apk/app-debug.apk
+          echo "Android SOURCE CI smoke: HYBRID consent enabled=$HYBRID_QA_OPT_IN (not a release; no OTA)"
+
