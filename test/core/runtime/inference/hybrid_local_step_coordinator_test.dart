@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_disclosure_consent.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_immutable_step_plan_store.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_local_step_coordinator.dart';
@@ -134,18 +136,27 @@ void main() {
 
   test('H50 simultaneous LOCAL attempts can commit only one first step',
       () async {
-    final outcomes = await Future.wait(<Future<bool>>[
-      run((instruction, previous) async {
-        expect(instruction, 'first local');
-        return const HybridVerifiedStepResult(
-          output: 'first candidate', provenance: 'local-validated');
-      }).then((_) => true).catchError((Object _) => false),
-      run((instruction, previous) async {
-        expect(instruction, 'first local');
-        return const HybridVerifiedStepResult(
-          output: 'second candidate', provenance: 'local-validated');
-      }).then((_) => true).catchError((Object _) => false),
-    ]);
+    final bothStarted = Completer<void>();
+    final release = Completer<void>();
+    var starts = 0;
+    Future<HybridVerifiedStepResult> attempted(
+        String instruction, List<String> previous) async {
+      expect(instruction, 'first local');
+      expect(previous, isEmpty);
+      starts++;
+      if (starts == 2) bothStarted.complete();
+      await release.future;
+      return HybridVerifiedStepResult(
+        output: 'candidate-$starts', provenance: 'local-validated');
+    }
+
+    final first = run(attempted)
+        .then((_) => true).catchError((Object _) => false);
+    final second = run(attempted)
+        .then((_) => true).catchError((Object _) => false);
+    await bothStarted.future;
+    release.complete();
+    final outcomes = await Future.wait(<Future<bool>>[first, second]);
     expect(outcomes.where((ok) => ok), hasLength(1));
     final progress = await journal.load(
       ownerId: 'owner1', sessionId: 'chat1', taskId: 'task1');
@@ -153,9 +164,7 @@ void main() {
     final result = await evidence.loadCompletedStep(
       ownerId: 'owner1', sessionId: 'chat1',
       taskId: 'task1', step: 1);
-    expect(result, isNotNull);
-    expect(<String>['first candidate', 'second candidate'],
-        contains(result!.output));
+    expect(result?.output, 'candidate-2');
   });
 
   test('H50 owner revocation blocks even the LOCAL execution', () async {
