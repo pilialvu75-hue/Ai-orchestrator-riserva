@@ -52,16 +52,24 @@ class ChatAudioPlaybackBar extends StatelessWidget {
     final limit = buffered.inMilliseconds;
     final canScrub = !isBusy && limit > 0;
     final current = position.inMilliseconds.clamp(0, limit > 0 ? limit : 0);
+    final atEnd = complete && buffered > Duration.zero && position >= buffered;
     return Row(
       children: [
         IconButton(
           tooltip: isBusy
               ? 'Preparazione audio'
-              : isPaused || !isPlaying
-                  ? 'Riprendi lettura'
-                  : 'Pausa lettura',
-          onPressed: isBusy ? null :
-              (isPaused || !isPlaying ? onResume : onPause),
+              : atEnd
+                  ? 'Riascolta dall’inizio'
+                  : isPaused || !isPlaying
+                      ? 'Riprendi lettura'
+                      : 'Pausa lettura',
+          onPressed: isBusy
+              ? null
+              : atEnd
+                  ? () => onSeek?.call(Duration.zero)
+                  : isPaused || !isPlaying
+                      ? onResume
+                      : onPause,
           icon: Icon(
             isBusy
                 ? Icons.hourglass_top_rounded
@@ -116,7 +124,7 @@ class ChatAudioPlaybackBar extends StatelessWidget {
                         child: Slider(
                           value: (draggingMs ?? current.toDouble()).clamp(
                             0.0, limit > 0 ? limit.toDouble() : 1.0,
-                          ),
+                          ).toDouble(),
                           min: 0,
                           max: limit > 0 ? limit.toDouble() : 1,
                           onChanged: canScrub
