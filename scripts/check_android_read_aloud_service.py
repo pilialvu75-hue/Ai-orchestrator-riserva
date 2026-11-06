@@ -59,6 +59,10 @@ def validate() -> list[str]:
         "return START_NOT_STICKY",
         "setShowActionsInCompactView",
         "setOnAudioFocusChangeListener",
+        "AudioManager.ACTION_AUDIO_BECOMING_NOISY",
+        "registerReceiver(becomingNoisy, noisyFilter",
+        "unregisterReceiver(becomingNoisy)",
+        "Context.RECEIVER_NOT_EXPORTED",
     )
     bridge_markers = (
         "PcmReadAloudMediaService.ensureStarted(app)",
