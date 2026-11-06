@@ -25,7 +25,7 @@ import java.util.concurrent.Executors
 internal class PcmReadAloudBridge(private val context: Context) {
     private val lock = Any()
     private val main = Handler(Looper.getMainLooper())
-    private val io = Executors.newSingleThreadExecutor()
+    internal val io = Executors.newSingleThreadExecutor()
     private val path = File(context.cacheDir, "read_aloud_current.pcm")
     private var reader: RandomAccessFile? = null
     private var writer: RandomAccessFile? = null
@@ -53,7 +53,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
         return (seekBase + (clock and 0xffffffffL)).coerceIn(0L, totalFrames)
     }
 
-    private fun snapshot(): Map<String, Any> = synchronized(lock) {
+    fun status(): Map<String, Any> = synchronized(lock) {
         val position = playedFrames()
         val atEnd = finished && position >= totalFrames
         mapOf(
@@ -67,7 +67,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
         )
     }
 
-    private fun releaseLocked() {
+    fun releaseLocked() = synchronized(lock) {
         active = false
         try { track?.pause() } catch (_: Exception) {}
         try { track?.flush() } catch (_: Exception) {}
@@ -86,7 +86,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
         if (path.exists()) path.delete()
     }
 
-    private fun prepare() = synchronized(lock) {
+    fun prepare() = synchronized(lock) {
         releaseLocked()
         path.parentFile?.mkdirs()
         writer = RandomAccessFile(path, "rw")
@@ -94,7 +94,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
         active = true
     }
 
-    private fun append(pcm: ByteArray, rate: Int) = synchronized(lock) {
+    fun append(pcm: ByteArray, rate: Int) = synchronized(lock) {
         require(active) { "PCM session is not prepared" }
         require(rate in 8000..48000) { "Unsupported PCM sample rate" }
         require(pcm.isNotEmpty() && pcm.size % 2 == 0) { "Invalid PCM16 chunk" }
@@ -138,21 +138,21 @@ internal class PcmReadAloudBridge(private val context: Context) {
         totalFrames += pcm.size / 2L
     }
 
-    private fun pause() = synchronized(lock) {
+    fun pause() = synchronized(lock) {
         if (active && !paused) {
             paused = true
             track?.pause()
         }
     }
 
-    private fun resume() = synchronized(lock) {
+    fun resume() = synchronized(lock) {
         if (active && paused) {
             paused = false
             track?.play()
         }
     }
 
-    private fun seek(targetMs: Long, relative: Boolean) = synchronized(lock) {
+    fun seek(targetMs: Long, relative: Boolean) = synchronized(lock) {
         if (!active || sampleRate == 0) return@synchronized
         val absoluteMs = if (relative) {
             playedFrames() * 1000L / sampleRate + targetMs
@@ -221,16 +221,57 @@ internal class PcmReadAloudBridge(private val context: Context) {
     companion object {
         private const val CHANNEL = "com.aiorchestrator/tts_pcm_transport"
 
-        fun register(context: Context, engine: FlutterEngine): PcmReadAloudBridge {
-            val transport = PcmReadAloudBridge(context.applicationContext)
+        /**
+         * Channel is attached to the current FlutterEngine. There is NO PCM
+         * player owned by this Activity: it lives inside the foreground media
+         * Service, so switching apps does not dispose the playback timeline.
+         */
+        fun register(context: Context, engine: FlutterEngine) {
+            val app = context.applicationContext
             MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
                 .setMethodCallHandler { call, result ->
                     try {
-                        when (call.method) {
-                            "prepare" -> {
-                                synchronized(transport.lock) { transport.prepare() }
-                                result.success(null)
+                        if (call.method == "prepare") {
+                            PcmReadAloudMediaService.ensureStarted(app) { service, error ->
+                                try {
+                                    if (service == null) {
+                                        result.error("MEDIA_SERVICE", error ?: "Audio service unavailable", null)
+                                    } else {
+                                        service.transport.prepare()
+                                        service.updateMediaState()
+                                        result.success(null)
+                                    }
+                                } catch (failure: Exception) {
+                                    result.error("PCM_PREPARE", failure.message, null)
+                                }
                             }
+                            return@setMethodCallHandler
+                        }
+
+                        val service = PcmReadAloudMediaService.active()
+                        if (service == null) {
+                            if (call.method == "status") {
+                                result.success(
+                                    mapOf(
+                                        "supported" to true,
+                                        "active" to false,
+                                        "playing" to false,
+                                        "paused" to false,
+                                        "positionMs" to 0L,
+                                        "bufferedMs" to 0L,
+                                        "complete" to false
+                                    )
+                                )
+                            } else if (call.method == "stop" || call.method == "dispose") {
+                                result.success(null)
+                            } else {
+                                result.error("MEDIA_SERVICE", "No user-started media service", null)
+                            }
+                            return@setMethodCallHandler
+                        }
+
+                        val transport = service.transport
+                        when (call.method) {
                             "append" -> {
                                 val pcm = call.argument<ByteArray>("pcm")
                                     ?: throw IllegalArgumentException("Missing PCM chunk")
@@ -239,56 +280,55 @@ internal class PcmReadAloudBridge(private val context: Context) {
                                 transport.io.execute {
                                     try {
                                         transport.append(pcm, rate)
-                                        transport.main.post { result.success(null) }
-                                    } catch (error: Exception) {
                                         transport.main.post {
-                                            result.error("PCM_APPEND", error.message, null)
+                                            service.updateMediaState()
+                                            result.success(null)
+                                        }
+                                    } catch (failure: Exception) {
+                                        transport.main.post {
+                                            result.error("PCM_APPEND", failure.message, null)
                                         }
                                     }
                                 }
                             }
                             "finish" -> {
                                 synchronized(transport.lock) { transport.finished = true }
+                                service.updateMediaState()
                                 result.success(null)
                             }
                             "pause" -> {
-                                transport.pause()
-                                result.success(transport.snapshot())
+                                service.pause()
+                                result.success(transport.status())
                             }
                             "resume" -> {
-                                transport.resume()
-                                result.success(transport.snapshot())
+                                service.play()
+                                result.success(transport.status())
                             }
                             "seek" -> {
                                 transport.seek(
-                                    (call.argument<Number>("milliseconds")?.toLong() ?: 0L),
-                                    false
+                                    call.argument<Number>("milliseconds")?.toLong() ?: 0L,
+                                    relative = false
                                 )
-                                result.success(transport.snapshot())
+                                service.updateMediaState()
+                                result.success(transport.status())
                             }
                             "seekRelative" -> {
-                                transport.seek(
-                                    (call.argument<Number>("milliseconds")?.toLong() ?: 0L),
-                                    true
+                                service.jump(
+                                    call.argument<Number>("milliseconds")?.toLong() ?: 0L
                                 )
-                                result.success(transport.snapshot())
+                                result.success(transport.status())
                             }
-                            "status" -> result.success(transport.snapshot())
-                            "stop" -> {
-                                synchronized(transport.lock) { transport.releaseLocked() }
-                                result.success(null)
-                            }
-                            "dispose" -> {
-                                transport.close()
+                            "status" -> result.success(transport.status())
+                            "stop", "dispose" -> {
+                                service.finishPlayback()
                                 result.success(null)
                             }
                             else -> result.notImplemented()
                         }
-                    } catch (error: Exception) {
-                        result.error("PCM_TRANSPORT", error.message, null)
+                    } catch (failure: Exception) {
+                        result.error("PCM_TRANSPORT", failure.message, null)
                     }
                 }
-            return transport
         }
     }
 }
