@@ -205,7 +205,7 @@ internal class PcmReadAloudMediaService : Service() {
         return audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
     }
 
-    private fun play() {
+    fun play() {
         if (!requestFocus()) {
             transport.pause()
             updateMediaState()
@@ -215,13 +215,13 @@ internal class PcmReadAloudMediaService : Service() {
         updateMediaState()
     }
 
-    private fun pause() {
+    fun pause() {
         resumeAfterFocus = false
         transport.pause()
         updateMediaState()
     }
 
-    private fun jump(offsetMs: Long) {
+    fun jump(offsetMs: Long) {
         transport.seek(offsetMs, relative = true)
         updateMediaState()
     }
