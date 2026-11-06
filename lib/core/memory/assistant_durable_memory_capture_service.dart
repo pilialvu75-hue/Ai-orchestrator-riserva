@@ -1,4 +1,6 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
+import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
+import 'package:ai_orchestrator/core/memory/assistant_entity_reference_analyzer.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
@@ -192,6 +194,117 @@ final class AssistantDurableMemoryCaptureService {
       return _applyExplicitUserInstruction(
         sessionId: sessionId,
         userPrompt: userPrompt,
+      );
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  /// A manually submitted named reference, never inferred from model output.
+  ///
+  /// Separate per-action consent is mandatory; this is deliberately NOT called
+  /// from ordinary chat, even when name-capture opt-in is enabled.
+  Future<bool> proposeManualEntityReferenceCandidate({
+    required String userPrompt,
+    bool consentEnabled = false,
+    bool directUserMessage = false,
+  }) {
+    if (!consentEnabled || !directUserMessage || _resetInProgress) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) async {
+      if (_resetInProgress) return false;
+      final key =
+          AssistantManualEntityReferenceCandidate.recordKeyFor(userPrompt);
+      if (key == null) return false;
+      await _memoryService.recordUserCandidate(
+        recordKey: key,
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: userPrompt.trim(),
+        updatedAt: _now(),
+        reason: 'manual_entity_reference:it',
+      );
+      return true;
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  /// Read-only queue for manual, source-labeled claims about named people.
+  Future<List<AssistantDurableMemoryRecord>>
+      loadReviewableManualEntityReferenceCandidates() async {
+    final records = await _memoryService.loadCandidates(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+    );
+    return List<AssistantDurableMemoryRecord>.unmodifiable(
+      records.where((record) =>
+          record.recordKey ==
+              AssistantManualEntityReferenceCandidate.recordKeyFor(
+                record.content,
+              ) &&
+          record.reason == 'manual_entity_reference:it' &&
+          record.kind == AssistantMemoryKind.fact &&
+          record.source == AssistantMemorySource.userStatement),
+    );
+  }
+
+  /// Approval is compare-and-swap against the displayed user statement.
+  /// An edit may change the claim but must retain its explicit named alias.
+  Future<bool> reviewManualEntityReferenceCandidate({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    bool userConfirmed = false,
+    String? correctedContent,
+  }) {
+    final originalKey =
+        AssistantManualEntityReferenceCandidate.recordKeyFor(reviewed.content);
+    final requestedContent = (correctedContent ?? reviewed.content).trim();
+    final revisedKey =
+        AssistantManualEntityReferenceCandidate.recordKeyFor(requestedContent);
+    if (!userConfirmed ||
+        _resetInProgress ||
+        reviewed.status != AssistantMemoryStatus.candidate ||
+        reviewed.source != AssistantMemorySource.userStatement ||
+        reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.scopeId !=
+            AssistantDurableMemoryContextService.localUserScopeId ||
+        reviewed.kind != AssistantMemoryKind.fact ||
+        reviewed.reason != 'manual_entity_reference:it' ||
+        originalKey == null ||
+        reviewed.recordKey != originalKey ||
+        (!approve && correctedContent != null) ||
+        (approve && revisedKey == null)) {
+      return Future<bool>.value(false);
+    }
+    // Do not let editing silently switch to another person's name.
+    final originalAlias =
+        AssistantEntityReferenceAnalyzer.parseDirectUserStatement(
+          reviewed.content,
+        )?.nameReferenceKey;
+    final revisedAlias =
+        AssistantEntityReferenceAnalyzer.parseDirectUserStatement(
+          requestedContent,
+        )?.nameReferenceKey;
+    if (approve && originalAlias != revisedAlias) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) {
+      if (_resetInProgress) return Future<bool>.value(false);
+      return _memoryService.resolveUserStatementCandidate(
+        reviewed: reviewed,
+        approve: approve,
+        approvedContent: approve ? requestedContent : null,
+        reviewedAt: _now(),
       );
     });
     _pendingWrites = operation.then<void>(

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
+import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
 
 abstract class AssistantDurableMemoryPersistence {
   Future<String?> read(String key);
@@ -191,7 +192,12 @@ class AssistantDurableMemoryStore {
         !(reviewed.kind == AssistantMemoryKind.preference ||
             (reviewed.kind == AssistantMemoryKind.fact &&
              (reviewed.recordKey == AssistantNaturalNameCandidate.recordKey ||
-              reviewed.recordKey == AssistantNaturalCarColorCandidate.recordKey))) ||
+              reviewed.recordKey == AssistantNaturalCarColorCandidate.recordKey ||
+              (reviewed.reason == 'manual_entity_reference:it' &&
+               reviewed.recordKey ==
+                   AssistantManualEntityReferenceCandidate.recordKeyFor(
+                     reviewed.content,
+                   ))))) ||
         reviewedAt < 0 ||
         (approve && (approvedContent == null ||
             approvedContent.trim().isEmpty))) {
