@@ -1,0 +1,23 @@
+name: Cantiere Dispatch Bootstrap Safety
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cantiere-real-star-production.yml'
+      - '.github/workflows/cantiere-dispatch-bootstrap-safety.yml'
+      - 'tool/cantiere_dispatch_bootstrap_safety.py'
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Check inert, manual-only registration
+        run: python3 tool/cantiere_dispatch_bootstrap_safety.py
