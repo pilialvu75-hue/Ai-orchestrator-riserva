@@ -77,9 +77,11 @@ void main() {
     ));
     expect(find.byTooltip('Preparazione audio'), findsOneWidget);
     final back = tester.widget<IconButton>(
-        find.byTooltip('Indietro 10 secondi'));
+        find.byWidgetPredicate(
+          (widget) => widget is IconButton && widget.tooltip == 'Indietro 10 secondi'));
     final forward = tester.widget<IconButton>(
-        find.byTooltip('Avanti 10 secondi'));
+        find.byWidgetPredicate(
+          (widget) => widget is IconButton && widget.tooltip == 'Avanti 10 secondi'));
     expect(back.onPressed, isNull);
     expect(forward.onPressed, isNull);
     expect(tester.takeException(), isNull);
