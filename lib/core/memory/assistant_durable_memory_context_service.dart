@@ -94,8 +94,10 @@ class AssistantDurableMemoryContextService {
           record.content,
         );
         final name = claim?.namedReference;
-        if (name == null ||
-            !_terms(name).every(queryTerms.contains)) {
+        final nameTerms = name == null ? const <String>{} : _terms(name);
+        // Short aliases (e.g. "Li") have no indexed >=3-character token.
+        // An empty match set must never authorize recall of a third party.
+        if (nameTerms.isEmpty || !nameTerms.every(queryTerms.contains)) {
           continue;
         }
       }
