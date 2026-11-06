@@ -67,7 +67,7 @@ class ChatAudioPlaybackBar extends StatelessWidget {
           onPressed: isBusy
               ? null
               : atEnd
-                  ? () => onSeek?.call(Duration.zero)
+                  ? onRestart
                   : isPaused || !isPlaying
                       ? onResume
                       : onPause,
