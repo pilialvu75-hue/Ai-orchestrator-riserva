@@ -160,7 +160,7 @@ def run(apk, package, out):
         time.sleep(2)
         second = adb("exec-out", "screencap", "-p", binary=True)
         (out / "after-second-tap.png").write_bytes(second)
-        second_metrics = compare_images(before, second)
+        second_metrics = compare_images(after, second)
         receipt["tap_one"] = first_metrics
         receipt["tap_two"] = second_metrics
         receipt["ui_color_change_verified"] = True
