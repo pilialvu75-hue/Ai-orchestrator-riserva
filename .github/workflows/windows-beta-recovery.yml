@@ -79,7 +79,11 @@ jobs:
 
           echo "Authorized Android workflow_dispatch success confirmed"
           version_code="$((100000 + $(jq -r .run_number <<<"$source_run"))))"
-          [[ "$tag" == *"+$version_code" ]]
+          echo "Authorized Android build=$version_code, requested release tag=$tag"
+          [[ "$tag" == *"+$version_code" ]] || {
+            echo "::error::Tag does not match the authorized Android run build number"
+            exit 1
+          }
           echo "Version code matches requested beta tag"
           tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
           test "$tag_sha" = "$sha"
