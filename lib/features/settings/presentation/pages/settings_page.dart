@@ -17,6 +17,7 @@ import 'package:ai_orchestrator/features/settings/presentation/pages/modules/dan
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/assistant_memory_review_page.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/language_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/model_management_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/models_page.dart';
@@ -405,6 +406,8 @@ class _SettingsPageState extends State<SettingsPage> {
                               di.sl<AssistantDurableMemoryCaptureService>(),
                           consentService:
                               di.sl<AssistantNaturalMemoryConsentService>(),
+                          relationalConsentService:
+                              di.sl<AssistantRelationalMemoryConsentService>(),
                         ),
                       ),
                     );

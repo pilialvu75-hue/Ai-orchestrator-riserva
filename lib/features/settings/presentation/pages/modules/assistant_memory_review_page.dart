@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_ser
 import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
 import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
 
@@ -17,10 +18,12 @@ class AssistantMemoryReviewPage extends StatefulWidget {
     super.key,
     required this.captureService,
     required this.consentService,
+    this.relationalConsentService,
   });
 
   final AssistantDurableMemoryCaptureService captureService;
   final AssistantNaturalMemoryConsentService consentService;
+  final AssistantRelationalMemoryConsentService? relationalConsentService;
 
   @override
   State<AssistantMemoryReviewPage> createState() =>
@@ -100,6 +103,20 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     setState(() => _savingConsent = true);
     try {
       await widget.consentService.setEnabled(enabled);
+      if (mounted) setState(() {});
+    } on Object catch (_) {
+      _message('chat_consent_save_error');
+    } finally {
+      if (mounted) setState(() => _savingConsent = false);
+    }
+  }
+
+  Future<void> _toggleRelationalSuggestions(bool enabled) async {
+    final consent = widget.relationalConsentService;
+    if (consent == null || _savingConsent) return;
+    setState(() => _savingConsent = true);
+    try {
+      await consent.setEnabled(enabled);
       if (mounted) setState(() {});
     } on Object catch (_) {
       _message('chat_consent_save_error');
@@ -341,6 +358,17 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
               contentPadding: EdgeInsets.zero,
               secondary: const Icon(Icons.psychology_outlined),
             ),
+            if (widget.relationalConsentService != null)
+              SwitchListTile(
+                value: widget.relationalConsentService!.enabled,
+                onChanged: _savingConsent || _busy
+                    ? null
+                    : _toggleRelationalSuggestions,
+                title: Text(_t('relational_consent_title')),
+                subtitle: Text(_t('relational_consent_note')),
+                contentPadding: EdgeInsets.zero,
+                secondary: const Icon(Icons.people_outline),
+              ),
             const SizedBox(height: 16),
             Text(
               _t('manual'),
