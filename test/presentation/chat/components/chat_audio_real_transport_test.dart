@@ -59,6 +59,36 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('finished service offers explicit replay, not stale resume',
+      (tester) async {
+    var restarts = 0;
+    var resumes = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 360,
+          child: ChatAudioPlaybackBar(
+            isPlaying: false,
+            isBusy: false,
+            realTransport: true,
+            position: const Duration(seconds: 90),
+            buffered: const Duration(seconds: 90),
+            complete: true,
+            onStop: () => fail('No stop after finished audio'),
+            onRestart: () => restarts++,
+            onResume: () => resumes++,
+            onClose: () {},
+          ),
+        ),
+      ),
+    ));
+    expect(find.byTooltip('Riascolta dall’inizio'), findsOneWidget);
+    await tester.tap(find.byTooltip('Riascolta dall’inizio'));
+    expect(restarts, 1);
+    expect(resumes, 0);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('seek is disabled until real PCM exists', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
