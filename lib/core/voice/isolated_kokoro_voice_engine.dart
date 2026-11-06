@@ -159,7 +159,7 @@ final class IsolatedKokoroVoiceEngine
 
   ReadAloudSink? get _readAloudSink {
     final sink = _audioSink;
-    return sink is ReadAloudSink ? sink : null;
+    return sink is ReadAloudSink ? sink as ReadAloudSink : null;
   }
 
   @override
