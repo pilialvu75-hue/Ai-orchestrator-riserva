@@ -71,6 +71,7 @@ class MainActivity : FlutterActivity() {
         LocalPdfTextBridge.register(this, flutterEngine)
         VideoStoryboardBridge.register(flutterEngine)
         PcmReadAloudBridge.register(applicationContext, flutterEngine)
+        LiveAudioDiagnosticsBridge.register(flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
         registerMlcNativeChannel(flutterEngine)
