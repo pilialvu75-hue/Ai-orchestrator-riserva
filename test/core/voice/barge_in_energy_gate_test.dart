@@ -11,7 +11,16 @@ void main() {
     final gate = BargeInEnergyGate();
     for (var i = 0; i < 12; i++) {
       expect(gate.process(loud20ms,
-          assistantSpeaking: true, echoSuppressed: false), isFalse);
+          assistantSpeaking: true, echoSuppressed: false, speechConfirmed: true), isFalse);
+    }
+  });
+
+  test('never interrupts without VAD-confirmed speech', () {
+    final gate = BargeInEnergyGate();
+    for (var i = 0; i < 12; i++) {
+      expect(gate.process(loud20ms,
+          assistantSpeaking: true, echoSuppressed: true,
+          speechConfirmed: false), isFalse);
     }
   });
 
@@ -19,27 +28,27 @@ void main() {
     final gate = BargeInEnergyGate();
     for (var i = 0; i < 5; i++) {
       expect(gate.process(loud20ms,
-          assistantSpeaking: true, echoSuppressed: true), isFalse);
+          assistantSpeaking: true, echoSuppressed: true, speechConfirmed: true), isFalse);
     }
     expect(gate.process(loud20ms,
-        assistantSpeaking: true, echoSuppressed: true), isTrue);
+        assistantSpeaking: true, echoSuppressed: true, speechConfirmed: true), isTrue);
     expect(gate.process(loud20ms,
-        assistantSpeaking: true, echoSuppressed: true), isFalse);
+        assistantSpeaking: true, echoSuppressed: true, speechConfirmed: true), isFalse);
     expect(gate.process(silent20ms,
-        assistantSpeaking: true, echoSuppressed: true), isFalse);
+        assistantSpeaking: true, echoSuppressed: true, speechConfirmed: true), isFalse);
     for (var i = 0; i < 5; i++) {
       expect(gate.process(loud20ms,
-          assistantSpeaking: true, echoSuppressed: true), isFalse);
+          assistantSpeaking: true, echoSuppressed: true, speechConfirmed: true), isFalse);
     }
     expect(gate.process(loud20ms,
-        assistantSpeaking: true, echoSuppressed: true), isTrue);
+        assistantSpeaking: true, echoSuppressed: true, speechConfirmed: true), isTrue);
   });
 
   test('cannot trigger while assistant is not speaking', () {
     final gate = BargeInEnergyGate();
     for (var i = 0; i < 10; i++) {
       expect(gate.process(loud20ms,
-          assistantSpeaking: false, echoSuppressed: true), isFalse);
+          assistantSpeaking: false, echoSuppressed: true, speechConfirmed: true), isFalse);
     }
   });
 
@@ -47,6 +56,6 @@ void main() {
     final gate = BargeInEnergyGate();
     final corrupt = Float32List.fromList([double.nan, 0.3]);
     expect(gate.process(corrupt,
-        assistantSpeaking: true, echoSuppressed: true), isFalse);
+        assistantSpeaking: true, echoSuppressed: true, speechConfirmed: true), isFalse);
   });
 }
