@@ -70,6 +70,7 @@ class MainActivity : FlutterActivity() {
         LocalImageTextBridge.register(this, flutterEngine)
         LocalPdfTextBridge.register(this, flutterEngine)
         VideoStoryboardBridge.register(flutterEngine)
+        PcmReadAloudBridge.register(applicationContext, flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
         registerMlcNativeChannel(flutterEngine)
