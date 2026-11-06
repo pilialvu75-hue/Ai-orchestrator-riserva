@@ -256,7 +256,10 @@ final class IsolatedKokoroVoiceEngine
   Future<void> _speakRequest(String sanitized, int generation) async {
     // Every explicit read-aloud request gets a new PCM timeline. This is
     // independent of chat navigation; generated phrases remain seekable.
-    await _readAloudSink?.beginReadAloud();
+    final readAloud = _readAloudSink;
+    await readAloud?.beginReadAloud();
+    var completed = false;
+    try {
     final preparation = Stopwatch()..start();
     final assets = await _assetsProvider();
     logEvent(_tag, '[TTS_PREPARE_TIMING] asset_ms=${preparation.elapsedMilliseconds}');
@@ -287,7 +290,20 @@ final class IsolatedKokoroVoiceEngine
           detectTtsLanguage(phrases[index], defaultLang), generation, index);
     }
     if (!_disposed && generation == _lifecycleGeneration) {
-      await _readAloudSink?.finishReadAloud();
+      await readAloud?.finishReadAloud();
+      completed = true;
+    }
+    } finally {
+      // If assets are missing or a later phrase fails, never leave a
+      // user-started Android mediaPlayback foreground service orphaned.
+      // When another request stopped us, its stopReadAloud owns cleanup.
+      if (!completed && !_disposed && generation == _lifecycleGeneration) {
+        try {
+          await readAloud?.stopReadAloud();
+        } catch (error) {
+          logEvent(_tag, '[TTS_STOP_WARN] background_audio_cleanup_failed');
+        }
+      }
     }
   }
 
