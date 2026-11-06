@@ -96,6 +96,7 @@ jobs:
           test/core/runtime/inference/hybrid_resume_preflight_test.dart
           test/core/runtime/inference/hybrid_h49_integrated_checkpoint_test.dart
           test/core/runtime/inference/hybrid_protected_resume_adapter_test.dart
+          test/core/runtime/inference/hybrid_local_step_coordinator_test.dart
           test/core/runtime/inference/hybrid_cloud_visual_attachment_guard_test.dart
           test/features/chat/data/repositories/chat_repository_visual_consent_test.dart
           test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart
