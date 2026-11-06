@@ -71,7 +71,7 @@ def validate(source: str) -> list[str]:
     # Two explicit dispatches are permitted only in the owner-authorized,
     # CI-gated checkpoint: Android beta first, Windows from the successful
     # Android workflow_dispatch run ID. No arbitrary downstream actions.
-    dispatches = re.findall(r'gh workflow run ([\w.-]+\.yml)\\b', source)
+    dispatches = re.findall(r'gh workflow run ([\w.-]+\.yml)\b', source)
     if sorted(dispatches) != ["build.yml", "windows-release-publish.yml"]:
         problems.append("Only authorized Android and provenanced Windows dispatches allowed")
     for marker in (
