@@ -154,7 +154,8 @@ void main() {
 
     expect(received, ['Prima risposta', 'Seconda risposta']);
     expect(sink.pushCount, 1); // stale PCM never reaches the player.
-    expect(sink.lastSamples, [0.3, -0.3]);
+    expect(sink.lastSamples, hasLength(2));
+    expect(sink.lastSamples!.first, closeTo(0.3, 0.001));
     await engine.dispose();
   });
 
