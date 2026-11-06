@@ -12,6 +12,11 @@ on:
       - 'tool/test_cantiere_real_star_receipt_gate.py'
       - '.github/workflows/cantiere-real-star-production.yml'
   workflow_dispatch:
+    inputs:
+      confirm_real_model_calls:
+        description: 'Type AUTHORIZE_REAL_MODEL_CALLS to permit bounded cloud inference for this run'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -41,7 +46,7 @@ jobs:
           python3 -m unittest -v tool.test_cantiere_real_star_receipt_gate
 
   real-star-opt-in:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/cantiere/real-star-after-bootstrap-20261106'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/cantiere/real-star-after-bootstrap-20261106' && inputs.confirm_real_model_calls == 'AUTHORIZE_REAL_MODEL_CALLS'
     needs: source-check
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -99,7 +104,7 @@ jobs:
           retention-days: 7
 
   real-star-emulator:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/cantiere/real-star-after-bootstrap-20261106'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/cantiere/real-star-after-bootstrap-20261106' && inputs.confirm_real_model_calls == 'AUTHORIZE_REAL_MODEL_CALLS'
     needs: real-star-opt-in
     runs-on: ubuntu-24.04
     timeout-minutes: 35
