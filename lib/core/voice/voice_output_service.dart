@@ -40,10 +40,9 @@ class VoiceOutputService {
 
   ReadAloudVoiceEngine? get _transport {
     final engine = _engine;
-    return engine is ReadAloudVoiceEngine &&
-            engine.supportsRealReadAloudControls
-        ? engine
-        : null;
+    if (engine is! ReadAloudVoiceEngine) return null;
+    final transport = engine as ReadAloudVoiceEngine;
+    return transport.supportsRealReadAloudControls ? transport : null;
   }
 
   bool get supportsRealReadAloudControls => _transport != null;
