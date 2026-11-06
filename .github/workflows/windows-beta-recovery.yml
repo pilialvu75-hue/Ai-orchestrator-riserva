@@ -64,6 +64,7 @@ jobs:
           grep -Fxq "source_sha=$sha" "$request"
           grep -Fxq "tag=$tag" "$request"
 
+          echo "Verified strict recovery request syntax"
           source_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
           jq -e --arg sha "$sha" --arg repo "$GITHUB_REPOSITORY" '
             .name == "Build & Release APK" and
@@ -75,16 +76,20 @@ jobs:
             .repository.full_name == $repo
           ' <<<"$source_run" >/dev/null
 
+          echo "Authorized Android workflow_dispatch success confirmed"
           version_code="$((100000 + $(jq -r .run_number <<<"$source_run"))))"
           [[ "$tag" == *"+$version_code" ]]
+          echo "Version code matches requested beta tag"
           tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
           test "$tag_sha" = "$sha"
 
+          echo "Release tag points to the authorized Android commit"
           release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
           jq -e --arg tag "$tag" '
             .tag_name == $tag and .draft == false and .prerelease == true and
             ([.assets[].name] | index("app-release.apk") != null)
           ' <<<"$release" >/dev/null
+          echo "Published beta and Android APK verified"
           if jq -e '[.assets[].name] | index("AI-Orchestrator-Setup-x64.exe") != null' \
               <<<"$release" >/dev/null; then
             echo "::notice::Windows installer already present in authorized release $tag"
