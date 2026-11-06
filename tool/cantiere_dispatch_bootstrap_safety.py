@@ -89,7 +89,7 @@ if __name__ == "__main__":
             print("CANTIERE_EXPERIMENTAL_MANUAL_GATE_PASS")
         else:
             verify(content)
-            except Exception as error:
-        print("CANTIERE_DISPATCH_BOOTSTRAP_FAIL: " + str(error), file=sys.stderr)
+            print("CANTIERE_DISPATCH_BOOTSTRAP_INERT_PASS")
+    except Exception as error:
+        print("CANTIERE_DISPATCH_SAFETY_FAIL: " + str(error), file=sys.stderr)
         sys.exit(1)
-    print("CANTIERE_DISPATCH_BOOTSTRAP_INERT_PASS")
