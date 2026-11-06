@@ -1,3 +1,4 @@
+export 'package:ai_orchestrator/core/voice/read_aloud_transport.dart' show TtsAudioSink;
 import 'dart:typed_data';
 
 import 'package:ai_orchestrator/core/voice/android_pcm_tts_audio_sink.dart';
