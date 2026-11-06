@@ -156,8 +156,7 @@ internal class PcmReadAloudMediaService : Service() {
                     }
                     AudioManager.AUDIOFOCUS_LOSS -> {
                         resumeAfterFocus = false
-                        transport.pause()
-                        updateMediaState()
+                        finishPlayback()
                     }
                     AudioManager.AUDIOFOCUS_GAIN -> {
                         if (resumeAfterFocus) {
@@ -171,6 +170,12 @@ internal class PcmReadAloudMediaService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A stale notification/media key must never resurrect audio after a
+        // user stop or process death without a fresh in-app START gesture.
+        if (intent?.action != ACTION_START && !foregroundReady) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         when (intent?.action) {
             ACTION_START -> {
                 if (!foregroundReady) {
