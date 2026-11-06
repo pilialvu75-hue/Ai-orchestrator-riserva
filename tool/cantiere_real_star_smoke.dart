@@ -63,6 +63,7 @@ Future<void> main(List<String> args) async {
 
   final client = http.Client();
   final roleEvidence = <String, List<String>>{};
+  final requestBudget = _RealStarRequestBudget();
   final buildLab = WorkshopBuildLab(providers: <WorkshopBuildProvider>[
     WorkshopLocalBuildProvider(
       configuration: WorkshopLocalBuildConfiguration(
@@ -87,6 +88,7 @@ Future<void> main(List<String> args) async {
           accessClientSecret: clientSecret,
           capability: WorkshopWebCloudRolePolicy.capabilityForRole(role).id,
           roleEvidence: roleEvidence,
+          requestBudget: requestBudget,
         ),
       ),
   };
@@ -178,6 +180,7 @@ Future<void> main(List<String> args) async {
       'inference': 'cloudflare_protected_broker',
       'four_roles_replied': true,
       'broker_model_ids_observed': true,
+      'broker_request_count': requestBudget.used,
       'independent_model_generation_provenance_verified': false,
       'artifact_built': true,
       'apk_sha256': crypto.sha256.convert(await apk.readAsBytes()).toString(),
@@ -206,6 +209,17 @@ Future<void> main(List<String> args) async {
   }
 }
 
+final class _RealStarRequestBudget {
+  static const int maximum = 32;
+  int used = 0;
+
+  bool reserve() {
+    if (used >= maximum) return false;
+    used++;
+    return true;
+  }
+}
+
 final class _AccessBrokerProvider implements RuntimeInferenceProvider {
   _AccessBrokerProvider({
     required this.client,
@@ -214,6 +228,7 @@ final class _AccessBrokerProvider implements RuntimeInferenceProvider {
     required this.accessClientSecret,
     required this.capability,
     required this.roleEvidence,
+    required this.requestBudget,
   });
 
   final http.Client client;
@@ -222,6 +237,7 @@ final class _AccessBrokerProvider implements RuntimeInferenceProvider {
   final String accessClientSecret;
   final String capability;
   final Map<String, List<String>> roleEvidence;
+  final _RealStarRequestBudget requestBudget;
 
   @override
   TokenStream streamInference({
@@ -231,6 +247,20 @@ final class _AccessBrokerProvider implements RuntimeInferenceProvider {
     if (request.isOffline || cancellationToken.isCancelled) {
       yield InferenceResponse.error(
         'REAL_STAR_PROVIDER_NOT_ALLOWED',
+        providerId: 'web_auto',
+      );
+      return;
+    }
+    if (!requestBudget.reserve()) {
+      yield InferenceResponse.error(
+        'REAL_STAR_MAX_PROVIDER_REQUESTS_EXCEEDED',
+        providerId: 'web_auto',
+      );
+      return;
+    }
+    if (request.maxTokens > 8192 || request.maxTokens < 1) {
+      yield InferenceResponse.error(
+        'REAL_STAR_TOKEN_REQUEST_OUT_OF_BOUNDS',
         providerId: 'web_auto',
       );
       return;
@@ -251,6 +281,15 @@ final class _AccessBrokerProvider implements RuntimeInferenceProvider {
       });
     }
     messages.add(<String, String>{'role': 'user', 'content': request.prompt.trim()});
+    if (messages.length > 40 ||
+        messages.fold<int>(0, (sum, item) => sum + item['content']!.length) >
+            96000) {
+      yield InferenceResponse.error(
+        'REAL_STAR_CONTEXT_LIMIT_EXCEEDED',
+        providerId: 'web_auto',
+      );
+      return;
+    }
 
     try {
       final uri = origin.resolve('/api/cantiere/inference');
