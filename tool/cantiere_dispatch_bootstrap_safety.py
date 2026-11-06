@@ -58,7 +58,7 @@ def verify_experimental(text):
             text,
         )
         if match is None or not re.search(
-            r"(?m)^    if: github\.event_name == 'workflow_dispatch'\s*$",
+            r"(?m)^    if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs/heads/cantiere/real-star-after-bootstrap-20261106'\s*$",
             match.group(1),
         ):
             raise AssertionError("EXPERIMENTAL_JOB_NOT_MANUAL_ONLY: " + job)
