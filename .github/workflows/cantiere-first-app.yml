@@ -134,8 +134,10 @@ jobs:
           test -s "$SOURCE"
           mkdir -p build/cantiere-first-app
           cp "$SOURCE" build/cantiere-first-app/cantiere-first-app.apk
-          sha256sum build/cantiere-first-app/cantiere-first-app.apk \
-            > build/cantiere-first-app/cantiere-first-app.apk.sha256
+          (
+            cd build/cantiere-first-app
+            sha256sum cantiere-first-app.apk > cantiere-first-app.apk.sha256
+          )
           cp "${RUNNER_TEMP}/cantiere-first-app.log" \
             build/cantiere-first-app/cantiere-first-app.log
 
