@@ -24,7 +24,7 @@ class ReadAloudSnapshot {
 
   factory ReadAloudSnapshot.fromMap(Map<dynamic, dynamic> data) {
     Duration readTime(String name) =>
-        Duration(milliseconds: ((data[name] as num?)?.toInt() ?? 0).clamp(0, 2147483647));
+        Duration(milliseconds: ((data[name] as num?)?.toInt() ?? 0).clamp(0, 2147483647).toInt());
     return ReadAloudSnapshot(
       supported: data['supported'] == true,
       active: data['active'] == true,
