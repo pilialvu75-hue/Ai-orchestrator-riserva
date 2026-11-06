@@ -90,6 +90,49 @@ void main() {
     expect(analysis.unresolved, hasLength(3));
   });
 
+  test('explicit named height never attaches to other coworkers', () {
+    final analysis =
+        AssistantEntityReferenceAnalyzer.analyzeDirectUserStatements(<String>[
+      'Jerome è alto.',
+      'Kader è un mio collega.',
+      'Mika fa tanto sport.',
+      'Ho un collega alto.',
+    ]);
+    expect(analysis.claims, hasLength(4));
+    final jerome = analysis.byNameReference['person:name:jerome']!;
+    expect(jerome.single.predicate, 'altezza_dichiarata');
+    expect(jerome.single.sensitiveThirdParty, isTrue);
+    expect(jerome.single.canAutomaticallyConfirm, isFalse);
+    expect(analysis.byNameReference['person:name:kader']!.single.predicate,
+        'collega_utente');
+    expect(analysis.byNameReference['person:name:mika']!.single.predicate,
+        'attivita_dichiarata');
+    expect(analysis.unresolved, hasLength(1));
+    expect(analysis.unresolved.single.predicate, 'altezza_dichiarata');
+  });
+
+  test('explicit repainting is distinct from replacement or second vehicle', () {
+    final analysis =
+        AssistantEntityReferenceAnalyzer.analyzeDirectUserStatements(<String>[
+      'Ho cambiato auto: ora è rossa.',
+      'Ho comprato una seconda auto rossa.',
+      'Ho riverniciato la mia auto: ora è rossa.',
+      'Ho riverniciato la stessa auto: ora è rossa.',
+    ]);
+    expect(analysis.claims, hasLength(4));
+    expect(analysis.claims.map((claim) => claim.predicate).toList(), <String>[
+      'cambio_auto_identita_da_chiarire',
+      'acquisto_seconda_auto',
+      'riverniciatura_stessa_auto_dichiarata',
+      'riverniciatura_stessa_auto_dichiarata',
+    ]);
+    expect(analysis.unresolved, hasLength(4));
+    expect(analysis.claims.every((claim) => !claim.canAutomaticallyConfirm),
+        isTrue);
+    expect(AssistantEntityReferenceAnalyzer.parseDirectUserStatement(
+        'Ho riverniciato l’auto di Jerome: ora è rossa.'), isNull);
+  });
+
   test('external-looking or ambiguous text cannot become references', () {
     const unsafe = <String>[
       '"Nora è sovrappeso"',
