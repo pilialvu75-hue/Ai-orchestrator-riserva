@@ -32,6 +32,8 @@ internal class PcmReadAloudBridge(private val context: Context) {
     private var track: AudioTrack? = null
     private var sampleRate = 0
     private var totalFrames = 0L
+    // Bound private cache use on storage-constrained Android devices.
+    private val maxCacheBytes = 96L * 1024L * 1024L
     private var playCursor = 0L
     private var seekBase = 0L
     private var paused = false
@@ -127,6 +129,9 @@ internal class PcmReadAloudBridge(private val context: Context) {
         } else {
             require(rate == sampleRate) { "PCM rate changed within one read-aloud session" }
         }
+        require(totalFrames * 2L + pcm.size <= maxCacheBytes) {
+            "Read-aloud exceeds the 96 MiB cached PCM safety limit"
+        }
         val file = writer ?: error("PCM writer is unavailable")
         file.seek(totalFrames * 2L)
         file.write(pcm)
@@ -171,6 +176,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
     private fun pump() {
         while (alive) {
             try {
+                var hadWork = false
                 synchronized(lock) {
                     val currentTrack = track
                     val currentReader = reader
@@ -187,11 +193,14 @@ internal class PcmReadAloudBridge(private val context: Context) {
                             val sent = currentTrack.write(
                                 data, 0, data.size, AudioTrack.WRITE_NON_BLOCKING
                             )
-                            if (sent > 0) playCursor += sent / 2L
+                            if (sent > 0) {
+                                playCursor += sent / 2L
+                                hadWork = true
+                            }
                         }
                     }
                 }
-                Thread.sleep(12)
+                Thread.sleep(if (hadWork) 12 else 40)
             } catch (_: InterruptedException) {
                 break
             } catch (_: Exception) {
@@ -201,7 +210,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
         }
     }
 
-    private fun close() {
+    fun close() {
         synchronized(lock) {
             alive = false
             releaseLocked()
