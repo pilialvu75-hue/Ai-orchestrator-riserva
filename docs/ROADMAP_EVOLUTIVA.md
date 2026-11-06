@@ -1046,6 +1046,49 @@ consenso esplicito.
   retry della medesima richiesta Cloud in volo e migrazione
   automatica LOCAL->Cloud del testo gia' generato: questi
   rimangono esplicitamente vietati/non implementati.
+- **H48 — registro protetto di avanzamento HYBRID, prima pietra
+  dei checkpoint durevoli (non ripresa semantica):**
+  nuovo `HybridProgressCheckpointJournal` indipendente dal
+  Cantiere, utilizzabile in seguito dall'orchestratore di un
+  lavoro multi-step: ogni task ha ID opachi owner/session/task,
+  numero totale e completato di fasi (max 1000), revisione
+  monotona e ultimo esecutore LOCAL/CLOUD. Non salva testi di
+  domande, risposte, immagini, cronologia, ricordi, credenziali,
+  account o contenuti di prompt. Il backend e' il medesimo
+  storage OS-protetto dei consensi; il record e' firmato con
+  HMAC SHA-256 su chiave casuale generata nello storage
+  protetto, con validazione rigorosa dello schema e legame
+  esatto a owner/session/task. Una corruzione, cancellazione
+  parziale o modifica del record fa fallire il caricamento
+  chiuso, senza recupero automatico di materiale Cloud.
+
+  Il registro salva soltanto stati `paused` e `completed`,
+  mai `running`, quindi riaprire l'app dopo un riavvio
+  NON avvia una chiamata Cloud/LOCAL. Avanzare di una sola
+  fase richiede l'ID corretto, l'autorizzazione owner/session,
+  una revisione attesa e una fase precedentemente completata
+  dal chiamante. Invii Cloud e autorizzazioni privacy
+  restano esclusivamente responsabilita' del consent gate
+  esistente; un record non e' un consenso riutilizzabile.
+  Le mutazioni sono serializzate entro un singolo isolate
+  Dart e protette da revisione; non si promette coordinamento
+  fra processi diversi.
+
+  Test H48 ad hoc: reopen dopo restart, passaggio
+  LOCAL→CLOUD→LOCAL, nessuna ripresa automatica, owner
+  diverso bloccato, HMAC alterato, chiave mancante,
+  chiamate concorrenti/doppie, record gia' completo,
+  credenziali non persistite e storage OS non disponibile.
+  Le suite shared Ubuntu/macOS e QA Android/Windows/Linux/macOS
+  eseguono questi test. Nessuna release da questa PR,
+  flag HYBRID ancora OFF default.
+
+  **Limiti dichiarati:** questo e' un registro di avanzamento
+  e non conserva il contesto semantico sufficiente a riprendere
+  attivita' interrotte da 10 checkpoint. L'integrazione
+  nel planner/esecutore, le dipendenze fra fasi, la ripresa
+  del contenuto in LOCAL e l'eventuale passaggio futuro a
+  CLOUD con consenso granulare richiedono milestone separate.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

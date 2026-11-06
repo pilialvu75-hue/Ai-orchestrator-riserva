@@ -50,7 +50,7 @@ jobs:
       - name: Verify consent-enabled QA compilation and routing
         shell: pwsh
         run: |
-          flutter test --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true --dart-define=AIVEXUS_EXPECT_HYBRID_QA_ENABLED=true test/app/runtime_bootstrap_cloud_consent_flag_test.dart test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
+          flutter test --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=true --dart-define=AIVEXUS_EXPECT_HYBRID_QA_ENABLED=true test/app/runtime_bootstrap_cloud_consent_flag_test.dart test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart test/core/runtime/inference/hybrid_progress_checkpoint_journal_test.dart test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
           if ($LASTEXITCODE -ne 0) { throw 'Consent QA tests failed' }
 
       - name: Build HYBRID Windows QA, compile-time flag ON

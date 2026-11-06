@@ -61,6 +61,7 @@ jobs:
           test/app/runtime_bootstrap_cloud_consent_flag_test.dart
           test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart
           test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart
+          test/core/runtime/inference/hybrid_progress_checkpoint_journal_test.dart
           test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart
           test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
 
@@ -339,6 +340,7 @@ jobs:
           test/app/runtime_bootstrap_cloud_consent_flag_test.dart
           test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart
           test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart
+          test/core/runtime/inference/hybrid_progress_checkpoint_journal_test.dart
           test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart
           test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
 

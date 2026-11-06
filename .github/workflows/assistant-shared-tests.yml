@@ -90,6 +90,7 @@ jobs:
           test/core/runtime/inference/hybrid_cloud_runtime_source_evidence_test.dart
           test/core/runtime/inference/hybrid_cloud_assistant_runtime_bundle_test.dart
           test/core/runtime/inference/hybrid_cloud_network_recovery_next_turn_test.dart
+          test/core/runtime/inference/hybrid_progress_checkpoint_journal_test.dart
           test/core/runtime/inference/hybrid_cloud_visual_attachment_guard_test.dart
           test/features/chat/data/repositories/chat_repository_visual_consent_test.dart
           test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart
