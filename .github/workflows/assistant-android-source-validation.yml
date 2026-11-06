@@ -12,6 +12,7 @@ on:
       - 'lib/native/**'
       - 'native/android/**'
       - 'android/**'
+      - 'scripts/check_android_read_aloud_service.py'
       - 'test/**'
       - 'pubspec.*'
       - '.github/workflows/assistant-android-source-validation.yml'
@@ -139,6 +140,8 @@ jobs:
           ccache --version
 
 
+      - name: Verify Android 17 background audio service contract
+        run: python3 scripts/check_android_read_aloud_service.py
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
       - name: Test Assistant resource policy and runtime
