@@ -943,6 +943,28 @@ consenso esplicito.
   H40 e' una modifica nel solo branch draft #977 finche' i
   nuovi workflow CI e i test fisici non risultano verificati;
   nessuna beta e' pubblicata da questa sola modifica.
+- **H41 — checkpoint beta con consenso HYBRID esplicito:**
+  Il comando owner preesistente `/aivexus beta-checkpoint <SHA>`
+  continua a rilasciare la beta ordinaria con gate HYBRID OFF.
+  Il nuovo comando separato `/aivexus hybrid-beta-checkpoint <SHA>`,
+  valido **solo** come commento dell'owner sull'issue #1008 aperta,
+  seleziona l'input beta `hybrid_consent_beta=true`.
+  Un checkpoint proveniente dal merge di una PR non puo' abilitare
+  HYBRID implicitamente. Restano le verifiche obbligatorie:
+  autore e attore owner, corpo esatto SHA corrente di main,
+  nessun secondo run Android per lo stesso SHA, cinque suite CI
+  post-merge verdi su main, presenza del flag protetto nel
+  workflow sorgente. Il comando non esegue testo utente come
+  shell, non abilita la stabile e mantiene l'unico workflow
+  downstream di release Android per tutti i publisher desktop.
+  Test statici Python nel gate CI verificano i confini owner,
+  idempotenza e differenza beta normale/HYBRID.
+
+  **H41 non e' una pubblicazione**: e' solo un percorso per un
+  checkpoint HYBRID deliberato, quando i gate H40/Android sono
+  verdi e la PR #977 sia stata integrata su main. Dopo la release,
+  confermare effettivamente asset e checksum delle quattro
+  piattaforme e test OTA tramite menu Impostazioni -> Aggiornamenti.
 - **Limite attuale:** gateway UI e provenienza Hannibal sono presenti;
   ricordi confermati funzionano nel ramo HYBRID-LOCAL del codice sperimentale
   ma il runtime Cloud produttivo resta quello preesistente, senza dispatcher

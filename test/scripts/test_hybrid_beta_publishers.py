@@ -26,6 +26,19 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
         self.assertIn("steps.hybrid_gate.outputs.enabled", content)
         self.assertIn("if: github.event_name == 'workflow_dispatch'", content)
 
+    def test_only_owner_can_request_explicit_hybrid_beta(self):
+        workflow = source(".github/workflows/owner-beta-checkpoint.yml")
+        self.assertIn("hybrid-beta-checkpoint", workflow)
+        self.assertIn("hybrid_consent_beta='false'", workflow)
+        self.assertIn("if [[ \"$requested_type\" == 'hybrid-beta-checkpoint' ]]", workflow)
+        self.assertIn("github.actor == github.repository_owner", workflow)
+        self.assertIn("github.event.comment.user.login == github.repository_owner", workflow)
+        self.assertIn("github.event.issue.number == 1008", workflow)
+        self.assertIn('sha="${BASH_REMATCH[2]}"', workflow)
+        self.assertIn('if [[ "$sha" != "$main_sha" ]]', workflow)
+        self.assertIn('-f hybrid_consent_beta="$hybrid_consent_beta"', workflow)
+        self.assertEqual(workflow.count("gh workflow run build.yml"), 1)
+
     def test_desktop_publishers_verify_issued_manifest_before_build(self):
         for platform in ("windows", "macos", "linux"):
             with self.subTest(platform=platform):
