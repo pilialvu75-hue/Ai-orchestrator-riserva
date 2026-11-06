@@ -194,7 +194,7 @@ jobs:
           target: google_apis
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             APK="${{ runner.temp }}/first-app/cantiere-first-app.apk"
             AAPT=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)
             test -n "$AAPT"
