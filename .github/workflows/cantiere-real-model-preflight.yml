@@ -1,0 +1,26 @@
+name: Cantiere Real Model Four-Role Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Verify synthetic contract tests without network
+        run: python3 -m unittest -v test_cantiere_real_model_preflight
+        working-directory: tool
+      - name: Query four real Cantiere model capabilities (opt-in only)
+        env:
+          CANTIERE_BROKER_URL: ${{ vars.CANTIERE_BROKER_URL }}
+          CANTIERE_ZERO_COST_ROUTES_VERIFIED: ${{ vars.CANTIERE_ZERO_COST_ROUTES_VERIFIED }}
+          CANTIERE_CF_ACCESS_CLIENT_ID: ${{ secrets.CANTIERE_CF_ACCESS_CLIENT_ID }}
+          CANTIERE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CANTIERE_CF_ACCESS_CLIENT_SECRET }}
+        run: python3 tool/cantiere_real_model_preflight.py
