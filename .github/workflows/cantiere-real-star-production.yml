@@ -1,0 +1,22 @@
+# Minimal registration bootstrap for GitHub workflow_dispatch.
+# The default branch intentionally does not run AI inference or compile apps.
+# Once registered, GitHub allows an authorized operator to choose the
+# reviewed experimental branch in "Run workflow". The selected branch's
+# workflow definition will execute, and retain all zero-cost/Access gates.
+name: Cantiere Real Model Star Production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  registration-only:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Explain registration state; no model inference
+        run: |
+          echo "CANTIERE_DISPATCH_REGISTRATION_ONLY"
+          echo "Select an explicitly reviewed experimental branch for the real-star trial."
+          echo "No model calls, APK generation, or cost-bearing work in this job."
