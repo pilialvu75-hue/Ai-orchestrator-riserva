@@ -44,6 +44,20 @@ class ChatAudioPlaybackController extends ChangeNotifier {
         try {
           final state = await _output.refreshReadAloud();
           if (_text == null) return;
+          // The Android foreground service closes itself after the final
+          // played PCM frame (or after a permanent audio-focus loss).
+          // Do not leave a dead "Riprendi" button that would target a
+          // destroyed MediaSession. The message speaker can start a fresh
+          // playback explicitly when the user wants to listen again.
+          if (!state.active && !_busy && _playback.active) {
+            ++_generation;
+            _text = null;
+            _poll?.cancel();
+            _playback = const ReadAloudSnapshot();
+            _playing = false;
+            notifyListeners();
+            return;
+          }
           final playing = state.playing;
           final busy = _busy && state.buffered == Duration.zero &&
               !state.complete;
