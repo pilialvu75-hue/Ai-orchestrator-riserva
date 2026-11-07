@@ -21,6 +21,9 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+dependency_overrides:
+  async:
+    path: modules/aivexus_external_async/vendor/async
 flutter:
   uses-material-design: true
 """
