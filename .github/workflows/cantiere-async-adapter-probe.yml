@@ -3,11 +3,13 @@ on:
   pull_request:
     paths:
       - 'tool/cantiere_async_adapter_sandbox.py'
+      - 'tool/test_cantiere_async_adapter_sandbox.py'
       - '.github/workflows/cantiere-async-adapter-probe.yml'
   push:
     branches: [main]
     paths:
       - 'tool/cantiere_async_adapter_sandbox.py'
+      - 'tool/test_cantiere_async_adapter_sandbox.py'
       - '.github/workflows/cantiere-async-adapter-probe.yml'
   workflow_dispatch:
 permissions:
@@ -18,6 +20,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Run fast bridge regression tests
+        run: python3 -m unittest discover -s tool -p 'test_cantiere_async_adapter_sandbox.py' -v
       - uses: dart-lang/setup-dart@v1
       - name: Pin Library and upstream revisions
         shell: bash
