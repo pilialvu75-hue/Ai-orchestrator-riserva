@@ -68,7 +68,8 @@ class ChatAudioPlaybackController extends ChangeNotifier {
           final playing = state.playing;
           final busy = _busy && state.buffered == Duration.zero &&
               !state.complete;
-          if (state.position != _playback.position ||
+          if (state.active != _playback.active ||
+              state.position != _playback.position ||
               state.buffered != _playback.buffered ||
               state.complete != _playback.complete ||
               state.paused != _playback.paused ||
