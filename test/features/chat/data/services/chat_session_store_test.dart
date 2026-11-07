@@ -256,4 +256,47 @@ void main() {
     expect(await store.listSessions(inTrash: true), isEmpty);
     expect(await db.query('user_preferences'), isEmpty);
   });
+  test('permanent purge rejects active chat and preserves unrelated memories',
+      () async {
+    await db.execute('''
+      CREATE TABLE document_chunks (
+        id TEXT PRIMARY KEY, document_id TEXT NOT NULL
+      )
+    ''');
+    await store.createSession('active');
+    await store.createSession('trashed');
+    await addMessage('m-active', 'active', 1, 'Risposta da conservare');
+    await addMessage('m-trashed', 'trashed', 2, 'Domanda cestinata');
+    await store.moveToTrash('trashed');
+    await db.insert('user_preferences', <String, Object>{
+      'pref_key': 'assistant.memory.user.confirmed',
+      'pref_value': 'unchanged',
+    });
+
+    // A race or stale bottom-sheet selection must never delete a chat that
+    // has not been explicitly moved into the trash.
+    await expectLater(
+      store.permanentlyDeleteTrashedSession('active'),
+      throwsStateError,
+    );
+    expect(await db.query('chat_history'), hasLength(2));
+
+    expect(await store.permanentlyDeleteTrashedSession('trashed'), 1);
+    expect((await store.listSessions()).map((x) => x.id), ['active']);
+    expect(await store.listSessions(inTrash: true), isEmpty);
+    expect((await db.query('chat_history')).single['id'], 'm-active');
+    final memories = await db.query('user_preferences',
+      where: 'pref_key = ?',
+      whereArgs: <String>['assistant.memory.user.confirmed'],
+    );
+    expect(memories.single['pref_value'], 'unchanged');
+
+    // Repeating a permanent delete cannot silently affect other sessions.
+    await expectLater(
+      store.permanentlyDeleteTrashedSession('trashed'),
+      throwsStateError,
+    );
+    expect((await db.query('chat_history')).single['id'], 'm-active');
+  });
+
 }

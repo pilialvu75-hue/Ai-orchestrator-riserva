@@ -35,6 +35,10 @@ import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_event.dart';
 import 'package:ai_orchestrator/features/chat/presentation/bloc/chat_state.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_session_store.dart';
+import 'package:ai_orchestrator/features/chat/data/services/trashed_chat_purge_coordinator.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/empty_trash_confirmation_dialog.dart';
+import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/features/chat/presentation/services/hybrid_cloud_chat_consent_gateway.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:uuid/uuid.dart';
@@ -62,6 +66,8 @@ const double _kSidebarBreakpoint = 720;
 enum _ChatSessionAction {
   togglePin, rename, archive, export, share, trash, showTrash
 }
+
+enum _TrashSheetAction { emptyAll }
 
 /// Shared UI state for narrow and wide layouts. Choosing another session
 /// switches the view; only the Debug Lab's explicit Clear Chat can erase data.
@@ -307,6 +313,7 @@ class _ChatPageState extends State<ChatPage>
       _deadlockController;
 
   bool _isSending = false;
+  bool _trashPurgeInProgress = false;
   String _activeSessionId = _kDefaultSessionId;
   List<ChatSessionInfo> _chatSessions = const <ChatSessionInfo>[];
   late final ChatSessionStore _sessionStore;
@@ -664,11 +671,72 @@ class _ChatPageState extends State<ChatPage>
     }
   }
 
+  Future<void> _emptyTrash() async {
+    if (_isSending || _trashPurgeInProgress) {
+      _showChatNavigationError(
+        'Attendi la fine della risposta o dell’eliminazione prima di svuotare il cestino.',
+      );
+      return;
+    }
+
+    // Take a fresh snapshot: a chat restored since the sheet opened must
+    // never be purged. ChatSessionStore independently verifies trash status
+    // inside the final SQLite transaction.
+    final trashed = await _sessionStore.listSessions(inTrash: true);
+    if (!mounted || trashed.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => EmptyTrashConfirmationDialog(
+        chatCount: trashed.length,
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    if (_isSending || _trashPurgeInProgress) return;
+    setState(() => _trashPurgeInProgress = true);
+
+    final purge = TrashedChatPurgeCoordinator(
+      sessionStore: _sessionStore,
+      conversationMemoryService: di.sl<ConversationMemoryService>(),
+      memoryCaptureService: di.sl<AssistantDurableMemoryCaptureService>(),
+    );
+    var removedChats = 0;
+    try {
+      for (final chat in trashed) {
+        // The barriers drain memory capture and indexing before each SQL
+        // transaction. Confirmed USER-scoped memories always survive.
+        await purge.purgeTrashedSession(
+          sessionId: chat.id,
+          userConfirmed: true,
+        );
+        removedChats++;
+      }
+      await _refreshChatSessions();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cestino svuotato: $removedChats conversazioni eliminate.')),
+      );
+    } catch (error) {
+      // Batch purges are individually atomic, not an all-or-nothing batch.
+      // If storage fails midway, explicitly report partial completion.
+      if (mounted) {
+        _showChatNavigationError(
+          'Eliminate $removedChats di ${trashed.length} conversazioni. '
+          'Le rimanenti sono ancora nel cestino.',
+        );
+      }
+      await _refreshChatSessions();
+    } finally {
+      if (mounted) setState(() => _trashPurgeInProgress = false);
+    }
+  }
+
   Future<void> _openTrash() async {
+    if (_trashPurgeInProgress) return;
     try {
       final sessions = await _sessionStore.listSessions(inTrash: true);
       if (!mounted) return;
-      final selectedId = await showModalBottomSheet<String>(
+      final selected = await showModalBottomSheet<Object>(
         context: context,
         isScrollControlled: true,
         builder: (sheetContext) => SafeArea(
@@ -688,17 +756,35 @@ class _ChatPageState extends State<ChatPage>
                             ListTile(
                               leading: const Icon(Icons.restore_outlined),
                               title: Text(session.title),
-                              onTap: () => Navigator.of(sheetContext).pop(session.id),
+                              onTap: () => Navigator.of(sheetContext).pop(session),
                             ),
                         ],
                       ),
               ),
+              if (sessions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.delete_forever_outlined),
+                      label: const Text('Svuota cestino'),
+                      onPressed: () => Navigator.of(sheetContext)
+                          .pop(_TrashSheetAction.emptyAll),
+                    ),
+                  ),
+                ),
             ]),
           ),
         ),
       );
-      if (selectedId == null) return;
-      await _sessionStore.restoreFromTrash(selectedId);
+      if (!mounted || selected == null) return;
+      if (selected == _TrashSheetAction.emptyAll) {
+        await _emptyTrash();
+        return;
+      }
+      if (selected is! ChatSessionInfo) return;
+      await _sessionStore.restoreFromTrash(selected.id);
       await _refreshChatSessions();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
