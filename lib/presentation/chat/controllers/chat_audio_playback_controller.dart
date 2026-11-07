@@ -62,6 +62,7 @@ class ChatAudioPlaybackController extends ChangeNotifier {
             _poll?.cancel();
             _playback = const ReadAloudSnapshot();
             _playing = false;
+            _busy = false;
             notifyListeners();
             return;
           }
