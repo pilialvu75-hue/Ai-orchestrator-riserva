@@ -42,7 +42,9 @@ void main() {
   test('invalid transcript role is rejected', () async {
     final recorder = LiveChatTranscriptRecorder(
         localDataSource: _MemoryMessages());
-    expect(() => recorder.append(sessionId: 'a', role: 'system', text: 'x'),
-        throwsArgumentError);
+    await expectLater(
+      recorder.append(sessionId: 'a', role: 'system', text: 'x'),
+      throwsArgumentError,
+    );
   });
 }
