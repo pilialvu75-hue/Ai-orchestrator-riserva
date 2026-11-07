@@ -38,7 +38,7 @@ jobs:
         run: flutter create --project-name aivexus_stella_queue --platforms=web,android .
       - name: Analyze generated app
         working-directory: ${{ runner.temp }}/stella
-        run: flutter analyze
+        run: flutter analyze lib test
       - name: Execute widget test with real Library adapter
         working-directory: ${{ runner.temp }}/stella
         run: flutter test
