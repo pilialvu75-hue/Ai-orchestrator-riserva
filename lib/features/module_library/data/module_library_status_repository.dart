@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:ai_orchestrator/features/module_library/data/module_library_intake_source.dart';
+
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_research_diagnostics_source.dart';
@@ -29,6 +31,11 @@ final class ModuleLibraryStatusRepository {
   final WorkshopLibraryGitHubAuthClient _authClient;
   final http.Client _client;
   final ModuleResearchStatusSource _researchSource;
+
+  Future<List<ModuleLibraryIntakeEntry>> loadIntake() async {
+    final credential = await _usableCredential();
+    return ModuleLibraryIntakeSource(client: _client).load(token: credential.accessToken);
+  }
 
   Future<List<ModuleCapabilityStatus>> load() async {
     final credential = await _usableCredential();

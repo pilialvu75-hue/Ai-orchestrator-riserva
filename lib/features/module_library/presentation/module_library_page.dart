@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_curator_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_library_intake_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_lab_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_status_repository.dart';
 import 'package:ai_orchestrator/features/module_library/domain/module_capability_status.dart';
@@ -58,6 +59,8 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
   bool _labLoading = false;
   String? _labError;
   List<ModuleCapabilityStatus> _items = const <ModuleCapabilityStatus>[];
+  List<ModuleLibraryIntakeEntry> _intake = const <ModuleLibraryIntakeEntry>[];
+  String? _intakeError;
   DateTime? _lastUpdatedAt;
 
   @override
@@ -154,6 +157,12 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
         _connected = true;
         _loading = false;
       });
+      try {
+        final intake = await _repository.loadIntake();
+        if (mounted) setState(() { _intake = intake; _intakeError = null; });
+      } catch (error) {
+        if (mounted) setState(() { _intake = const []; _intakeError = error.toString(); });
+      }
       unawaited(_refreshLab());
     } catch (error) {
       if (!mounted) return;
@@ -457,6 +466,8 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
     setState(() {
       _connected = false;
       _items = const <ModuleCapabilityStatus>[];
+      _intake = const <ModuleLibraryIntakeEntry>[];
+      _intakeError = null;
       _lastUpdatedAt = null;
       _curatorLoading.clear();
       _healthLoading = false;
@@ -538,6 +549,8 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
                       onRunResearcher: _runResearcherNow,
                       onRefreshLab: _refreshLab,
                       items: _items,
+                      intake: _intake,
+                      intakeError: _intakeError,
                       updatedAt: _lastUpdatedAt,
                       onRefresh: _refresh,
                       curatorLoading: _curatorLoading,
@@ -555,6 +568,8 @@ class _ModuleIndexView extends StatelessWidget {
     required this.onRunResearcher,
     required this.onRefreshLab,
     required this.items,
+    required this.intake,
+    required this.intakeError,
     required this.updatedAt,
     required this.onRefresh,
     required this.curatorLoading,
@@ -567,6 +582,8 @@ class _ModuleIndexView extends StatelessWidget {
   final Future<void> Function() onRunResearcher;
   final Future<void> Function() onRefreshLab;
   final List<ModuleCapabilityStatus> items;
+  final List<ModuleLibraryIntakeEntry> intake;
+  final String? intakeError;
   final DateTime? updatedAt;
   final Future<void> Function() onRefresh;
   final Set<String> curatorLoading;
@@ -587,12 +604,25 @@ class _ModuleIndexView extends StatelessWidget {
       child: ListView.separated(
         padding: const EdgeInsets.all(16),
         physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: sorted.length + 2,
+        itemCount: sorted.length + 3,
         separatorBuilder: (_, __) => const Divider(height: 1),
         itemBuilder: (context, index) {
           if (index == 0) return _LastUpdatedBanner(updatedAt: updatedAt);
           if (index == 1) return _ModuleLabCard(run: labRun, loading: labLoading, error: labError, onRun: onRunResearcher, onRefresh: onRefreshLab);
-          final status = sorted[index - 2];
+          if (index == 2) return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Catalogo certificato: ${items.fold<int>(0, (sum, item) => sum + item.certifiedActive)} moduli', style: Theme.of(context).textTheme.titleMedium),
+              Text('Intake non certificato: ${intake.length} moduli (di cui ${intake.where((e) => e.status == 'tested').length} TESTED)'),
+              if (intakeError != null) Text('Intake non disponibile: $intakeError'),
+              for (final entry in intake) ListTile(
+                dense: true,
+                title: Text(entry.name),
+                subtitle: Text('${entry.status.toUpperCase()} — non certificato, non riutilizzabile automaticamente'),
+              ),
+            ],
+          );
+          final status = sorted[index - 3];
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(vertical: 6),
             title: Text('${status.title} (${status.progressLabel})'),
