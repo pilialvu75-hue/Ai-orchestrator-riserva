@@ -65,6 +65,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   bool _hasText = false;
   bool _hasLongDraft = false;
+  bool _dictationWasUsed = false;
+  bool _submissionInFlight = false;
+  int _dictationButtonEpoch = 0;
   final GlobalKey _composerFieldKey = GlobalKey();
   final DictationDraftBuffer _dictationDraft = DictationDraftBuffer();
   String? _loadedEditingText;
@@ -180,8 +183,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
   bool get _canSubmit =>
       _hasText || _attachments.isNotEmpty;
 
-  void _submit() {
-    if (widget.isLoading) {
+  Future<void> _submit() async {
+    if (widget.isLoading || _submissionInFlight) {
       return;
     }
 
@@ -192,6 +195,31 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
 
     final bool wasEditing = _isEditing;
+
+    // Sending a dictated message must not leave the Sherpa microphone
+    // recorder/OnlineStream alive while a large local LLM loads. The
+    // dictation button only schedules teardown after the native final
+    // callback; this awaited barrier also covers user Send on a partial
+    // transcript before that final callback arrives.
+    _submissionInFlight = true;
+    try {
+      if (_dictationWasUsed || _voiceInputService.isListening) {
+        await _voiceInputService.stopListening();
+        if (!mounted) return;
+      }
+      _dictationWasUsed = false;
+    } catch (error) {
+      debugPrint('[VOICE_DICTATION_SEND_STOP_FAILED] $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Impossibile fermare il microfono: riprova prima di inviare.'),
+        ));
+      }
+      return; // Do not start inference while capture teardown is failing.
+    } finally {
+      _submissionInFlight = false;
+    }
+    if (!mounted) return;
 
     debugPrint(
       '[UI_SEND] '
@@ -221,6 +249,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
     setState(() {
       _attachments.clear();
       _hasText = false;
+      // The native mic is now stopped before dispatch. Recreate the button
+      // so its mic icon cannot remain in the old 'recording' state.
+      _dictationButtonEpoch++;
     });
 
     RuntimeEventLog.instance.emit(
@@ -566,9 +597,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   onSubmitted: (_) => _submit(),
                 ),
                 voiceButton: VoiceInputButton(
+                  key: ValueKey('chat-dictation-$_dictationButtonEpoch'),
                   voiceInputService: _voiceInputService,
                   size: 42,
                   onRecordingStarted: () {
+                    _dictationWasUsed = true;
                     _dictationDraft.begin(_controller.text);
                   },
                   onRecordingStopped: () {

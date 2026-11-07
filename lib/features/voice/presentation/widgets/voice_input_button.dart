@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
 
@@ -35,6 +37,8 @@ class VoiceInputButton extends StatefulWidget {
 class _VoiceInputButtonState extends State<VoiceInputButton>
     with SingleTickerProviderStateMixin {
   bool _listening = false;
+  bool _starting = false;
+  Future<void> _pendingFinalStop = Future<void>.value();
   late AnimationController _pulse;
   late Animation<double> _scale;
 
@@ -53,11 +57,19 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
 
   @override
   void dispose() {
+    // A route change must never strand the native recorder open in a hidden
+    // chat. The final-result stop is already tracked by _pendingFinalStop.
+    if (_listening && widget.voiceInputService.isListening) {
+      unawaited(widget.voiceInputService.stopListening().catchError(
+        (Object error) => debugPrint('[VOICE_DICTATION_STOP_WARN] $error'),
+      ));
+    }
     _pulse.dispose();
     super.dispose();
   }
 
   Future<void> _toggle() async {
+    if (_starting) return;
     if (_listening) {
       try {
         await widget.voiceInputService.stopListening();
@@ -71,6 +83,16 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
       return;
     }
 
+    // A final Sherpa result stops the *UI* immediately, but native mic and
+    // ASR stream teardown is asynchronous. Never start a new dictation while
+    // the previous capture is still alive.
+    _starting = true;
+    try {
+      await _pendingFinalStop;
+      if (!mounted) return;
+    } finally {
+      _starting = false;
+    }
     widget.onRecordingStarted?.call();
     var receivedFinalResult = false;
     try {
@@ -78,11 +100,23 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
         onResult: (text, isFinal) {
           if (!mounted) return;
           widget.onResult(text, isFinal);
-          if (isFinal) {
+          if (isFinal && !receivedFinalResult) {
             receivedFinalResult = true;
             _pulse.stop();
             setState(() => _listening = false);
             widget.onRecordingStopped?.call();
+            // Do not release the Sherpa OnlineStream *inside* its native
+            // onResult callback: recognizer.reset(stream) still runs after
+            // this callback returns. Defer teardown to the next event turn,
+            // before inference can overlap with an invisible live recorder.
+            final inputService = widget.voiceInputService;
+            _pendingFinalStop = Future<void>.delayed(Duration.zero, () async {
+              try {
+                await inputService.stopListening();
+              } catch (error) {
+                debugPrint('[VOICE_DICTATION_STOP_WARN] $error');
+              }
+            });
           }
         },
       );
@@ -93,7 +127,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
         _pulse.repeat(reverse: true);
       } else {
         _pulse.stop();
-        widget.onRecordingStopped?.call();
+        if (!receivedFinalResult) widget.onRecordingStopped?.call();
       }
       setState(() => _listening = started);
     } catch (_) {
