@@ -272,6 +272,10 @@ void main() {
       'pref_key': 'assistant.memory.user.confirmed',
       'pref_value': 'unchanged',
     });
+    await db.insert('user_preferences', <String, Object>{
+      'pref_key': 'assistant.durable_memory.v1:conversation:trashed',
+      'pref_value': 'private-session-memory',
+    });
 
     // A race or stale bottom-sheet selection must never delete a chat that
     // has not been explicitly moved into the trash.
@@ -290,6 +294,13 @@ void main() {
       whereArgs: <String>['assistant.memory.user.confirmed'],
     );
     expect(memories.single['pref_value'], 'unchanged');
+    // Session-only confirmed memories are intentionally removed with the
+    // trashed conversation; user-scoped confirmed memories are not.
+    final privateRecords = await db.query('user_preferences',
+      where: 'pref_key = ?',
+      whereArgs: <String>['assistant.durable_memory.v1:conversation:trashed'],
+    );
+    expect(privateRecords, isEmpty);
 
     // Repeating a permanent delete cannot silently affect other sessions.
     await expectLater(
