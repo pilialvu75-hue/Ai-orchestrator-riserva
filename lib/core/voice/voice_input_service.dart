@@ -16,6 +16,8 @@ class VoiceInputService {
   final VoiceTextNormalizer _normalizer;
 
   VoiceEngineStatus? _lastStatus;
+  Future<void>? _stopInFlight;
+  Future<bool>? _reclamationInFlight;
 
   VoiceEngineStatus? get lastStatus => _lastStatus;
 
@@ -57,6 +59,12 @@ class VoiceInputService {
     required VoiceRecognitionResultCallback onResult,
     String localeId = AppConstants.sttDefaultLocaleId,
   }) async {
+    // Never reopen Sherpa while the previous native stream is being closed
+    // or its recognizer is being released for an inference handoff.
+    final reclaiming = _reclamationInFlight;
+    if (reclaiming != null) await reclaiming;
+    final stopping = _stopInFlight;
+    if (stopping != null) await stopping;
     final ready = await initialize();
     if (!ready) return;
 
@@ -71,5 +79,41 @@ class VoiceInputService {
     );
   }
 
-  Future<void> stopListening() => _engine.stopListening();
+  /// Coalesce Stop from native final callback, Send and route disposal.
+  /// Overlapping native stop/free requests can invalidate the same stream.
+  Future<void> stopListening() {
+    final pending = _stopInFlight;
+    if (pending != null) return pending;
+    late Future<void> work;
+    work = Future<void>.sync(_engine.stopListening).whenComplete(() {
+      if (identical(_stopInFlight, work)) _stopInFlight = null;
+    });
+    _stopInFlight = work;
+    return work;
+  }
+
+  /// Optional release after a short dictation, never for continuous Live.
+  /// Reinitialization is mandatory before the next chat microphone tap.
+  Future<bool> releaseRecognitionMemoryForInference() {
+    final pending = _reclamationInFlight;
+    if (pending != null) return pending;
+    late Future<bool> work;
+    work = _releaseAfterStop().whenComplete(() {
+      if (identical(_reclamationInFlight, work)) {
+        _reclamationInFlight = null;
+      }
+    });
+    _reclamationInFlight = work;
+    return work;
+  }
+
+  Future<bool> _releaseAfterStop() async {
+    await stopListening();
+    final engine = _engine;
+    if (engine is! VoiceRecognitionMemoryReclaimer) return false;
+    final released = await (engine as VoiceRecognitionMemoryReclaimer)
+        .releaseRecognitionMemoryForInference();
+    if (released) _lastStatus = null;
+    return released;
+  }
 }
