@@ -209,12 +209,16 @@ class VoiceOutputService {
 
   /// Interrompe sempre qualsiasi riproduzione TTS in corso.
   Future<void> stopSpeaking() async {
-    ++_requestGeneration;
+    final token = ++_requestGeneration;
     if (supportsRealReadAloudControls) {
       // Do not wait for synthesis of every phrase in a long answer.
       await _engine.stopSpeaking();
-      _activeNormalizedText = null;
-      await _refreshStatusSafely();
+      // A new Play may have started while native Stop was awaiting its
+      // platform-channel acknowledgment. Never clear the newer selection.
+      if (token == _requestGeneration) {
+        _activeNormalizedText = null;
+        await _refreshStatusSafely();
+      }
       return;
     }
     await _enqueue(() async {
