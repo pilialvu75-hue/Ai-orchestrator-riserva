@@ -1488,3 +1488,91 @@ implementare il primo incremento ME-1 di acquisizione naturale
 multilingue con provenance e review, senza attivare sync/Cloud o
 confondere risposte inventate con ricordi attendibili.
 
+
+
+## 18. Chat audio e stabilita dettatura — checkpoint fisico Galaxy S24 FE (7 novembre 2026)
+
+Questa sezione aggiorna unicamente UX delle sezioni 14–15 e voce
+della sezione 10, senza cambiare i contratti di Cantiere, memoria o HYBRID.
+Fonti operative: issue #967 (audio/MediaSession), #1052 (crash dopo
+dettatura), #1033 (Voice 2.0) e #947 (cestino).
+
+### 18.1 — Risultati fisici e stato del sorgente: livelli diversi
+
+- Galaxy S24 FE, Android 17, beta 1.0.15-beta+104018: Test 4
+  Stop **PASS**, nuova lettura **PASS con latenza**,
+  cambio rapido messaggio **FAIL**, ritorno da YouTube **FAIL UX**.
+  Dopo YouTube un nuovo Play funziona ma ricomincia **dall'inizio**:
+  non descrivere il difetto come blocco del tasto Play.
+- Progressivo fisico #967, Test 1–4: **12 PASS, 2 FAIL, 2 NON PROVATI**
+  (Bluetooth). Non estendere PASS a versioni e device non collaudati.
+- PR #1034 **MERGED** su main, commit 59f98bc1 (7/11):
+  preemption TTS PCM, switch rapido e recupero stato lettore dopo
+  perdita focus. Il fix **non e nella beta 104018**.
+- PR #1051 **in corso**, ramo ricostruito su main dopo squash #1034,
+  head d6eb8507: bookmark volatile e ripresa dal punto salvato
+  **solo con Play esplicito** quando e terminato il conflitto audio
+  con YouTube. CI e QA obbligatorie; non attestare PASS fisici.
+  Dopo AUDIOFOCUS_LOSS permanente chiudere FGS e MediaSession:
+  niente riproduzione contemporanea a YouTube.
+- PR #1053 **MERGED** su main, commit fbf6f652 (7/11):
+  ferma il recorder STT a fine dettatura, attende stop anche per
+  l'invio di risultati parziali, impedisce teardown dentro callback
+  nativa Sherpa. CI Android ARM64, Flutter tests e desktop PASS;
+  **crash su S24 ancora NON certificato risolto**.
+
+### 18.2 — Crash e RAM: evidenze, limiti, priorita
+
+- Segnalazione: dettatura → invio → stato «sta pensando» → app chiusa;
+  al riavvio domanda presente ma risposta mancante.
+- Diagnostics S24 FE del 7/11: cinque terminazioni Android
+  ApplicationExitInfo.REASON_LOW_MEMORY **distinte per timestamp**.
+  Diversi sample pressure=high, con 0,8–1,0 GiB RAM disponibili
+  durante inferenza; i vecchi eventi ripubblicati dopo i riavvii
+  non vanno ricontati come crash nuovi.
+- **Non dimostrata** correlazione temporale tra quel crash dopo STT
+  e uno specifico OOM: correlare allegati originali, timestamp,
+  ASR_FINAL, INFERENCE_BEGIN, AndroidProcessExitInfo.
+- Lo stop STT chiude recorder/subscription/OnlineStream;
+  **non scarica il recognizer Sherpa** (il campo _recognizer resta
+  residente fino a dispose). Non attribuire centinaia di MB
+  recuperati a #1053 senza misurazione fisica.
+- P0: profilare picco RAM/nativa/GPU con STT appena usato vs
+  testo digitato; verificare pressione, modello Phi-3.5 Mini,
+  memoria pre-inferenza, budget e recupero da processo terminato.
+  Nessun invio implicito dei dati dell'utente al Cloud.
+
+### 18.3 — Gate pratici della prossima beta
+
+1. Distribuzione esclusivamente con **Impostazioni → Aggiornamenti**:
+   niente APK manuali, disinstallazioni, reset o wipe.
+2. Misurare tempo Play → primo suono, cambio rapido di messaggio,
+   Stop/Replay senza PCM residuo o sovrapposizione.
+3. YouTube prende focus → sessione AIVEXUS termina; ritorno e Play
+   esplicito sullo **stesso messaggio** dal segnalibro, se presente;
+   Stop manuale/fine naturale/testo differente non lo riutilizzano.
+   Se il processo e stato terminato, bookmark volatile perso.
+4. Tre ripetizioni dello **stesso testo digitato vs dettato** in
+   LOCAL Phi-3.5 Mini; poi seconda dettatura e cambio chat.
+   Annotare fine STT, inizio inferenza, esito, crash, RAM e temperatura
+   senza memorizzare la trascrizione personale nei log.
+5. In caso di interruzione, richiesta utente salvata e risposta
+   mancante recuperabile con Riprova: **requisito da implementare
+   e collaudare, non funzionalita oggi certificata**.
+6. CI multipiattaforma + updater e prova fisica S24;
+   non chiudere #967/#1052 in base alla sola CI.
+
+### 18.4 — UX successiva senza dispersione
+
+- Player compatto: Play/Pausa/Stop, seek/durata effettivi,
+  controlli da notifica e lock screen; continuita durante cambio
+  chat/app e schermo spento quando permesso da Android 17.
+- Voce/Live: issue #1033; TTS offline-first multilingue IT/FR/EN/ES
+  e prima emissione audio misurata. LOCAL/HYBRID/CLOUD restano
+  indipendenti dal motore audio.
+- Cestino #947: dopo P0, implementare Sposta/Ripristina, poi
+  «Svuota cestino» con conferma, integrita SQLite e tutela
+  memoria evolutiva. Archiviare non equivale a cestinare.
+  Non distruggere dati del tester durante lo sviluppo.
+- Rispettare sezione 15: non peggiorare apertura chat,
+  primo token, fluidita, memoria o qualita delle risposte.
