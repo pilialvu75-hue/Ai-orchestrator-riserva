@@ -25,7 +25,6 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
 import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
-import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
@@ -301,8 +300,6 @@ class _ChatPageState extends State<ChatPage>
       _runtimeSettings;
   late final VoiceEngine _voiceEngine;
   late final VoiceLoopManager _voiceLoopManager;
-  late final SherpaOnnxVoiceEngine
-      _sherpaVoiceEngine;
   late final VoiceModelDownloader
       _voiceModelDownloader;
   late final RuntimeStateController
@@ -347,8 +344,6 @@ class _ChatPageState extends State<ChatPage>
     _voiceEngine = di.sl<VoiceEngine>();
     _voiceLoopManager =
         di.sl<VoiceLoopManager>();
-    _sherpaVoiceEngine =
-        di.sl<SherpaOnnxVoiceEngine>();
     _voiceModelDownloader =
         di.sl<VoiceModelDownloader>();
 
@@ -1099,7 +1094,7 @@ class _ChatPageState extends State<ChatPage>
       enableDrag: false,
       builder: (_) => LiveVoiceOverlay(
         voiceLoopManager: _voiceLoopManager,
-        voiceEngine: _sherpaVoiceEngine,
+        voiceEngine: _voiceEngine,
         voiceModelDownloader: _voiceModelDownloader,
         onUserTranscript: (text) => _persistLiveTurn(
           sessionId: sessionId, role: 'user', text: text),
