@@ -109,9 +109,10 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
             // onResult callback: recognizer.reset(stream) still runs after
             // this callback returns. Defer teardown to the next event turn,
             // before inference can overlap with an invisible live recorder.
+            final inputService = widget.voiceInputService;
             _pendingFinalStop = Future<void>.delayed(Duration.zero, () async {
               try {
-                await widget.voiceInputService.stopListening();
+                await inputService.stopListening();
               } catch (error) {
                 debugPrint('[VOICE_DICTATION_STOP_WARN] $error');
               }
