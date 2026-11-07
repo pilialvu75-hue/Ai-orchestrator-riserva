@@ -12,6 +12,7 @@ class _MemoryEngine implements VoiceEngine, VoiceRecognitionMemoryReclaimer {
   int releaseCalls = 0;
   bool listening = false;
   Completer<void>? stopGate;
+  Completer<bool>? releaseGate;
   bool releaseSucceeds = true;
 
   @override
@@ -54,6 +55,8 @@ class _MemoryEngine implements VoiceEngine, VoiceRecognitionMemoryReclaimer {
   Future<bool> releaseRecognitionMemoryForInference() async {
     if (listening) throw StateError('Native microphone still active');
     releaseCalls++;
+    final gate = releaseGate;
+    if (gate != null) return gate.future;
     return releaseSucceeds;
   }
 
@@ -115,6 +118,36 @@ void main() {
     expect(engine.startCalls, 2);
     expect(engine.listening, isTrue);
     engine.stopGate = null;
+    await service.stopListening();
+  });
+
+  test('parallel releases coalesce and next mic tap waits for native free',
+      () async {
+    final engine = _MemoryEngine()..releaseGate = Completer<bool>();
+    final service = VoiceInputService(engine: engine);
+    await service.startListening(onResult: (_, __) {});
+
+    final firstRelease = service.releaseRecognitionMemoryForInference();
+    final secondRelease = service.releaseRecognitionMemoryForInference();
+    await Future<void>.delayed(Duration.zero);
+    expect(engine.stopCalls, 1);
+    expect(engine.releaseCalls, 1);
+    expect(engine.listening, isFalse);
+
+    final secondDictation = service.startListening(onResult: (_, __) {});
+    await Future<void>.delayed(Duration.zero);
+    // No stale recognizer may be reused while native free is unfinished.
+    expect(engine.initCalls, 1);
+    expect(engine.startCalls, 1);
+
+    engine.releaseGate!.complete(true);
+    expect(await firstRelease, isTrue);
+    expect(await secondRelease, isTrue);
+    await secondDictation;
+    expect(engine.releaseCalls, 1);
+    expect(engine.initCalls, 2);
+    expect(engine.startCalls, 2);
+    engine.releaseGate = null;
     await service.stopListening();
   });
 
