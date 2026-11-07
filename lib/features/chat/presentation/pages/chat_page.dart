@@ -25,7 +25,6 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
 import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
-import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
@@ -41,6 +40,8 @@ import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/features/chat/presentation/services/hybrid_cloud_chat_consent_gateway.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
+import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
+import 'package:ai_orchestrator/features/chat/data/services/live_chat_transcript_recorder.dart';
 import 'package:uuid/uuid.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_overlay.dart';
@@ -299,8 +300,6 @@ class _ChatPageState extends State<ChatPage>
       _runtimeSettings;
   late final VoiceEngine _voiceEngine;
   late final VoiceLoopManager _voiceLoopManager;
-  late final SherpaOnnxVoiceEngine
-      _sherpaVoiceEngine;
   late final VoiceModelDownloader
       _voiceModelDownloader;
   late final RuntimeStateController
@@ -345,8 +344,6 @@ class _ChatPageState extends State<ChatPage>
     _voiceEngine = di.sl<VoiceEngine>();
     _voiceLoopManager =
         di.sl<VoiceLoopManager>();
-    _sherpaVoiceEngine =
-        di.sl<SherpaOnnxVoiceEngine>();
     _voiceModelDownloader =
         di.sl<VoiceModelDownloader>();
 
@@ -1065,29 +1062,51 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
-  Future<void>
-      _openLiveVoiceSession() async {
+  /// Persist real Live turns in the same SQLite chat history as typed text.
+  /// No cloud upload or duplicate LLM inference occurs here.
+  Future<void> _persistLiveTurn({
+    required String sessionId,
+    required String role,
+    required String text,
+  }) async {
+    final recorder = LiveChatTranscriptRecorder(
+      localDataSource: ChatLocalDataSourceImpl(
+        databaseHelper: di.sl<DatabaseHelper>(),
+      ),
+    );
+    await recorder.append(
+      sessionId: sessionId,
+      role: role,
+      text: text,
+    );
+    _uiLog('[LIVE_TRANSCRIPT_SAVED] session=$sessionId role=$role '
+        'chars=${text.trim().length}');
+  }
+
+  Future<void> _openLiveVoiceSession() async {
+    final sessionId = _activeSessionId;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor:
-          Colors.transparent,
-      barrierColor:
-          Colors.black.withValues(
-        alpha: 0.76,
-      ),
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.76),
       isDismissible: false,
       enableDrag: false,
-      builder: (_) =>
-          LiveVoiceOverlay(
-        voiceLoopManager:
-            _voiceLoopManager,
-        voiceEngine:
-            _sherpaVoiceEngine,
-        voiceModelDownloader:
-            _voiceModelDownloader,
+      builder: (_) => LiveVoiceOverlay(
+        voiceLoopManager: _voiceLoopManager,
+        voiceEngine: _voiceEngine,
+        voiceModelDownloader: _voiceModelDownloader,
+        onUserTranscript: (text) => _persistLiveTurn(
+          sessionId: sessionId, role: 'user', text: text),
+        onAssistantTranscript: (text) => _persistLiveTurn(
+          sessionId: sessionId, role: 'assistant', text: text),
       ),
     );
+    if (mounted && sessionId == _activeSessionId) {
+      context.read<OrchestratorStateEngine>()
+          .add(LoadMessagesEvent(sessionId: sessionId));
+      await _refreshChatSessions();
+    }
   }
 
   @override
