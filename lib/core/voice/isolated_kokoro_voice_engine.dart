@@ -121,7 +121,7 @@ final class AudioStreamTtsAudioSink implements TtsAudioSink {
 /// options and the generated Float32 PCM are transferred.
 final class IsolatedKokoroVoiceEngine
     with RuntimeEventEmitter
-    implements VoiceEngine, ReadAloudVoiceEngine, ReadAloudResumeTarget {
+    implements VoiceEngine, ReadAloudVoiceEngine, ReadAloudResumeTarget, VoiceRecognitionMemoryReclaimer {
   IsolatedKokoroVoiceEngine({
     required VoiceEngine delegate,
     String Function()? languageCode,
@@ -154,6 +154,16 @@ final class IsolatedKokoroVoiceEngine
   int _activeRequestGeneration = -1;
   Completer<void>? _requestFinished;
   int _queuedRequestSequence = 0;
+
+  /// Only forwards an explicit post-dictation handoff. Kokoro output and
+  /// its worker remain untouched while the Sherpa ASR model is released.
+  @override
+  Future<bool> releaseRecognitionMemoryForInference() async {
+    final delegate = _delegate;
+    if (delegate is! VoiceRecognitionMemoryReclaimer) return false;
+    return (delegate as VoiceRecognitionMemoryReclaimer)
+        .releaseRecognitionMemoryForInference();
+  }
 
   @override
   bool get isListening => _delegate.isListening;
