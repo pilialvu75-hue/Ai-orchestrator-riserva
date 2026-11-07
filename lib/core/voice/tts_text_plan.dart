@@ -1,4 +1,4 @@
-/// Conservative, offline IT/FR/EN routing. Ambiguous text uses the app locale.
+/// Conservative, offline IT/FR/EN/ES routing. Ambiguous text uses the app locale.
 String detectTtsLanguage(String text, String fallback) {
   final words = RegExp(r"[a-zà-ÿ]+")
       .allMatches(text.toLowerCase())
@@ -8,6 +8,7 @@ String detectTtsLanguage(String text, String fallback) {
     'it': 'ciao buongiorno buonasera grazie prego sono siamo questo questa questi queste della delle degli nella nelle perché quindi anche oppure puoi posso vuoi vorrei italiano italiana come stai buongiorno',
     'fr': 'bonjour bonsoir salut merci voici voilà avec vous nous votre notre cette ces dans pour est sont une des les aux du au pas mais français française comment allez aujourd hui',
     'en': 'hello hi thanks thank please the this that these those with you your yours our their is are was were have has how what where when why would could should english today',
+    'es': 'hola buenos días buenas tardes buenas noches gracias por favor como estás esta este estos estas respuesta español española mañana hoy porque también puedes quiero quisiera tenemos nosotros ustedes para con una unos unas pero aquí ahora',
   };
   final scores = <String, int>{
     for (final entry in vocabulary.entries)

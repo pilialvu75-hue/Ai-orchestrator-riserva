@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
+import 'package:ai_orchestrator/core/voice/live_voice_latency.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
@@ -150,8 +151,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       await _engine.stopSpeaking();
     } catch (_) {}
 
-    _sessionActive = false;
-
+    // Session stays active until _runLoop completes; a new turn cannot race.
     logEvent(
       _tag,
       '[SESSION_STOP_REQUESTED]',
@@ -301,6 +301,9 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     final sttCompleter =
         Completer<String>();
+    token.onCancel(() {
+      if (!sttCompleter.isCompleted) sttCompleter.complete('');
+    });
 
     void completeStt(
       String text,
@@ -368,6 +371,12 @@ class VoiceLoopManager with RuntimeEventEmitter {
           }
         },
       );
+      if (!_engine.isListening && !token.isCancelled && !_stopRequested) {
+        const message = 'Microfono o riconoscimento vocale non disponibile.';
+        logEvent(_tag, '[STT_NOT_LISTENING]');
+        onError?.call(message);
+        return;
+      }
     } catch (error) {
       if (!token.isCancelled &&
           !_stopRequested) {
@@ -438,6 +447,10 @@ class VoiceLoopManager with RuntimeEventEmitter {
       '[STT_FINAL_TEXT] '
       'chars=${spokenText.length}',
     );
+
+    // Start after the user's speech is fully recognized. These metrics never
+    // contain the transcript, and TTS_REQUEST does not imply audible output.
+    final latency = LiveVoiceLatency();
 
     // -----------------------------------------------------------------------
     // 2. RESOLVE ACTIVE LOCAL MODEL
@@ -556,6 +569,40 @@ class VoiceLoopManager with RuntimeEventEmitter {
     final sentenceBoundaryPattern =
         RegExp(r'[.!?\n]');
 
+    // Ordered playback continues independently of token ingestion.
+    // At most two queued speech operations are kept pending.
+    Future<void> playbackTail = Future<void>.value();
+    final pendingPlayback = <Future<void>>[];
+    bool playbackFailed = false;
+
+    Future<void> queueSpeech(String text) async {
+      if (pendingPlayback.length >= 2) {
+        await pendingPlayback.removeAt(0);
+      }
+      if (_disposed || token.isCancelled || _stopRequested ||
+          playbackFailed) {
+        return;
+      }
+      playbackTail = playbackTail.then((_) async {
+        if (_disposed || token.isCancelled || _stopRequested ||
+            playbackFailed) {
+          return;
+        }
+        try {
+          await _engine.speak(text);
+        } catch (error) {
+          playbackFailed = true;
+          if (!token.isCancelled && !_stopRequested && !_disposed) {
+            final message = 'Voice output failed: $error';
+            logEvent(_tag, '[TTS_ERROR] $message');
+            onError?.call(message);
+          }
+        }
+      });
+      pendingPlayback.add(playbackTail);
+    }
+
+
     await for (
       final response in inferenceStream
     ) {
@@ -586,6 +633,11 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
       if (chunk.isEmpty) {
         continue;
+      }
+
+      final firstTokenMs = latency.recordFirstTokenMs();
+      if (firstTokenMs != null) {
+        logEvent(_tag, '[VOICE_LATENCY] first_token_ms=$firstTokenMs');
       }
 
       tokenBuffer.write(
@@ -633,26 +685,13 @@ class VoiceLoopManager with RuntimeEventEmitter {
         'final=${response.isFinal}',
       );
 
-      try {
-        await _engine.speak(
-          speakChunk,
-        );
-      } catch (error) {
-        if (!token.isCancelled &&
-            !_stopRequested) {
-          final message =
-              'Voice output failed: $error';
-
-          logEvent(
-            _tag,
-            '[TTS_ERROR] $message',
-          );
-
-          onError?.call(message);
-        }
-
-        break;
+      final firstTtsMs = latency.recordFirstTtsRequestMs();
+      if (firstTtsMs != null) {
+        logEvent(_tag, '[VOICE_LATENCY] first_tts_request_ms=$firstTtsMs');
       }
+
+      await queueSpeech(speakChunk);
+      if (playbackFailed) break;
     }
 
     // -----------------------------------------------------------------------
@@ -671,6 +710,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
             .trim();
 
     if (trailing.isEmpty) {
+      await Future.wait(pendingPlayback);
       return;
     }
 
@@ -680,24 +720,12 @@ class VoiceLoopManager with RuntimeEventEmitter {
       'chars=${trailing.length}',
     );
 
-    try {
-      await _engine.speak(
-        trailing,
-      );
-    } catch (error) {
-      if (!token.isCancelled &&
-          !_stopRequested) {
-        final message =
-            'Voice output failed: $error';
-
-        logEvent(
-          _tag,
-          '[TTS_TRAILING_ERROR] '
-          '$message',
-        );
-
-        onError?.call(message);
-      }
+    final firstTtsMs = latency.recordFirstTtsRequestMs();
+    if (firstTtsMs != null) {
+      logEvent(_tag, '[VOICE_LATENCY] first_tts_request_ms=$firstTtsMs');
     }
+
+    await queueSpeech(trailing);
+    await Future.wait(pendingPlayback);
   }
 }

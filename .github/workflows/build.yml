@@ -606,6 +606,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          # Bind the GitHub Release tag to the exact built source, even if main advances during the build.
+          target_commitish: ${{ github.sha }}
           name: AI-Orchestrator Android ${{ steps.version.outputs.version_name }}+${{ steps.version.outputs.version_code }} (${{ steps.version.outputs.channel }})
           prerelease: ${{ steps.version.outputs.channel != 'stable' }}
           body_path: RELEASE_NOTES.md

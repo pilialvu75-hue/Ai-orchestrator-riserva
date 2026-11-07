@@ -370,32 +370,43 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
   }
 
   Future<void> _runLiveLoop() async {
+    // Run successive voice turns until the user closes Live or a real error
+    // occurs. The manager owns each STT -> inference -> TTS turn; restarting
+    // only after its Future completes prevents overlapping mic sessions.
     try {
-      await widget.voiceLoopManager.startLiveSession(
-        onError: (message) {
-          if (!mounted || _closing) {
-            return;
+      while (mounted && !_closing) {
+        var turnFailed = false;
+        try {
+          await widget.voiceLoopManager.startLiveSession(
+            onError: (message) {
+              turnFailed = true;
+              if (!mounted || _closing) {
+                return;
+              }
+              _showError(message);
+              _syncUiStateFromEngine();
+            },
+            onSubtitle: (_, __) {
+              if (!mounted || _closing) {
+                return;
+              }
+              _syncUiStateFromEngine();
+            },
+          );
+        } catch (error) {
+          turnFailed = true;
+          if (mounted && !_closing) {
+            _showError('Errore durante la sessione Live: $error');
           }
+        }
 
-          _showError(message);
-          _syncUiStateFromEngine();
-        },
-        onSubtitle: (_, __) {
-          if (!mounted || _closing) {
-            return;
-          }
+        if (!mounted || _closing || turnFailed) {
+          break;
+        }
 
-          _syncUiStateFromEngine();
-        },
-      );
-    } catch (error) {
-      if (!mounted || _closing) {
-        return;
+        // Yield between turns so UI updates and cancellation can be observed.
+        await Future<void>.delayed(const Duration(milliseconds: 150));
       }
-
-      _showError(
-        'Errore durante la sessione Live: $error',
-      );
     } finally {
       if (mounted && !_closing) {
         _sessionStarted = false;
@@ -451,6 +462,19 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
 
   void _log(String message) {
     RuntimeEventLog.instance.emit('[VOICE_LIVE] $message');
+  }
+
+  Future<void> _interruptCurrentTurn() async {
+    if (_closing || !_sessionStarted) {
+      return;
+    }
+    // The continuous loop will return to listening when the current
+    // cancelled turn unwinds. This is a manual interruption, not VAD/barge-in.
+    _log('[TURN_INTERRUPT_REQUESTED]');
+    await widget.voiceLoopManager.stopLiveSession();
+    if (mounted && !_closing) {
+      _syncUiStateFromEngine();
+    }
   }
 
   Future<void> _closeOverlay() async {
@@ -690,6 +714,18 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                       ),
                       ..._buildErrorWidgetsIfPresent(errorText),
                       const Spacer(),
+                      if (state == _LiveVoiceUiState.speaking ||
+                          state == _LiveVoiceUiState.thinking) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _interruptCurrentTurn,
+                            icon: const Icon(Icons.mic_rounded),
+                            label: const Text('Interrompi e torna in ascolto'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
