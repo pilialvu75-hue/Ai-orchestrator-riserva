@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
@@ -68,6 +69,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
     String? modelPath,
     String? modelId,
     String? systemPrompt,
+    Future<void> Function(String text)? onUserTranscript,
+    Future<void> Function(String text)? onAssistantTranscript,
     void Function(String text, bool isFinal)?
         onSubtitle,
     void Function(String error)? onError,
@@ -101,6 +104,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
         modelPath: modelPath,
         modelId: modelId,
         systemPrompt: systemPrompt,
+        onUserTranscript: onUserTranscript,
+        onAssistantTranscript: onAssistantTranscript,
         onSubtitle: onSubtitle,
         onError: onError,
       );
@@ -282,6 +287,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
     required String? modelPath,
     required String? modelId,
     required String? systemPrompt,
+    required Future<void> Function(String text)? onUserTranscript,
+    required Future<void> Function(String text)? onAssistantTranscript,
     required void Function(
       String text,
       bool isFinal,
@@ -298,6 +305,22 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // -----------------------------------------------------------------------
     // 1. STT
     // -----------------------------------------------------------------------
+
+    // Android Live releases its large ASR model before LLM inference.
+    // Reinitialize it on the next explicit turn; no reinit is needed on desktop.
+    if (Platform.isAndroid) {
+      final status = await _engine.inspect();
+      if (!status.readyForInput) {
+        final ready = await _engine.initialize();
+        if (_disposed || token.isCancelled || _stopRequested) return;
+        if (!ready.readyForInput) {
+          onError?.call('Riconoscimento vocale Android non pronto.');
+          logEvent(_tag, '[STT_REINIT_FAILED]');
+          return;
+        }
+        logEvent(_tag, '[STT_REINIT_AFTER_HANDOFF]');
+      }
+    }
 
     final sttCompleter =
         Completer<String>();
@@ -448,6 +471,37 @@ class VoiceLoopManager with RuntimeEventEmitter {
       'chars=${spokenText.length}',
     );
 
+    if (onUserTranscript != null) {
+      try {
+        await onUserTranscript(spokenText);
+      } catch (error) {
+        logEvent(_tag, '[LIVE_TRANSCRIPT_SAVE_FAILED] role=user error=$error');
+        onError?.call('Non riesco a salvare la domanda Live nella chat.');
+        return;
+      }
+    }
+
+    // On Android do not keep the large Sherpa ASR graph resident while
+    // starting the local LLM / Kokoro worker. Reinitialize before next turn.
+    // This is the same native memory handoff used by normal dictation.
+    if (Platform.isAndroid && _engine is VoiceRecognitionMemoryReclaimer) {
+      try {
+        final released = await (_engine as VoiceRecognitionMemoryReclaimer)
+            .releaseRecognitionMemoryForInference();
+        logEvent(_tag, '[LIVE_ASR_MEMORY_HANDOFF] released=$released');
+        if (!released) {
+          onError?.call('Memoria del riconoscimento vocale non liberata. '
+              'Risposta sospesa per evitare sovraccarico Android.');
+          return;
+        }
+      } catch (error) {
+        logEvent(_tag, '[LIVE_ASR_MEMORY_HANDOFF_FAIL] $error');
+        onError?.call('Errore nel recupero memoria del microfono Android.');
+        return;
+      }
+    }
+    if (_disposed || token.isCancelled || _stopRequested) return;
+
     // Start after the user's speech is fully recognized. These metrics never
     // contain the transcript, and TTS_REQUEST does not imply audible output.
     final latency = LiveVoiceLatency();
@@ -565,6 +619,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     final tokenBuffer =
         StringBuffer();
+    final fullResponse = StringBuffer();
 
     final sentenceBoundaryPattern =
         RegExp(r'[.!?\n]');
@@ -643,6 +698,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       tokenBuffer.write(
         chunk,
       );
+      fullResponse.write(chunk);
 
       final currentText =
           tokenBuffer.toString();
@@ -695,7 +751,21 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
 
     // -----------------------------------------------------------------------
-    // 5. TRAILING TTS
+    // 5. Persist the complete assistant text before playback finishes.
+    // It remains visible even if Android later stops the audio service.
+    // -----------------------------------------------------------------------
+
+    final assistantText = fullResponse.toString().trim();
+    if (assistantText.isNotEmpty && onAssistantTranscript != null) {
+      try {
+        await onAssistantTranscript(assistantText);
+      } catch (error) {
+        logEvent(_tag, '[LIVE_TRANSCRIPT_SAVE_FAILED] role=assistant error=$error');
+        onError?.call('Non riesco a salvare la risposta Live nella chat.');
+      }
+    }
+
+    // 6. TRAILING TTS
     // -----------------------------------------------------------------------
 
     if (_disposed ||
