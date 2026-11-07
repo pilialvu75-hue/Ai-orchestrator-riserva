@@ -178,6 +178,19 @@ void main() {
     await first;
   });
 
+  test('bookmark is handed to the engine only for an explicit PCM restart',
+      () async {
+    final engine = _BookmarkAwarePcmEngine();
+    final service = VoiceOutputService(engine: engine);
+    await service.speakFromPosition('Messaggio da riprendere',
+        const Duration(seconds: 17));
+    expect(engine.resumeAt, const Duration(seconds: 17));
+    expect(engine.spoken, ['Messaggio da riprendere']);
+    await service.speak('Nuovo messaggio');
+    expect(engine.resumeAt, const Duration(seconds: 17));
+    expect(engine.spoken, ['Messaggio da riprendere', 'Nuovo messaggio']);
+  });
+
   test('new explicit play after audio-focus loss is not a stale toggle',
       () async {
     final engine = _SwitchingPcmEngine();
@@ -206,4 +219,49 @@ void main() {
     await speaking;
     expect(engine.stopped, true);
   });
+}
+
+class _BookmarkAwarePcmEngine
+    implements VoiceEngine, ReadAloudVoiceEngine, ReadAloudResumeTarget {
+  Duration? resumeAt;
+  final spoken = <String>[];
+
+  @override
+  bool get supportsRealReadAloudControls => true;
+  @override
+  ReadAloudSnapshot get readAloudSnapshot =>
+      const ReadAloudSnapshot(supported: true);
+  @override
+  bool get isSpeaking => false;
+  @override
+  bool get isListening => false;
+  @override
+  void setNextReadAloudPosition(Duration position) { resumeAt = position; }
+  @override
+  Future<void> speak(String text) async { spoken.add(text); }
+  @override
+  Future<void> stopSpeaking() async {}
+  @override
+  Future<ReadAloudSnapshot> refreshReadAloud() async => readAloudSnapshot;
+  @override
+  Future<VoiceEngineStatus> inspect() async => VoiceEngineStatus.unsupported();
+  @override
+  Future<VoiceEngineStatus> initialize() => inspect();
+  @override
+  Future<void> startListening({
+    required VoiceRecognitionResultCallback onResult,
+    String localeId = 'it-IT',
+  }) async {}
+  @override
+  Future<void> stopListening() async {}
+  @override
+  Future<void> dispose() async {}
+  @override
+  Future<void> pauseReadAloud() async {}
+  @override
+  Future<void> resumeReadAloud() async {}
+  @override
+  Future<void> skipReadAloud(Duration offset) async {}
+  @override
+  Future<void> seekReadAloud(Duration position) async {}
 }

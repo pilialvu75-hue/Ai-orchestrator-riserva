@@ -121,7 +121,7 @@ final class AudioStreamTtsAudioSink implements TtsAudioSink {
 /// options and the generated Float32 PCM are transferred.
 final class IsolatedKokoroVoiceEngine
     with RuntimeEventEmitter
-    implements VoiceEngine, ReadAloudVoiceEngine {
+    implements VoiceEngine, ReadAloudVoiceEngine, ReadAloudResumeTarget {
   IsolatedKokoroVoiceEngine({
     required VoiceEngine delegate,
     String Function()? languageCode,
@@ -168,6 +168,14 @@ final class IsolatedKokoroVoiceEngine
 
   @override
   bool get supportsRealReadAloudControls => _readAloudSink != null;
+
+  @override
+  void setNextReadAloudPosition(Duration position) {
+    final sink = _audioSink;
+    if (sink is ReadAloudResumeTarget) {
+      (sink as ReadAloudResumeTarget).setNextReadAloudPosition(position);
+    }
+  }
 
   @override
   ReadAloudSnapshot get readAloudSnapshot =>

@@ -10,6 +10,8 @@ class ReadAloudSnapshot {
     this.playing = false,
     this.paused = false,
     this.complete = false,
+    this.terminatedByFocusLoss = false,
+    this.rebuildingBookmark = false,
     this.position = Duration.zero,
     this.buffered = Duration.zero,
   });
@@ -19,6 +21,11 @@ class ReadAloudSnapshot {
   final bool playing;
   final bool paused;
   final bool complete;
+  /// The native foreground service ended because another app permanently
+  /// took audio focus. This is not an explicit Stop or natural completion.
+  final bool terminatedByFocusLoss;
+  /// PCM is being regenerated silently up to a user-requested bookmark.
+  final bool rebuildingBookmark;
   final Duration position;
   final Duration buffered;
 
@@ -31,6 +38,8 @@ class ReadAloudSnapshot {
       playing: data['playing'] == true,
       paused: data['paused'] == true,
       complete: data['complete'] == true,
+      terminatedByFocusLoss: data['stopReason'] == 'audio_focus_loss',
+      rebuildingBookmark: data['rebuildingBookmark'] == true,
       position: readTime('positionMs'),
       buffered: readTime('bufferedMs'),
     );
@@ -67,4 +76,10 @@ abstract interface class ReadAloudVoiceEngine {
   Future<void> seekReadAloud(Duration position);
   Future<void> skipReadAloud(Duration offset);
   Future<ReadAloudSnapshot> refreshReadAloud();
+}
+
+/// Optional bookmark contract. Only the next explicitly user-started PCM
+/// session may consume this target; no background audio is auto-resurrected.
+abstract interface class ReadAloudResumeTarget {
+  void setNextReadAloudPosition(Duration position);
 }

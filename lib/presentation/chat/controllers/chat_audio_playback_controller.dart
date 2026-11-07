@@ -23,6 +23,31 @@ class ChatAudioPlaybackController extends ChangeNotifier {
   Timer? _poll;
   bool _pollInFlight = false;
   ReadAloudSnapshot _playback = const ReadAloudSnapshot();
+  String? _resumeBookmarkText;
+  Duration _resumeBookmarkPosition = Duration.zero;
+
+  void _clearBookmark() {
+    _resumeBookmarkText = null;
+    _resumeBookmarkPosition = Duration.zero;
+  }
+
+  void _rememberInterruptedPlayback(ReadAloudSnapshot stopped) {
+    // The native service supplies the exact played-frame clock on permanent
+    // audio focus loss. An explicit Stop, notification dismissal, or natural
+    // completion must NEVER create a resume bookmark.
+    final position = stopped.position > Duration.zero
+        ? stopped.position : _playback.position;
+    if (_text != null &&
+        stopped.terminatedByFocusLoss &&
+        position > Duration.zero &&
+        (!_playback.complete ||
+            _playback.position < _playback.buffered)) {
+      _resumeBookmarkText = _text;
+      _resumeBookmarkPosition = position;
+    } else {
+      _clearBookmark();
+    }
+  }
 
   bool get isOpen => _text != null;
   bool get isPlaying => _playing;
@@ -57,6 +82,7 @@ class ChatAudioPlaybackController extends ChangeNotifier {
           // also applies while Kokoro is still synthesizing: do not strand
           // the UI in "busy" with a dead media session after YouTube.
           if (!state.active && _playback.active) {
+            _rememberInterruptedPlayback(state);
             ++_generation;
             _text = null;
             _poll?.cancel();
@@ -67,12 +93,13 @@ class ChatAudioPlaybackController extends ChangeNotifier {
             return;
           }
           final playing = state.playing;
-          final busy = _busy && state.buffered == Duration.zero &&
-              !state.complete;
+          final busy = state.rebuildingBookmark ||
+              (_busy && state.buffered == Duration.zero && !state.complete);
           if (state.active != _playback.active ||
               state.position != _playback.position ||
               state.buffered != _playback.buffered ||
               state.complete != _playback.complete ||
+              state.rebuildingBookmark != _playback.rebuildingBookmark ||
               state.paused != _playback.paused ||
               playing != _playing || busy != _busy) {
             _playback = state;
@@ -110,18 +137,39 @@ class ChatAudioPlaybackController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> play(String text) {
-    if (text.trim().isEmpty) return Future<void>.value();
+  Future<void> play(String text) async {
+    if (text.trim().isEmpty) return;
     final token = ++_generation;
+
+    // When returning from an external app, a suspended Flutter poller may
+    // not have observed native MediaSession teardown yet. Take one fresh
+    // status sample before starting a new user-requested session.
+    if (canSeek && _text == text && _playback.active) {
+      try {
+        final native = await _output.refreshReadAloud();
+        if (!native.active) _rememberInterruptedPlayback(native);
+      } catch (error) {
+        debugPrint('PCM bookmark preflight unavailable: $error');
+      }
+    }
+
+    // A second tap can supersede an in-flight native status preflight.
+    if (token != _generation) return;
+    final bookmark = _resumeBookmarkText == text
+        ? _resumeBookmarkPosition : Duration.zero;
+    _clearBookmark(); // Never seek a different message to an old position.
     _text = text;
     _playback = const ReadAloudSnapshot();
     _busy = true;
     notifyListeners();
     _watch();
-    return _perform(token, () => _output.speak(text));
+    await _perform(token, () => bookmark > Duration.zero && canSeek
+        ? _output.speakFromPosition(text, bookmark)
+        : _output.speak(text));
   }
 
   Future<void> stop() {
+    _clearBookmark();
     if (_text == null) return Future<void>.value();
     final token = ++_generation;
     _busy = true;
@@ -130,6 +178,7 @@ class ChatAudioPlaybackController extends ChangeNotifier {
   }
 
   Future<void> restart() {
+    _clearBookmark(); // Explicit Restart always means from the beginning.
     final text = _text;
     if (text == null) return Future<void>.value();
     final token = ++_generation;
@@ -174,6 +223,7 @@ class ChatAudioPlaybackController extends ChangeNotifier {
   }
 
   void close() {
+    _clearBookmark();
     if (_text == null) return;
     ++_generation;
     _text = null;
