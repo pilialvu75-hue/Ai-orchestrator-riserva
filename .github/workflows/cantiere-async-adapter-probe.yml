@@ -1,0 +1,33 @@
+name: Cantiere real Library async integration probe
+on:
+  pull_request:
+    paths:
+      - 'tool/cantiere_async_adapter_sandbox.py'
+      - '.github/workflows/cantiere-async-adapter-probe.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tool/cantiere_async_adapter_sandbox.py'
+      - '.github/workflows/cantiere-async-adapter-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  execute-library-adapter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - name: Pin Library and upstream revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          library_sha="$(git ls-remote https://github.com/pilialvu75-hue/AI-Orchestrator-Module-Library.git refs/heads/main | cut -f1)"
+          upstream_sha="$(git ls-remote https://github.com/dart-lang/core.git refs/heads/main | cut -f1)"
+          [[ "$library_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$upstream_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "LIBRARY_SHA=$library_sha" >> "$GITHUB_ENV"
+          echo "UPSTREAM_SHA=$upstream_sha" >> "$GITHUB_ENV"
+      - name: Run actual Cantiere-to-Library async consumer
+        run: python3 tool/cantiere_async_adapter_sandbox.py --library-sha "$LIBRARY_SHA" --upstream-sha "$UPSTREAM_SHA"
