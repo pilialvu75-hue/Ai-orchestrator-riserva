@@ -1,0 +1,51 @@
+name: Cantiere generated Stella Queue app
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tool/cantiere_generate_stella_queue.py'
+      - '.github/workflows/cantiere-stella-queue.yml'
+
+jobs:
+  generate-test-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Pin upstream and Library revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "LIBRARY_SHA=$(git ls-remote https://github.com/pilialvu75-hue/AI-Orchestrator-Module-Library.git refs/heads/main | cut -f1)" >> "$GITHUB_ENV"
+          echo "UPSTREAM_SHA=$(git ls-remote https://github.com/dart-lang/core.git refs/heads/main | cut -f1)" >> "$GITHUB_ENV"
+      - name: Generate app and rebuild tested adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tool/cantiere_generate_stella_queue.py --output "$RUNNER_TEMP/stella"
+          git clone --quiet https://github.com/pilialvu75-hue/AI-Orchestrator-Module-Library.git "$RUNNER_TEMP/library"
+          git -C "$RUNNER_TEMP/library" checkout --quiet "$LIBRARY_SHA"
+          python3 "$RUNNER_TEMP/library/tools/rebuild_async_adapter.py" --source-commit "$UPSTREAM_SHA" --output "$RUNNER_TEMP/stella/modules/aivexus_external_async"
+      - name: Generate Flutter platform scaffolding
+        working-directory: ${{ runner.temp }}/stella
+        run: flutter create --project-name aivexus_stella_queue --platforms=web,android .
+      - name: Analyze generated app
+        working-directory: ${{ runner.temp }}/stella
+        run: flutter analyze
+      - name: Execute widget test with real Library adapter
+        working-directory: ${{ runner.temp }}/stella
+        run: flutter test
+      - name: Build runnable web application
+        working-directory: ${{ runner.temp }}/stella
+        run: flutter build web --release
+      - name: Publish generated runnable app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cantiere-stella-queue-web-not-certified
+          path: ${{ runner.temp }}/stella/build/web/
+          retention-days: 14
