@@ -59,7 +59,7 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
   void dispose() {
     // A route change must never strand the native recorder open in a hidden
     // chat. The final-result stop is already tracked by _pendingFinalStop.
-    if (_listening) {
+    if (_listening && widget.voiceInputService.isListening) {
       unawaited(widget.voiceInputService.stopListening().catchError(
         (Object error) => debugPrint('[VOICE_DICTATION_STOP_WARN] $error'),
       ));
