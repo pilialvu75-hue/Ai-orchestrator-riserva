@@ -99,6 +99,13 @@ class VoiceOutputService {
     }
 
     final requestToken = ++_requestGeneration;
+    if (supportsRealReadAloudControls) {
+      // A PCM synthesis can take seconds while producing the first phrase.
+      // Do not place the next user tap behind its entire awaited speak().
+      // The isolated Kokoro engine safely drains a cancelled worker before
+      // admitting a new synthesis, without replaying its stale PCM.
+      return _speakPcm(normalized, requestToken);
+    }
     return _enqueue(() async {
       if (requestToken != _requestGeneration) return;
       final currentlySpeaking =
@@ -158,6 +165,46 @@ class VoiceOutputService {
        */
       await _refreshStatusSafely();
     });
+  }
+
+  /// Preemptible user-initiated PCM read-aloud: latest tap wins.
+  ///
+  /// The former _operationQueue awaited all Kokoro phrases, so switching to
+  /// another chat message could be delayed until that entire synthesis ended.
+  /// Non-PCM engines still use the original serial queue above.
+  Future<void> _speakPcm(String normalized, int token) async {
+    if (token != _requestGeneration) return;
+    final previous = _activeNormalizedText;
+    if (previous != null || _engine.isSpeaking) {
+      // A previous media session may have ended following permanent audio
+      // focus loss (e.g. YouTube). Re-tapping that message must start a new
+      // session, not turn into an invisible second Stop.
+      var wasActive = _engine.isSpeaking;
+      if (previous == normalized) {
+        final snapshot = await refreshReadAloud();
+        if (token != _requestGeneration) return;
+        wasActive = wasActive || snapshot.active;
+      }
+      await _engine.stopSpeaking();
+      if (token != _requestGeneration) return;
+      _activeNormalizedText = null;
+      if (previous == normalized && wasActive) {
+        await _refreshStatusSafely();
+        return;
+      }
+    }
+    if (token != _requestGeneration) return;
+
+    // Claim the message before generation: before the first PCM frame,
+    // isSpeaking can still be false while the worker is genuinely busy.
+    _activeNormalizedText = normalized;
+    try {
+      await _engine.speak(normalized);
+      if (token == _requestGeneration) await _refreshStatusSafely();
+    } catch (_) {
+      if (token == _requestGeneration) _activeNormalizedText = null;
+      rethrow;
+    }
   }
 
   /// Interrompe sempre qualsiasi riproduzione TTS in corso.
