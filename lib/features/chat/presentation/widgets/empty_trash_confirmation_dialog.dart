@@ -14,7 +14,8 @@ class EmptyTrashConfirmationDialog extends StatelessWidget {
           'Eliminare definitivamente $chatCount '
           '${chatCount == 1 ? 'conversazione' : 'conversazioni'} dal cestino? '
           'Non sarà possibile ripristinarle. Le chat attive e i ricordi '
-          'personali già confermati non verranno cancellati.',
+          'condivisi tra chat resteranno. I ricordi salvati soltanto nelle '
+          'conversazioni cestinate saranno eliminati.',
         ),
         actions: [
           TextButton(
