@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
@@ -308,7 +310,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     // Android Live releases its large ASR model before LLM inference.
     // Reinitialize it on the next explicit turn; no reinit is needed on desktop.
-    if (Platform.isAndroid) {
+    if (!kIsWeb && Platform.isAndroid) {
       final status = await _engine.inspect();
       if (!status.readyForInput) {
         final ready = await _engine.initialize();
@@ -484,7 +486,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // On Android do not keep the large Sherpa ASR graph resident while
     // starting the local LLM / Kokoro worker. Reinitialize before next turn.
     // This is the same native memory handoff used by normal dictation.
-    if (Platform.isAndroid && _engine is VoiceRecognitionMemoryReclaimer) {
+    if (!kIsWeb && Platform.isAndroid && _engine is VoiceRecognitionMemoryReclaimer) {
       try {
         final released = await (_engine as VoiceRecognitionMemoryReclaimer)
             .releaseRecognitionMemoryForInference();
