@@ -67,6 +67,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   bool _hasLongDraft = false;
   bool _dictationWasUsed = false;
   bool _submissionInFlight = false;
+  int _dictationButtonEpoch = 0;
   final GlobalKey _composerFieldKey = GlobalKey();
   final DictationDraftBuffer _dictationDraft = DictationDraftBuffer();
   String? _loadedEditingText;
@@ -248,6 +249,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
     setState(() {
       _attachments.clear();
       _hasText = false;
+      // The native mic is now stopped before dispatch. Recreate the button
+      // so its mic icon cannot remain in the old 'recording' state.
+      _dictationButtonEpoch++;
     });
 
     RuntimeEventLog.instance.emit(
@@ -593,6 +597,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   onSubmitted: (_) => _submit(),
                 ),
                 voiceButton: VoiceInputButton(
+                  key: ValueKey('chat-dictation-$_dictationButtonEpoch'),
                   voiceInputService: _voiceInputService,
                   size: 42,
                   onRecordingStarted: () {
