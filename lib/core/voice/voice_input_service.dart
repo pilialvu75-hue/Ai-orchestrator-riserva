@@ -111,9 +111,10 @@ class VoiceInputService {
     await stopListening();
     final engine = _engine;
     if (engine is! VoiceRecognitionMemoryReclaimer) return false;
-    final released = await (engine as VoiceRecognitionMemoryReclaimer)
+    // Even if native free reports a warning, the recognizer handle may be
+    // invalidated. Force a fresh initialize on the next microphone tap.
+    _lastStatus = null;
+    return (engine as VoiceRecognitionMemoryReclaimer)
         .releaseRecognitionMemoryForInference();
-    if (released) _lastStatus = null;
-    return released;
   }
 }
