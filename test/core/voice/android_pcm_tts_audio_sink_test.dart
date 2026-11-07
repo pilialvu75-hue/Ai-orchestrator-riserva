@@ -70,6 +70,57 @@ void main() {
     expect((seek.arguments as Map)['milliseconds'], 5000);
   });
 
+  test('resume bookmark is passed to one explicit PCM prepare only', () async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    final sink = AndroidPcmTtsAudioSink(channel: channel);
+    sink.setNextReadAloudPosition(const Duration(seconds: 23));
+    await sink.beginReadAloud();
+    expect(calls.first.method, 'prepare');
+    expect((calls.first.arguments as Map)['resumeMs'], 23000);
+
+    await sink.stopReadAloud();
+    await sink.beginReadAloud();
+    final prepares = calls.where((call) => call.method == 'prepare').toList();
+    expect(prepares, hasLength(2));
+    expect(prepares.last.arguments, isNull);
+    await sink.stopReadAloud();
+  });
+
+  test('bookmark regeneration advertises true buffering', () {
+    final state = ReadAloudSnapshot.fromMap(<String, Object>{
+      'active': true,
+      'rebuildingBookmark': true,
+      'positionMs': 0,
+      'bufferedMs': 11000,
+      'playing': false,
+    });
+    expect(state.rebuildingBookmark, isTrue);
+    expect(state.buffered, const Duration(seconds: 11));
+    expect(state.playing, isFalse);
+  });
+
+  test('native focus loss is distinguishable from explicit stop', () {
+    final lost = ReadAloudSnapshot.fromMap(<String, Object>{
+      'active': false,
+      'stopReason': 'audio_focus_loss',
+      'positionMs': 23000,
+      'bufferedMs': 45000,
+    });
+    expect(lost.terminatedByFocusLoss, isTrue);
+    expect(lost.position, const Duration(seconds: 23));
+    final manual = ReadAloudSnapshot.fromMap(<String, Object>{
+      'active': false,
+      'stopReason': 'explicit',
+      'positionMs': 0,
+    });
+    expect(manual.terminatedByFocusLoss, isFalse);
+  });
+
   test('unsupported snapshots never fabricate progress', () {
     const state = ReadAloudSnapshot();
     expect(state.supported, false);

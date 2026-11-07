@@ -53,6 +53,21 @@ class VoiceOutputService {
   Future<ReadAloudSnapshot> refreshReadAloud() async =>
       await _transport?.refreshReadAloud() ?? const ReadAloudSnapshot();
 
+  /// Rebuilds the PCM timeline on an explicit new Play request and starts
+  /// from the last measured position when the Android engine supports it.
+  /// Falls back to a normal read on non-Android engines.
+  Future<void> speakFromPosition(String text, Duration position) {
+    final normalized = _normalizer.normalizeForTts(text);
+    if (normalized.isEmpty) return Future<void>.value();
+    if (position <= Duration.zero ||
+        !supportsRealReadAloudControls ||
+        _engine is! ReadAloudResumeTarget) {
+      return speak(text);
+    }
+    final token = ++_requestGeneration;
+    return _speakPcm(normalized, token, resumeFrom: position);
+  }
+
   Future<void> pauseReadAloud() async {
     await _transport?.pauseReadAloud();
   }
@@ -172,7 +187,8 @@ class VoiceOutputService {
   /// The former _operationQueue awaited all Kokoro phrases, so switching to
   /// another chat message could be delayed until that entire synthesis ended.
   /// Non-PCM engines still use the original serial queue above.
-  Future<void> _speakPcm(String normalized, int token) async {
+  Future<void> _speakPcm(String normalized, int token,
+      {Duration resumeFrom = Duration.zero}) async {
     if (token != _requestGeneration) return;
     final previous = _activeNormalizedText;
     if (previous != null || _engine.isSpeaking) {
@@ -199,6 +215,12 @@ class VoiceOutputService {
     // isSpeaking can still be false while the worker is genuinely busy.
     _activeNormalizedText = normalized;
     try {
+      // Set AFTER any old session's Stop. No bookmark can leak into a
+      // superseded request and the engine still owns its native worker.
+      if (resumeFrom > Duration.zero && _engine is ReadAloudResumeTarget) {
+        (_engine as ReadAloudResumeTarget)
+            .setNextReadAloudPosition(resumeFrom);
+      }
       await _engine.speak(normalized);
       if (token == _requestGeneration) await _refreshStatusSafely();
     } catch (_) {

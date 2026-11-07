@@ -7,7 +7,7 @@ import 'read_aloud_transport.dart';
 
 /// Android-only offline PCM output. The app-private native file keeps played
 /// phrases available for real seek; no text is sent off-device.
-class AndroidPcmTtsAudioSink implements TtsAudioSink, ReadAloudSink {
+class AndroidPcmTtsAudioSink implements TtsAudioSink, ReadAloudSink, ReadAloudResumeTarget {
   AndroidPcmTtsAudioSink({MethodChannel? channel})
       : _channel = channel ?? const MethodChannel('com.aiorchestrator/tts_pcm_transport');
 
@@ -16,6 +16,7 @@ class AndroidPcmTtsAudioSink implements TtsAudioSink, ReadAloudSink {
   ReadAloudSnapshot _snapshot = const ReadAloudSnapshot(supported: true);
   bool _disposed = false;
   Object? _appendError;
+  Duration _nextReadAloudPosition = Duration.zero;
 
   @override
   bool get isPlaying => !_disposed && _snapshot.playing;
@@ -36,9 +37,19 @@ class AndroidPcmTtsAudioSink implements TtsAudioSink, ReadAloudSink {
   }
 
   @override
+  void setNextReadAloudPosition(Duration position) {
+    _nextReadAloudPosition = position > Duration.zero
+        ? position : Duration.zero;
+  }
+
+  @override
   Future<void> beginReadAloud() async {
     _appendError = null;
-    await _send('prepare');
+    final bookmark = _nextReadAloudPosition;
+    _nextReadAloudPosition = Duration.zero;
+    await _send('prepare', bookmark > Duration.zero
+        ? <String, Object>{'resumeMs': bookmark.inMilliseconds}
+        : null);
     _snapshot = const ReadAloudSnapshot(supported: true, active: true);
   }
 

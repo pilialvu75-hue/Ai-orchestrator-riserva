@@ -1,6 +1,6 @@
 # AIVEXUS — collaudo audio Android 17 / Galaxy S24 FE
 
-**Ramo:** PR #1027 — servizio audio in background Android; non confondere con la beta 103921, che contiene solo pausa e seek PCM della PR #1016.
+**Ramo:** PR #1027 integrata e collaudata sulla beta 104018 per la riproduzione in background. Seguito: PR #1034 (Stop/cambio messaggio) e ramo dipendente per segnalibro dopo perdita permanente dell'audio focus.
 
 > La CI verifica che il codice compili e che i contratti rimangano integri, ma non certifica il comportamento del telefono fisico. Installare **solo** da Impostazioni → Aggiornamenti dopo release beta autorizzata, mai APK manuali, mai disinstallare l'app. Non cambiare impostazioni della batteria per mascherare un difetto. Il microfono STT deve continuare a funzionare.
 
@@ -14,6 +14,9 @@
 6. Usare dalla notifica / schermata di blocco **Pausa, Riprendi, -10 s, +10 s, Chiudi**. I comandi devono agire sullo stesso audio e la posizione deve restare coerente.
 7. Provare auricolari Bluetooth e cablati: staccandoli durante la lettura l'audio deve **fermarsi in pausa**, senza uscire improvvisamente dallo speaker.
 8. Durante una chiamata o altra app con audio focus, AIVEXUS deve rispettare la perdita audio; deve riprendere automaticamente solo dopo una perdita **transitoria** e soltanto se l'utente non aveva già premuto Pausa.
+   - **Perdita permanente (YouTube):** il servizio si chiude, senza riproduzione parallela. Tornare su AIVEXUS e toccare **esplicitamente** lo stesso messaggio: dopo la rigenerazione locale, deve partire dal segnalibro del clock PCM misurato, **senza riprodurre l'inizio**. Il segnalibro è solo nella memoria dell'app (non persiste se Android termina il processo).
+   - **Stop esplicito, tasto Chiudi della notifica, fine naturale o testo diverso:** nessun segnalibro, la nuova lettura parte dall'inizio. Le cuffie non sono ancora state collaudate sul dispositivo.
+   - **Tempo di ripresa:** potrebbe esserci attesa mentre Kokoro rigenera silenziosamente le frasi precedenti; questa funzione preserva il punto, non garantisce ripartenza immediata.
 9. A lettura finita o chiusa, la notifica del servizio deve sparire e la cache PCM privata essere rilasciata. Nuovo tap sull'altoparlante deve creare una nuova sessione, senza audio duplicato.
 10. Provare microfono/dettatura dopo l'uso audio e verificare che restino funzionanti. Ripetere con Wi-Fi spento: lettura locale non deve dipendere dal Cloud.
 

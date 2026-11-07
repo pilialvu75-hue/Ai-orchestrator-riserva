@@ -45,6 +45,17 @@ internal class PcmReadAloudMediaService : Service() {
         private const val ACTION_STOP = "com.aiorchestrator.audio.STOP"
 
         @Volatile private var current: PcmReadAloudMediaService? = null
+        // Only per-process metadata: never persist personal text or
+        // resurrect playback without a fresh user tap.
+        @Volatile private var lastStopReason = "none"
+        @Volatile private var lastStopPositionMs = 0L
+        @Volatile private var lastStopBufferedMs = 0L
+
+        fun lastStoppedStatus(): Map<String, Any> = mapOf(
+            "stopReason" to lastStopReason,
+            "positionMs" to lastStopPositionMs,
+            "bufferedMs" to lastStopBufferedMs
+        )
         private val waiting = mutableListOf<(PcmReadAloudMediaService?, String?) -> Unit>()
 
         /** Must run on the main thread. The callback fires AFTER startForeground. */
@@ -109,7 +120,7 @@ internal class PcmReadAloudMediaService : Service() {
             val buffered = (status["bufferedMs"] as? Long) ?: 0L
             val position = (status["positionMs"] as? Long) ?: 0L
             if (complete && buffered > 0L && position >= buffered) {
-                finishPlayback()
+                finishPlayback("finished")
             } else {
                 mainHandler.postDelayed(this, 1000L)
             }
@@ -118,6 +129,9 @@ internal class PcmReadAloudMediaService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        lastStopReason = "none"
+        lastStopPositionMs = 0L
+        lastStopBufferedMs = 0L
         transport = PcmReadAloudBridge(applicationContext)
         current = this
         notificationManager =
@@ -179,7 +193,7 @@ internal class PcmReadAloudMediaService : Service() {
                     }
                     AudioManager.AUDIOFOCUS_LOSS -> {
                         resumeAfterFocus = false
-                        finishPlayback()
+                        finishPlayback("audio_focus_loss")
                     }
                     AudioManager.AUDIOFOCUS_GAIN -> {
                         if (resumeAfterFocus) {
@@ -366,8 +380,14 @@ internal class PcmReadAloudMediaService : Service() {
             .build()
     }
 
-    fun finishPlayback() {
+    fun finishPlayback(reason: String = "explicit") {
         if (!foregroundReady) return
+        val lastState = transport.status()
+        lastStopReason = reason
+        lastStopPositionMs = if (reason == "audio_focus_loss")
+            (lastState["positionMs"] as? Long) ?: 0L else 0L
+        lastStopBufferedMs = if (reason == "audio_focus_loss")
+            (lastState["bufferedMs"] as? Long) ?: 0L else 0L
         transport.releaseLocked()
         resumeAfterFocus = false
         focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }

@@ -39,6 +39,10 @@ internal class PcmReadAloudBridge(private val context: Context) {
     private var paused = false
     private var finished = false
     private var active = false
+    // Pending bookmark only in a user-started session. Do not play generated
+    // frames before this offset has been rebuilt from the same message.
+    private var resumeTargetFrames = 0L
+    private var resumeTargetMs = 0L
     @Volatile private var alive = true
 
     init {
@@ -60,7 +64,9 @@ internal class PcmReadAloudBridge(private val context: Context) {
             "supported" to true,
             "active" to active,
             "paused" to paused,
-            "playing" to (active && !paused && totalFrames > position && !atEnd),
+            "rebuildingBookmark" to (active && resumeTargetFrames > 0L),
+            "playing" to (active && !paused && resumeTargetFrames == 0L &&
+                totalFrames > position && !atEnd),
             "positionMs" to if (sampleRate > 0) position * 1000L / sampleRate else 0L,
             "bufferedMs" to if (sampleRate > 0) totalFrames * 1000L / sampleRate else 0L,
             "complete" to finished
@@ -83,11 +89,16 @@ internal class PcmReadAloudBridge(private val context: Context) {
         seekBase = 0
         finished = false
         paused = false
+        resumeTargetFrames = 0L
+        resumeTargetMs = 0L
         if (path.exists()) path.delete()
     }
 
-    fun prepare() = synchronized(lock) {
+    fun prepare(resumeMs: Long = 0L) = synchronized(lock) {
         releaseLocked()
+        // Bound the requested offset even if a malformed MethodChannel call
+        // supplies a huge number. The actual PCM cache is bounded separately.
+        resumeTargetMs = resumeMs.coerceIn(0L, 3600000L)
         path.parentFile?.mkdirs()
         writer = RandomAccessFile(path, "rw")
         reader = RandomAccessFile(path, "r")
@@ -100,6 +111,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
         require(pcm.isNotEmpty() && pcm.size % 2 == 0) { "Invalid PCM16 chunk" }
         if (sampleRate == 0) {
             sampleRate = rate
+            resumeTargetFrames = resumeTargetMs * rate / 1000L
             val minBuffer = AudioTrack.getMinBufferSize(
                 rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
             )
@@ -125,7 +137,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
             check(track?.state == AudioTrack.STATE_INITIALIZED) {
                 "Failed to initialize PCM AudioTrack"
             }
-            track?.play()
+            if (resumeTargetFrames == 0L && !paused) track?.play()
         } else {
             require(rate == sampleRate) { "PCM rate changed within one read-aloud session" }
         }
@@ -136,6 +148,30 @@ internal class PcmReadAloudBridge(private val context: Context) {
         file.seek(totalFrames * 2L)
         file.write(pcm)
         totalFrames += pcm.size / 2L
+        if (resumeTargetFrames > 0 && totalFrames > resumeTargetFrames) {
+            // No original audio leaks through: the pump cannot write until
+            // the requested sample clock is available.
+            seekBase = resumeTargetFrames
+            playCursor = resumeTargetFrames
+            resumeTargetFrames = 0L
+            resumeTargetMs = 0L
+            if (!paused) track?.play()
+        }
+    }
+
+    fun finish() = synchronized(lock) {
+        finished = true
+        if (resumeTargetFrames > 0L) {
+            // A changed TTS duration may be shorter than the bookmark.
+            // Fall back to the final two seconds rather than strand a
+            // silent foreground session forever.
+            val tail = minOf(totalFrames, sampleRate.toLong() * 2L)
+            seekBase = (totalFrames - tail).coerceAtLeast(0L)
+            playCursor = seekBase
+            resumeTargetFrames = 0L
+            resumeTargetMs = 0L
+            if (!paused && totalFrames > playCursor) track?.play()
+        }
     }
 
     fun pause() = synchronized(lock) {
@@ -148,12 +184,15 @@ internal class PcmReadAloudBridge(private val context: Context) {
     fun resume() = synchronized(lock) {
         if (active && paused) {
             paused = false
-            track?.play()
+            if (resumeTargetFrames == 0L) track?.play()
         }
     }
 
     fun seek(targetMs: Long, relative: Boolean) = synchronized(lock) {
         if (!active || sampleRate == 0) return@synchronized
+        // An explicit manual seek supersedes the saved bookmark.
+        resumeTargetFrames = 0L
+        resumeTargetMs = 0L
         val absoluteMs = if (relative) {
             playedFrames() * 1000L / sampleRate + targetMs
         } else {
@@ -180,7 +219,8 @@ internal class PcmReadAloudBridge(private val context: Context) {
                 synchronized(lock) {
                     val currentTrack = track
                     val currentReader = reader
-                    if (active && !paused && currentTrack != null &&
+                    if (active && !paused && resumeTargetFrames == 0L &&
+                        currentTrack != null &&
                         currentReader != null && sampleRate > 0
                     ) {
                         val bufferedInTrack = playCursor - playedFrames()
@@ -237,7 +277,9 @@ internal class PcmReadAloudBridge(private val context: Context) {
                                     if (service == null) {
                                         result.error("MEDIA_SERVICE", error ?: "Audio service unavailable", null)
                                     } else {
-                                        service.transport.prepare()
+                                        service.transport.prepare(
+                                            call.argument<Number>("resumeMs")?.toLong() ?: 0L
+                                        )
                                         service.updateMediaState()
                                         result.success(null)
                                     }
@@ -251,14 +293,17 @@ internal class PcmReadAloudBridge(private val context: Context) {
                         val service = PcmReadAloudMediaService.active()
                         if (service == null) {
                             if (call.method == "status") {
+                                val stop = PcmReadAloudMediaService.lastStoppedStatus()
                                 result.success(
                                     mapOf(
+                                        "stopReason" to stop["stopReason"],
                                         "supported" to true,
                                         "active" to false,
                                         "playing" to false,
                                         "paused" to false,
-                                        "positionMs" to 0L,
-                                        "bufferedMs" to 0L,
+                                        "rebuildingBookmark" to false,
+                                        "positionMs" to (stop["positionMs"] ?: 0L),
+                                        "bufferedMs" to (stop["bufferedMs"] ?: 0L),
                                         "complete" to false
                                     )
                                 )
@@ -292,7 +337,7 @@ internal class PcmReadAloudBridge(private val context: Context) {
                                 }
                             }
                             "finish" -> {
-                                synchronized(transport.lock) { transport.finished = true }
+                                transport.finish()
                                 service.updateMediaState()
                                 result.success(null)
                             }
