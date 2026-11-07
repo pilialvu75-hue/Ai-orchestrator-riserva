@@ -115,6 +115,87 @@ void main() {
     expect(sink.pushCount, 1);
   });
 
+  test('Stop followed immediately by Replay retains the new request', () async {
+    final started = Completer<void>();
+    final oldResult = Completer<KokoroTtsGeneratedAudio>();
+    final received = <String>[];
+    final sink = _FakeTtsAudioSink();
+
+    final engine = IsolatedKokoroVoiceEngine(
+      delegate: _FakeVoiceEngine(),
+      assetsProvider: () async => assets,
+      audioSink: sink,
+      generationRunner: (request) {
+        received.add(request.text);
+        if (received.length == 1) {
+          started.complete();
+          return oldResult.future;
+        }
+        return Future.value(KokoroTtsGeneratedAudio(
+          samples: Float32List.fromList([0.3, -0.3]),
+          sampleRate: 24000,
+        ));
+      },
+    );
+
+    final first = engine.speak('Prima risposta');
+    await started.future;
+    await engine.stopSpeaking();
+    final replay = engine.speak('Seconda risposta');
+
+    // The new reading is queued, not discarded or launched while the old
+    // native worker still owns its model context.
+    expect(received, ['Prima risposta']);
+    oldResult.complete(KokoroTtsGeneratedAudio(
+      samples: Float32List.fromList([0.1, -0.1]),
+      sampleRate: 24000,
+    ));
+    await Future.wait([first, replay]);
+
+    expect(received, ['Prima risposta', 'Seconda risposta']);
+    expect(sink.pushCount, 1); // stale PCM never reaches the player.
+    expect(sink.lastSamples, hasLength(2));
+    expect(sink.lastSamples!.first, closeTo(0.3, 0.001));
+    await engine.dispose();
+  });
+
+  test('only latest queued reading survives multiple rapid taps after Stop',
+      () async {
+    final started = Completer<void>();
+    final oldResult = Completer<KokoroTtsGeneratedAudio>();
+    final received = <String>[];
+    final sink = _FakeTtsAudioSink();
+    final engine = IsolatedKokoroVoiceEngine(
+      delegate: _FakeVoiceEngine(),
+      assetsProvider: () async => assets,
+      audioSink: sink,
+      generationRunner: (request) {
+        received.add(request.text);
+        if (received.length == 1) {
+          started.complete();
+          return oldResult.future;
+        }
+        return Future.value(KokoroTtsGeneratedAudio(
+          samples: Float32List.fromList([0.4]),
+          sampleRate: 24000,
+        ));
+      },
+    );
+    final first = engine.speak('Vecchio testo');
+    await started.future;
+    await engine.stopSpeaking();
+    final superseded = engine.speak('Messaggio intermedio');
+    final latest = engine.speak('Messaggio finale');
+    oldResult.complete(KokoroTtsGeneratedAudio(
+      samples: Float32List.fromList([0.1]),
+      sampleRate: 24000,
+    ));
+    await Future.wait([first, superseded, latest]);
+    expect(received, ['Vecchio testo', 'Messaggio finale']);
+    expect(sink.pushCount, 1);
+    await engine.dispose();
+  });
+
   test('stop invalidates audio returned later by the worker', () async {
     final delegate = _FakeVoiceEngine();
     final sink = _FakeTtsAudioSink();

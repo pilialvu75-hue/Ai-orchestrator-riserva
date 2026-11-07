@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_output_service.dart';
@@ -36,6 +38,8 @@ class _FakeOutput extends VoiceOutputService {
   ReadAloudSnapshot current =
       const ReadAloudSnapshot(supported: true, active: true);
 
+  Completer<void>? pendingSpeech;
+
   @override
   bool get supportsRealReadAloudControls => true;
   @override
@@ -43,7 +47,9 @@ class _FakeOutput extends VoiceOutputService {
   @override
   Future<ReadAloudSnapshot> refreshReadAloud() async => current;
   @override
-  Future<void> speak(String text) async {}
+  Future<void> speak(String text) async {
+    if (pendingSpeech != null) await pendingSpeech!.future;
+  }
 }
 
 void main() {
@@ -64,6 +70,29 @@ void main() {
     expect(controller.isOpen, false);
     expect(controller.isPlaying, false);
     expect(controller.measuredPlayback.position, Duration.zero);
+  });
+
+  testWidgets('permanent audio focus loss clears busy foreground player',
+      (tester) async {
+    final output = _FakeOutput();
+    output.pendingSpeech = Completer<void>();
+    final controller = ChatAudioPlaybackController(output: output);
+    final speaking = controller.play('Sintesi ancora in corso');
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(controller.isOpen, true);
+    expect(controller.isBusy, true);
+    expect(controller.measuredPlayback.active, true);
+
+    // YouTube has received permanent focus; the native MediaSession is gone.
+    output.current = const ReadAloudSnapshot(supported: true);
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(controller.isOpen, false);
+    expect(controller.isBusy, false);
+    expect(controller.isPlaying, false);
+
+    output.pendingSpeech!.complete();
+    await speaking;
+    expect(controller.isOpen, false);
   });
 
   testWidgets('explicit pause keeps foreground player available',

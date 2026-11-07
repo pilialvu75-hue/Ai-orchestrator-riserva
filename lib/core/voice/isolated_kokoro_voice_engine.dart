@@ -1,4 +1,5 @@
 export 'package:ai_orchestrator/core/voice/read_aloud_transport.dart' show TtsAudioSink;
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:ai_orchestrator/core/voice/android_pcm_tts_audio_sink.dart';
@@ -150,6 +151,9 @@ final class IsolatedKokoroVoiceEngine
   int _lifecycleGeneration = 0;
   bool _disposed = false;
   bool _requestBusy = false;
+  int _activeRequestGeneration = -1;
+  Completer<void>? _requestFinished;
+  int _queuedRequestSequence = 0;
 
   @override
   bool get isListening => _delegate.isListening;
@@ -238,18 +242,47 @@ final class IsolatedKokoroVoiceEngine
 
   @override
   Future<void> speak(String text) async {
-    if (_disposed || text.trim().isEmpty) return;
+    final sanitized = text.trim();
+    if (_disposed || sanitized.isEmpty) return;
+
     if (_requestBusy) {
-      logEvent(_tag, '[TTS_WORKER_BUSY] generation=$_lifecycleGeneration');
-      return;
+      if (_activeRequestGeneration == _lifecycleGeneration) {
+        // Repeated taps without an intervening Stop still do not launch
+        // overlapping native Kokoro generation.
+        logEvent(_tag, '[TTS_WORKER_BUSY] generation=$_lifecycleGeneration');
+        return;
+      }
+
+      // A real Stop invalidated the older request, but its worker may still
+      // be finishing a phrase. Never silently drop the next user-started
+      // reading. Wait for that worker to drain before starting fresh PCM.
+      final previous = _requestFinished;
+      final generationAtTap = _lifecycleGeneration;
+      final sequence = ++_queuedRequestSequence;
+      if (previous != null) await previous.future;
+      // If the user stopped again or tapped a newer message, this queued
+      // request is obsolete. Only the latest queued request is admitted.
+      if (_disposed ||
+          generationAtTap != _lifecycleGeneration ||
+          sequence != _queuedRequestSequence) {
+        return;
+      }
+      if (_requestBusy) return;
     }
+
     // Acquire before the first await, including asset and delegate inspection.
     _requestBusy = true;
     final generation = _lifecycleGeneration;
+    _activeRequestGeneration = generation;
+    final finished = Completer<void>();
+    _requestFinished = finished;
     try {
-      await _speakRequest(text.trim(), generation);
+      await _speakRequest(sanitized, generation);
     } finally {
       _requestBusy = false;
+      _activeRequestGeneration = -1;
+      if (identical(_requestFinished, finished)) _requestFinished = null;
+      finished.complete();
     }
   }
 

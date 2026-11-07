@@ -61,7 +61,137 @@ class _SlowReadAloudEngine implements VoiceEngine, ReadAloudVoiceEngine {
   Future<ReadAloudSnapshot> refreshReadAloud() async => readAloudSnapshot;
 }
 
+class _SwitchingPcmEngine implements VoiceEngine, ReadAloudVoiceEngine {
+  final startedFirst = Completer<void>();
+  final startedSecond = Completer<void>();
+  final releaseFirst = Completer<void>();
+  final requests = <String>[];
+  var active = false;
+  var stops = 0;
+  Completer<void>? firstStopGate;
+
+  @override
+  bool get supportsRealReadAloudControls => true;
+  @override
+  ReadAloudSnapshot get readAloudSnapshot =>
+      ReadAloudSnapshot(supported: true, active: active);
+  @override
+  bool get isSpeaking => false; // Simulate PCM still buffering.
+  @override
+  bool get isListening => false;
+
+  @override
+  Future<void> speak(String text) async {
+    requests.add(text);
+    active = true;
+    if (requests.length == 1) {
+      startedFirst.complete();
+      await releaseFirst.future; // Earlier native synthesis still in flight.
+    } else if (!startedSecond.isCompleted) {
+      startedSecond.complete();
+    }
+  }
+
+  @override
+  Future<void> stopSpeaking() async {
+    stops++;
+    active = false;
+    if (stops == 1 && firstStopGate != null) {
+      await firstStopGate!.future;
+    }
+  }
+  @override
+  Future<ReadAloudSnapshot> refreshReadAloud() async => readAloudSnapshot;
+  @override
+  Future<VoiceEngineStatus> inspect() async => VoiceEngineStatus.unsupported();
+  @override
+  Future<VoiceEngineStatus> initialize() => inspect();
+  @override
+  Future<void> startListening({
+    required VoiceRecognitionResultCallback onResult,
+    String localeId = 'it-IT',
+  }) async {}
+  @override
+  Future<void> stopListening() async {}
+  @override
+  Future<void> dispose() async {}
+  @override
+  Future<void> pauseReadAloud() async {}
+  @override
+  Future<void> resumeReadAloud() async {}
+  @override
+  Future<void> skipReadAloud(Duration offset) async {}
+  @override
+  Future<void> seekReadAloud(Duration position) async {}
+}
+
 void main() {
+  test('switching messages preempts PCM queue before synthesis ends',
+      () async {
+    final engine = _SwitchingPcmEngine();
+    final output = VoiceOutputService(engine: engine);
+    final first = output.speak('Prima risposta molto lunga');
+    await engine.startedFirst.future;
+    final second = output.speak('Seconda risposta');
+
+    // The old operation queue blocked this until releaseFirst completed.
+    await engine.startedSecond.future.timeout(const Duration(seconds: 2));
+    expect(engine.requests, ['Prima risposta molto lunga', 'Seconda risposta']);
+    expect(engine.stops, 1);
+
+    engine.releaseFirst.complete();
+    await Future.wait([first, second]);
+  });
+
+  test('older async Stop cannot clear the newer message selection',
+      () async {
+    final engine = _SwitchingPcmEngine();
+    engine.firstStopGate = Completer<void>();
+    final output = VoiceOutputService(engine: engine);
+    final old = output.speak('Messaggio precedente');
+    await engine.startedFirst.future;
+
+    final stopping = output.stopSpeaking(); // First Stop remains pending.
+    final newer = output.speak('Messaggio nuovo');
+    await engine.startedSecond.future.timeout(const Duration(seconds: 2));
+    await newer;
+    engine.firstStopGate!.complete();
+    await stopping;
+
+    // New selection remains active; a second tap should stop, not respeak.
+    await output.speak('Messaggio nuovo');
+    expect(engine.requests, ['Messaggio precedente', 'Messaggio nuovo']);
+    engine.releaseFirst.complete();
+    await old;
+  });
+
+  test('same-message tap stops an active PCM session without restarting',
+      () async {
+    final engine = _SwitchingPcmEngine();
+    final output = VoiceOutputService(engine: engine);
+    final first = output.speak('Messaggio corrente');
+    await engine.startedFirst.future;
+    await output.speak('Messaggio corrente');
+    expect(engine.stops, 1);
+    expect(engine.requests, ['Messaggio corrente']);
+    engine.releaseFirst.complete();
+    await first;
+  });
+
+  test('new explicit play after audio-focus loss is not a stale toggle',
+      () async {
+    final engine = _SwitchingPcmEngine();
+    final output = VoiceOutputService(engine: engine);
+    final first = output.speak('Riprendi dopo YouTube');
+    await engine.startedFirst.future;
+    engine.active = false; // Permanent loss closed the native session.
+    engine.releaseFirst.complete();
+    await first;
+
+    await output.speak('Riprendi dopo YouTube');
+    expect(engine.requests,
+        ['Riprendi dopo YouTube', 'Riprendi dopo YouTube']);
+  });
   test('stop does not wait for long PCM speech generation queue', () async {
     final engine = _SlowReadAloudEngine();
     final service = VoiceOutputService(engine: engine);

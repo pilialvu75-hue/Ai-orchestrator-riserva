@@ -41,27 +41,36 @@ class ChatAudioPlaybackController extends ChangeNotifier {
       if (canSeek) {
         if (_pollInFlight) return;
         _pollInFlight = true;
+        final generationAtPoll = _generation;
         try {
           final state = await _output.refreshReadAloud();
-          if (_text == null) return;
+          // A previous native status response must never overwrite a new
+          // message's player state after a rapid chat switch.
+          if (_text == null || generationAtPoll != _generation) return;
           // The Android foreground service closes itself after the final
           // played PCM frame (or after a permanent audio-focus loss).
           // Do not leave a dead "Riprendi" button that would target a
           // destroyed MediaSession. The message speaker can start a fresh
           // playback explicitly when the user wants to listen again.
-          if (!state.active && !_busy && _playback.active) {
+          // Once an actual foreground session existed, losing it means
+          // playback ended (including permanent audio-focus loss). This
+          // also applies while Kokoro is still synthesizing: do not strand
+          // the UI in "busy" with a dead media session after YouTube.
+          if (!state.active && _playback.active) {
             ++_generation;
             _text = null;
             _poll?.cancel();
             _playback = const ReadAloudSnapshot();
             _playing = false;
+            _busy = false;
             notifyListeners();
             return;
           }
           final playing = state.playing;
           final busy = _busy && state.buffered == Duration.zero &&
               !state.complete;
-          if (state.position != _playback.position ||
+          if (state.active != _playback.active ||
+              state.position != _playback.position ||
               state.buffered != _playback.buffered ||
               state.complete != _playback.complete ||
               state.paused != _playback.paused ||
