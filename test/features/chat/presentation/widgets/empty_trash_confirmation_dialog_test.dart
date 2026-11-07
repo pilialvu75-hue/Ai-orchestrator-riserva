@@ -44,6 +44,7 @@ void main() {
       home: Scaffold(body: EmptyTrashConfirmationDialog(chatCount: 1)),
     ));
     expect(find.textContaining('1 conversazione'), findsOneWidget);
-    expect(find.textContaining('ricordi personali'), findsOneWidget);
+    expect(find.textContaining('ricordi condivisi tra chat'), findsOneWidget);
+    expect(find.textContaining('I ricordi salvati soltanto'), findsOneWidget);
   });
 }
