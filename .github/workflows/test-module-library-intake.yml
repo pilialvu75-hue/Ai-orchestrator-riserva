@@ -1,0 +1,29 @@
+name: Test Module Library Intake
+on:
+  pull_request:
+    paths:
+      - 'lib/features/module_library/**'
+      - 'test/features/module_library/**'
+      - '.github/workflows/test-module-library-intake.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'lib/features/module_library/**'
+      - 'test/features/module_library/**'
+      - '.github/workflows/test-module-library-intake.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  intake-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart analyze lib/features/module_library/data/module_library_intake_source.dart test/features/module_library/module_library_intake_source_test.dart
+      - run: flutter test test/features/module_library/module_library_intake_source_test.dart
