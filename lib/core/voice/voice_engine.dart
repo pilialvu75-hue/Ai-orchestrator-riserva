@@ -198,3 +198,10 @@ abstract class VoiceEngine {
   Future<void> stopSpeaking();
   Future<void> dispose();
 }
+
+/// Optional native ASR memory release between short chat dictation and LLM.
+/// It is not a generic stop: callers must first finish microphone teardown.
+/// Continuous Live sessions never call this handoff.
+abstract interface class VoiceRecognitionMemoryReclaimer {
+  Future<bool> releaseRecognitionMemoryForInference();
+}

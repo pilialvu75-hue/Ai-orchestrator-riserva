@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
+
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_input_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/state_engine/chat_attachment.dart';
@@ -203,9 +206,36 @@ class _ChatInputBarState extends State<ChatInputBar> {
     // transcript before that final callback arrives.
     _submissionInFlight = true;
     try {
-      if (_dictationWasUsed || _voiceInputService.isListening) {
+      final bool wasDictated = _dictationWasUsed;
+      if (wasDictated || _voiceInputService.isListening) {
         await _voiceInputService.stopListening();
         if (!mounted) return;
+      }
+      // On <=8 GiB Android devices the large native Sherpa recognizer can
+      // overlap with Phi's model load even though the microphone is stopped.
+      // Hand off only short chat dictation, never continuous Live. If the
+      // Android sample is unavailable, preserve existing behavior.
+      if (wasDictated && !kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.android) {
+        try {
+          final monitor = ResourceMonitor.instance;
+          final sample = monitor.latest ?? await monitor.sample();
+          final totalRam = sample?.totalBytes;
+          if (totalRam != null && totalRam > 0 &&
+              totalRam <= 8 * 1024 * 1024 * 1024) {
+            final released = await _voiceInputService
+                .releaseRecognitionMemoryForInference();
+            RuntimeEventLog.instance.emit(
+              '[ASR_MEMORY_HANDOFF] low_ram=true released=$released '
+              'total_bytes=$totalRam',
+            );
+            if (!mounted) return;
+          }
+        } on Object catch (error) {
+          // Reclaim is a memory optimization, not a reason to lose a draft.
+          debugPrint('[ASR_MEMORY_HANDOFF_WARN] type=' +
+              error.runtimeType.toString());
+        }
       }
       _dictationWasUsed = false;
     } catch (error) {

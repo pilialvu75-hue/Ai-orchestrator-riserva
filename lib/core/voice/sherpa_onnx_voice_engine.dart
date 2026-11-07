@@ -25,7 +25,7 @@ RecordConfig liveAsrRecordConfig({required bool isAndroid}) => RecordConfig(
   noiseSuppress: isAndroid,
 );
 
-class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine {
+class SherpaOnnxVoiceEngine with RuntimeEventEmitter implements VoiceEngine, VoiceRecognitionMemoryReclaimer {
   SherpaOnnxVoiceEngine({
     VoiceModelPaths? modelPaths,
     String Function()? languageCode,
@@ -771,6 +771,37 @@ logEvent(
 
     await _closeMicSafely();
     await _closeAsrStreamSafely();
+  }
+
+  /// Android short-dictation handoff: unload the large native ASR model
+  /// only AFTER the recorder, PCM subscription and OnlineStream are closed.
+  /// The next explicit dictation calls initialize() and creates it anew.
+  /// This does not run for continuous Live or change isolated Kokoro TTS.
+  @override
+  Future<bool> releaseRecognitionMemoryForInference() async {
+    if (_disposed || _isListening || _initializing) return false;
+    await _closeMicSafely();
+    await _closeAsrStreamSafely();
+    if (_disposed || _isListening || _initializing) return false;
+
+    final recognizer = _recognizer;
+    if (recognizer == null) return false;
+    _recognizer = null;
+    _initialized = false;
+    _status = _status.copyWith(
+      initialized: false,
+      offlineAsrAvailable: false,
+    );
+    try {
+      recognizer.free();
+      logEvent(_tag, '[ASR_NATIVE_MEMORY_RELEASED] reason=dictation_inference_handoff');
+      return true;
+    } on Object catch (error) {
+      // A native free may partially complete. Never reuse an uncertain
+      // handle; the next dictation must create a fresh recognizer.
+      logEvent(_tag, '[ASR_NATIVE_MEMORY_RELEASE_WARN] type=' + error.runtimeType.toString());
+      return false;
+    }
   }
 
   Future<void> _closeMicSafely() async {
