@@ -30,7 +30,9 @@ jobs:
           python3 tool/cantiere_generate_stella_queue.py --output "$RUNNER_TEMP/stella"
           git clone --quiet https://github.com/pilialvu75-hue/AI-Orchestrator-Module-Library.git "$RUNNER_TEMP/library"
           git -C "$RUNNER_TEMP/library" checkout --quiet "$LIBRARY_SHA"
-          python3 "$RUNNER_TEMP/library/tools/rebuild_async_adapter.py" --source-commit "$UPSTREAM_SHA" --output "$RUNNER_TEMP/stella/modules/aivexus_external_async"
+          python3 "$RUNNER_TEMP/library/tools/rebuild_async_adapter.py" --source-commit "$UPSTREAM_SHA" --output "$RUNNER_TEMP/rebuilt-async"
+          mkdir -p "$RUNNER_TEMP/stella/modules"
+          cp -a "$RUNNER_TEMP/rebuilt-async/adapter" "$RUNNER_TEMP/stella/modules/aivexus_external_async"
       - name: Generate Flutter platform scaffolding
         working-directory: ${{ runner.temp }}/stella
         run: flutter create --project-name aivexus_stella_queue --platforms=web,android .
