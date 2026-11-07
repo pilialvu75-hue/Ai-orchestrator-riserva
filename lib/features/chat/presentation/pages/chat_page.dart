@@ -42,7 +42,7 @@ import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_ser
 import 'package:ai_orchestrator/features/chat/presentation/services/hybrid_cloud_chat_consent_gateway.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
-import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
+import 'package:ai_orchestrator/features/chat/data/services/live_chat_transcript_recorder.dart';
 import 'package:uuid/uuid.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_overlay.dart';
@@ -1074,20 +1074,18 @@ class _ChatPageState extends State<ChatPage>
     required String role,
     required String text,
   }) async {
-    final normalized = text.trim();
-    if (normalized.isEmpty) return;
-    final row = ChatMessageModel(
-      id: const Uuid().v4(),
+    final recorder = LiveChatTranscriptRecorder(
+      localDataSource: ChatLocalDataSourceImpl(
+        databaseHelper: di.sl<DatabaseHelper>(),
+      ),
+    );
+    await recorder.append(
       sessionId: sessionId,
       role: role,
-      content: normalized,
-      timestamp: DateTime.now().millisecondsSinceEpoch,
-      provider: 'live-local',
+      text: text,
     );
-    await ChatLocalDataSourceImpl(databaseHelper: di.sl<DatabaseHelper>())
-        .insertMessage(row);
     _uiLog('[LIVE_TRANSCRIPT_SAVED] session=$sessionId role=$role '
-        'chars=${normalized.length}');
+        'chars=${text.trim().length}');
   }
 
   Future<void> _openLiveVoiceSession() async {
