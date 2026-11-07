@@ -68,6 +68,7 @@ class _SwitchingPcmEngine implements VoiceEngine, ReadAloudVoiceEngine {
   final requests = <String>[];
   var active = false;
   var stops = 0;
+  Completer<void>? firstStopGate;
 
   @override
   bool get supportsRealReadAloudControls => true;
@@ -95,6 +96,9 @@ class _SwitchingPcmEngine implements VoiceEngine, ReadAloudVoiceEngine {
   Future<void> stopSpeaking() async {
     stops++;
     active = false;
+    if (stops == 1 && firstStopGate != null) {
+      await firstStopGate!.future;
+    }
   }
   @override
   Future<ReadAloudSnapshot> refreshReadAloud() async => readAloudSnapshot;
@@ -137,6 +141,28 @@ void main() {
 
     engine.releaseFirst.complete();
     await Future.wait([first, second]);
+  });
+
+  test('older async Stop cannot clear the newer message selection',
+      () async {
+    final engine = _SwitchingPcmEngine();
+    engine.firstStopGate = Completer<void>();
+    final output = VoiceOutputService(engine: engine);
+    final old = output.speak('Messaggio precedente');
+    await engine.startedFirst.future;
+
+    final stopping = output.stopSpeaking(); // First Stop remains pending.
+    final newer = output.speak('Messaggio nuovo');
+    await engine.startedSecond.future.timeout(const Duration(seconds: 2));
+    await newer;
+    engine.firstStopGate!.complete();
+    await stopping;
+
+    // New selection remains active; a second tap should stop, not respeak.
+    await output.speak('Messaggio nuovo');
+    expect(engine.requests, ['Messaggio precedente', 'Messaggio nuovo']);
+    engine.releaseFirst.complete();
+    await old;
   });
 
   test('same-message tap stops an active PCM session without restarting',
