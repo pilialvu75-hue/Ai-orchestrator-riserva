@@ -308,6 +308,18 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // 1. STT
     // -----------------------------------------------------------------------
 
+    // A next turn is explicitly user-initiated in the safe Live UI.
+    // Stop any residual speaker output before the microphone is enabled:
+    // desktop native buffers can continue playing after TTS enqueue returns.
+    try {
+      await _engine.stopSpeaking();
+    } catch (error) {
+      logEvent(_tag, '[LIVE_PRE_LISTEN_STOP_WARN] $error');
+    }
+    if (_disposed || token.isCancelled || _stopRequested) return;
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    if (_disposed || token.isCancelled || _stopRequested) return;
+
     // Android Live releases its large ASR model before LLM inference.
     // Reinitialize it on the next explicit turn; no reinit is needed on desktop.
     if (!kIsWeb && Platform.isAndroid) {
