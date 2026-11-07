@@ -1,26 +1,10 @@
 name: Assistant Shared Tests
 
 on:
+  # Release checkpoint requires all five CI workflows for the exact main SHA.
+  # Do not skip desktop builds when a commit changes only tests, docs, or generated code.
   push:
     branches: [main, codex/assistant-local-reliability, codex/assistant-freshness-followup]
-    paths:
-      - 'lib/core/**'
-      - 'lib/presentation/chat/**'
-      - 'lib/features/chat/presentation/pages/chat_page.dart'
-      - 'test/presentation/chat/**'
-      - 'lib/native/runtime/windows/**'
-      - 'test/core/**'
-      - 'test/features/chat/data/repositories/prompt_resolving_chat_repository_test.dart'
-      - 'pubspec.*'
-      - '.github/workflows/owner-beta-checkpoint.yml'
-      - '.github/workflows/assistant-shared-tests.yml'
-      - 'scripts/hybrid_beta_release_manifest.py'
-      - 'test/scripts/test_hybrid_beta_release_manifest.py'
-      - 'test/scripts/test_hybrid_beta_publishers.py'
-      - '.github/workflows/build.yml'
-      - '.github/workflows/windows-release-publish.yml'
-      - '.github/workflows/macos-release-publish.yml'
-      - '.github/workflows/linux-release-publish.yml'
   pull_request:
     branches: [main]
     paths:
