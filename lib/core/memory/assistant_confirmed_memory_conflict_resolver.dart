@@ -41,18 +41,18 @@ abstract final class AssistantConfirmedMemoryConflictResolver {
     final replaced = <String>{};
     for (final correction in records) {
       if (!isReviewedNamedCorrection(correction)) continue;
-      for (final earlier in records) {
-        if (earlier.recordKey == correction.recordKey ||
-            earlier.scope != correction.scope ||
-            earlier.scopeId != correction.scopeId ||
-            earlier.updatedAt >= correction.updatedAt ||
-            _normalized(earlier.content) !=
-                _normalized(correction.before!)) {
-          continue;
-        }
-        // We have an exact, scoped, older assertion. Its storage remains
-        // untouched, but only the confirmed correction is sent to a model.
-        replaced.add(earlier.recordKey);
+      final matchingOlder = records.where((earlier) =>
+          earlier.recordKey != correction.recordKey &&
+          earlier.scope == correction.scope &&
+          earlier.scopeId == correction.scopeId &&
+          earlier.updatedAt < correction.updatedAt &&
+          _normalized(earlier.content) ==
+              _normalized(correction.before!)).toList(growable: false);
+      // Two people sharing a name may have identical text records. Exact
+      // wording is NOT identity proof: reject ambiguous replacements.
+      if (matchingOlder.length == 1) {
+        // Keep SQLite history intact; hide only the superseded rendering.
+        replaced.add(matchingOlder.single.recordKey);
       }
     }
     return List<AssistantDurableMemoryRecord>.unmodifiable(
@@ -71,6 +71,7 @@ abstract final class AssistantConfirmedMemoryConflictResolver {
         !record.recordKey.startsWith(correctionKeyPrefix) ||
         record.before == null ||
         record.after == null ||
+        _normalized(record.before!) == _normalized(record.after!) ||
         _normalized(record.after!) != _normalized(record.content)) {
       return false;
     }
