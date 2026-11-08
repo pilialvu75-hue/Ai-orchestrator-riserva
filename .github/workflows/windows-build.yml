@@ -3,18 +3,11 @@ name: Build Windows Desktop
 on:
   workflow_dispatch:
   pull_request:
+  # Release checkpoint requires all five CI workflows for the exact main SHA.
+  # Do not skip desktop builds when a commit changes only tests, docs, or generated code.
   push:
     branches:
       - main
-    paths:
-      - 'lib/**'
-      - 'windows/**'
-      - 'tool/**'
-      - 'assets/**'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - '.github/workflows/windows-build.yml'
-      - '.github/workflows/owner-beta-checkpoint.yml'
 
 permissions:
   contents: read

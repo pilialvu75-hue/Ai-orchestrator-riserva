@@ -89,6 +89,28 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
                 ), job_count)
                 self.assertNotIn("gh release upload", workflow)
 
+    def test_sha_bound_checkpoint_ci_runs_on_every_main_push(self):
+        # #948: The owner checkpoint waits for five workflow results on the
+        # exact main SHA. A paths-filtered push leaves that check waiting
+        # forever after merges that change only tests or UI assets.
+        names = (
+            (".github/workflows/assistant-shared-tests.yml", "Assistant Shared Tests"),
+            (".github/workflows/windows-build.yml", "Build Windows Desktop"),
+            (".github/workflows/linux-build.yml", "Build Linux Desktop"),
+            (".github/workflows/macos-build.yml", "Build macOS Desktop"),
+            (".github/workflows/web-build.yml", "Web Cantiere Build"),
+        )
+        for path, name in names:
+            with self.subTest(workflow=path):
+                workflow = source(path)
+                self.assertIn(f"name: {name}", workflow)
+                self.assertIn("\n  push:\n", workflow)
+                push_block = workflow.split("\n  push:\n", 1)[1]
+                push_block = push_block.split("\n  pull_request:", 1)[0]
+                push_block = push_block.split("\n\npermissions:", 1)[0]
+                self.assertIn("main", push_block)
+                self.assertNotIn("\n    paths:", push_block)
+
     def test_desktop_publishers_verify_issued_manifest_before_build(self):
         for platform in ("windows", "macos", "linux"):
             with self.subTest(platform=platform):
