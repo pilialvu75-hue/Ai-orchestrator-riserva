@@ -228,6 +228,118 @@ void main() {
     ), isNull);
   });
 
+  test('forgetting a later correction also forgets its entire superseded '
+      'chain, but not other confirmed people', () async {
+    await addOldFact();
+    await memory.recordConfirmed(
+      recordKey: 'unrelated-mika',
+      scope: AssistantMemoryScope.user,
+      scopeId: scope,
+      kind: AssistantMemoryKind.fact,
+      content: 'Mika fa tanto sport.',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 9,
+    );
+
+    expect(await capture.proposeNamedRelationCorrectionCandidate(
+      userPrompt: 'Non Jerome, Kader è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+    final first = (await capture
+        .loadReviewableNamedRelationCorrectionCandidates()).single;
+    expect(await capture.reviewNamedRelationCorrectionCandidate(
+      reviewed: first, approve: true, userConfirmed: true,
+    ), isTrue);
+
+    expect(await capture.proposeNamedRelationCorrectionCandidate(
+      userPrompt: 'Non Kader, Mika è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+    final second = (await capture
+        .loadReviewableNamedRelationCorrectionCandidates()).single;
+    expect(await capture.reviewNamedRelationCorrectionCandidate(
+      reviewed: second, approve: true, userConfirmed: true,
+    ), isTrue);
+
+    final beforeForget = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user, scopeId: scope,
+    );
+    expect(beforeForget, hasLength(4));
+    final latest = beforeForget.singleWhere(
+      (r) => r.content == 'Mika è alto.',
+    );
+
+    expect(await capture.forgetReviewedConfirmedUserMemory(
+      reviewed: latest, userConfirmed: true,
+    ), isTrue);
+    final remaining = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user, scopeId: scope,
+    );
+    expect(remaining.map((r) => r.content), ['Mika fa tanto sport.']);
+    final context = AssistantDurableMemoryContextService(
+      memoryService: memory,
+    );
+    expect(await context.buildConfirmedContext(
+      sessionId: 'new-local-model-chat',
+      userPrompt: 'Chi era alto, Jerome o Kader?',
+    ), isNull);
+    expect(await context.buildConfirmedContext(
+      sessionId: 'new-local-model-chat',
+      userPrompt: 'Mika fa sport?',
+    ), contains('Mika fa tanto sport.'));
+  });
+
+  test('an ambiguous correction predecessor aborts all chain deletions',
+      () async {
+    await addOldFact();
+    await capture.proposeNamedRelationCorrectionCandidate(
+      userPrompt: 'Non Jerome, Kader è alto.',
+      consentEnabled: true, directUserMessage: true,
+    );
+    final first = (await capture
+        .loadReviewableNamedRelationCorrectionCandidates()).single;
+    expect(await capture.reviewNamedRelationCorrectionCandidate(
+      reviewed: first, approve: true, userConfirmed: true,
+    ), isTrue);
+
+    await capture.proposeNamedRelationCorrectionCandidate(
+      userPrompt: 'Non Kader, Mika è alto.',
+      consentEnabled: true, directUserMessage: true,
+    );
+    final second = (await capture
+        .loadReviewableNamedRelationCorrectionCandidates()).single;
+    expect(await capture.reviewNamedRelationCorrectionCandidate(
+      reviewed: second, approve: true, userConfirmed: true,
+    ), isTrue);
+
+    final latest = (await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user, scopeId: scope,
+    )).singleWhere((r) => r.content == 'Mika è alto.');
+
+    // A separate confirmed assertion about Kader makes predecessor
+    // identity ambiguous. Neither it nor the correction chain may
+    // be destroyed based solely on matching written names.
+    await memory.recordConfirmed(
+      recordKey: 'another-kader',
+      scope: AssistantMemoryScope.user, scopeId: scope,
+      kind: AssistantMemoryKind.fact,
+      content: 'Kader è alto.',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 11,
+    );
+    expect(await capture.forgetReviewedConfirmedUserMemory(
+      reviewed: latest, userConfirmed: true,
+    ), isFalse);
+    final remaining = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user, scopeId: scope,
+    );
+    expect(remaining, hasLength(4));
+    expect(remaining.map((r) => r.content),
+        containsAll(['Jerome è alto.', 'Kader è alto.', 'Mika è alto.']));
+  });
+
   test('ambiguous matching old facts cannot become reviewed corrections',
       () async {
     await addOldFact();
