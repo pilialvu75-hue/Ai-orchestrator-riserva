@@ -32,6 +32,7 @@ class InferenceService {
 
   bool _runtimeLookupInProgress = false;
   String? _lastCompletedAssistantLocalModelId;
+  final LocalSessionModelAffinity _localAffinity = LocalSessionModelAffinity();
 
   InferenceService({
     required Future<AiModel?> Function() loadSelectedModel,
@@ -200,6 +201,7 @@ class InferenceService {
        * currently selected model.
        */
       var selectedModel = await _resolveModelForRequest(isolatedRequest);
+      var trackLocalAutoAffinity = false;
 
       // AUTO is only allowed at the ordinary Assistant boundary. Explicit
       // Workshop model identities remain immutable, including in HYBRID.
@@ -222,19 +224,38 @@ class InferenceService {
                 // Missing telemetry is unknown, never interpreted as safe.
               }
             }
-            selectedModel = const LocalModelOrchestrator().select(
+            // A completed model owns affinity only inside its own chat.
+            // HYBRID may successfully deliver a Cloud fallback, so its
+            // completion must not be treated as LOCAL resident evidence.
+            final affinity = runtimeMode == AiRuntimeMode.local
+                ? _localAffinity.get(isolatedRequest.sessionId)
+                : null;
+            final decision = const LocalModelOrchestrator().decide(
               request: isolatedRequest,
               availableModels: models,
               preferredModel: selectedModel,
               supportsModel: _runtimeProvider.supportsModel,
               resources: resources,
               isAndroid: android,
+              lastCompletedModelId: affinity?.modelId,
+              successfulTurnsSinceSwitch:
+                  affinity?.successfulTurnsSinceSwitch ?? 99,
             );
+            selectedModel = decision.model;
+            trackLocalAutoAffinity =
+                runtimeMode == AiRuntimeMode.local && selectedModel != null;
             _log(
               '[LOCAL_AUTO_ROUTE] session=${isolatedRequest.sessionId} '
               'installed=${models.length} selected=${selectedModel?.id ?? 'none'} '
-              'task=${const LocalModelOrchestrator().classify(isolatedRequest).name} '
+              'task=${decision.task.name} '
               'ram_pressure=${resources?.pressure ?? 'unknown'}',
+            );
+            _log(
+              '[LOCAL_AFFINITY] previous=${affinity?.modelId ?? 'none'} '
+              'selected=${selectedModel?.id ?? 'none'} '
+              'reason=${decision.reason.name} '
+              'score_gain=${decision.scoreGain} '
+              'turns_since_switch=${affinity?.successfulTurnsSinceSwitch ?? -1}',
             );
           } catch (error) {
             // Fail locally and explicitly; never infer that the manual model
@@ -242,6 +263,9 @@ class InferenceService {
             selectedModel = null;
             _log('[LOCAL_AUTO_ROUTE] catalogue_error=$error');
           }
+        } else if (runtimeMode == AiRuntimeMode.local) {
+          // A deliberate return to MANUAL resets AUTO session stickiness.
+          _localAffinity.reset();
         }
       }
 
@@ -290,12 +314,32 @@ class InferenceService {
 
       _runtimeLookupInProgress = false;
 
-      yield* _streamWithRetryAndGuards(
+      await for (final chunk in _streamWithRetryAndGuards(
         runtimeMode: runtimeMode,
         cloudRequest: isolatedRequest,
         localRequest: localRequest,
         cancellationToken: session.cancellationToken,
-      );
+      )) {
+        if (trackLocalAutoAffinity &&
+            chunk.isFinal &&
+            !chunk.isError &&
+            !session.cancellationToken.isCancelled &&
+            localRequest != null &&
+            selectedModel != null) {
+          final actual = chunk.model;
+          // Prefer the runtime-reported identity; do not promote an
+          // unexpected model or an unverified Cloud fallback to affinity.
+          if (actual == null ||
+              actual == selectedModel.effectiveRuntimeModelId ||
+              actual == selectedModel.id) {
+            _localAffinity.recordSuccess(
+                isolatedRequest.sessionId, selectedModel.id);
+            _log('[LOCAL_AFFINITY_COMMIT] model=${selectedModel.id} '
+                'turns_since_switch=${_localAffinity.get(isolatedRequest.sessionId)?.successfulTurnsSinceSwitch ?? -1}');
+          }
+        }
+        yield chunk;
+      }
     } catch (error, stackTrace) {
       _log(
         '[INFERENCE_ERROR] '
