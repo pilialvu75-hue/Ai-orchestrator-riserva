@@ -36,6 +36,16 @@ enum AiRuntimeMode {
   }
 }
 
+/// LOCAL routing is independent from the Cloud provider AUTO setting.
+/// Legacy installations stay manual until the user enables automatic routing.
+enum LocalModelSelectionMode {
+  manual,
+  automatic;
+
+  static LocalModelSelectionMode fromStoredValue(String? value) =>
+      value == 'automatic' ? automatic : manual;
+}
+
 enum CloudSpendingMode {
   freeOnly,
   prepaidOnly,
@@ -65,6 +75,7 @@ class AiRuntimeSettingsService extends ChangeNotifier {
   }
 
   static List<String> get supportedProviders => CloudProviderCatalog.supportedProviders;
+  static const String _localModelSelectionKey = 'local.model.selection_mode';
   static const String _cloudModelPrefix = 'cloud.provider.model.';
   static const String _cloudAutoParticipationPrefix = 'cloud.provider.auto_enabled.';
   static const String _cloudSpendingModeKey = 'cloud.spending.mode';
@@ -83,6 +94,19 @@ class AiRuntimeSettingsService extends ChangeNotifier {
 
   bool get isCloudProviderAutomatic => manualCloudProvider == null;
   Future<AiRuntimeMode> loadRuntimeMode() async => runtimeMode;
+
+  LocalModelSelectionMode get localModelSelectionMode =>
+      LocalModelSelectionMode.fromStoredValue(
+        _configRepository.getString(_localModelSelectionKey),
+      );
+
+  Future<LocalModelSelectionMode> loadLocalModelSelectionMode() async =>
+      localModelSelectionMode;
+
+  Future<void> setLocalModelSelectionMode(LocalModelSelectionMode mode) async {
+    await _configRepository.setString(_localModelSelectionKey, mode.name);
+    notifyListeners();
+  }
 
   Future<void> setRuntimeMode(AiRuntimeMode mode) async {
     await _configRepository.setString(AppConstants.prefAiMode, mode.storageValue);
