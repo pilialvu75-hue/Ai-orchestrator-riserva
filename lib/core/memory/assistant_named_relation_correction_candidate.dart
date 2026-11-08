@@ -56,7 +56,16 @@ abstract final class AssistantNamedRelationCorrectionCandidate {
     final match = generic ?? tall!;
     final beforeName = match.group(1)!.trim();
     final afterName = match.group(2)!.trim();
-    final predicate = generic != null ? generic.group(3)!.toLowerCase() : 'è alto';
+    const unresolved = <String>{
+      'lui', 'lei', 'egli', 'ella', 'qualcuno', 'collega',
+      'persona', 'altro', 'altra', 'questo', 'questa', 'quello', 'quella',
+    };
+    if (unresolved.contains(beforeName.toLowerCase()) ||
+        unresolved.contains(afterName.toLowerCase())) {
+      return null;
+    }
+    final predicate =
+        generic != null ? generic.group(3)!.toLowerCase() : 'è alto';
 
     final beforeFact = '$beforeName $predicate.';
     final afterFact = '$afterName $predicate.';
