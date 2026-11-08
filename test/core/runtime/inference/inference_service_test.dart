@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_provider
 
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_request.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_response.dart';
@@ -186,6 +187,11 @@ void main() {
 
   test('LOCAL AUTO cross-model handoff preserves confirmed memory, corrections '
       'and current language without leaking another conversation', () async {
+    // Flutter unit tests default to Android, regardless of host runner OS.
+    // Use the desktop threshold to force a legitimate Phi → Qwen switch;
+    // the separate router suite verifies stricter Android anti-switch logic.
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final phi = validModel.copyWith(
       id: 'phi3_5_mini',
       localPath: '/tmp/phi.gguf',
