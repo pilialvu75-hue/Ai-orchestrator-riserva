@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/voice/live_playback_drain.dart';
+import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 
 void main() {
   const drain = LivePlaybackDrain();
@@ -49,4 +50,35 @@ void main() {
       pollInterval: Duration.zero,
     ), throwsArgumentError);
   });
+  test('native Android complete does not mean audible playback ended', () {
+    const writingFinished = ReadAloudSnapshot(
+      active: true,
+      complete: true,
+      playing: true,
+      position: Duration(seconds: 2),
+      buffered: Duration(seconds: 10),
+    );
+    expect(androidPcmPlaybackPending(writingFinished), isTrue);
+    const drained = ReadAloudSnapshot(
+      active: true,
+      complete: true,
+      position: Duration(seconds: 10),
+      buffered: Duration(seconds: 10),
+    );
+    expect(androidPcmPlaybackPending(drained), isFalse);
+  });
+
+  test('supports asynchronous native player state polling', () async {
+    var polls = 0;
+    final safe = await drain.waitUntilQuiet(
+      isPlaying: () async => polls++ < 2,
+      isCancelled: () => false,
+      quietWindow: const Duration(milliseconds: 15),
+      pollInterval: const Duration(milliseconds: 5),
+      timeout: const Duration(seconds: 1),
+    );
+    expect(safe, isTrue);
+    expect(polls, greaterThanOrEqualTo(3));
+  });
+
 }
