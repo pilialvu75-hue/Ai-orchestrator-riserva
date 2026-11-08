@@ -1334,6 +1334,21 @@ rossa» non devono sovrascrivere la vecchia auto. L'affermazione puo
 essere compresa come evento ancora da disambiguare, non promossa a
 ricordo confermato.
 
+### 17.3 quater — Checkpoint 8 novembre 2026: memoria corretta, LOCAL AUTO e release gate
+
+**Questa voce aggiorna lo stato del 5 novembre senza modificare i criteri di accettazione 17.4–17.5.** I test automatici e l'integrazione in main NON equivalgono a collaudo fisico o beta distribuita.
+
+- **ME-0/ME-2, vista canonica:** [PR #1079](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/1079) MERGED. Risolve la vista dei fatti confermati dopo correzioni esplicite: restituisce ai diversi modelli LOCAL il fatto attuale, conserva lo storico SQLite, richiede nome esplicito per memorie di terzi ed evita di promuovere candidati non confermati.
+- **ME-2, correzione naturale con review:** [PR #1080](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/1080) MERGED. La frase limitata «Non Jerome, Kader è alto» produce soltanto una proposta; conferma/rifiuto nella pagina Revisione memoria, snapshot stale protetto; niente auto-profilazione o auto-approvazione.
+- **ME-2, isolamento:** [PR #1083](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/1083) MERGED. L'oscuramento dei vecchi fatti è qualificato per scope, scopeId e recordKey, senza contaminare conversazioni diverse.
+- **ME-2, forget concatenato:** [PR #1085](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/1085) MERGED su main l'8 novembre (squash `6de0ba37bdd8aa61f87cb0672045853271f07ebc`). Dimenticare l'ultima correzione segue e rimuove atomicamente la catena univoca esatta nel medesimo ambito; se il predecessore è ambiguo abortisce senza scrivere, e i fatti indipendenti restano. Test mirati nel workflow LOCAL Affinity Unit Tests (SQLite di sistema, **non release**) PASS su Ubuntu/macOS/Windows. Difetto tracciato in [#1084](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/1084); QA fisica ancora da effettuare.
+- **LOCAL AUTO, affinità:** [PR #1074](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/1074) espone l'identificativo del modello realmente usato nei log Diagnostics; [PR #1075](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/pull/1075) MERGED, con affinità per conversazione, isteresi e cooldown dopo completamento. Non dichiarare ancora switch impercettibile senza TTFT/RAM/benchmark su dispositivi reali.
+- **Prossimo incremento LOCAL AUTO:** [issue #1086](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/1086): un solo fallback GGUF LOCAL compatibile **prima del primo token**, mai con LOW_MEMORY/cancel, mai per MANUALE/Workshop/HYBRID, nessun Cloud, duplicato di risposta o alterazione di memoria e permessi. La pressione RAM rilevata su Galaxy S24 FE impone unload/limiti prima di tentare il secondo LLM.
+- **Gate di distribuzione P0:** [issue #1076](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/1076): mismatch SHA-256 per asset nativi SQLite in CI; non disabilitare checksum e non usare SQLite di sistema come sostituto per release. Una beta installabile richiede verifiche di packaging, firma, updater interno e collaudo fisico; Android solo **Impostazioni → Aggiornamenti**, senza APK manuali, reinstallazione o reset.
+- **Lacune ME-1/ME-4/ME-6:** riconoscimento e acquisizione automatica configurabile di preferenze innocue senza approvare ogni ricordo, entity ID persistenti senza inferenze su omonimi, forget/tombstone sincronizzati, pairing cifrato S24–ASUS, test cross-model IT/EN/FR/ES e connettività/offline ancora da completare o dimostrare. Consenso Cloud separato dalla memoria LOCAL, come in 17.5. Non dichiarare sincronizzazione effettiva fra dispositivi.
+
+**Ordine operativo conservato:** consolidare cancellazione/consistenza ME-0/ME-2 e QA; proseguire LOCAL AUTO P0 #1086 in parallelo alla risoluzione indipendente del blocco release #1076; poi benchmark qualità/costi di switch e acquisizione naturale configurabile. Il Cantiere mantiene la priorità generale della prima app autonoma funzionante: questi lavori sulla memoria non costituiscono una roadmap concorrente.
+
 ### 17.4 — Piano per milestone con gate di accettazione
 
 | Milestone | Priorita | Deliverable e gate verificabile |
