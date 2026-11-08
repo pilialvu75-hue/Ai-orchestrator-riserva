@@ -35,6 +35,7 @@ String? publicLogProjection(String line) {
     'LOCAL_EXECUTION_CONFIG',
     'RESOURCE_SAMPLE',
     'INFERENCE_TIMING',
+    'LOCAL_MODEL_USED',
     'RESOURCE_PROFILE',
     'RESOURCE_GUARD',
     'INFERENCE_BEGIN',
@@ -697,6 +698,247 @@ String? publicLogProjection(String line) {
       'decode_baseline': int.parse(m[4]!),
       'decode_current': int.parse(m[5]!),
       'reason': 'native_decode_progress',
+    });
+  }
+
+  // Only a closed, model-id-only completion signal is exported: no prompts,
+  // conversation content, paths, raw session identifiers or error messages.
+  // changed=true proves a different LOCAL model completed since the previous
+  // successful ordinary Assistant request in this app process.
+  if (event == 'LOCAL_MODEL_USED') {
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,80}) '
+      r'previous=(none|[A-Za-z0-9_.-]{1,80}) changed=(true|false)
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,80}) mode=(local|hybrid|cloud) '
+      r'attempt=(\d{1,3}) first_content_ms=(-?\d{1,12}) total_ms=(\d{1,12}) '
+      r'reported_tokens=(\d{1,12}) text_chunks=(\d{1,12}) outcome=(success|error)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'model': m[1]!,
+      'mode': m[2]!,
+      'attempt': int.parse(m[3]!),
+      'first_content_ms': int.parse(m[4]!),
+      'total_ms': int.parse(m[5]!),
+      'reported_tokens': int.parse(m[6]!),
+      'text_chunks': int.parse(m[7]!),
+      'outcome': m[8]!,
+    });
+  }
+  if (event == 'RESOURCE_SAMPLE') {
+    final current = RegExp(
+      r'^available_bytes=(-?\d{1,15}) rss_bytes=(-?\d{1,15}) '
+      r'native_heap_bytes=(-?\d{1,15}) battery_temp_decic=(-?\d{1,6}) '
+      r'critical=(true|false) '
+      r'phase=(idle|uninitialized|loading|tokenizing|runtimeUnavailable|ready|inferencing|streaming|completed|timedOut|stalled|ffiMissing|modelMissing|failed) '
+      r'gpu_layers=(-?\d{1,6}) decode_calls=(-?\d{1,12}) '
+      r'prefill_ms=(-?\d{1,12})'
+      r'(?: total_bytes=(-?\d{1,15}) threshold_bytes=(-?\d{1,15}) '
+      r'pressure=(unknown|normal|high|critical) low_memory=(true|false) trim_level=(\d{1,3}) '
+      r'n_ctx=(-?\d{1,6}) n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}))?$',
+    ).firstMatch(rest);
+    if (current != null) {
+      return jsonEncode({
+        'time': timestamp[1]!,
+        'event': event,
+        'available_bytes': int.parse(current[1]!),
+        'rss_bytes': int.parse(current[2]!),
+        'native_heap_bytes': int.parse(current[3]!),
+        'battery_temp_decic': int.parse(current[4]!),
+        'critical': current[5] == 'true',
+        'phase': current[6]!,
+        'gpu_layers': int.parse(current[7]!),
+        'decode_calls': int.parse(current[8]!),
+        'prefill_ms': int.parse(current[9]!),
+        if (current[10] != null) ...{
+          'total_bytes': int.parse(current[10]!),
+          'threshold_bytes': int.parse(current[11]!),
+          'pressure': current[12]!,
+          'low_memory': current[13] == 'true',
+          'trim_level': int.parse(current[14]!),
+          'n_ctx': int.parse(current[15]!),
+          'n_batch': int.parse(current[16]!),
+          'n_ubatch': int.parse(current[17]!),
+        },
+      });
+    }
+
+    // Historical persisted logs remain exportable through the old closed
+    // grammar. New fields are never inferred when they were not measured.
+    final legacy = RegExp(
+      r'^available_bytes=(-?\d{1,15}) rss_bytes=(-?\d{1,15}) '
+      r'native_heap_bytes=(-?\d{1,15}) critical=(true|false) '
+      r'phase=(idle|uninitialized|loading|tokenizing|runtimeUnavailable|ready|inferencing|streaming|completed|timedOut|stalled|ffiMissing|modelMissing|failed) '
+      r'gpu_layers=(-?\d{1,6}) decode_calls=(-?\d{1,12})'
+      r'(?: total_bytes=(-?\d{1,15}) threshold_bytes=(-?\d{1,15}) '
+      r'pressure=(unknown|normal|high|critical) low_memory=(true|false) trim_level=(\d{1,3}) '
+      r'n_ctx=(-?\d{1,6}) n_batch=(-?\d{1,6}) n_ubatch=(-?\d{1,6}))?$',
+    ).firstMatch(rest);
+    if (legacy == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'available_bytes': int.parse(legacy[1]!),
+      'rss_bytes': int.parse(legacy[2]!),
+      'native_heap_bytes': int.parse(legacy[3]!),
+      'critical': legacy[4] == 'true',
+      'phase': legacy[5]!,
+      'gpu_layers': int.parse(legacy[6]!),
+      'decode_calls': int.parse(legacy[7]!),
+      if (legacy[8] != null) ...{
+        'total_bytes': int.parse(legacy[8]!),
+        'threshold_bytes': int.parse(legacy[9]!),
+        'pressure': legacy[10]!,
+        'low_memory': legacy[11] == 'true',
+        'trim_level': int.parse(legacy[12]!),
+        'n_ctx': int.parse(legacy[13]!),
+        'n_batch': int.parse(legacy[14]!),
+        'n_ubatch': int.parse(legacy[15]!),
+      },
+    });
+  }
+  if (event == 'RESOURCE_PROFILE') {
+    final m = RegExp(
+      r'^reason=(pressure|phi_conservative|phi_gpu_conservative|phi_memory_recovery|device_memory_budget|device_memory_conservative|device_gpu_conservative|baseline) n_ctx=(\d{1,6}) '
+      r'n_batch=(\d{1,6}) n_ubatch=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'reason': m[1]!,
+      'n_ctx': int.parse(m[2]!),
+      'n_batch': int.parse(m[3]!),
+      'n_ubatch': int.parse(m[4]!),
+    });
+  }
+  if (event == 'RESOURCE_GUARD') {
+    final m = RegExp(r'^action=(defer|cancel) reason=critical_memory$')
+        .firstMatch(rest);
+    if (m == null) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'action': m[1]!,
+      'reason': 'critical_memory',
+    });
+  }
+
+  if (event == 'LOCAL_EXECUTION_CONFIG') {
+    final config = RegExp(
+      r'^mode=(cpu_baseline|vulkan) gpu_layers=(\d{1,3}) n_ctx=(\d{1,6}) n_batch=(\d{1,6})$',
+    ).firstMatch(rest);
+    if (config == null) return null;
+    final layers = int.parse(config[2]!);
+    if ((config[1] == 'cpu_baseline' && layers != 0) ||
+        (config[1] == 'vulkan' && layers == 0)) return null;
+    return jsonEncode(<String, Object>{
+      'time': timestamp[1]!,
+      'event': event,
+      'mode': config[1]!,
+      'gpu_layers': layers,
+      'n_ctx': int.parse(config[3]!),
+      'n_batch': int.parse(config[4]!),
+    });
+  }
+
+  final result = <String, Object>{'time': timestamp[1]!, 'event': event};
+  // Exact known producer format; do not extract numbers from free-form errors.
+  if (event == 'TTS_GENERATE_BEGIN') {
+    final m = RegExp(
+      r'^family=kokoro lang=(it|fr|en) sid=(\d{1,3}) '
+      r'speed=([0-9.]{1,12}) chars=(\d{1,9})(?: phrase=\d{1,9})?$',
+    ).firstMatch(rest);
+    if (m != null) {
+      result.addAll(<String, Object>{
+        'family': 'kokoro',
+        'lang': m[1]!,
+        'sid': int.parse(m[2]!),
+        'speed': m[3]!,
+        'chars': int.parse(m[4]!),
+      });
+    }
+  }
+  if (event == 'TTS_TIMING') {
+    final m = RegExp(
+      r'^reused=(true|false) load_ms=(\d{1,9}) synthesis_ms=(\d{1,9})$',
+    ).firstMatch(rest);
+    if (m != null) {
+      result.addAll(<String, Object>{
+        'reused': m[1] == 'true',
+        'load_ms': int.parse(m[2]!),
+        'synthesis_ms': int.parse(m[3]!),
+      });
+    }
+  }
+  if (event == 'TTS_PREPARE_TIMING') {
+    final m = RegExp(r'^asset_ms=(\d{1,9})$').firstMatch(rest);
+    if (m != null) result['asset_ms'] = int.parse(m[1]!);
+  }
+  if (event == 'TTS_FAIL') {
+    final reason = RegExp(
+      r'^reason=(worker_failed|non_finite_pcm|invalid_pcm|playback_failed)$',
+    ).firstMatch(rest);
+    if (reason != null) result['error'] = reason[1]!;
+    final m = RegExp(
+      r'^Bad state: TTS returned invalid audio: (\d{1,9}) of '
+      r'(\d{1,9}) samples are non-finite\.$',
+    ).firstMatch(rest);
+    if (m != null) {
+      result.addAll(<String, Object>{
+        'error': 'non_finite_pcm',
+        'invalid': int.parse(m[1]!),
+        'samples': int.parse(m[2]!),
+      });
+    }
+  }
+  if (event == 'ANDROID_PROCESS_EXIT_HISTORY') {
+    try {
+      final data = jsonDecode(rest);
+      if (data is Map) {
+        final cause = data['managed_cause'];
+        if (const <String>{
+          'foreground_start_timeout',
+          'foreground_start_disallowed',
+          'foreground_bad_notification',
+          'security_exception',
+          'managed_other',
+        }.contains(cause)) {
+          result['managed_cause'] = cause;
+        }
+
+        for (final key in <String>[
+          'timestamp_ms',
+          'reason_code',
+          'status',
+          'pss_kb',
+          'rss_kb',
+        ]) {
+          final value = data[key];
+          if (value is int) result[key] = value;
+        }
+      }
+    } catch (_) {
+      // Retain the event even without a structured exit record.
+    }
+  }
+  // No arbitrary exception text, stack, prompt, path, ID or token is exported.
+  return jsonEncode(result);
+}
+,
+    ).firstMatch(rest);
+    if (m == null) return null;
+    final actualChange = m[2] != 'none' && m[1] != m[2];
+    if (actualChange != (m[3] == 'true')) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'model': m[1]!,
+      'previous': m[2]!,
+      'changed': actualChange,
     });
   }
 
