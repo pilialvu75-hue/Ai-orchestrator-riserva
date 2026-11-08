@@ -1334,6 +1334,47 @@ rossa» non devono sovrascrivere la vecchia auto. L'affermazione puo
 essere compresa come evento ancora da disambiguare, non promossa a
 ricordo confermato.
 
+### 17.3 quater — Checkpoint fisico ME-2, Galaxy S24 FE (8 novembre 2026)
+
+Questa evidenza aggiorna la baseline ME-2 del 5 novembre senza cambiare i
+gate finali della sezione 17. Fonti: issue #899, commenti
+[#6717717412](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899#issuecomment-6717717412)
+e [#6717759716](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899#issuecomment-6717759716).
+
+- **Dispositivo reale:** Galaxy S24 FE, Android beta
+  `1.0.15-beta+103962`, modalita LOCAL. Questa e' una verifica fisica
+  dichiarata dall'utente con schermate, non solo un test CI.
+- **Test 1 PASS, acquisizione naturale:** dopo consenso relazionale,
+  `Jerome e' alto.` in chat genera una proposta locale attribuita a
+  Jerome, visibile in Impostazioni -> Memoria; la proposta non e'
+  ancora un ricordo confirmed.
+- **Test 2 PASS, recupero cross-chat dopo approvazione:** approvata la
+  proposta, in una nuova chat LOCAL la domanda
+  `Che cosa sai di Jerome?` riceve
+  `Sai che Jerome e' alto.`. Recupero confermato su hardware reale;
+  non dimostra ancora persistenza dopo restart, cambio modello o sync.
+- **Anomalia lingua:** risposta del modello in inglese al primo
+  enunciato italiano; nel Test 2 risposta in italiano. Verificare
+  separatamente continuita della lingua e retrieval della memoria.
+- **Test 3 aperto:** chiedere `Che cosa sai di Kader?` senza aggiungere
+  ricordi su Kader; non attribuire a Kader l'altezza di Jerome.
+  Proseguire con restart, modello differente, revoca/forget,
+  cancellazione della chat d'origine, omonimi e ambiguita di identita.
+- **Nuovo requisito UX, da implementare:** memoria LOCAL naturale
+  configurabile con politiche `non ricordare`,
+  `chiedi sempre`, `approva automaticamente fatti ordinari consentiti`;
+  preferenze semplici e persone nominate hanno consensi distinti.
+  Ambiguita, contraddizioni e dati sensibili richiedono trattamento
+  specifico, revisione o chiarimento. Dedup, provenienza, audit,
+  correzione/revoca e controllo anti-contaminazione restano obbligatori.
+  Il consenso per acquisizione LOCAL NON autorizza trasmissioni
+  Cloud/HYBRID: consenso alla divulgazione separato per destinatario
+  e categoria dati. La beta 103962 richiede ancora approvazione
+  manuale; nessuna di queste nuove policy e' gia disponibile.
+- **Stato:** ME-2 implementata solo parzialmente e collaudo fisico
+  in corso; nessun PASS attribuito a Windows/macOS/Linux, sync
+  cross-device, persistenza post-riavvio o autonomia completa.
+
 ### 17.4 — Piano per milestone con gate di accettazione
 
 | Milestone | Priorita | Deliverable e gate verificabile |
@@ -1482,7 +1523,7 @@ implica consenso alla persistenza o alla trasmissione esterna.
 - **Libreria CANT-RAG-1**: piano del retrieval locale e validazione
   di componenti, senza doppiare il motore memoria dell'assistente.
 
-**Prossima decisione operativa:** chiudere ME-0 con test riproducibili
+**Prossima decisione operativa (baseline storica del 5 novembre, ora aggiornata da 17.3 quater):** chiudere ME-0 con test riproducibili
 e prova fisica chat eliminata -> ricordo USER persistente; poi
 implementare il primo incremento ME-1 di acquisizione naturale
 multilingue con provenance e review, senza attivare sync/Cloud o
