@@ -147,6 +147,58 @@ void main() {
           containsAll(['La bici è blu.', 'La bici è rossa.']));
     });
 
+    test('reviewed user correction does not erase same-key conversation fact',
+        () {
+      final originalUser = _fact('shared.person.attribute', 'Jerome è alto.');
+      final originalConversation = _fact(
+        'shared.person.attribute',
+        'Jerome è alto.',
+        scope: AssistantMemoryScope.conversation,
+        scopeId: 'other-chat',
+      );
+      final selected =
+          _view([originalUser, originalConversation, _correction()]);
+      expect(selected, hasLength(2));
+      expect(
+        selected.where((r) => r.recordKey == 'shared.person.attribute'),
+        hasLength(1),
+      );
+      expect(
+        selected.firstWhere(
+          (r) => r.recordKey == 'shared.person.attribute',
+        ).scopeId,
+        'other-chat',
+      );
+      expect(
+        selected.where((r) => r.content == 'Kader è alto.'),
+        hasLength(1),
+      );
+    });
+
+    test('reviewed conversation correction keeps same-key user fact',
+        () {
+      final originalConversation = _fact(
+        'shared.person.attribute', 'Jerome è alto.',
+        scope: AssistantMemoryScope.conversation,
+        scopeId: 'chat-current',
+      );
+      final originalUser =
+          _fact('shared.person.attribute', 'Jerome è alto.');
+      final correction = _correction(
+        scope: AssistantMemoryScope.conversation,
+        scopeId: 'chat-current',
+      );
+      final selected =
+          _view([originalUser, originalConversation, correction]);
+      expect(selected, hasLength(2));
+      expect(
+        selected.singleWhere(
+          (r) => r.recordKey == 'shared.person.attribute',
+        ).scope,
+        AssistantMemoryScope.user,
+      );
+    });
+
     test('newest confirmed version wins only inside a single scoped key',
         () {
       final old = _fact('bike.current', 'La bici è blu.', at: 10);

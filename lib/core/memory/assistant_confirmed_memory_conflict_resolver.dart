@@ -37,7 +37,7 @@ abstract final class AssistantConfirmedMemoryConflictResolver {
     }
 
     final records = byKey.values.toList(growable: false);
-    final replaced = <String>{};
+    final replaced = <(AssistantMemoryScope, String, String)>{};
     for (final correction in records) {
       if (!isReviewedNamedCorrection(correction)) continue;
       final matchingOlder = records.where((earlier) =>
@@ -51,11 +51,13 @@ abstract final class AssistantConfirmedMemoryConflictResolver {
       // wording is NOT identity proof: reject ambiguous replacements.
       if (matchingOlder.length == 1) {
         // Keep SQLite history intact; hide only the superseded rendering.
-        replaced.add(matchingOlder.single.recordKey);
+        final old = matchingOlder.single;
+        replaced.add((old.scope, old.scopeId, old.recordKey));
       }
     }
     return List<AssistantDurableMemoryRecord>.unmodifiable(
-      records.where((record) => !replaced.contains(record.recordKey)),
+      records.where((record) =>
+          !replaced.contains((record.scope, record.scopeId, record.recordKey))),
     );
   }
 
