@@ -218,8 +218,12 @@ class AssistantDurableMemoryContextService {
     var score = overlap * 10;
     if (record.kind == AssistantMemoryKind.decision ||
         record.kind == AssistantMemoryKind.unresolvedTask ||
-        record.kind == AssistantMemoryKind.procedure) score += 2;
-    if (record.kind == AssistantMemoryKind.preference) score += 1;
+        record.kind == AssistantMemoryKind.procedure) {
+      score += 2;
+    }
+    if (record.kind == AssistantMemoryKind.preference) {
+      score += 1;
+    }
     return score;
   }
 
@@ -394,11 +398,23 @@ class AssistantDurableMemoryContextService {
   String _renderRecord(AssistantDurableMemoryRecord record) {
     final content = _singleLine(record.content);
     final details = <String>[];
-    if (record.before != null && record.after != null) {
-      details.add('${_singleLine(record.before!)} -> ${_singleLine(record.after!)}');
-    }
-    if (record.reason != null) {
-      details.add('reason: ${_singleLine(record.reason!)}');
+    if (AssistantConfirmedMemoryConflictResolver
+        .isReviewedNamedCorrection(record)) {
+      // Both claims are shown with explicit validity labels. A different
+      // LLM must not interpret the old statement as another current fact.
+      details.add(
+        'superseded (NOT CURRENT): ${_singleLine(record.before!)}; '
+        'confirmed current: ${_singleLine(record.after!)}',
+      );
+    } else {
+      if (record.before != null && record.after != null) {
+        details.add(
+          '${_singleLine(record.before!)} -> ${_singleLine(record.after!)}',
+        );
+      }
+      if (record.reason != null) {
+        details.add('reason: ${_singleLine(record.reason!)}');
+      }
     }
     final suffix = details.isEmpty ? '' : ' (${details.join('; ')})';
     return _truncate(
