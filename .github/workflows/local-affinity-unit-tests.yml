@@ -12,6 +12,12 @@ on:
       - 'lib/core/memory/assistant_durable_memory_context_service.dart'
       - 'test/core/memory/assistant_confirmed_memory_conflict_resolver_test.dart'
       - 'test/core/memory/assistant_durable_memory_context_service_test.dart'
+      - 'lib/core/memory/assistant_named_relation_correction_candidate.dart'
+      - 'lib/core/memory/assistant_durable_memory_capture_service.dart'
+      - 'lib/core/memory/assistant_durable_memory_store.dart'
+      - 'lib/core/memory/assistant_durable_memory_service.dart'
+      - 'lib/features/settings/presentation/pages/modules/assistant_memory_review_page.dart'
+      - 'test/core/memory/assistant_named_relation_correction_review_test.dart'
       - '.github/workflows/local-affinity-unit-tests.yml'
   workflow_dispatch:
 
@@ -66,6 +72,12 @@ jobs:
           lib/core/memory/assistant_durable_memory_context_service.dart
           test/core/memory/assistant_confirmed_memory_conflict_resolver_test.dart
           test/core/memory/assistant_durable_memory_context_service_test.dart
+          lib/core/memory/assistant_named_relation_correction_candidate.dart
+          lib/core/memory/assistant_durable_memory_capture_service.dart
+          lib/core/memory/assistant_durable_memory_store.dart
+          lib/core/memory/assistant_durable_memory_service.dart
+          lib/features/settings/presentation/pages/modules/assistant_memory_review_page.dart
+          test/core/memory/assistant_named_relation_correction_review_test.dart
       - name: Run LOCAL model selection, canonical memory and service tests
         run: >-
           flutter test --reporter expanded
@@ -73,3 +85,4 @@ jobs:
           test/core/runtime/inference/inference_service_test.dart
           test/core/memory/assistant_confirmed_memory_conflict_resolver_test.dart
           test/core/memory/assistant_durable_memory_context_service_test.dart
+          test/core/memory/assistant_named_relation_correction_review_test.dart

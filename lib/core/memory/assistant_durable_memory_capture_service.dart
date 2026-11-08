@@ -1,6 +1,8 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
 import 'package:ai_orchestrator/core/memory/assistant_entity_reference_analyzer.dart';
+import 'package:ai_orchestrator/core/memory/assistant_named_relation_correction_candidate.dart';
+import 'package:ai_orchestrator/core/memory/assistant_confirmed_memory_conflict_resolver.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
@@ -325,6 +327,140 @@ final class AssistantDurableMemoryCaptureService {
     return operation;
   }
 
+  /// Propose a direct user correction about two named third parties.
+  /// This never confirms a memory: the user must review the candidate.
+  Future<bool> proposeNamedRelationCorrectionCandidate({
+    required String userPrompt,
+    String? sessionId,
+    bool consentEnabled = false,
+    bool directUserMessage = false,
+    bool Function()? consentStillEnabled,
+  }) {
+    final session = sessionId?.trim();
+    if (!consentEnabled ||
+        !directUserMessage ||
+        _resetInProgress ||
+        (session != null &&
+            (session.isEmpty || _purgedSessions.contains(session))) ||
+        (consentStillEnabled != null && !consentStillEnabled())) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) async {
+      if (_resetInProgress ||
+          (session != null && _purgedSessions.contains(session)) ||
+          (consentStillEnabled != null && !consentStillEnabled())) {
+        return false;
+      }
+      final draft =
+          AssistantNamedRelationCorrectionCandidate.parse(userPrompt);
+      if (draft == null) return false;
+      final confirmed = await _memoryService.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+      );
+      if (_resetInProgress ||
+          (session != null && _purgedSessions.contains(session)) ||
+          (consentStillEnabled != null && !consentStillEnabled())) {
+        return false;
+      }
+      // Wording alone cannot identify one person among same-name records.
+      final matches = confirmed.where((r) =>
+          r.kind == AssistantMemoryKind.fact &&
+          r.source == AssistantMemorySource.userExplicit &&
+          r.content == draft.beforeFact).toList();
+      if (matches.length != 1 ||
+          confirmed.any((r) => r.recordKey == draft.recordKey) ||
+          confirmed.any((r) =>
+              AssistantConfirmedMemoryConflictResolver
+                  .isReviewedNamedCorrection(r) &&
+              r.before == draft.beforeFact &&
+              r.updatedAt > matches.single.updatedAt)) {
+        return false;
+      }
+      await _memoryService.recordUserCandidate(
+        recordKey: draft.recordKey,
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: draft.originalStatement,
+        before: matches.single.content,
+        after: matches.single.updatedAt.toString(),
+        reason: AssistantNamedRelationCorrectionCandidate.pendingReason,
+        updatedAt: _now(),
+      );
+      return true;
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
+  Future<List<AssistantDurableMemoryRecord>>
+      loadReviewableNamedRelationCorrectionCandidates() async {
+    final pending = await _memoryService.loadCandidates(
+      scope: AssistantMemoryScope.user,
+      scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+      limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+    );
+    return List<AssistantDurableMemoryRecord>.unmodifiable(
+      pending.where((record) {
+        final draft =
+            AssistantNamedRelationCorrectionCandidate.parse(record.content);
+        return draft != null &&
+            record.recordKey == draft.recordKey &&
+            record.kind == AssistantMemoryKind.fact &&
+            record.scope == AssistantMemoryScope.user &&
+            record.source == AssistantMemorySource.userStatement &&
+            record.reason ==
+                AssistantNamedRelationCorrectionCandidate.pendingReason &&
+            record.before == draft.beforeFact &&
+            int.tryParse(record.after ?? '') != null;
+      }),
+    );
+  }
+
+  Future<bool> reviewNamedRelationCorrectionCandidate({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    bool userConfirmed = false,
+    String? correctedContent,
+  }) {
+    if (!userConfirmed ||
+        _resetInProgress ||
+        correctedContent != null ||
+        reviewed.status != AssistantMemoryStatus.candidate ||
+        reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.scopeId !=
+            AssistantDurableMemoryContextService.localUserScopeId) {
+      return Future<bool>.value(false);
+    }
+    final draft =
+        AssistantNamedRelationCorrectionCandidate.parse(reviewed.content);
+    if (draft == null ||
+        reviewed.recordKey != draft.recordKey ||
+        reviewed.reason !=
+            AssistantNamedRelationCorrectionCandidate.pendingReason ||
+        reviewed.before != draft.beforeFact) {
+      return Future<bool>.value(false);
+    }
+    final operation = _pendingWrites.then((_) {
+      if (_resetInProgress) return Future<bool>.value(false);
+      return _memoryService.resolveReviewedNamedRelationCorrection(
+        reviewed: reviewed,
+        approve: approve,
+        reviewedAt: _now(),
+      );
+    });
+    _pendingWrites = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return operation;
+  }
+
   /// Direct-user, one-given-name proposal in IT/EN/FR/ES.
   ///
   /// Both source and consent gates must be explicit. When called from chat,
@@ -634,7 +770,7 @@ final class AssistantDurableMemoryCaptureService {
         updatedAt: _now(),
         before: previous.content,
         after: previous.updatedAt.toString(),
-        reason: 'natural_direct_car_color_update:' + update.language,
+        reason: 'natural_direct_car_color_update:${update.language}',
       );
       return true;
     });
@@ -668,7 +804,7 @@ final class AssistantDurableMemoryCaptureService {
             .extractDirectUserCarColorCorrection(record.content);
         return parsed != null &&
             record.reason ==
-                'natural_direct_car_color_update:' + parsed.language;
+                'natural_direct_car_color_update:${parsed.language}';
       }),
     );
   }
@@ -695,7 +831,7 @@ final class AssistantDurableMemoryCaptureService {
         .extractDirectUserCarColorCorrection(reviewed.content);
     if (parsed == null ||
         reviewed.reason !=
-            'natural_direct_car_color_update:' + parsed.language ||
+            'natural_direct_car_color_update:${parsed.language}' ||
         (approve &&
             AssistantNaturalMemoryCandidateExtractor
                     .extractDirectUserCarColorCorrection(
