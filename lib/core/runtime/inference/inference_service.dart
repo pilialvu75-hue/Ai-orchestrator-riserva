@@ -31,6 +31,7 @@ class InferenceService {
   static const String _searchNoticePrefix = 'search:';
 
   bool _runtimeLookupInProgress = false;
+  String? _lastCompletedAssistantLocalModelId;
 
   InferenceService({
     required Future<AiModel?> Function() loadSelectedModel,
@@ -1293,6 +1294,20 @@ class InferenceService {
               'total_ms=${attemptClock.elapsedMilliseconds} '
               'reported_tokens=${chunk.tokensGenerated} text_chunks=$streamedChunkCount '
               'outcome=${chunk.isError ? 'error' : 'success'}');
+          // Completion is the only reliable boundary for asserting which
+          // model actually answered. This intentionally excludes explicit
+          // Workshop model identities and any failed LOCAL attempt.
+          if (!chunk.isError &&
+              runtimeMode == AiRuntimeMode.local &&
+              cloudRequest.modelId == null &&
+              cloudRequest.modelPath == null &&
+              safeModel != 'unknown') {
+            final previous = _lastCompletedAssistantLocalModelId;
+            final changed = previous != null && previous != safeModel;
+            _log('[LOCAL_MODEL_USED] model=$safeModel '
+                'previous=${previous ?? 'none'} changed=$changed');
+            _lastCompletedAssistantLocalModelId = safeModel;
+          }
         }
 
         _log(
