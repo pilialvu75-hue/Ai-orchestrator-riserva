@@ -476,7 +476,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
         onError?.call('Live Android: rilascio memoria vocale non disponibile.');
         return;
       }
-      final released = await recognizer.releaseRecognitionMemoryForInference();
+      final released = await (recognizer as VoiceRecognitionMemoryReclaimer)
+          .releaseRecognitionMemoryForInference();
       if (_disposed || token.isCancelled || _stopRequested) return;
       logEvent(_tag, '[LIVE_ASR_MEMORY_HANDOFF] requested=true released=$released');
       if (!released) {
@@ -650,7 +651,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
           final voice = _engine;
           if (voice is ReadAloudVoiceEngine) {
             try {
-              final status = await voice.refreshReadAloud();
+              final status = await (voice as ReadAloudVoiceEngine)
+                  .refreshReadAloud();
               // On desktop the shared engine implements ReadAloudVoiceEngine
               // but has no Android read-aloud sink. Never ignore its actual
               // PCM player queue in that case.
