@@ -650,7 +650,11 @@ class VoiceLoopManager with RuntimeEventEmitter {
           final voice = _engine;
           if (voice is ReadAloudVoiceEngine) {
             try {
-              return (await voice.refreshReadAloud()).playing;
+              final status = await voice.refreshReadAloud();
+              // On desktop the shared engine implements ReadAloudVoiceEngine
+              // but has no Android read-aloud sink. Never ignore its actual
+              // PCM player queue in that case.
+              return status.playing || voice.isSpeaking;
             } catch (_) {
               // Native transport status is best-effort; keep a quiet tail.
             }
