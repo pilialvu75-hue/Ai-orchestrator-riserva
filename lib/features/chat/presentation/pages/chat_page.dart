@@ -1726,7 +1726,7 @@ class _ChatBodyState
     if (entry.tag != 'INFERENCE_TIMING' ||
         !entry.message.contains('outcome=success')) return;
     final match = RegExp(
-      r'\bmodel=([A-Za-z0-9_.-]{1,80}) mode=(local|hybrid)\b',
+      r'\bmodel=([A-Za-z0-9_.-]{1,80}) mode=local\b',
     ).firstMatch(entry.message);
     final modelId = match?.group(1);
     if (!mounted || modelId == null || modelId == _lastSuccessfulLocalModelId) {
@@ -2578,7 +2578,7 @@ class _ChatBodyState
               mainAxisSize: MainAxisSize.min,
               children: [
                 _buildRuntimeModePill(surfaceColor),
-                if (_runtimeSettingsService.runtimeMode != AiRuntimeMode.cloud) ...[
+                if (_runtimeSettingsService.runtimeMode == AiRuntimeMode.local) ...[
                   const SizedBox(width: 6),
                   _buildLocalModelSelector(surfaceColor),
                 ],
