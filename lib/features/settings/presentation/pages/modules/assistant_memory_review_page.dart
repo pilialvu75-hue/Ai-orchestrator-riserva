@@ -1,6 +1,8 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
+import 'package:ai_orchestrator/core/memory/assistant_named_relation_correction_candidate.dart';
+import 'package:ai_orchestrator/core/memory/assistant_confirmed_memory_conflict_resolver.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
@@ -70,7 +72,10 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
           .loadReviewableNaturalCarColorCorrectionCandidates();
       final entityReferences = await widget.captureService
           .loadReviewableManualEntityReferenceCandidates();
+      final namedCorrections = await widget.captureService
+          .loadReviewableNamedRelationCorrectionCandidates();
       final pending = <AssistantDurableMemoryRecord>[
+        ...namedCorrections,
         ...entityReferences,
         ...preferences,
         ...names,
@@ -150,6 +155,13 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       if (!ok) {
         ok = await widget.captureService
             .proposeNaturalUserCarColorCorrectionCandidate(
+          userPrompt: _text.text,
+          consentEnabled: true,
+          directUserMessage: true,
+        );
+      }
+      if (!ok) {
+        ok = await widget.captureService.proposeNamedRelationCorrectionCandidate(
           userPrompt: _text.text,
           consentEnabled: true,
           directUserMessage: true,
@@ -241,6 +253,14 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
     setState(() => _busy = true);
     try {
       final changed = record.recordKey.startsWith(
+              AssistantConfirmedMemoryConflictResolver.correctionKeyPrefix)
+          ? await widget.captureService.reviewNamedRelationCorrectionCandidate(
+              reviewed: record,
+              approve: approve,
+              userConfirmed: true,
+              correctedContent: correctedContent,
+            )
+          : record.recordKey.startsWith(
               AssistantManualEntityReferenceCandidate.keyPrefix)
           ? await widget.captureService.reviewManualEntityReferenceCandidate(
               reviewed: record,
@@ -434,6 +454,16 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(record.content),
+                        if (record.recordKey.startsWith(
+                            AssistantConfirmedMemoryConflictResolver
+                                .correctionKeyPrefix)) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '${record.before ?? ''} → '
+                            '${AssistantNamedRelationCorrectionCandidate.parse(record.content)?.afterFact ?? ''}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
                         const SizedBox(height: 8),
                         Wrap(
                           spacing: 8,
@@ -446,7 +476,11 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
                               child: Text(_t('approve')),
                             ),
                             OutlinedButton(
-                              onPressed: _busy
+                              onPressed: _busy ||
+                                      record.recordKey.startsWith(
+                                        AssistantConfirmedMemoryConflictResolver
+                                            .correctionKeyPrefix,
+                                      )
                                   ? null
                                   : () async {
                                       final corrected = await _edit(record);
