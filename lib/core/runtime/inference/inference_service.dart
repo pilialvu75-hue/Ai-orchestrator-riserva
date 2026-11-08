@@ -1291,7 +1291,12 @@ class InferenceService {
         runtimeState.contains('load') ||
         runtimeState.contains('dispos') ||
         runtimeState.contains('poison') ||
-        runtimeState.contains('unsafe')) {
+        runtimeState.contains('unsafe') ||
+        runtimeState == 'tokenizing' ||
+        runtimeState == 'inferencing' ||
+        runtimeState == 'streaming' ||
+        runtimeState == 'stalled' ||
+        runtimeState == 'timedOut') {
       _log('[LOCAL_AUTO_RECOVERY] result=skipped reason=runtime_transition');
       yield originalFailure;
       return;
