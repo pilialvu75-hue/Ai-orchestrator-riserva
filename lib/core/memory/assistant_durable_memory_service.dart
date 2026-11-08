@@ -164,6 +164,20 @@ class AssistantDurableMemoryService {
     );
   }
 
+  /// Only an explicitly owner-approved, version-checked named correction
+  /// can become a confirmed replacement. A candidate alone is invisible.
+  Future<bool> resolveReviewedNamedRelationCorrection({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    required int reviewedAt,
+  }) {
+    return _store.resolveReviewedNamedRelationCorrection(
+      reviewed: reviewed,
+      approve: approve,
+      reviewedAt: reviewedAt,
+    );
+  }
+
   Future<bool> confirmCandidate({
     required AssistantMemoryScope scope,
     required String scopeId,
