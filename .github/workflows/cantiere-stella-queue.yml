@@ -2,6 +2,12 @@ name: Cantiere generated Stella Queue app
 
 on:
   workflow_dispatch:
+    inputs:
+      values:
+        description: 'Comma-separated integers to generate and test (max 100)'
+        required: true
+        default: '1,2,3'
+        type: string
   pull_request:
     paths:
       - 'tool/cantiere_generate_stella_queue.py'
@@ -25,9 +31,11 @@ jobs:
           echo "UPSTREAM_SHA=$(git ls-remote https://github.com/dart-lang/core.git refs/heads/main | cut -f1)" >> "$GITHUB_ENV"
       - name: Generate app and rebuild tested adapter
         shell: bash
+        env:
+          QUEUE_VALUES: ${{ github.event_name == 'workflow_dispatch' && inputs.values || '7,-2,11' }}
         run: |
           set -euo pipefail
-          python3 tool/cantiere_generate_stella_queue.py --output "$RUNNER_TEMP/stella" --values "7,-2,11"
+          python3 tool/cantiere_generate_stella_queue.py --output "$RUNNER_TEMP/stella" --values "$QUEUE_VALUES"
           git clone --quiet https://github.com/pilialvu75-hue/AI-Orchestrator-Module-Library.git "$RUNNER_TEMP/library"
           git -C "$RUNNER_TEMP/library" checkout --quiet "$LIBRARY_SHA"
           python3 "$RUNNER_TEMP/library/tools/rebuild_async_adapter.py" --source-commit "$UPSTREAM_SHA" --output "$RUNNER_TEMP/rebuilt-async"
