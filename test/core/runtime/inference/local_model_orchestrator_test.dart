@@ -32,6 +32,8 @@ void main() {
     bool android = false,
     bool Function(AiModel)? supports,
     List<ChatTurn> context = const [],
+    String? lastCompletedModelId,
+    int successfulTurnsSinceSwitch = 99,
   }) => router.select(
     request: InferenceRequest(
       sessionId: 'test',
@@ -43,6 +45,8 @@ void main() {
     supportsModel: supports ?? (_) => true,
     resources: memory,
     isAndroid: android,
+    lastCompletedModelId: lastCompletedModelId,
+    successfulTurnsSinceSwitch: successfulTurnsSinceSwitch,
   );
 
   test('ordinary chat sticks to the manual favorite where possible', () {
@@ -98,4 +102,85 @@ void main() {
       qwen.id,
     );
   });
+  test('same chat stays on the completed specialist after coding turn', () {
+    // With a single successful code answer, an ordinary follow-up should
+    // not reload Phi solely because Phi remains selected in MANUAL settings.
+    expect(route('Chi pratica sport?',
+      lastCompletedModelId: qwen.id)?.id, qwen.id);
+    expect(route('continua',
+      lastCompletedModelId: qwen.id,
+      context: const [
+        ChatTurn(role: ChatRole.user, content: 'Scrivi codice Dart'),
+      ])?.id, qwen.id);
+  });
+
+  test('Android requires a larger task gain than desktop to reload a model', () {
+    expect(route('Scrivi codice Dart',
+      lastCompletedModelId: phi.id,
+      android: true)?.id, phi.id);
+    expect(route('Scrivi codice Dart',
+      lastCompletedModelId: phi.id)?.id, qwen.id);
+  });
+
+  test('cooldown stops A to B to A immediately after a successful switch', () {
+    final coder = installed('codegemma_2b', 1600000000);
+    final decision = router.decide(
+      request: const InferenceRequest(
+          sessionId: 'chat', prompt: 'Scrivi codice Dart'),
+      availableModels: [phi, coder],
+      preferredModel: phi,
+      supportsModel: (_) => true,
+      lastCompletedModelId: phi.id,
+      successfulTurnsSinceSwitch: 0,
+    );
+    expect(decision.model?.id, phi.id);
+    expect(decision.reason, LocalModelRoutingReason.keptCooldown);
+
+    final later = router.decide(
+      request: const InferenceRequest(
+          sessionId: 'chat', prompt: 'Scrivi codice Dart'),
+      availableModels: [phi, coder],
+      preferredModel: phi,
+      supportsModel: (_) => true,
+      lastCompletedModelId: phi.id,
+      successfulTurnsSinceSwitch: 3,
+    );
+    expect(later.model?.id, coder.id);
+    expect(later.reason, LocalModelRoutingReason.switchedForTask);
+  });
+
+  test('memory guard beats affinity and removed models cannot remain pinned', () {
+    final memory = ResourceSample({
+      'availableBytes': 160000000,
+      'thresholdBytes': 300000000,
+      'totalBytes': 8000000000,
+      'lowMemory': true,
+    });
+    expect(route('Spiega il problema',
+      lastCompletedModelId: phi.id,
+      memory: memory,
+      android: true)?.id, qwen.id);
+    expect(route('Ciao',
+      lastCompletedModelId: phi.id,
+      models: [qwen])?.id, qwen.id);
+  });
+
+  test('session affinity retains model only after success and is bounded', () {
+    final affinity = LocalSessionModelAffinity(maxSessions: 2);
+    expect(affinity.get('chat-a'), isNull);
+    affinity.recordSuccess('chat-a', phi.id);
+    expect(affinity.get('chat-a')?.modelId, phi.id);
+    expect(affinity.get('chat-a')?.successfulTurnsSinceSwitch, 99);
+    affinity.recordSuccess('chat-a', qwen.id);
+    expect(affinity.get('chat-a')?.successfulTurnsSinceSwitch, 0);
+    affinity.recordSuccess('chat-a', qwen.id);
+    expect(affinity.get('chat-a')?.successfulTurnsSinceSwitch, 1);
+    affinity.recordSuccess('chat-b', phi.id);
+    affinity.recordSuccess('chat-c', qwen.id);
+    expect(affinity.get('chat-a'), isNull);
+    expect(affinity.get('chat-b')?.modelId, phi.id);
+    affinity.reset();
+    expect(affinity.get('chat-c'), isNull);
+  });
+
 }

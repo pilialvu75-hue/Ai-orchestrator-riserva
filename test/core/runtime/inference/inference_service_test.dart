@@ -87,6 +87,103 @@ void main() {
     );
   }
 
+  test('LOCAL AUTO retains the last completed model per conversation',
+      () async {
+    RuntimeEventLog.instance.clear();
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+      sizeBytes: 2200000000,
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+      sizeBytes: 1800000000,
+    );
+    final seen = <String, List<String?>>{};
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider:
+          FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
+        seen.putIfAbsent(request.sessionId, () => []).add(request.modelId);
+        yield InferenceResponse.finalChunk(
+          text: 'OK', tokensGenerated: 1, model: request.modelId,
+        );
+      }),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    for (final request in [
+      const InferenceRequest(sessionId: 'chat-a',
+          prompt: 'Scrivi codice Dart'),
+      const InferenceRequest(sessionId: 'chat-a',
+          prompt: 'Chi è alto?'),
+      const InferenceRequest(sessionId: 'chat-b',
+          prompt: 'Ciao, come stai?'),
+      const InferenceRequest(sessionId: 'chat-a',
+          prompt: 'Chi pratica sport?'),
+    ]) {
+      await service.stream(request).drain<void>();
+    }
+    expect(seen['chat-a'], [
+      qwen.effectiveRuntimeModelId,
+      qwen.effectiveRuntimeModelId,
+      qwen.effectiveRuntimeModelId,
+    ]);
+    expect(seen['chat-b'], [phi.effectiveRuntimeModelId]);
+    final commits = RuntimeEventLog.instance.entries
+        .map((entry) => entry.message)
+        .where((entry) => entry.startsWith('[LOCAL_AFFINITY_COMMIT]'))
+        .toList();
+    expect(commits, hasLength(4));
+    expect(commits.first, contains('model=${qwen.id}'));
+  });
+
+  test('failed LOCAL AUTO response does not pin an unsuccessful LLM',
+      () async {
+    RuntimeEventLog.instance.clear();
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+      sizeBytes: 2200000000,
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+      sizeBytes: 1800000000,
+    );
+    final seen = <String?>[];
+    var first = true;
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider:
+          FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
+        seen.add(request.modelId);
+        if (first) {
+          first = false;
+          yield InferenceResponse.error('Local model unavailable');
+        } else {
+          yield InferenceResponse.finalChunk(
+            text: 'OK', tokensGenerated: 1, model: request.modelId,
+          );
+        }
+      }),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    await service.stream(const InferenceRequest(
+        sessionId: 'same-chat', prompt: 'Scrivi codice Dart')).drain<void>();
+    await service.stream(const InferenceRequest(
+        sessionId: 'same-chat', prompt: 'Ciao, come stai?')).drain<void>();
+    expect(seen, [qwen.effectiveRuntimeModelId, phi.effectiveRuntimeModelId]);
+    final committed = RuntimeEventLog.instance.entries
+        .map((entry) => entry.message)
+        .where((entry) => entry.startsWith('[LOCAL_AFFINITY_COMMIT]'))
+        .toList();
+    expect(committed, hasLength(1));
+    expect(committed.single, contains('model=${phi.id}'));
+  });
+
   test('LOCAL AUTO changes model for coding but preserves dialogue context',
       () async {
     final phi = validModel.copyWith(
