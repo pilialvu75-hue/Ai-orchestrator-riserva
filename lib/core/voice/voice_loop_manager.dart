@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
+
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
@@ -9,6 +11,8 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.da
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/live_voice_latency.dart';
+import 'package:ai_orchestrator/core/voice/live_playback_drain.dart';
+import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
@@ -299,6 +303,20 @@ class VoiceLoopManager with RuntimeEventEmitter {
     // 1. STT
     // -----------------------------------------------------------------------
 
+    final android = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    if (android) {
+      // In Live, ASR is deliberately unloaded before local inference.
+      // Re-create it at the start of the next spoken turn, not while the
+      // previous local model or PCM output is still running.
+      final status = await _engine.initialize();
+      if (_disposed || token.isCancelled || _stopRequested) return;
+      if (!status.readyForInput) {
+        logEvent(_tag, '[LIVE_ASR_REINIT_FAIL] android=true');
+        onError?.call('Riconoscimento vocale non disponibile. Verifica i modelli vocali.');
+        return;
+      }
+    }
+
     final sttCompleter =
         Completer<String>();
     token.onCancel(() {
@@ -447,6 +465,25 @@ class VoiceLoopManager with RuntimeEventEmitter {
       '[STT_FINAL_TEXT] '
       'chars=${spokenText.length}',
     );
+
+    if (android) {
+      // Do not run Android local LLM and the large native Sherpa recognizer
+      // together on low-RAM devices. Microphone and ASR stream are already
+      // stopped before native ASR ownership is released.
+      final recognizer = _engine;
+      if (recognizer is! VoiceRecognitionMemoryReclaimer) {
+        logEvent(_tag, '[LIVE_ASR_MEMORY_HANDOFF_UNAVAILABLE]');
+        onError?.call('Live Android: rilascio memoria vocale non disponibile.');
+        return;
+      }
+      final released = await recognizer.releaseRecognitionMemoryForInference();
+      if (_disposed || token.isCancelled || _stopRequested) return;
+      logEvent(_tag, '[LIVE_ASR_MEMORY_HANDOFF] requested=true released=$released');
+      if (!released) {
+        onError?.call('Memoria riconoscimento vocale non liberata. Live interrotto per sicurezza.');
+        return;
+      }
+    }
 
     // Start after the user's speech is fully recognized. These metrics never
     // contain the transcript, and TTS_REQUEST does not imply audible output.
@@ -603,6 +640,31 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
 
 
+    Future<void> awaitAudibleOutput() async {
+      // speak() can finish while PCM is still playing through the native
+      // output sink. Opening ASR immediately then causes acoustic feedback.
+      final drained = await waitForLivePlaybackDrain(
+        isPlaying: () async {
+          final voice = _engine;
+          if (voice is ReadAloudVoiceEngine) {
+            try {
+              return (await voice.refreshReadAloud()).playing;
+            } catch (_) {
+              // Native transport status is best-effort; keep a quiet tail.
+            }
+          }
+          return voice.isSpeaking;
+        },
+        isCancelled: () => _disposed || token.isCancelled || _stopRequested,
+      );
+      if (!drained && !_disposed && !token.isCancelled && !_stopRequested) {
+        logEvent(_tag, '[LIVE_OUTPUT_DRAIN_TIMEOUT]');
+        onError?.call('Riproduzione vocale ancora attiva. Riascolto sospeso per evitare eco.');
+      } else if (drained) {
+        logEvent(_tag, '[LIVE_OUTPUT_DRAINED]');
+      }
+    }
+
     await for (
       final response in inferenceStream
     ) {
@@ -711,6 +773,9 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     if (trailing.isEmpty) {
       await Future.wait(pendingPlayback);
+      if (!_disposed && !token.isCancelled && !_stopRequested) {
+        await awaitAudibleOutput();
+      }
       return;
     }
 
@@ -727,5 +792,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     await queueSpeech(trailing);
     await Future.wait(pendingPlayback);
+    if (!_disposed && !token.isCancelled && !_stopRequested) {
+      await awaitAudibleOutput();
+    }
   }
 }
