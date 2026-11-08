@@ -321,7 +321,12 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_t('forget_body')),
+            Text(
+              AssistantConfirmedMemoryConflictResolver
+                      .isReviewedNamedCorrection(record)
+                  ? _t('forget_replaced_fact')
+                  : _t('forget_body'),
+            ),
             const SizedBox(height: 12),
             Text(record.content),
           ],
