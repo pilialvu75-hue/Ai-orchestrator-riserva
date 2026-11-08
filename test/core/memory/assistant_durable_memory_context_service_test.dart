@@ -1,4 +1,6 @@
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
+import 'package:ai_orchestrator/core/memory/assistant_confirmed_memory_conflict_resolver.dart';
+import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_store.dart';
@@ -77,7 +79,7 @@ void main() {
           HybridDisclosureSensitivity.unknown);
       expect(slices.last.text, contains('La bici attuale è quella nuova.'));
       expect(() => HybridCloudConfirmedMemoryProvenance.toDisclosureSegments(
-        source: verified, exactContext: verified.text + ' [hidden]',
+        source: verified, exactContext: '${verified.text} [hidden]',
       ), throwsStateError);
     });
 
@@ -102,7 +104,7 @@ void main() {
       );
       expect(data, isNotNull);
       final pieces = HybridCloudConfirmedMemoryProvenance.toDisclosureSegments(
-        source: data!, exactContext: data!.text,
+        source: data!, exactContext: data.text,
       );
       final storedParts = pieces.where((p) =>
           p.scope.origin == HybridDisclosureOrigin.durableMemory).toList();
@@ -271,6 +273,151 @@ void main() {
           lessThanOrEqualTo(
             AssistantDurableMemoryContextService.maxSelectedRecords,
           ));
+    });
+
+    test('confirmed relational correction replaces obsolete assertion '
+        'in LOCAL and provenance-aware context', () async {
+      final memory = _service(_MemoryPersistence());
+      final oldKey =
+          AssistantManualEntityReferenceCandidate.recordKeyFor(
+            'Jerome è alto.',
+          )!;
+      await memory.recordConfirmed(
+        recordKey: oldKey,
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: 'Jerome è alto.',
+        source: AssistantMemorySource.userExplicit,
+        updatedAt: 10,
+      );
+      await memory.recordConfirmed(
+        recordKey: 'reviewed.entity.correction.jerome-kader',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: 'Kader è alto.',
+        source: AssistantMemorySource.userExplicit,
+        updatedAt: 20,
+        before: 'Jerome è alto.',
+        after: 'Kader è alto.',
+        reason: AssistantConfirmedMemoryConflictResolver
+            .reviewedCorrectionReason,
+      );
+      final context = AssistantDurableMemoryContextService(
+        memoryService: memory,
+      );
+
+      final local = await context.buildConfirmedContext(
+        sessionId: 'chat-1',
+        userPrompt: 'Di Jerome e Kader chi è alto?',
+      );
+      expect(local, isNotNull);
+      expect(local, contains('Kader è alto.'));
+      expect(local, contains(
+        'superseded (NOT CURRENT): Jerome è alto.; '
+        'confirmed current: Kader è alto.',
+      ));
+      expect(local,
+          isNot(contains('\n- [fact; origin=userExplicit] Jerome è alto.')));
+
+      final cloudEvidence =
+          await context.buildConfirmedContextWithProvenance(
+        sessionId: 'chat-1',
+        userPrompt: 'Di Jerome e Kader chi è alto?',
+      );
+      expect(cloudEvidence?.text, local);
+      final segments = HybridCloudConfirmedMemoryProvenance
+          .toDisclosureSegments(
+        source: cloudEvidence!,
+        exactContext: cloudEvidence.text,
+      );
+      expect(segments.map((part) => part.text).join(), local);
+      expect(segments.where((part) =>
+          part.scope.origin == HybridDisclosureOrigin.durableMemory),
+          hasLength(1));
+
+      // An old confirmed fact remains in SQLite for audit/history. The
+      // canonical view, not the persisted record, suppresses it.
+      final persisted = await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        limit: 8,
+      );
+      expect(persisted.map((record) => record.recordKey),
+          containsAll([oldKey, 'reviewed.entity.correction.jerome-kader']));
+    });
+
+    test('reviewed third-party correction requires a named query', () async {
+      final memory = _service(_MemoryPersistence());
+      await memory.recordConfirmed(
+        recordKey: 'reviewed.entity.correction.jerome-kader',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: 'Kader è alto.',
+        source: AssistantMemorySource.userExplicit,
+        updatedAt: 20,
+        before: 'Jerome è alto.',
+        after: 'Kader è alto.',
+        reason: AssistantConfirmedMemoryConflictResolver
+            .reviewedCorrectionReason,
+      );
+      final context = AssistantDurableMemoryContextService(
+        memoryService: memory,
+      );
+      expect(
+        await context.buildConfirmedContext(
+          sessionId: 'chat-1', userPrompt: 'Chi è alto?',
+        ),
+        isNull,
+      );
+      expect(
+        await context.buildConfirmedContext(
+          sessionId: 'chat-1', userPrompt: 'Cosa sai di me?',
+        ),
+        isNull,
+      );
+      expect(
+        await context.buildConfirmedContext(
+          sessionId: 'chat-1', userPrompt: 'Parliamo di Jerome.',
+        ),
+        contains('Kader è alto.'),
+      );
+    });
+
+    test('pending correction never replaces confirmed original in context',
+        () async {
+      final memory = _service(_MemoryPersistence());
+      await memory.recordConfirmed(
+        recordKey: 'natural.entity.statement.jerome',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: 'Jerome è alto.',
+        source: AssistantMemorySource.userExplicit,
+        updatedAt: 10,
+      );
+      await memory.recordUserCandidate(
+        recordKey: 'reviewed.entity.correction.pending',
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        kind: AssistantMemoryKind.fact,
+        content: 'Kader è alto.',
+        updatedAt: 30,
+        before: 'Jerome è alto.',
+        after: 'Kader è alto.',
+        reason: AssistantConfirmedMemoryConflictResolver
+            .reviewedCorrectionReason,
+      );
+      final context = AssistantDurableMemoryContextService(
+        memoryService: memory,
+      );
+      final text = await context.buildConfirmedContext(
+        sessionId: 'chat-1', userPrompt: 'Parliamo di Jerome.',
+      );
+      expect(text, contains('Jerome è alto.'));
+      expect(text, isNot(contains('Kader è alto.')));
     });
 
     test('augmentSystemPrompt fails open when persistence read fails', () async {

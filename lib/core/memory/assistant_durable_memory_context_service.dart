@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/memory/assistant_durable_memory_service.dar
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
 import 'package:ai_orchestrator/core/memory/assistant_entity_reference_analyzer.dart';
+import 'package:ai_orchestrator/core/memory/assistant_confirmed_memory_conflict_resolver.dart';
 
 /// Immutable evidence produced by the confirmed-only SQLite memory reader.
 ///
@@ -100,9 +101,20 @@ class AssistantDurableMemoryContextService {
       ],
     );
 
-    final conversationRecords = loaded[0];
-    final userRecords = loaded[1];
-    if (conversationRecords.isEmpty && userRecords.isEmpty) return null;
+    // Both Local and consent-gated Cloud consume this same confirmed-only,
+    // read-only current view. Reviewed corrections shadow obsolete assertions
+    // without mutating SQLite or promoting a model-generated candidate.
+    final canonical = AssistantConfirmedMemoryConflictResolver.currentView(
+      conversationRecords: loaded[0],
+      userRecords: loaded[1],
+    );
+    final conversationRecords = canonical
+        .where((record) => record.scope == AssistantMemoryScope.conversation)
+        .toList(growable: false);
+    final userRecords = canonical
+        .where((record) => record.scope == AssistantMemoryScope.user)
+        .toList(growable: false);
+    if (canonical.isEmpty) return null;
 
     final queryTerms = _terms(query);
     final broadMemoryRequest = _isBroadMemoryRequest(query);
@@ -120,6 +132,23 @@ class AssistantDurableMemoryContextService {
     }
 
     for (final record in userRecords) {
+      // A reviewed correction involving two named people is still a
+      // third-party assertion. Even after confirmation, an ordinary question
+      // about the user (or a generic property) must not retrieve it.
+      if (record.recordKey.startsWith(
+          AssistantConfirmedMemoryConflictResolver.correctionKeyPrefix)) {
+        final names =
+            AssistantConfirmedMemoryConflictResolver.namedReferencesForCorrection(
+          record,
+        );
+        if (names.isEmpty ||
+            !names.any((name) {
+              final terms = _terms(name);
+              return terms.isNotEmpty && terms.every(queryTerms.contains);
+            })) {
+          continue;
+        }
+      }
       // A reviewed third-party assertion is only relevant when the query
       // explicitly mentions its written name. Shared attributes such as
       // "alto" must never retrieve facts about a different colleague, and
@@ -189,8 +218,12 @@ class AssistantDurableMemoryContextService {
     var score = overlap * 10;
     if (record.kind == AssistantMemoryKind.decision ||
         record.kind == AssistantMemoryKind.unresolvedTask ||
-        record.kind == AssistantMemoryKind.procedure) score += 2;
-    if (record.kind == AssistantMemoryKind.preference) score += 1;
+        record.kind == AssistantMemoryKind.procedure) {
+      score += 2;
+    }
+    if (record.kind == AssistantMemoryKind.preference) {
+      score += 1;
+    }
     return score;
   }
 
@@ -365,11 +398,23 @@ class AssistantDurableMemoryContextService {
   String _renderRecord(AssistantDurableMemoryRecord record) {
     final content = _singleLine(record.content);
     final details = <String>[];
-    if (record.before != null && record.after != null) {
-      details.add('${_singleLine(record.before!)} -> ${_singleLine(record.after!)}');
-    }
-    if (record.reason != null) {
-      details.add('reason: ${_singleLine(record.reason!)}');
+    if (AssistantConfirmedMemoryConflictResolver
+        .isReviewedNamedCorrection(record)) {
+      // Both claims are shown with explicit validity labels. A different
+      // LLM must not interpret the old statement as another current fact.
+      details.add(
+        'superseded (NOT CURRENT): ${_singleLine(record.before!)}; '
+        'confirmed current: ${_singleLine(record.after!)}',
+      );
+    } else {
+      if (record.before != null && record.after != null) {
+        details.add(
+          '${_singleLine(record.before!)} -> ${_singleLine(record.after!)}',
+        );
+      }
+      if (record.reason != null) {
+        details.add('reason: ${_singleLine(record.reason!)}');
+      }
     }
     final suffix = details.isEmpty ? '' : ' (${details.join('; ')})';
     return _truncate(
