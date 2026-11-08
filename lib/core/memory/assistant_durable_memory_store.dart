@@ -515,6 +515,23 @@ class AssistantDurableMemoryStore {
         return false;
       }
       final next = records.toList(growable: true)..removeAt(index);
+      if (AssistantConfirmedMemoryConflictResolver
+          .isReviewedNamedCorrection(current)) {
+        // Forgetting the correction must never resurrect the obsolete fact.
+        // Remove that exact prior assertion in the same atomic owner lock.
+        final older = next.where((r) =>
+            r.status == AssistantMemoryStatus.confirmed &&
+            r.source == AssistantMemorySource.userExplicit &&
+            r.kind == AssistantMemoryKind.fact &&
+            r.scope == current.scope &&
+            r.scopeId == current.scopeId &&
+            r.updatedAt < current.updatedAt &&
+            r.content == current.before).toList();
+        if (older.length > 1) return false;
+        if (older.length == 1) {
+          next.remove(older.single);
+        }
+      }
       await _write(reviewed.scope, reviewed.scopeId.trim(), next);
       return true;
     });
