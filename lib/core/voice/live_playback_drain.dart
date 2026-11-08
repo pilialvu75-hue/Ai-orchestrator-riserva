@@ -10,7 +10,7 @@ class LivePlaybackDrain {
   const LivePlaybackDrain();
 
   Future<bool> waitUntilQuiet({
-    required bool Function() isPlaying,
+    required FutureOr<bool> Function() isPlaying,
     required bool Function() isCancelled,
     Duration quietWindow = const Duration(milliseconds: 1200),
     Duration pollInterval = const Duration(milliseconds: 80),
@@ -25,7 +25,7 @@ class LivePlaybackDrain {
     while (true) {
       if (isCancelled()) return false;
       final elapsed = watch.elapsed;
-      if (isPlaying()) {
+      if (await isPlaying()) {
         quietSince = null;
       } else {
         quietSince ??= elapsed;
