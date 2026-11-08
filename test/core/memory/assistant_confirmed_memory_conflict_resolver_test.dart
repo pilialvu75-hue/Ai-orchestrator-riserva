@@ -134,7 +134,7 @@ void main() {
       expect(selected.map((r) => r.recordKey), containsAll(['old-a', 'old-b']));
     });
 
-    test('latest confirmed logical key wins across scopes; ties prefer chat',
+    test('identical text keys in distinct scopes are not identity evidence',
         () {
       final global = _fact('bike.current', 'La bici è blu.', at: 30);
       final local = _fact(
@@ -142,9 +142,18 @@ void main() {
         at: 30, scope: AssistantMemoryScope.conversation, scopeId: 'chat-1',
       );
       final selected = _view([global, local]);
+      expect(selected, hasLength(2));
+      expect(selected.map((r) => r.content),
+          containsAll(['La bici è blu.', 'La bici è rossa.']));
+    });
+
+    test('newest confirmed version wins only inside a single scoped key',
+        () {
+      final old = _fact('bike.current', 'La bici è blu.', at: 10);
+      final fresh = _fact('bike.current', 'La bici è rossa.', at: 30);
+      final selected = _view([old, fresh]);
       expect(selected, hasLength(1));
       expect(selected.single.content, 'La bici è rossa.');
-      expect(selected.single.scope, AssistantMemoryScope.conversation);
     });
 
     test('sequential reviewed corrections yield the last confirmed value',
