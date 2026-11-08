@@ -10,7 +10,7 @@ class LiveEchoGuard {
   static String normalize(String text) => text.toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9à-ÿ]+'), ' ')
       .trim()
-      .replaceAll(RegExp(r'\\s+'), ' ');
+      .replaceAll(RegExp(r'\s+'), ' ');
 
   void rememberSpoken(String phrase) {
     final normalized = normalize(phrase);
