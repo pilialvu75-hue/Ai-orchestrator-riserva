@@ -277,7 +277,7 @@ class AssistantDurableMemoryStore {
         .extractDirectUserCarColorCorrection(reviewed.content);
     if (original == null ||
         reviewed.reason !=
-            'natural_direct_car_color_update:' + original.language ||
+            'natural_direct_car_color_update:${original.language}' ||
         int.tryParse(reviewed.after!) == null) {
       return false;
     }
