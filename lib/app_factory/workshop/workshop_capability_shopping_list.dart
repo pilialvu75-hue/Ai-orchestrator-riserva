@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_project_plan.dart'
 /// Library snapshot. Keeping this stage pure prevents network availability
 /// from becoming a prerequisite for project planning.
 abstract final class WorkshopLibraryCapabilityIds {
+  static const String runningTotal = 'math.running_total';
   static const String authSession = 'auth.session';
   static const String storageSecrets = 'storage.secrets';
   static const String networkHttp = 'network.http';
@@ -181,6 +182,24 @@ final class WorkshopCapabilityShoppingListBuilder {
 
   static const List<WorkshopCapabilityRule> defaultRules =
       <WorkshopCapabilityRule>[
+    WorkshopCapabilityRule(
+      capabilityId: WorkshopLibraryCapabilityIds.runningTotal,
+      contractId: 'math.running_total.v1',
+      keywords: <String>[
+        'running total',
+        'running totals',
+        'cumulative sum',
+        'cumulative sums',
+        'somma cumulativa',
+        'totale progressivo',
+        'totali progressivi',
+        'somme cumulative',
+        'somme cumulate',
+        'somme cumulée',
+        'sommes cumulées',
+        'suma acumulada',
+      ],
+    ),
     WorkshopCapabilityRule(
       capabilityId: WorkshopLibraryCapabilityIds.authSession,
       contractId: 'auth.session.v1',

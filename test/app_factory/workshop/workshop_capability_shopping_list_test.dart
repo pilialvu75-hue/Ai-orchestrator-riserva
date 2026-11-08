@@ -95,6 +95,24 @@ void main() {
     }
   });
 
+  test('recognizes generated running-total capability from an approved plan', () {
+    final project = plan(
+      goal: 'Build an Android app with a running total of expenses.',
+      requirements: const <String>['Mostra il totale progressivo delle spese.'],
+    );
+    final result = builder.build(
+      plan: project,
+      approval: approvalFor(project.id),
+    );
+    final needs = result.needs.where(
+      (item) => item.capabilityId == WorkshopLibraryCapabilityIds.runningTotal,
+    ).toList();
+    expect(needs, hasLength(1));
+    expect(needs.single.preferredContractId, 'math.running_total.v1');
+    expect(needs.single.required, isTrue);
+    expect(result.targets, contains('android'));
+  });
+
   test('technology-only evidence is advisory rather than mandatory', () {
     final project = plan(
       goal: 'Build an Android utility.',
