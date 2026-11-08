@@ -4,6 +4,8 @@ import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_candidate_extractor.dart';
 import 'package:ai_orchestrator/core/memory/assistant_manual_entity_reference_candidate.dart';
+import 'package:ai_orchestrator/core/memory/assistant_named_relation_correction_candidate.dart';
+import 'package:ai_orchestrator/core/memory/assistant_confirmed_memory_conflict_resolver.dart';
 
 abstract class AssistantDurableMemoryPersistence {
   Future<String?> read(String key);
@@ -340,6 +342,102 @@ class AssistantDurableMemoryStore {
       }
       next.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       await _write(AssistantMemoryScope.user, owner, next);
+      return true;
+    });
+  }
+
+  /// Atomic owner review of one explicit third-party correction.
+  ///
+  /// The existing accepted statement is never removed from SQLite; a new
+  /// confirmed, version-checked correction is appended. The canonical reader
+  /// hides the obsolete assertion for inference. Approval fails if the source
+  /// changed, was forgotten, is ambiguous, or was already corrected.
+  Future<bool> resolveReviewedNamedRelationCorrection({
+    required AssistantDurableMemoryRecord reviewed,
+    required bool approve,
+    required int reviewedAt,
+  }) async {
+    final draft =
+        AssistantNamedRelationCorrectionCandidate.parse(reviewed.content);
+    if (draft == null ||
+        reviewed.scope != AssistantMemoryScope.user ||
+        reviewed.scopeId.trim().isEmpty ||
+        reviewed.recordKey != draft.recordKey ||
+        reviewed.status != AssistantMemoryStatus.candidate ||
+        reviewed.source != AssistantMemorySource.userStatement ||
+        reviewed.kind != AssistantMemoryKind.fact ||
+        reviewed.reason !=
+            AssistantNamedRelationCorrectionCandidate.pendingReason ||
+        reviewed.before != draft.beforeFact ||
+        reviewed.after == null ||
+        int.tryParse(reviewed.after!) == null ||
+        reviewedAt < reviewed.updatedAt) {
+      return false;
+    }
+
+    final scopeId = reviewed.scopeId.trim();
+    return _withScopeWriteLock(AssistantMemoryScope.user, scopeId, () async {
+      final records = await load(
+        scope: AssistantMemoryScope.user,
+        scopeId: scopeId,
+        confirmedOnly: false,
+      );
+      final index =
+          records.indexWhere((item) => item.recordKey == reviewed.recordKey);
+      if (index < 0) return false;
+      final current = records[index];
+      if (current.status != AssistantMemoryStatus.candidate ||
+          current.source != AssistantMemorySource.userStatement ||
+          current.scope != reviewed.scope ||
+          current.scopeId != reviewed.scopeId ||
+          current.kind != reviewed.kind ||
+          current.recordKey != reviewed.recordKey ||
+          current.updatedAt != reviewed.updatedAt ||
+          current.content != reviewed.content ||
+          current.before != reviewed.before ||
+          current.after != reviewed.after ||
+          current.reason != reviewed.reason) {
+        return false;
+      }
+
+      final next = records.toList(growable: true)..removeAt(index);
+      if (approve) {
+        final sourceMatches = next.where((item) =>
+            item.status == AssistantMemoryStatus.confirmed &&
+            item.source == AssistantMemorySource.userExplicit &&
+            item.kind == AssistantMemoryKind.fact &&
+            item.scope == AssistantMemoryScope.user &&
+            item.scopeId == scopeId &&
+            item.content == draft.beforeFact &&
+            item.updatedAt.toString() == reviewed.after).toList();
+        if (sourceMatches.length != 1) return false;
+
+        // An older assertion may no longer be current if it was already
+        // replaced by another confirmed correction. Do not fork the truth.
+        final replacedAlready = next.any((item) =>
+            AssistantConfirmedMemoryConflictResolver
+                .isReviewedNamedCorrection(item) &&
+            item.before == draft.beforeFact &&
+            item.updatedAt > sourceMatches.single.updatedAt);
+        if (replacedAlready) return false;
+
+        next.add(_validateAndNormalize(AssistantDurableMemoryRecord(
+          recordKey: reviewed.recordKey,
+          scope: AssistantMemoryScope.user,
+          scopeId: scopeId,
+          kind: AssistantMemoryKind.fact,
+          content: draft.afterFact,
+          source: AssistantMemorySource.userExplicit,
+          status: AssistantMemoryStatus.confirmed,
+          updatedAt: reviewedAt,
+          before: draft.beforeFact,
+          after: draft.afterFact,
+          reason:
+              AssistantConfirmedMemoryConflictResolver.reviewedCorrectionReason,
+        )));
+      }
+      next.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      await _write(AssistantMemoryScope.user, scopeId, next);
       return true;
     });
   }
