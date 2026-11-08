@@ -1356,9 +1356,16 @@ e [#6717759716](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues
 - **Anomalia lingua:** risposta del modello in inglese al primo
   enunciato italiano; nel Test 2 risposta in italiano. Verificare
   separatamente continuita della lingua e retrieval della memoria.
-- **Test 3 aperto:** chiedere `Che cosa sai di Kader?` senza aggiungere
-  ricordi su Kader; non attribuire a Kader l'altezza di Jerome.
-  Proseguire con restart, modello differente, revoca/forget,
+- **Test 3 PASS, isolamento referenti su S24 FE:** alla domanda
+  `Che cosa sai di Kader?` in nuova chat LOCAL, AIVEXUS risponde
+  `Mi dispiace, non ho informazioni specifiche su Kader. Potresti
+  fornire piu dettagli?` senza attribuire l'altezza di Jerome a Kader.
+  Il risultato, segnalato con screenshot dall'utente, vale per questo
+  caso testato, non dimostra entity resolution generale. Fonte:
+  [issue #899, Test 3](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899#issuecomment-6717939273).
+  **Prossimo Test 4:** chiudere e riaprire l'app, nuova chat LOCAL,
+  chiedere `Che cosa sai di Jerome?` e verificare il ricordo senza
+  riapprovazione. Seguono modello differente, revoca/forget,
   cancellazione della chat d'origine, omonimi e ambiguita di identita.
 - **Nuovo requisito UX, da implementare:** memoria LOCAL naturale
   configurabile con politiche `non ricordare`,
