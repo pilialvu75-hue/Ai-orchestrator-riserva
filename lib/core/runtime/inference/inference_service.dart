@@ -350,11 +350,11 @@ class InferenceService {
           // Prefer the runtime-reported identity; do not promote an
           // unexpected model or an unverified Cloud fallback to affinity.
           if (actual == null ||
-              actual == selectedModel.effectiveRuntimeModelId ||
-              actual == selectedModel.id) {
+              actual == selectedModel!.effectiveRuntimeModelId ||
+              actual == selectedModel!.id) {
             _localAffinity.recordSuccess(
-                isolatedRequest.sessionId, selectedModel.id);
-            _log('[LOCAL_AFFINITY_COMMIT] model=${selectedModel.id} '
+                isolatedRequest.sessionId, selectedModel!.id);
+            _log('[LOCAL_AFFINITY_COMMIT] model=${selectedModel!.id} '
                 'turns_since_switch=${_localAffinity.get(isolatedRequest.sessionId)?.successfulTurnsSinceSwitch ?? -1}');
           }
         }
