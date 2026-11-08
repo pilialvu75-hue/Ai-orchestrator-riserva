@@ -1,0 +1,62 @@
+name: Voice P0 Unit Tests (system SQLite, non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/core/voice/voice_loop_manager.dart'
+      - 'lib/core/voice/live_playback_drain.dart'
+      - 'test/core/voice/live_playback_drain_test.dart'
+      - '.github/workflows/voice-p0-unit-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-p0-test-${{ github.ref }}
+  cancel-in-progress: true
+
+# SOURCE-ONLY TEST LANE. System SQLite is used solely to execute Dart tests
+# while upstream pinned sqlite3 native asset hashes are mismatching. Never use
+# this workflow as an Android/desktop RELEASE approval or provenance gate.
+jobs:
+  voice-unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Configure system SQLite for isolated logic tests only
+        shell: bash
+        run: |
+          cat >> pubspec.yaml <<'EOF'
+          hooks:
+            user_defines:
+              sqlite3:
+                source: system
+                name:
+                  windows: winsqlite3
+                  default: sqlite3
+          EOF
+          echo 'Non-release tests only: distribution checksums remain mandatory.'
+      - name: Restore locked Dart dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze changed Live source and test
+        run: >-
+          flutter analyze
+          lib/core/voice/voice_loop_manager.dart
+          lib/core/voice/live_playback_drain.dart
+          test/core/voice/live_playback_drain_test.dart
+      - name: Test Live playback drain safety
+        run: >-
+          flutter test --reporter expanded
+          test/core/voice/live_playback_drain_test.dart
