@@ -12,6 +12,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/live_voice_latency.dart';
 import 'package:ai_orchestrator/core/voice/live_playback_drain.dart';
+import 'package:ai_orchestrator/core/voice/live_echo_guard.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
@@ -45,6 +46,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
   final VoiceEngine _engine;
   final LocalRuntimeProvider _runtimeProvider;
   final LocalAiRepository _localAiRepository;
+  final LiveEchoGuard _echoGuard = LiveEchoGuard();
 
   CancellationToken? _activeCancellation;
 
@@ -463,6 +465,13 @@ class VoiceLoopManager with RuntimeEventEmitter {
       return;
     }
 
+    // A desktop microphone can receive the last assistant audio from its
+    // own speakers. Never infer a fresh answer from the same long phrase.
+    if (_echoGuard.isLikelyPlaybackEcho(spokenText)) {
+      logEvent(_tag, '[LIVE_PLAYBACK_ECHO_REJECTED]');
+      return;
+    }
+
     logEvent(
       _tag,
       '[STT_FINAL_TEXT] '
@@ -639,6 +648,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
         await _engine.stopSpeaking();
         onError?.call('Riproduzione audio non terminata: Live sospeso.');
       } else if (drained) {
+        _echoGuard.playbackEnded();
         logEvent(_tag, '[LIVE_PLAYBACK_DRAIN_OK]');
       }
     }
@@ -659,6 +669,9 @@ class VoiceLoopManager with RuntimeEventEmitter {
         }
         try {
           await _engine.speak(text);
+          if (!_disposed && !token.isCancelled && !_stopRequested) {
+            _echoGuard.rememberSpoken(text);
+          }
         } catch (error) {
           playbackFailed = true;
           if (!token.isCancelled && !_stopRequested && !_disposed) {
