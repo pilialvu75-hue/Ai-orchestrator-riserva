@@ -6,6 +6,46 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const time = '[2026-09-06T02:57:18.238076]';
 
+  group('LOCAL model execution public evidence', () {
+    test('exports only completed model names and a true switch', () {
+      final first = jsonDecode(publicLogProjection(
+        '$time [LOCAL_MODEL_USED] model=qwen2_5_3b_instruct '
+        'previous=none changed=false',
+      )!) as Map<String, dynamic>;
+      expect(first, {
+        'time': '2026-09-06T02:57:18.238076',
+        'event': 'LOCAL_MODEL_USED',
+        'model': 'qwen2_5_3b_instruct',
+        'previous': 'none',
+        'changed': false,
+      });
+      final switched = jsonDecode(publicLogProjection(
+        '$time [LOCAL_MODEL_USED] model=phi3_5_mini '
+        'previous=qwen2_5_3b_instruct changed=true',
+      )!) as Map<String, dynamic>;
+      expect(switched['changed'], true);
+      expect(switched['model'], 'phi3_5_mini');
+      expect(switched['previous'], 'qwen2_5_3b_instruct');
+    });
+
+    test('rejects conflicting, malformed and privacy-unsafe signals', () {
+      const invalid = [
+        'model=qwen2_5_3b_instruct previous=none changed=true',
+        'model=qwen2_5_3b_instruct previous=qwen2_5_3b_instruct changed=true',
+        'model=qwen2_5_3b_instruct previous=phi3_5_mini changed=false',
+        'model=qwen2_5_3b_instruct previous=none changed=false prompt=private',
+        'model=qwen2_5_3b_instruct previous=none changed=false\\npath=private',
+        'model=private/name previous=none changed=false',
+        'model=qwen2_5_3b_instruct previous=none changed=maybe',
+      ];
+      for (final value in invalid) {
+        expect(publicLogProjection('$time [LOCAL_MODEL_USED] $value'),
+            isNull, reason: value);
+      }
+    });
+  });
+
+
   group('Cantiere Engineer output public projection', () {
     test('exports only numeric counters and closed terminal/status enums', () {
       final row = jsonDecode(publicLogProjection(

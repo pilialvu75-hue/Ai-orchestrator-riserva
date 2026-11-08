@@ -351,6 +351,7 @@ void main() {
     });
 
     test('re-reads selected model for each request in the same chat', () async {
+      RuntimeEventLog.instance.clear();
       var selected =
           validModel.copyWith(id: 'phi3_5_mini', localPath: '/tmp/phi.gguf');
       final seenModels = <String?>[];
@@ -378,6 +379,14 @@ void main() {
           .toList();
       expect(seenModels, ['phi3_5_mini', 'nemotron3_nano_4b']);
       expect(seenPaths, ['/tmp/phi.gguf', '/tmp/nemotron.gguf']);
+      final completed = RuntimeEventLog.instance.entries
+          .map((entry) => entry.message)
+          .where((message) => message.startsWith('[LOCAL_MODEL_USED]'))
+          .toList(growable: false);
+      expect(completed, hasLength(2));
+      expect(completed[0], contains('model=phi3_5_mini previous=none changed=false'));
+      expect(completed[1],
+          contains('model=nemotron3_nano_4b previous=phi3_5_mini changed=true'));
     });
 
     test('local error timing retains the requested model', () async {

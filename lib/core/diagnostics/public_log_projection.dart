@@ -35,6 +35,7 @@ String? publicLogProjection(String line) {
     'LOCAL_EXECUTION_CONFIG',
     'RESOURCE_SAMPLE',
     'INFERENCE_TIMING',
+    'LOCAL_MODEL_USED',
     'RESOURCE_PROFILE',
     'RESOURCE_GUARD',
     'INFERENCE_BEGIN',
@@ -697,6 +698,25 @@ String? publicLogProjection(String line) {
       'decode_baseline': int.parse(m[4]!),
       'decode_current': int.parse(m[5]!),
       'reason': 'native_decode_progress',
+    });
+  }
+
+  // A closed, model-id-only completion signal, without conversation text,
+  // paths, raw session identifiers or arbitrary error payloads.
+  if (event == 'LOCAL_MODEL_USED') {
+    final m = RegExp(
+      r'^model=([A-Za-z0-9_.-]{1,80}) '
+      r'previous=(none|[A-Za-z0-9_.-]{1,80}) changed=(true|false)$',
+    ).firstMatch(rest);
+    if (m == null) return null;
+    final actualChange = m[2] != 'none' && m[1] != m[2];
+    if (actualChange != (m[3] == 'true')) return null;
+    return jsonEncode({
+      'time': timestamp[1]!,
+      'event': event,
+      'model': m[1]!,
+      'previous': m[2]!,
+      'changed': actualChange,
     });
   }
 
