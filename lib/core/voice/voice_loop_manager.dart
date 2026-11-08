@@ -650,8 +650,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
               // Android 'complete' means generation/append finished, not
               // actual playback finished. Compare native AudioTrack clock
               // against buffered duration instead.
-              return status.active &&
-                  (status.playing || status.position < status.buffered);
+              return androidPcmPlaybackPending(status);
             }
           }
           return _engine.isSpeaking;
