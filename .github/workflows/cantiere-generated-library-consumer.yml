@@ -1,0 +1,48 @@
+name: Cantiere consumes generated Library Dart module
+on:
+  pull_request:
+    paths:
+      - 'ci/fixtures/cantiere_generated_library_consumer.dart.txt'
+      - '.github/workflows/cantiere-generated-library-consumer.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-library-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cantiere
+      - uses: actions/checkout@v4
+        with:
+          repository: pilialvu75-hue/AI-Orchestrator-Module-Library
+          ref: a57f8fdb9634d73ebec3068d1180d9b9c2951d51
+          path: library
+      - uses: dart-lang/setup-dart@v1
+      - name: Generate real module from Library spec
+        run: python3 library/tools/generate_first_dart_module.py --spec library/examples/first-generated-module-spec.json --output "$RUNNER_TEMP/generated"
+      - name: Validate generated Library module
+        working-directory: ${{ runner.temp }}/generated
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+          dart test
+      - name: Set up independent Cantiere consumer with path dependency
+        run: |
+          mkdir -p "$RUNNER_TEMP/cantiere-consumer"
+          cat > "$RUNNER_TEMP/cantiere-consumer/pubspec.yaml" <<EOF
+          name: cantiere_library_consumer
+          environment:
+            sdk: '>=3.3.0 <4.0.0'
+          dependencies:
+            aivexus_running_total:
+              path: $RUNNER_TEMP/generated
+          EOF
+          cp cantiere/ci/fixtures/cantiere_generated_library_consumer.dart.txt "$RUNNER_TEMP/cantiere-consumer/main.dart"
+      - name: Execute actual Cantiere consumer
+        working-directory: ${{ runner.temp }}/cantiere-consumer
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+          dart run main.dart
