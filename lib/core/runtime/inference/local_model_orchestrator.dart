@@ -57,7 +57,7 @@ class LocalModelOrchestrator {
       // Stability wins for ordinary dialogue; special tasks may justify a
       // model reload, but small capability differences should not.
       if (model.id == preferredId) {
-        result += task == LocalConversationTask.general ? 40 : 7;
+        result += task == LocalConversationTask.general && !multilingual ? 40 : 7;
       }
       if (id.contains('qwen')) {
         result += 12;
