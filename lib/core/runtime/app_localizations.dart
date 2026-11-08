@@ -16,6 +16,11 @@ class AppLocalizations {
 
   static const Map<String, Map<String, String>> _localizedValues = {
     'en': {
+      'local_routing_title': 'Local model routing',
+      'local_routing_manual': 'Manual',
+      'local_routing_auto': 'Automatic',
+      'local_routing_manual_note': 'Keep the model selected under Models. Existing behaviour stays unchanged.',
+      'local_routing_auto_note': 'Choose a validated model installed on this device for each turn. Chat context and approved local memories are preserved. Switching may add loading time; under memory pressure larger models are avoided.',
       'cloud_review_title': "Review Cloud sharing",
       'cloud_review_intro': "Choose what Aivexus may send for this request. Nothing is shared unless you explicitly approve it.",
       'cloud_review_account': "Cloud account",
@@ -253,6 +258,11 @@ class AppLocalizations {
       'installer_opened': 'Installer opened. Confirm installation on Android.',
     },
     'fr': {
+      'local_routing_title': 'Orchestration des modèles LOCAL',
+      'local_routing_manual': 'Manuelle',
+      'local_routing_auto': 'Automatique',
+      'local_routing_manual_note': 'Conserve le modèle choisi dans Modèles, sans changer le fonctionnement actuel.',
+      'local_routing_auto_note': 'Choisit à chaque tour un modèle installé et validé sur cet appareil. Préserve le contexte et les souvenirs locaux confirmés. Un changement peut allonger le chargement ; les gros modèles sont évités quand la RAM manque.',
       'cloud_review_title': "Partage des données Cloud",
       'cloud_review_intro': "Choisissez les informations qu'Aivexus peut envoyer pour cette demande. Rien n'est partagé sans votre autorisation.",
       'cloud_review_account': "Compte Cloud",
@@ -459,6 +469,11 @@ class AppLocalizations {
           'Installateur ouvert. Confirmez l\u2019installation sur Android.',
     },
     'it': {
+      'local_routing_title': 'Orchestrazione modelli LOCAL',
+      'local_routing_manual': 'Manuale',
+      'local_routing_auto': 'Automatica',
+      'local_routing_manual_note': 'Utilizza il modello scelto in Modelli, senza modificare il comportamento attuale.',
+      'local_routing_auto_note': 'Sceglie a ogni turno un modello validato e installato sul dispositivo. Conserva il contesto e i ricordi locali approvati. Il cambio può richiedere un caricamento; con poca RAM evita i modelli più pesanti.',
       'cloud_review_title': "Condivisione dei dati Cloud",
       'cloud_review_intro': "Scegli quali informazioni Aivexus può inviare per questa richiesta. Non viene condiviso nulla senza la tua autorizzazione.",
       'cloud_review_account': "Account Cloud",
@@ -692,6 +707,11 @@ class AppLocalizations {
           'Installer aperto. Conferma l\u2019installazione su Android.',
     },
     'es': {
+      'local_routing_title': 'Orquestación de modelos LOCAL',
+      'local_routing_manual': 'Manual',
+      'local_routing_auto': 'Automática',
+      'local_routing_manual_note': 'Mantiene el modelo elegido en Modelos y el funcionamiento actual.',
+      'local_routing_auto_note': 'Elige en cada turno un modelo instalado y validado en el dispositivo. Conserva el contexto y los recuerdos locales confirmados. El cambio puede tardar más; con poca RAM evita los modelos grandes.',
       'cloud_review_title': "Compartir datos con Cloud",
       'cloud_review_intro': "Elige qué información puede enviar Aivexus en esta solicitud. No se comparte nada sin tu permiso.",
       'cloud_review_account': "Cuenta Cloud",
@@ -898,6 +918,11 @@ class AppLocalizations {
           'Instalador abierto. Confirma la instalaci\u00f3n en Android.',
     },
     'de': {
+      'local_routing_title': 'LOCAL-Modellsteuerung',
+      'local_routing_manual': 'Manuell',
+      'local_routing_auto': 'Automatisch',
+      'local_routing_manual_note': 'Das unter Modelle gewählte Modell bleibt aktiv; das bisherige Verhalten ändert sich nicht.',
+      'local_routing_auto_note': 'Wählt pro Anfrage ein installiertes, validiertes Modell. Kontext und bestätigte lokale Erinnerungen bleiben erhalten. Ein Modellwechsel kann Ladezeit verursachen; bei RAM-Mangel werden große Modelle vermieden.',
       'cloud_review_title': "Cloud-Datenfreigabe prüfen",
       'cloud_review_intro': "Wählen Sie, welche Informationen Aivexus für diese Anfrage senden darf. Ohne ausdrückliche Zustimmung wird nichts geteilt.",
       'cloud_review_account': "Cloud-Konto",

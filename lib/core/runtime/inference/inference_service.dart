@@ -7,6 +7,8 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_constants.dart'
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_model_orchestrator.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/stream_text_accumulator.dart';
@@ -33,12 +35,16 @@ class InferenceService {
   InferenceService({
     required Future<AiModel?> Function() loadSelectedModel,
     required Future<AiRuntimeMode> Function() loadRuntimeMode,
+    Future<List<AiModel>> Function()? loadAvailableLocalModels,
+    Future<LocalModelSelectionMode> Function()? loadLocalModelSelectionMode,
     required LocalRuntimeProvider runtimeProvider,
     required CloudRuntimeProvider cloudRuntimeProvider,
     required RuntimeSessionManager sessionManager,
     Tool? webSearchTool,
   })  : _loadSelectedModel = loadSelectedModel,
         _loadRuntimeMode = loadRuntimeMode,
+        _loadAvailableLocalModels = loadAvailableLocalModels,
+        _loadLocalModelSelectionMode = loadLocalModelSelectionMode,
         _runtimeProvider = runtimeProvider,
         _cloudRuntimeProvider = cloudRuntimeProvider,
         _sessionManager = sessionManager,
@@ -46,6 +52,8 @@ class InferenceService {
 
   final Future<AiModel?> Function() _loadSelectedModel;
   final Future<AiRuntimeMode> Function() _loadRuntimeMode;
+  final Future<List<AiModel>> Function()? _loadAvailableLocalModels;
+  final Future<LocalModelSelectionMode> Function()? _loadLocalModelSelectionMode;
   final LocalRuntimeProvider _runtimeProvider;
   final CloudRuntimeProvider _cloudRuntimeProvider;
   final RuntimeSessionManager _sessionManager;
@@ -190,10 +198,51 @@ class InferenceService {
        * That request must never silently fall back to the Assistant's
        * currently selected model.
        */
-      final selectedModel =
-          await _resolveModelForRequest(
-        isolatedRequest,
-      );
+      var selectedModel = await _resolveModelForRequest(isolatedRequest);
+
+      // AUTO is only allowed at the ordinary Assistant boundary. Explicit
+      // Workshop model identities remain immutable, including in HYBRID.
+      if (runtimeMode != AiRuntimeMode.cloud &&
+          isolatedRequest.modelId == null &&
+          isolatedRequest.modelPath == null &&
+          _loadAvailableLocalModels != null &&
+          _loadLocalModelSelectionMode != null) {
+        final selectionMode = await _loadLocalModelSelectionMode();
+        if (selectionMode == LocalModelSelectionMode.automatic) {
+          try {
+            final models = await _loadAvailableLocalModels();
+            ResourceSample? resources;
+            final android = !kIsWeb &&
+                defaultTargetPlatform == TargetPlatform.android;
+            if (android) {
+              try {
+                resources = await ResourceMonitor.instance.sample();
+              } catch (_) {
+                // Missing telemetry is unknown, never interpreted as safe.
+              }
+            }
+            selectedModel = const LocalModelOrchestrator().select(
+              request: isolatedRequest,
+              availableModels: models,
+              preferredModel: selectedModel,
+              supportsModel: _runtimeProvider.supportsModel,
+              resources: resources,
+              isAndroid: android,
+            );
+            _log(
+              '[LOCAL_AUTO_ROUTE] session=${isolatedRequest.sessionId} '
+              'installed=${models.length} selected=${selectedModel?.id ?? 'none'} '
+              'task=${const LocalModelOrchestrator().classify(isolatedRequest).name} '
+              'ram_pressure=${resources?.pressure ?? 'unknown'}',
+            );
+          } catch (error) {
+            // Fail locally and explicitly; never infer that the manual model
+            // is safe or authorize a Cloud dispatch after catalogue failure.
+            selectedModel = null;
+            _log('[LOCAL_AUTO_ROUTE] catalogue_error=$error');
+          }
+        }
+      }
 
       _log(
         '[INFERENCE_MODEL] '

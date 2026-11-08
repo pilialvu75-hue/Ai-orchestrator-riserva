@@ -518,6 +518,17 @@ Future<void> initDependencies({
         );
       },
       loadRuntimeMode: () => sl<AiRuntimeSettingsService>().loadRuntimeMode(),
+      loadLocalModelSelectionMode: () =>
+          sl<AiRuntimeSettingsService>().loadLocalModelSelectionMode(),
+      loadAvailableLocalModels: () async {
+        final result = await sl<LocalAiRepository>().getAvailableModels();
+        return result.fold(
+          (failure) => throw StateError(
+            'LOCAL model catalogue unavailable: ${failure.message}',
+          ),
+          (models) => models,
+        );
+      },
       runtimeProvider: sl<LocalRuntimeProvider>(),
       cloudRuntimeProvider: sl<CloudRuntimeProvider>(),
       sessionManager: sl<RuntimeSessionManager>(),

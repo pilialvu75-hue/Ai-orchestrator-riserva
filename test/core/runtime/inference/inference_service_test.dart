@@ -16,6 +16,7 @@ import 'package:ai_orchestrator/core/runtime/inference/cloud_runtime_provider.da
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_consent_denied.dart';
 import 'package:ai_orchestrator/core/runtime/inference/hybrid_cloud_runtime_source_evidence.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
@@ -40,6 +41,8 @@ void main() {
   InferenceService buildService({
     required AiRuntimeMode mode,
     AiModel? selectedModel,
+    List<AiModel>? availableModels,
+    LocalModelSelectionMode localSelectionMode = LocalModelSelectionMode.manual,
     required FakeLocalRuntimeProvider localRuntimeProvider,
     required CloudRuntimeProvider cloudRuntimeProvider,
     Tool? webSearchTool,
@@ -47,6 +50,8 @@ void main() {
     return InferenceService(
       loadSelectedModel: () async => selectedModel,
       loadRuntimeMode: () async => mode,
+      loadAvailableLocalModels: () async => availableModels ?? <AiModel>[],
+      loadLocalModelSelectionMode: () async => localSelectionMode,
       runtimeProvider: localRuntimeProvider,
       cloudRuntimeProvider: cloudRuntimeProvider,
       sessionManager: RuntimeSessionManager(),
@@ -81,6 +86,95 @@ void main() {
       automaticUseAllowed: (_) => automaticUseAllowed,
     );
   }
+
+  test('LOCAL AUTO changes model for coding but preserves dialogue context',
+      () async {
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini',
+      localPath: '/tmp/phi.gguf',
+      sizeBytes: 2200000000,
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct',
+      localPath: '/tmp/qwen.gguf',
+      sizeBytes: 1800000000,
+    );
+    final seen = <InferenceRequest>[];
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider:
+          FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
+        seen.add(request);
+        yield InferenceResponse.finalChunk(text: 'ok', tokensGenerated: 1);
+      }),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    const memoryContext = [
+      ChatTurn(role: ChatRole.user, content: 'Jerome è un mio collega'),
+      ChatTurn(role: ChatRole.assistant, content: 'Ricevuto'),
+    ];
+    await service.stream(const InferenceRequest(
+      sessionId: 'local-auto-context',
+      prompt: 'Scrivi codice Dart per una funzione',
+      context: memoryContext,
+      systemPrompt: 'Approved memory: Jerome is a colleague.',
+    )).drain<void>();
+    expect(seen, hasLength(1));
+    expect(seen.single.modelId, qwen.effectiveRuntimeModelId);
+    expect(seen.single.context, memoryContext);
+    expect(seen.single.systemPrompt,
+        contains('Approved memory: Jerome is a colleague.'));
+  });
+
+  test('LOCAL manual selection remains authoritative even for coding',
+      () async {
+    final phi = validModel.copyWith(id: 'phi3_5_mini');
+    final qwen = validModel.copyWith(id: 'qwen2_5_3b_instruct');
+    InferenceRequest? seen;
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.manual,
+      localRuntimeProvider:
+          FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
+        seen = request;
+        yield InferenceResponse.finalChunk(text: 'ok', tokensGenerated: 1);
+      }),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    await service.stream(const InferenceRequest(
+      sessionId: 'manual-local', prompt: 'Scrivi codice Dart',
+    )).drain<void>();
+    expect(seen?.modelId, phi.effectiveRuntimeModelId);
+  });
+
+  test('LOCAL AUTO never overrides an explicit Workshop model ID',
+      () async {
+    final phi = validModel.copyWith(id: 'phi3_5_mini');
+    final qwen = validModel.copyWith(id: 'qwen2_5_3b_instruct');
+    InferenceRequest? seen;
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider:
+          FakeLocalRuntimeProvider(streamBuilder: (request, _) async* {
+        seen = request;
+        yield InferenceResponse.finalChunk(text: 'ok', tokensGenerated: 1);
+      }),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    await service.stream(const InferenceRequest(
+      sessionId: 'workshop-local', prompt: 'Scrivi codice Dart',
+      modelId: 'phi3_5_mini',
+    )).drain<void>();
+    expect(seen?.modelId, 'phi3_5_mini');
+  });
 
   test('device clock context reaches local inference and preserves instructions',
       () async {

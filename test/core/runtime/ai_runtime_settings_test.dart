@@ -41,6 +41,20 @@ void main() {
       expect(service.activeProvider, 'gemini');
     });
 
+    test('LOCAL defaults to manual and persists automatic independently of Cloud',
+        () async {
+      final service = await createService();
+      expect(service.localModelSelectionMode, LocalModelSelectionMode.manual);
+
+      await service.setLocalModelSelectionMode(LocalModelSelectionMode.automatic);
+      expect(service.localModelSelectionMode, LocalModelSelectionMode.automatic);
+      expect(await service.loadLocalModelSelectionMode(),
+          LocalModelSelectionMode.automatic);
+
+      await service.setLocalModelSelectionMode(LocalModelSelectionMode.manual);
+      expect(service.localModelSelectionMode, LocalModelSelectionMode.manual);
+    });
+
     test('persists manual Cloud provider and clears back to automatic',
         () async {
       final service = await createService();
