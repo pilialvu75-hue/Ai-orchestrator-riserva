@@ -554,7 +554,9 @@ class VoiceLoopManager with RuntimeEventEmitter {
       prompt: spokenText,
       systemPrompt: systemPrompt,
       isOffline: true,
-      maxTokens: 256,
+      // Constrain Android Live PCM and inference peak while the 8 GB
+      // device's native allocation pressure is being investigated.
+      maxTokens: android ? 128 : 256,
       temperature: 0.7,
       modelId: resolvedModelId,
       modelPath: resolvedModelPath,
