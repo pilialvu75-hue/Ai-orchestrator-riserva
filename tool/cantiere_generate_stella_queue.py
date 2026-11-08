@@ -114,14 +114,24 @@ void main() {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--values', default='1,2,3', help='Comma-separated integers for the generated queue')
     args = parser.parse_args()
+    try:
+        values = [int(value.strip()) for value in args.values.split(',')]
+    except ValueError:
+        parser.error('--values must contain comma-separated integers')
+    if not values or len(values) > 100:
+        parser.error('--values requires between 1 and 100 integers')
     output = args.output.resolve()
     if output.exists() and any(output.iterdir()):
         parser.error('Output directory must be empty: ' + str(output))
+    expected = ', '.join(str(value) for value in values)
+    generated_main = MAIN.replace('Stream<int>.fromIterable([1, 2, 3])', 'Stream<int>.fromIterable(' + repr(values) + ')')
+    generated_test = TEST.replace("expect(find.text('1, 2, 3'), findsOneWidget);", "expect(find.text('" + expected + "'), findsOneWidget);")
     for name, data in {
         'pubspec.yaml': PUBSPEC,
-        'lib/main.dart': MAIN,
-        'test/widget_test.dart': TEST,
+        'lib/main.dart': generated_main,
+        'test/widget_test.dart': generated_test,
     }.items():
         path = output / name
         path.parent.mkdir(parents=True, exist_ok=True)
