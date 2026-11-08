@@ -1,5 +1,13 @@
 import 'dart:async';
 
+import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
+
+/// Android's 'complete' describes the PCM write, not audible completion.
+/// The AudioTrack playback clock must reach the buffered PCM duration.
+bool androidPcmPlaybackPending(ReadAloudSnapshot status) =>
+    status.active && (status.playing || status.position < status.buffered);
+
+
 /// Prevents a new microphone turn from starting before native playback has
 /// actually drained. TTS generation completion is not playback completion.
 ///
