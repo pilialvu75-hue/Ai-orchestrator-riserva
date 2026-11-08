@@ -27,6 +27,7 @@ import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
 import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
 import 'package:ai_orchestrator/core/voice/sherpa_onnx_voice_engine.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
+import 'package:ai_orchestrator/features/local_ai/domain/entities/ai_model.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_event.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/settings_page.dart';
@@ -1592,6 +1593,11 @@ class _ChatBodyState
   final _runtimeNoticePresenter = RuntimeNoticePresenter();
 
   static const String _automaticCloudProviderMenuValue = '__automatic__';
+  static const String _automaticLocalModelMenuValue = '__automatic_local__';
+
+  StreamSubscription<RuntimeEventEntry>? _localInferenceLogSubscription;
+  String? _lastSuccessfulLocalModelId;
+  late LocalModelSelectionMode _lastObservedLocalRoutingMode;
 
   final DebugLabController
       _debugLabController =
@@ -1635,6 +1641,10 @@ class _ChatBodyState
         di.sl<AiRuntimeSettingsService>();
     _manualCloudProvider =
         _runtimeSettingsService.manualCloudProvider;
+    _lastObservedLocalRoutingMode = _runtimeSettingsService.localModelSelectionMode;
+    _localInferenceLogSubscription = RuntimeEventLog.instance.stream.listen(
+      _trackSuccessfulLocalInference,
+    );
 
     _debugLabController.addListener(
       _handleDebugLabVisibilityChanged,
@@ -1658,6 +1668,7 @@ class _ChatBodyState
 
   @override
   void dispose() {
+    _localInferenceLogSubscription?.cancel();
     _audioPlayback.removeListener(_refreshAudio);
     _runtimeNoticePresenter.dispose();
     _debugLabController
@@ -1702,9 +1713,164 @@ class _ChatBodyState
   void _handleRuntimeSettingsChanged() {
     if (!mounted) return;
     setState(() {
-      _manualCloudProvider =
-          _runtimeSettingsService.manualCloudProvider;
+      _manualCloudProvider = _runtimeSettingsService.manualCloudProvider;
+      final mode = _runtimeSettingsService.localModelSelectionMode;
+      if (_lastObservedLocalRoutingMode != mode) {
+        _lastSuccessfulLocalModelId = null;
+        _lastObservedLocalRoutingMode = mode;
+      }
     });
+  }
+
+  void _trackSuccessfulLocalInference(RuntimeEventEntry entry) {
+    if (entry.tag != 'INFERENCE_TIMING' ||
+        !entry.message.contains('outcome=success')) return;
+    final match = RegExp(
+      r'\bmodel=([A-Za-z0-9_.-]{1,80}) mode=(local|hybrid)\b',
+    ).firstMatch(entry.message);
+    final modelId = match?.group(1);
+    if (!mounted || modelId == null || modelId == _lastSuccessfulLocalModelId) {
+      return;
+    }
+    setState(() => _lastSuccessfulLocalModelId = modelId);
+  }
+
+  Future<void> _setLocalModelSelection(String selection) async {
+    try {
+      if (selection == _automaticLocalModelMenuValue) {
+        await _runtimeSettingsService.setLocalModelSelectionMode(
+          LocalModelSelectionMode.automatic,
+        );
+      } else {
+        // Explicit model selection means MANUAL, even when previously in AUTO.
+        context.read<ModelDownloadBloc>().add(
+          SelectActiveModel(modelId: selection),
+        );
+        await _runtimeSettingsService.setLocalModelSelectionMode(
+          LocalModelSelectionMode.manual,
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.t('local_routing_save_failed'))),
+        );
+      }
+    }
+  }
+
+  Widget _buildLocalModelSelector(Color surfaceColor) {
+    final l10n = context.l10n;
+    final automatic = _runtimeSettingsService.localModelSelectionMode ==
+        LocalModelSelectionMode.automatic;
+
+    return BlocBuilder<ModelDownloadBloc, ModelDownloadState>(
+      builder: (context, state) {
+        final loaded = state is ModelsLoaded ? state : null;
+        final installed = (loaded?.models ?? <AiModel>[])
+            .where((model) =>
+                model.isDownloaded &&
+                model.validationStatus == ModelValidationStatus.validatedOk &&
+                (model.localPath?.trim().isNotEmpty ?? false))
+            .toList(growable: false);
+        final activeId = automatic
+            ? _lastSuccessfulLocalModelId
+            : loaded?.selectedModelId;
+        AiModel? current;
+        for (final model in installed) {
+          if (model.id == activeId ||
+              model.effectiveRuntimeModelId == activeId) {
+            current = model;
+            break;
+          }
+        }
+        final displayName = current?.displayName ?? activeId;
+        final chipLabel = automatic
+            ? displayName == null
+                ? 'AUTO'
+                : 'AUTO · $displayName'
+            : displayName ?? l10n.t('local_routing_manual');
+
+        return PopupMenuButton<String>(
+          key: const Key('chat-local-model-selector'),
+          tooltip: automatic
+              ? l10n.t('local_routing_last_successful')
+              : l10n.t('local_routing_manual'),
+          color: surfaceColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          onSelected: (value) => unawaited(_setLocalModelSelection(value)),
+          itemBuilder: (context) => <PopupMenuEntry<String>>[
+            PopupMenuItem<String>(
+              value: _automaticLocalModelMenuValue,
+              child: Row(children: [
+                SizedBox(
+                  width: 24,
+                  child: automatic
+                      ? const Icon(Icons.check, size: 18, color: Color(0xFF4ADE80))
+                      : null,
+                ),
+                Text(l10n.t('local_routing_auto')),
+              ]),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem<String>(
+              enabled: false,
+              child: Text(l10n.t('local_routing_manual')),
+            ),
+            ...installed.map((model) => PopupMenuItem<String>(
+              value: model.id,
+              child: Row(children: [
+                SizedBox(
+                  width: 24,
+                  child: !automatic && loaded?.selectedModelId == model.id
+                      ? const Icon(Icons.check, size: 18, color: Color(0xFF4ADE80))
+                      : null,
+                ),
+                Flexible(child: Text(model.displayName)),
+              ]),
+            )),
+            if (installed.isEmpty)
+              PopupMenuItem<String>(
+                enabled: false,
+                child: Text(l10n.t('no_local_model')),
+              ),
+            if (automatic && displayName != null)
+              PopupMenuItem<String>(
+                enabled: false,
+                child: Text(
+                  '${l10n.t('local_routing_last_successful')}: $displayName',
+                ),
+              ),
+          ],
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 144),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: surfaceColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF4ADE80).withValues(alpha: 0.35)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(
+                child: Text(
+                  chipLabel,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: const TextStyle(
+                    color: Color(0xFF4ADE80),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const Icon(Icons.arrow_drop_down, color: Color(0xFF4ADE80), size: 15),
+            ]),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _setCloudProviderSelection(String selection) async {
@@ -2412,6 +2578,10 @@ class _ChatBodyState
               mainAxisSize: MainAxisSize.min,
               children: [
                 _buildRuntimeModePill(surfaceColor),
+                if (_runtimeSettingsService.runtimeMode != AiRuntimeMode.cloud) ...[
+                  const SizedBox(width: 6),
+                  _buildLocalModelSelector(surfaceColor),
+                ],
                 if (_runtimeSettingsService.runtimeMode == AiRuntimeMode.cloud) ...[
                   const SizedBox(width: 6),
                   _buildCloudProviderSelector(surfaceColor),
