@@ -770,7 +770,7 @@ final class AssistantDurableMemoryCaptureService {
         updatedAt: _now(),
         before: previous.content,
         after: previous.updatedAt.toString(),
-        reason: 'natural_direct_car_color_update:' + update.language,
+        reason: 'natural_direct_car_color_update:${update.language}',
       );
       return true;
     });
@@ -804,7 +804,7 @@ final class AssistantDurableMemoryCaptureService {
             .extractDirectUserCarColorCorrection(record.content);
         return parsed != null &&
             record.reason ==
-                'natural_direct_car_color_update:' + parsed.language;
+                'natural_direct_car_color_update:${parsed.language}';
       }),
     );
   }
@@ -831,7 +831,7 @@ final class AssistantDurableMemoryCaptureService {
         .extractDirectUserCarColorCorrection(reviewed.content);
     if (parsed == null ||
         reviewed.reason !=
-            'natural_direct_car_color_update:' + parsed.language ||
+            'natural_direct_car_color_update:${parsed.language}' ||
         (approve &&
             AssistantNaturalMemoryCandidateExtractor
                     .extractDirectUserCarColorCorrection(
