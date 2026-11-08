@@ -1591,3 +1591,57 @@ dettatura), #1033 (Voice 2.0) e #947 (cestino).
   Non distruggere dati del tester durante lo sviluppo.
 - Rispettare sezione 15: non peggiorare apertura chat,
   primo token, fluidita, memoria o qualita delle risposte.
+
+## 19. Evoluzione AIVEXUS — Computer Use, auto-miglioramento e Security Lab indipendente (decisione 8 novembre 2026)
+
+**Direttiva owner (8/11/2026).** Prima chiudere l'inferenza Windows sull'ASUS (qualita/intelligenza, RTX 4060, latenza, stabilita, modelli LOCAL AUTO); **poi** sviluppare il Computer Use nativo di AI-Orchestrator-riserva. AIVEXUS Web rimane importante ma non sostituisce tale ordine. La sicurezza avanzata avra **un laboratorio/progetto separato e a bassa priorita**, come WEmulDroid, predisposto per futura integrazione. Non aprire lavori concorrenti ai molti cantieri attivi. La presente e l'unica roadmap strategica AIVEXUS: nessuna seconda roadmap concorrente nel core.
+
+### 19.1 — Sequenza, priorita e stato
+
+1. **P0 ora: inferenza fisica ASUS Windows** (Intel i7-12700H, NVIDIA RTX 4060 Laptop 8 GB, 16 GB RAM). Verificare CUDA/GPU reale e fallback sicuri, model ID effettivo, qualita IT/FR/EN/ES e coding, tempo primo token (TTFT), token/s, warmup, unload/reload, RAM/VRAM picco e stabilita. Confrontare MANUALE e LOCAL AUTO, evitare switch inutili. Benchmark ripetibili e release tramite updater in-app; non estendere PASS CI a prove fisiche. Collegamenti #1073 (routing), #1086 (pre-first-token retry), #1076 (blocco CI nativo SQLite).
+2. **P1 dopo inferenza: Computer Use AIVEXUS**, prima su Windows, poi adapter Android/macOS/Linux/Web; primi workflow di benchmark/diagnostica controllati, quindi operazioni di assistente quotidiano e Cantiere. API, tool tipizzati, UI automation/accessibilita e MCP dove opportuno: nessuna dipendenza obbligatoria da Kali, Ollama, 5ire o provider Cloud.
+3. **P2: auto-miglioramento** del software e delle procedure verificate, poi sperimentazione dell'addestramento dei modelli. Riutilizzare Diagnostics, memoria evolutiva sezioni 16/17, Cantiere e Libreria. Nessuna sostituzione della piattaforma esistente.
+4. **P3 futuro/a tempo perso: AIVEXUS-Security-Lab separato**, ricerca e collaudo sicurezza su applicazioni, infrastruttura, sincronizzazione e memoria, con interfacce integrabili; riuso dispositivi legacy per altri esperimenti. Le *protezioni minime* indispensabili al Computer Use sono obbligatorie da P1, non rimandate al Lab.
+5. Conservare stato, issue, owner, branche, claim e checkpoint dei lavori attivi (prima app Stella, Hybrid, memoria, Voice, Web, emulatori): questa sezione non ne annulla ne riapre i risultati. Nessun mega-refactor o costi Cloud non approvati.
+
+### 19.2 — Computer Use come capacita trasversale, non un nuovo Cantiere
+
+- Contratto comune: Intento -> piano -> chiamata tool autorizzata -> osservazione reale -> verifica -> checkpoint -> risultato. I modelli sono esecutori sostituibili; l'ownership di Task/Execution/Attempt e dei permessi resta nel core.
+- **Strumenti:** (a) API/connettori per email, calendario, file e servizi; (b) tool locali tipizzati per Git, Flutter, Dart, Gradle, diagnostica, compilazioni, test e modelli; (c) computer vision e accessibility/UI automation quando non c'e API. MCP come adapter opzionale, non un secondo orchestratore, non shell generale senza limiti.
+- **Assistente vita quotidiana:** linguaggio naturale per trovare email, preparare bozze, consultare documenti, navigare software, avviare task e programmare. Invio, cancellazione, spesa, installazioni, modifiche sensibili e operazioni irreversibili richiedono policy e autorizzazioni specifiche. Distinguere sempre proposto/eseguito/verificato; non inventare azioni.
+- **Cantiere:** i ruoli Orchestrator, Architect, Engineer, Reviewer e la scelta per passaggi di LLM gia esistono. Collegare gli esecutori locali veri in modo progressivo a WorkspaceSession, staging, review, validation, apply, build, test e rollback, senza duplicare controller o bypassare gate. La prima Stella resta prova di produzione autonoma reale su ogni piattaforma, non solo CI.
+- **Sicurezza di Computer Use:** autorizzazioni minime granulari e revocabili per lettura/scrittura/rete/shell/UI, isolamento dei workspace, limiti ai tool e timeout, prompt-injection defense su contenuti esterni, logging senza segreti, cancel e recovery. LOCAL senza provider IA Cloud; sincronizzazione e deleghe remote soltanto con pairing, consenso e protezione dei dati.
+- **Primo benchmark di accettazione P1:** Windows ASUS esegue un workflow completo richiesta -> tool di misura locale -> identificativo modello e misura TTFT/tok/s/GPU/RAM -> risultato verificato senza falsa telemetria; blocca azioni non autorizzate. Poi incrementi per compilazione e controllo interfacce.
+
+### 19.3 — Auto-miglioramento dell'app e dell'LLM: due cicli collegati
+
+- **Software auto-riparabile:** Observe -> Classify -> Plan -> Candidate patch -> Isolated tests -> Compare (qualita/tempi/RAM/sicurezza) -> Review and guarded apply -> Regression -> Promote or rollback -> Verified experience. Riutilizzare il self-repair della sezione 7. Evitare che l'agente modifichi insieme codice, verificatore e rollback: un componente indipendente controlla le promozioni. Nessun auto-merge di patch rischiose in produzione.
+- **Patrimonio comune modello-agnostico:** fatti confermati, procedure, skill, errori risolti, evidenze, licenze, contesto e provenienza. Retrieval mirato per Qwen, Phi, Nemotron, futuri LLM e provider autorizzati. Un successo verificato da un LLM puo essere riusato da un altro senza riaddestrarne i pesi. Soggetti/fatti personali e skill generali restano separati e protetti; revoca, eliminazione e consenso HYBRID non vengono elusi.
+- **Orchestratore specializzato:** prima far migliorare il router LOCAL AUTO esistente su misure reali: task family, capability, TTFT, costi switch, affidabilita, contesto, qualita. Un eventuale piccolo LLM addestrato per orchestrare si introduce soltanto se batte il baseline misurato sul dispositivo.
+- **Builder:** non creare un modello Builder monolitico concorrente con i quattro ruoli. Un eventuale specialista addestrato per diagnosi errori/repair di codice e facoltativo e deve dimostrare maggiore qualita/velocita. La Libreria e la memoria procedurale alimentano tutti i ruoli gia presenti.
+- **LoRA/QLoRA/weight-space programming:** laboratorio di ricerca separato con modelli/dataset autorizzati, versioning della base, adattatori specifici per architettura, licenze, holdout benchmark, regression/safety test e rollback. Non confondere memoria o procedure con modifica dei pesi; un LoRA Qwen non e automaticamente applicabile a Phi/Nemotron. Nessun autonomo weight update in produzione non verificato.
+- **Gate successo:** un test reale riproducibile mostra una correzione nel software, performance/miglioramento misurabile, nessuna regressione critica, recupero di esperienza da un secondo LLM e possibilita di rollback. Non dichiarare "si migliora da solo" sulla base di output del solo modello.
+
+### 19.4 — AIVEXUS-Security-Lab: progetto indipendente a bassa priorita
+
+**Nome provvisorio** AIVEXUS-Security-Lab; repository e laboratorio propri, analogamente a WEmulDroid/AEmulWin. **Stato:** soltanto idea e piano, nessun repository, release, controllo o modulo dichiarato gia creato. Avviare solo quando si libera capacita; usare interfacce versionate e report machine-readable per integrazione futura nel Cantiere/Diagnostics, senza dipendenza obbligatoria o secondo runtime concorrente.
+
+- **Applicazioni prodotte:** analisi statiche e dipendenze, SBOM, scansione di segreti, licenze, permessi, fuzzing e test dinamici in sandbox. Findings riproducibili con prove e patch proposte; test post-fix indipendenti, nessuna garanzia di sicurezza assoluta.
+- **AIVEXUS:** audit tool-use e privilegi, supply chain e aggiornamenti, privacy, protezione dei workspace, difesa prompt injection, credenziali, logging e isolamento delle memorie.
+- **Rete, progetti e memoria condivisa:** test di autenticazione reciproca, pairing, cifratura in transito/a riposo, sync offline e reconnect, merge e conflitti, revoca, replay/rollback, tombstone per ricordi eliminati, separazione degli utenti e data leakage. Preferire profili fittizi e DB sintetici.
+- **Esecuzione controllata:** soltanto sistemi propri o espressamente autorizzati e scope definito; niente test invasivi di terzi. Scan, test offensivi e modifiche di firmware soltanto in lab isolato, con limiti e autorizzazione. Le correzioni proposte passano dal Cantiere con validazione e approvazione, non con scrittura diretta sul prodotto.
+- **Futura integrazione:** API/adapters con schema versione, severity, evidenze e hash, nessun segreto nei log/artefatti; review e test obbligatori prima di promuovere un modulo. Non sottrarre priorita a inferenza ASUS e Computer Use P1.
+
+### 19.5 — Recupero e valorizzazione dispositivi datati
+
+- Il Computer Use puo gestire vecchi PC e smartphone con un agente leggero; dove l'hardware non basta, autorizzare delega ad ASUS su rete protetta. Non puo eliminare limiti reali CPU/RAM/GPU, supporto sistema/driver o obsolete patch di sicurezza.
+- Per vecchio WD My Cloud, lettori MP4 e TV Android di proprieta: inventario hardware e firmware, backup/immagine e recupero dati non distruttivo, analisi compatibilita, possibilita di nuove app e firmware supportabili; per flash e operazioni irreversibili servono consenso esplicito, strategia di ripristino e verifica concreta del dispositivo.
+- Priorita iniziale Windows e S24 con test fisici indipendenti, poi macOS/Linux e dispositivi legacy. La capacita di eseguire attivita sul computer deve rispettare proprieta, permessi e sicurezza dei dati.
+
+### 19.6 — Traguardi, integrazione e anti-dispersione
+
+- **P0 concluso** soltanto con modello reale, GPU effettiva e prestazioni/qualita misurate sull'ASUS, regressioni controllate e release tramite updater testata; nessuna confusione tra sorgente, CI, build e app installata.
+- **P1 concluso** soltanto con workflow Computer Use end-to-end reale, tool autorizzato e osservazione verificata, cancel/revoca, prompt-injection/permission tests e nessun falso completamento.
+- **P2 concluso** soltanto con miglioramento prima/dopo dimostrato su test indipendenti, rollback, procedure condivise tra LLM e rispetto della privacy. Fine-tuning solo se migliora rispetto a retrieval/router.
+- **Security Lab** potra produrre findings e fix candidati; eventuale integrazione solamente dopo prova, test e review; nessuna corsa a dichiarare "sicuro" un prodotto.
+- Niente implementazione immediata automatica dovuta alla sola annotazione; recuperare latest HEAD/PR/issue ownership prima di aprire nuovi lavori. L'obiettivo resta un'AIVEXUS autonomo, efficace, verificabile e multipiattaforma, con priorita sui risultati funzionanti.
