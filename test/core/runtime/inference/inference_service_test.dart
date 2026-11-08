@@ -184,6 +184,83 @@ void main() {
     expect(committed.single, contains('model=${phi.id}'));
   });
 
+  test('LOCAL AUTO cross-model handoff preserves confirmed memory, corrections '
+      'and current language without leaking another conversation', () async {
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini',
+      localPath: '/tmp/phi.gguf',
+      sizeBytes: 2200000000,
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct',
+      localPath: '/tmp/qwen.gguf',
+      sizeBytes: 1800000000,
+    );
+    const evidence = <ChatTurn>[
+      ChatTurn(role: ChatRole.user, content: 'Jerome è alto.'),
+      ChatTurn(role: ChatRole.assistant, content: 'Ricevuto.'),
+      ChatTurn(role: ChatRole.user, content: 'Mika pratica sport.'),
+      ChatTurn(role: ChatRole.assistant, content: 'Ricevuto.'),
+      ChatTurn(role: ChatRole.user,
+          content: 'Correzione: non Jerome, ma Kader è alto.'),
+      ChatTurn(role: ChatRole.assistant,
+          content: 'Ho capito: Kader è alto e Mika pratica sport.'),
+    ];
+    const approved = 'Memoria confermata: Mika pratica sport. '
+        'Kader è alto. Jerome non è alto. '
+        'Lingua preferita per questa chat: italiano.';
+    final seen = <InferenceRequest>[];
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (request, _) async* {
+          seen.add(request);
+          yield InferenceResponse.finalChunk(
+            text: 'Risposta di prova.',
+            tokensGenerated: 4,
+            model: request.modelId,
+          );
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+
+    await service.stream(const InferenceRequest(
+      sessionId: 'chat-relazioni',
+      prompt: 'Chi è alto?',
+      systemPrompt: approved,
+      context: evidence,
+    )).drain<void>();
+    await service.stream(const InferenceRequest(
+      sessionId: 'chat-relazioni',
+      prompt: 'Scrivi codice Dart per i fatti relazionali.',
+      systemPrompt: approved,
+      context: evidence,
+    )).drain<void>();
+    await service.stream(const InferenceRequest(
+      sessionId: 'chat-separata',
+      prompt: 'Ciao, come va?',
+      systemPrompt: 'Solo contesto della nuova conversazione.',
+    )).drain<void>();
+
+    expect(seen, hasLength(3));
+    expect(seen[0].modelId, phi.effectiveRuntimeModelId);
+    expect(seen[1].modelId, qwen.effectiveRuntimeModelId);
+    for (final request in seen.take(2)) {
+      expect(request.context, evidence);
+      expect(request.systemPrompt, contains(approved));
+      expect(request.systemPrompt, contains('Jerome non è alto'));
+      expect(request.systemPrompt, contains('Lingua preferita'));
+    }
+    expect(seen[2].context, isEmpty);
+    expect(seen[2].systemPrompt, contains('Solo contesto'));
+    expect(seen[2].systemPrompt, isNot(contains('Kader')));
+    expect(seen[2].systemPrompt, isNot(contains('Mika')));
+  });
+
   test('LOCAL AUTO changes model for coding but preserves dialogue context',
       () async {
     final phi = validModel.copyWith(
