@@ -197,6 +197,58 @@ void main() {
         scope: AssistantMemoryScope.user, scopeId: scope)), hasLength(1));
   });
 
+  test('forgetting a reviewed correction cannot resurrect its old fact',
+      () async {
+    await addOldFact();
+    await capture.proposeNamedRelationCorrectionCandidate(
+      userPrompt: 'Non Jerome, Kader è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    );
+    final pending =
+        (await capture.loadReviewableNamedRelationCorrectionCandidates())
+            .single;
+    expect(await capture.reviewNamedRelationCorrectionCandidate(
+      reviewed: pending, approve: true, userConfirmed: true,
+    ), isTrue);
+    final approved = (await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user, scopeId: scope,
+    )).singleWhere((r) =>
+        r.recordKey.startsWith('reviewed.entity.correction.'));
+    expect(await capture.forgetReviewedConfirmedUserMemory(
+      reviewed: approved, userConfirmed: true,
+    ), isTrue);
+    expect(await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user, scopeId: scope,
+    ), isEmpty);
+    final context =
+        AssistantDurableMemoryContextService(memoryService: memory);
+    expect(await context.buildConfirmedContext(
+      sessionId: 'chat', userPrompt: 'Parliamo di Jerome.',
+    ), isNull);
+  });
+
+  test('ambiguous matching old facts cannot become reviewed corrections',
+      () async {
+    await addOldFact();
+    await memory.recordConfirmed(
+      recordKey: 'other-jerome',
+      scope: AssistantMemoryScope.user,
+      scopeId: scope,
+      kind: AssistantMemoryKind.fact,
+      content: 'Jerome è alto.',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 20,
+    );
+    expect(await capture.proposeNamedRelationCorrectionCandidate(
+      userPrompt: 'Non Jerome, Kader è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isFalse);
+    expect(await capture.loadReviewableNamedRelationCorrectionCandidates(),
+        isEmpty);
+  });
+
   test('rejection removes only the pending correction', () async {
     await addOldFact();
     await capture.proposeNamedRelationCorrectionCandidate(
