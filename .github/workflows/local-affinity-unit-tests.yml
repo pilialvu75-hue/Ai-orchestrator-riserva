@@ -1,0 +1,65 @@
+name: LOCAL Affinity Unit Tests (system SQLite, non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/core/runtime/inference/local_model_orchestrator.dart'
+      - 'lib/core/runtime/inference/inference_service.dart'
+      - 'test/core/runtime/inference/local_model_orchestrator_test.dart'
+      - 'test/core/runtime/inference/inference_service_test.dart'
+      - '.github/workflows/local-affinity-unit-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-affinity-unit-${{ github.ref }}
+  cancel-in-progress: true
+
+# SOURCE-ONLY TEST LANE. Do not use this workflow to approve native release
+# packaging, SQLite binary provenance, Android install, or signed desktop apps.
+# Default production builds still use verified sqlite3 release native assets.
+jobs:
+  model-affinity:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Configure system SQLite for isolated tests only
+        shell: bash
+        run: |
+          cat >> pubspec.yaml <<'EOF'
+          hooks:
+            user_defines:
+              sqlite3:
+                source: system
+                name:
+                  windows: winsqlite3
+                  default: sqlite3
+          EOF
+          echo 'TEST-ONLY: using OS SQLite, never bundled with AIVEXUS release.'
+      - name: Restore locked Dart dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Static analysis for LOCAL routing
+        run: >-
+          flutter analyze
+          lib/core/runtime/inference/local_model_orchestrator.dart
+          lib/core/runtime/inference/inference_service.dart
+          test/core/runtime/inference/local_model_orchestrator_test.dart
+          test/core/runtime/inference/inference_service_test.dart
+      - name: Run LOCAL model selection and end-to-end service tests
+        run: >-
+          flutter test --reporter expanded
+          test/core/runtime/inference/local_model_orchestrator_test.dart
+          test/core/runtime/inference/inference_service_test.dart
