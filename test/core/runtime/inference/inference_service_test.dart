@@ -354,7 +354,7 @@ void main() {
     expect(commits.first, contains('model=${qwen.id}'));
   });
 
-  test('failed LOCAL AUTO response does not pin an unsuccessful LLM',
+  test('non-recoverable LOCAL AUTO error does not pin an unsuccessful LLM',
       () async {
     RuntimeEventLog.instance.clear();
     final phi = validModel.copyWith(
@@ -377,7 +377,7 @@ void main() {
         seen.add(request.modelId);
         if (first) {
           first = false;
-          yield InferenceResponse.error('Local model unavailable');
+          yield InferenceResponse.error('Permission denied');
         } else {
           yield InferenceResponse.finalChunk(
             text: 'OK', tokensGenerated: 1, model: request.modelId,
