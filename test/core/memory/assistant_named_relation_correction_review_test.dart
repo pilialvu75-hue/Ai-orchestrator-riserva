@@ -283,7 +283,7 @@ void main() {
     );
     expect(await context.buildConfirmedContext(
       sessionId: 'new-local-model-chat',
-      userPrompt: 'Chi era alto, Jerome, Kader o Mika?',
+      userPrompt: 'Chi era alto, Jerome o Kader?',
     ), isNull);
     expect(await context.buildConfirmedContext(
       sessionId: 'new-local-model-chat',
