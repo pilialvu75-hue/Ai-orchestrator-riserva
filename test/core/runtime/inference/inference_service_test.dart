@@ -20,6 +20,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -46,6 +47,7 @@ void main() {
     LocalModelSelectionMode localSelectionMode = LocalModelSelectionMode.manual,
     required FakeLocalRuntimeProvider localRuntimeProvider,
     required CloudRuntimeProvider cloudRuntimeProvider,
+    Future<ResourceSample?> Function()? sampleResources,
     Tool? webSearchTool,
   }) {
     return InferenceService(
@@ -56,6 +58,7 @@ void main() {
       runtimeProvider: localRuntimeProvider,
       cloudRuntimeProvider: cloudRuntimeProvider,
       sessionManager: RuntimeSessionManager(),
+      sampleResources: sampleResources,
       webSearchTool: webSearchTool,
     );
   }
@@ -87,6 +90,217 @@ void main() {
       automaticUseAllowed: (_) => automaticUseAllowed,
     );
   }
+
+
+  test('LOCAL AUTO pre-token load failure tries one compatible GGUF, '
+      'preserving approved context, single final and no Cloud', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    RuntimeEventLog.instance.clear();
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+      sizeBytes: 1700000000,
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+      sizeBytes: 1800000000,
+    );
+    final seen = <InferenceRequest>[];
+    var cloudCalls = 0;
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (request, _) async* {
+          seen.add(request);
+          if (seen.length == 1) {
+            yield InferenceResponse.error('Failed to load model');
+          } else {
+            yield InferenceResponse.finalChunk(
+              text: 'Risposta unica', tokensGenerated: 2,
+              model: request.modelId,
+            );
+          }
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(
+        configured: true,
+        automaticUseAllowed: true,
+        sendQuery: (provider, request) async {
+          cloudCalls++;
+          throw StateError('LOCAL must not contact Cloud');
+        },
+      ),
+    );
+    const evidence = <ChatTurn>[
+      ChatTurn(role: ChatRole.user, content: 'Kader è alto.'),
+    ];
+    final replies = await service.stream(const InferenceRequest(
+      sessionId: 'memory-chat',
+      prompt: 'Scrivi codice Dart',
+      context: evidence,
+      systemPrompt: 'Confirmed memory: Kader è alto.',
+    )).toList();
+    expect(seen.map((x) => x.modelId).toList(), [
+      qwen.effectiveRuntimeModelId, phi.effectiveRuntimeModelId,
+    ]);
+    expect(seen[1].sessionId, seen[0].sessionId);
+    expect(seen[1].systemPrompt, seen[0].systemPrompt);
+    expect(seen[1].context, seen[0].context);
+    expect(cloudCalls, 0);
+    expect(replies.where((x) => x.isError), isEmpty);
+    expect(replies.where((x) => x.isFinal), hasLength(1));
+    expect(replies.last.model, phi.effectiveRuntimeModelId);
+    final affinityCommits = RuntimeEventLog.instance.entries
+        .map((x) => x.message)
+        .where((x) => x.startsWith('[LOCAL_AFFINITY_COMMIT]'))
+        .toList();
+    expect(affinityCommits, hasLength(1));
+    expect(affinityCommits.single, contains('model=${phi.id}'));
+  });
+
+  test('LOCAL AUTO never switches after the first visible text', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+    );
+    final seen = <String?>[];
+    final service = buildService(
+      mode: AiRuntimeMode.local, selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (request, _) async* {
+          seen.add(request.modelId);
+          yield InferenceResponse.token(text: 'Prima parte');
+          yield InferenceResponse.error('Failed to load model');
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final replies = await service.stream(const InferenceRequest(
+      sessionId: 'no-duplicate', prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(seen, [qwen.effectiveRuntimeModelId]);
+    expect(replies.where((x) => x.text == 'Prima parte'), hasLength(1));
+    expect(replies.where((x) => x.isError), hasLength(1));
+  });
+
+  test('LOCAL AUTO two startup failures emit one terminal error, '
+      'with no third model', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+    );
+    final seen = <String?>[];
+    final service = buildService(
+      mode: AiRuntimeMode.local, selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (request, _) async* {
+          seen.add(request.modelId);
+          yield InferenceResponse.error(
+            seen.length == 1 ? 'Failed to load model' : 'Initialization failed');
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final replies = await service.stream(const InferenceRequest(
+      sessionId: 'both-fail', prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(seen, [
+      qwen.effectiveRuntimeModelId, phi.effectiveRuntimeModelId,
+    ]);
+    expect(replies.where((x) => x.isError && x.isFinal), hasLength(1));
+    expect(replies.last.errorMessage, 'Initialization failed');
+  });
+
+  test('LOCAL MANUAL and explicit Workshop model never auto-recover',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+    );
+    for (final explicit in [false, true]) {
+      var requests = 0;
+      final service = buildService(
+        mode: AiRuntimeMode.local,
+        selectedModel: phi,
+        availableModels: [phi, qwen],
+        localSelectionMode: explicit
+            ? LocalModelSelectionMode.automatic
+            : LocalModelSelectionMode.manual,
+        localRuntimeProvider: FakeLocalRuntimeProvider(
+          streamBuilder: (_, __) async* {
+            requests++;
+            yield InferenceResponse.error('Failed to load model');
+          },
+        ),
+        cloudRuntimeProvider: buildCloudProvider(configured: false),
+      );
+      final replies = await service.stream(InferenceRequest(
+        sessionId: explicit ? 'workshop' : 'manual',
+        prompt: 'Scrivi codice Dart',
+        modelId: explicit ? phi.effectiveRuntimeModelId : null,
+        modelPath: explicit ? phi.localPath : null,
+      )).toList();
+      expect(requests, 1);
+      expect(replies.where((x) => x.isError), hasLength(1));
+    }
+  });
+
+  test('Android critical LOW_MEMORY stops LOCAL AUTO second load', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+      sizeBytes: 1700000000,
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+      sizeBytes: 1800000000,
+    );
+    var loads = 0;
+    final critical = ResourceSample(<Object?, Object?>{
+      'totalBytes': 8 * 1024 * 1024 * 1024,
+      'lowMemory': true,
+      'availableBytes': 128 * 1024 * 1024,
+      'thresholdBytes': 256 * 1024 * 1024,
+    });
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: phi, availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      sampleResources: () async => critical,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (_, __) async* {
+          loads++;
+          yield InferenceResponse.error('Failed to load model');
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final replies = await service.stream(const InferenceRequest(
+      sessionId: 'critical-ram', prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(loads, 1);
+    expect(replies.where((x) => x.isError), hasLength(1));
+  });
 
   test('LOCAL AUTO retains the last completed model per conversation',
       () async {
