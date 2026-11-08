@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:ai_orchestrator/core/ai/model_manager.dart';
 import 'package:ai_orchestrator/core/runtime/app_localizations.dart';
+import 'package:ai_orchestrator/core/runtime/ai_runtime_settings.dart';
 import 'package:ai_orchestrator/core/storage/runtime_model_path_resolver.dart';
 import 'package:ai_orchestrator/features/local_ai/data/services/model_download_service.dart';
 import 'package:ai_orchestrator/features/local_ai/domain/entities/ai_model.dart';
@@ -19,6 +20,8 @@ class ModelsPage extends StatefulWidget {
 
 class _ModelsPageState extends State<ModelsPage> {
   static const _modelManager = ModelManager();
+  late final AiRuntimeSettingsService _routingSettings;
+  bool _routingSaving = false;
 
   String? _lastRequestedModelId;
   final Map<String, String> _statusOverrides = {};
@@ -61,10 +64,43 @@ class _ModelsPageState extends State<ModelsPage> {
   @override
   void initState() {
     super.initState();
+    _routingSettings = di.sl<AiRuntimeSettingsService>();
+    _routingSettings.addListener(_refreshRouting);
     final bloc = context.read<ModelDownloadBloc>();
     if (bloc.state is ModelDownloadInitial) {
       bloc.add(const LoadAvailableModels());
     }
+  }
+
+  void _refreshRouting() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _routingSettings.removeListener(_refreshRouting);
+    super.dispose();
+  }
+
+  Future<void> _setLocalRoutingMode(LocalModelSelectionMode mode) async {
+    if (_routingSaving) return;
+    setState(() => _routingSaving = true);
+    try {
+      await _routingSettings.setLocalModelSelectionMode(mode);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.t('local_routing_save_failed'))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _routingSaving = false);
+    }
+  }
+
+  void _chooseManualModel(String modelId) {
+    context.read<ModelDownloadBloc>().add(SelectActiveModel(modelId: modelId));
+    _setLocalRoutingMode(LocalModelSelectionMode.manual);
   }
 
   String _deriveCustomModelId(String url) {
@@ -447,6 +483,44 @@ class _ModelsPageState extends State<ModelsPage> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
               children: [
+                Text(
+                  l10n.t('local_routing_title'),
+                  style: const TextStyle(
+                    color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      key: const Key('local-model-manual'),
+                      label: Text(l10n.t('local_routing_manual')),
+                      selected: _routingSettings.localModelSelectionMode ==
+                          LocalModelSelectionMode.manual,
+                      onSelected: _routingSaving ? null : (_) =>
+                          _setLocalRoutingMode(LocalModelSelectionMode.manual),
+                    ),
+                    ChoiceChip(
+                      key: const Key('local-model-automatic'),
+                      label: Text(l10n.t('local_routing_auto')),
+                      selected: _routingSettings.localModelSelectionMode ==
+                          LocalModelSelectionMode.automatic,
+                      onSelected: _routingSaving ? null : (_) =>
+                          _setLocalRoutingMode(LocalModelSelectionMode.automatic),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _routingSettings.localModelSelectionMode ==
+                          LocalModelSelectionMode.automatic
+                      ? l10n.t('local_routing_auto_note')
+                      : l10n.t('local_routing_manual_note'),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 22),
                 FilledButton.icon(
                   onPressed: _exporting ? null : _exportAllModels,
                   icon: const Icon(Icons.save_alt),
@@ -499,9 +573,7 @@ class _ModelsPageState extends State<ModelsPage> {
                     onCancel: () => context
                         .read<ModelDownloadBloc>()
                         .add(CancelModelDownload(modelId: model.id)),
-                    onSetActive: () => context
-                        .read<ModelDownloadBloc>()
-                        .add(SelectActiveModel(modelId: model.id)),
+                    onSetActive: () => _chooseManualModel(model.id),
                     onRelink: model.isImportedModel
                         ? () => _importLocalModel(existingModelId: model.id)
                         : null,
@@ -535,9 +607,7 @@ class _ModelsPageState extends State<ModelsPage> {
                     onCancel: () => context
                         .read<ModelDownloadBloc>()
                         .add(CancelModelDownload(modelId: model.id)),
-                    onSetActive: () => context
-                        .read<ModelDownloadBloc>()
-                        .add(SelectActiveModel(modelId: model.id)),
+                    onSetActive: () => _chooseManualModel(model.id),
                     onRelink: model.isImportedModel
                         ? () => _importLocalModel(existingModelId: model.id)
                         : null,
