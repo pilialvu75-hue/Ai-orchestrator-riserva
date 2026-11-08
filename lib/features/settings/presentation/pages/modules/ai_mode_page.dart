@@ -32,6 +32,7 @@ class _AiModePageState extends State<AiModePage> {
   final TextEditingController _budgetController = TextEditingController();
 
   AiRuntimeMode _runtimeMode = AiRuntimeMode.hybrid;
+  LocalModelSelectionMode _localSelectionMode = LocalModelSelectionMode.manual;
   CloudSpendingMode _spendingMode = CloudSpendingMode.complexTasksOnly;
   String _provider = 'openAi';
   bool _loading = true;
@@ -61,6 +62,7 @@ class _AiModePageState extends State<AiModePage> {
     if (!mounted) return;
     setState(() {
       _runtimeMode = _settingsService.runtimeMode;
+      _localSelectionMode = _settingsService.localModelSelectionMode;
       _provider = provider;
       _consentAccountController.text =
           _credentialStore.snapshotFor(provider).accountId ?? '';
@@ -120,6 +122,7 @@ class _AiModePageState extends State<AiModePage> {
 
     try {
       await _settingsService.setRuntimeMode(_runtimeMode);
+      await _settingsService.setLocalModelSelectionMode(_localSelectionMode);
       await _settingsService.setActiveProvider(_provider);
       await _settingsService.setCloudModel(
         _provider,
@@ -317,6 +320,34 @@ class _AiModePageState extends State<AiModePage> {
                           setState(() => _runtimeMode = AiRuntimeMode.hybrid),
                     ),
                   ],
+                ),
+                const SizedBox(height: 24),
+                _SectionTitle(l10n.t('local_routing_title')),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _ModeChip(
+                      label: l10n.t('local_routing_manual'),
+                      selected: _localSelectionMode == LocalModelSelectionMode.manual,
+                      onTap: _saving ? () {} : () => setState(() =>
+                          _localSelectionMode = LocalModelSelectionMode.manual),
+                    ),
+                    _ModeChip(
+                      label: l10n.t('local_routing_auto'),
+                      selected: _localSelectionMode == LocalModelSelectionMode.automatic,
+                      onTap: _saving ? () {} : () => setState(() =>
+                          _localSelectionMode = LocalModelSelectionMode.automatic),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _localSelectionMode == LocalModelSelectionMode.automatic
+                      ? l10n.t('local_routing_auto_note')
+                      : l10n.t('local_routing_manual_note'),
+                  style: const TextStyle(color: Colors.white54, height: 1.35),
                 ),
                 const SizedBox(height: 12),
                 ListTile(
