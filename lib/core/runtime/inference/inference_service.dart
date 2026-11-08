@@ -23,8 +23,6 @@ import 'package:flutter/foundation.dart';
 
 class InferenceService {
   static const _logTag = 'INFERENCE';
-  static const Duration _streamIdleTimeout =
-      InferenceLifecyclePolicy.outerStreamIdleTimeout;
   static const int _maxRetryCount = 1;
   static const int _maxChunksPerRequest = 4096;
 
