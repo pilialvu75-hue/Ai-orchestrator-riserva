@@ -2,7 +2,7 @@ name: Cantiere consumes generated Library Dart module
 on:
   pull_request:
     paths:
-      - 'tool/cantiere_generated_library_consumer.dart'
+      - 'ci/fixtures/cantiere_generated_library_consumer.dart.txt'
       - '.github/workflows/cantiere-generated-library-consumer.yml'
   workflow_dispatch:
 permissions:
@@ -39,7 +39,7 @@ jobs:
             aivexus_running_total:
               path: $RUNNER_TEMP/generated
           EOF
-          cp cantiere/tool/cantiere_generated_library_consumer.dart "$RUNNER_TEMP/cantiere-consumer/main.dart"
+          cp cantiere/ci/fixtures/cantiere_generated_library_consumer.dart.txt "$RUNNER_TEMP/cantiere-consumer/main.dart"
       - name: Execute actual Cantiere consumer
         working-directory: ${{ runner.temp }}/cantiere-consumer
         run: |
