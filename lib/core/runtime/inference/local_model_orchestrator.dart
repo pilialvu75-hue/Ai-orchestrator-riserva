@@ -155,42 +155,7 @@ class LocalModelOrchestrator {
     final trimmed = request.prompt.trim().toLowerCase();
     final followUp = RegExp(
       r'^(continua|continue|continuer|prosegui|ancora|again|'
-      r'e poi\??|e per (lui|lei)\??|et ensuite\??|go on|more)\s*[.!?]*
-
-  LocalConversationTask classify(InferenceRequest request) {
-    var prompt = request.prompt.trim().toLowerCase();
-    // Follow-up turns such as "continua" inherit the immediately preceding
-    // user topic, not the generated assistant answer.
-    if (prompt.length < 32 && request.context.isNotEmpty) {
-      for (final turn in request.context.reversed) {
-        if (turn.role.name == 'user' && !turn.excludeFromContext) {
-          prompt = '${turn.content.toLowerCase()} $prompt';
-          break;
-        }
-      }
-    }
-    if (RegExp(
-      r'\b(codice|code|coding|programma|programming|debug|bug|'
-      r'flutter|dart|python|javascript|typescript|sql|'
-      r'compila|compile|repository|funzione|function|script)\b',
-      caseSensitive: false,
-    ).hasMatch(prompt)) {
-      return LocalConversationTask.coding;
-    }
-    if (RegExp(
-      r'\b(perch[eéè]|why|pourquoi|analizza|analyze|analyse|'
-      r'dimostra|prove|ragion|reason|logica|logic|'
-      r'confronta|compare|calcola|calculate|matematica|math)\b',
-      caseSensitive: false,
-    ).hasMatch(prompt)) {
-      return LocalConversationTask.reasoning;
-    }
-    return LocalConversationTask.general;
-  }
-}
-
-enum LocalConversationTask { general, reasoning, coding }
-,
+      r'e poi\??|e per (lui|lei)\??|et ensuite\??|go on|more)\s*[.!?]*$',
       caseSensitive: false,
     ).hasMatch(trimmed);
     if (followUp) {
@@ -299,7 +264,7 @@ class LocalSessionModelAffinity {
         ? 0
         : previous == null
             ? 99
-            : (previous.successfulTurnsSinceSwitch + 1).clamp(0, 99);
+            : (previous.successfulTurnsSinceSwitch + 1).clamp(0, 99).toInt();
     if (_sessions.length >= maxSessions) {
       _sessions.remove(_sessions.keys.first);
     }
