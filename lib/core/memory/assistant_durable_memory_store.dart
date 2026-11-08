@@ -517,19 +517,31 @@ class AssistantDurableMemoryStore {
       final next = records.toList(growable: true)..removeAt(index);
       if (AssistantConfirmedMemoryConflictResolver
           .isReviewedNamedCorrection(current)) {
-        // Forgetting the correction must never resurrect the obsolete fact.
-        // Remove that exact prior assertion in the same atomic owner lock.
-        final older = next.where((r) =>
-            r.status == AssistantMemoryStatus.confirmed &&
-            r.source == AssistantMemorySource.userExplicit &&
-            r.kind == AssistantMemoryKind.fact &&
-            r.scope == current.scope &&
-            r.scopeId == current.scopeId &&
-            r.updatedAt < current.updatedAt &&
-            r.content == current.before).toList();
-        if (older.length > 1) return false;
-        if (older.length == 1) {
-          next.remove(older.single);
+        // A correction can itself be the source of another correction.
+        // Forgetting only its immediate predecessor could resurrect an
+        // even older claim that the user already corrected. Traverse the
+        // entire uniquely linked history inside this *same* scope lock.
+        // Never merge equal names across different identities or scopes.
+        var cursor = current;
+        for (var depth = 0; depth < records.length; depth++) {
+          if (!AssistantConfirmedMemoryConflictResolver
+              .isReviewedNamedCorrection(cursor)) {
+            break;
+          }
+          final older = next.where((r) =>
+              r.status == AssistantMemoryStatus.confirmed &&
+              r.source == AssistantMemorySource.userExplicit &&
+              r.kind == AssistantMemoryKind.fact &&
+              r.scope == cursor.scope &&
+              r.scopeId == cursor.scopeId &&
+              r.updatedAt < cursor.updatedAt &&
+              r.content == cursor.before).toList(growable: false);
+          // The write below is all-or-nothing: ambiguous history must not
+          // trigger a partial delete or silently reinstate an old person.
+          if (older.length > 1) return false;
+          if (older.isEmpty) break;
+          cursor = older.single;
+          next.remove(cursor);
         }
       }
       await _write(reviewed.scope, reviewed.scopeId.trim(), next);
