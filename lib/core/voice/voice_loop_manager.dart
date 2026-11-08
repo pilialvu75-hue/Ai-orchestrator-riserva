@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/live_voice_latency.dart';
 import 'package:ai_orchestrator/core/voice/live_playback_drain.dart';
 import 'package:ai_orchestrator/core/voice/live_echo_guard.dart';
+import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
 ///
@@ -640,7 +641,21 @@ class VoiceLoopManager with RuntimeEventEmitter {
       // speak() may resolve as soon as PCM is queued; native playback can
       // still be audible on the ASUS when the next STT session starts.
       final drained = await const LivePlaybackDrain().waitUntilQuiet(
-        isPlaying: () => _engine.isSpeaking,
+        isPlaying: () async {
+          if (_androidMemoryHandoff &&
+              _engine is ReadAloudVoiceEngine) {
+            final readAloud = _engine as ReadAloudVoiceEngine;
+            if (readAloud.supportsRealReadAloudControls) {
+              final status = await readAloud.refreshReadAloud();
+              // Android 'complete' means generation/append finished, not
+              // actual playback finished. Compare native AudioTrack clock
+              // against buffered duration instead.
+              return status.active &&
+                  (status.playing || status.position < status.buffered);
+            }
+          }
+          return _engine.isSpeaking;
+        },
         isCancelled: () => _disposed || token.isCancelled || _stopRequested,
       );
       if (!drained && !_disposed && !token.isCancelled && !_stopRequested) {
