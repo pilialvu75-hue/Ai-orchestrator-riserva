@@ -79,7 +79,7 @@ void main() {
           HybridDisclosureSensitivity.unknown);
       expect(slices.last.text, contains('La bici attuale è quella nuova.'));
       expect(() => HybridCloudConfirmedMemoryProvenance.toDisclosureSegments(
-        source: verified, exactContext: verified.text + ' [hidden]',
+        source: verified, exactContext: '${verified.text} [hidden]',
       ), throwsStateError);
     });
 
@@ -104,7 +104,7 @@ void main() {
       );
       expect(data, isNotNull);
       final pieces = HybridCloudConfirmedMemoryProvenance.toDisclosureSegments(
-        source: data!, exactContext: data!.text,
+        source: data!, exactContext: data.text,
       );
       final storedParts = pieces.where((p) =>
           p.scope.origin == HybridDisclosureOrigin.durableMemory).toList();
@@ -314,7 +314,10 @@ void main() {
       );
       expect(local, isNotNull);
       expect(local, contains('Kader è alto.'));
-      expect(local, contains('Jerome è alto. -> Kader è alto.'));
+      expect(local, contains(
+        'superseded (NOT CURRENT): Jerome è alto.; '
+        'confirmed current: Kader è alto.',
+      ));
       expect(local,
           isNot(contains('\n- [fact; origin=userExplicit] Jerome è alto.')));
 
