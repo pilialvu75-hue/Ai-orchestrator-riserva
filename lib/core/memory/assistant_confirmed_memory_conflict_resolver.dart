@@ -12,28 +12,27 @@ abstract final class AssistantConfirmedMemoryConflictResolver {
       'owner_reviewed_entity_replacement:v1';
   static const String correctionKeyPrefix = 'reviewed.entity.correction.';
 
-  /// The most recent confirmed record with the same logical key wins, even
-  /// when it was stored in another scope. The conversation scope wins ties.
+  /// Logical record identity includes scope and scopeId: equal text keys in
+  /// another conversation or in global user memory are NOT identity proof.
+  /// Only duplicate versions of the same fully scoped key are deduplicated.
   ///
-  /// Two *different* keys are never merged solely because their wording,
-  /// predicates, aliases, or attributes look alike.
+  /// Two different keys are never merged merely because their wording,
+  /// predicates, aliases or attributes look alike.
   static List<AssistantDurableMemoryRecord> currentView({
     required List<AssistantDurableMemoryRecord> conversationRecords,
     required List<AssistantDurableMemoryRecord> userRecords,
   }) {
-    final byKey = <String, AssistantDurableMemoryRecord>{};
+    final byKey =
+        <(AssistantMemoryScope, String, String), AssistantDurableMemoryRecord>{};
     for (final record in <AssistantDurableMemoryRecord>[
       ...conversationRecords,
       ...userRecords,
     ]) {
       if (record.status != AssistantMemoryStatus.confirmed) continue;
-      final existing = byKey[record.recordKey];
-      if (existing == null ||
-          record.updatedAt > existing.updatedAt ||
-          (record.updatedAt == existing.updatedAt &&
-              record.scope == AssistantMemoryScope.conversation &&
-              existing.scope != AssistantMemoryScope.conversation)) {
-        byKey[record.recordKey] = record;
+      final scopedKey = (record.scope, record.scopeId, record.recordKey);
+      final existing = byKey[scopedKey];
+      if (existing == null || record.updatedAt > existing.updatedAt) {
+        byKey[scopedKey] = record;
       }
     }
 
