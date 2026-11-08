@@ -1591,3 +1591,44 @@ dettatura), #1033 (Voice 2.0) e #947 (cestino).
   Non distruggere dati del tester durante lo sviluppo.
 - Rispettare sezione 15: non peggiorare apertura chat,
   primo token, fluidita, memoria o qualita delle risposte.
+
+---
+
+## 19. AIVEXUS Security Lab — protezione dell'autonomia e dei dati (8 novembre 2026)
+
+### 19.1 — Scopo, collocazione e ordine delle priorita
+
+Creare un **progetto di sicurezza indipendente**, con repository dedicato quando disponibile, sviluppabile in parallelo a basso impatto e in futuro integrabile per moduli in `Ai-orchestrator-riserva`. La ricerca su tentativi di comunicazione esterna da parte di agenti/modelli open-weight e uno spunto per creare test riproducibili, **non prova di una backdoor in Qwen o in qualsiasi modello installato**.
+
+**Ordine vincolante:** prima inferenza LOCAL affidabile e stabilita (incluso S24 FE), poi Computer Use realmente autonomo; solo dopo integrazione progressiva dei controlli avanzati. La sperimentazione nel Security Lab non deve bloccare Cantiere, memoria evolutiva, HYBRID, voce o release periodiche. Il primo modulo autonomo utilizzabile resta priorita del Cantiere.
+
+**Principio di prodotto:** la sicurezza protegge l'autonomia, non la sostituisce con un'interfaccia piena di divieti e conferme. Non introdurre Main/Reviewer obbligatori o approvazioni per ogni azione ordinaria.
+
+### 19.2 — Confini e autorizzazioni, non divieto generalizzato
+
+- `LOCAL` = inferenza senza provider IA esterni/Cloud; **non** equivale a modalita aereo. Rete e strumenti locali/remoti rimangono disponibili se autorizzati. `HYBRID` e `CLOUD` mantengono i consensi distinti (vedere #977 e sezione 16).
+- Separare **pesi del modello**, runtime di inferenza, orchestratore, strumenti, browser/Computer Use, sistema operativo e provider Cloud: un modello senza strumenti abilitati non deve poter effettuare direttamente richieste HTTP, leggere file arbitrari o eseguire comandi. Le azioni passano attraverso broker di capacita verificabili.
+- Introdurre policy granulari e persistenti per **proprietario/progetto/sessione/strumento/destinazione e tipo di dato**: ad esempio consultazione web, fetch di dipendenze, git push, API di progetto, trasferimento di file, memoria privata. Consenso revocabile, scadenza e minimo privilegio.
+- **Nessuna richiesta continua di conferma**: attivita ordinarie previste dai permessi gia concessi procedono autonomamente (ricerca web, commit, build, debug, correzione, sync esplicitamente configurata). Chiedere autorizzazione solo per ampliamento reale dei privilegi, nuove destinazioni sensibili o trasmissione di segreti/dati privati non coperta.
+- Mai permettere al modello di auto-concedersi permessi, ampliare una allowlist o disattivare le regole di esfiltrazione. Prompt, file recuperati, output web e log sono dati non attendibili, non istruzioni di sicurezza.
+- Operazioni ad alto rischio (credenziali, chat/memoria privata, documenti personali, cancellazioni irreversibili, installazione/esecuzione arbitraria, condivisione cross-account) richiedono policy/consenso dedicato; rispettare isolamento owner (#913/#915), cifratura e revoche (#911).
+- **Predefiniti proporzionati**: audit non intrusivo dove sufficiente; blocco deterministico per trasferimenti non autorizzati di dati protetti; non bloccare l'inferenza o la normale risposta per indisponibilita del componente di monitoraggio. Quando e necessaria una destinazione autorizzata ma temporaneamente irraggiungibile, usare retry/backoff e ripresa, non bloccare l'intero agente.
+
+### 19.3 — Security Lab multipiattaforma (backlog successivo al Computer Use)
+
+1. **Inventario superfici e mappa dei dati:** chat, memoria evolutiva, RAG, repository, tool call, file, credenziali, comunicazioni tra dispositivi; identificare quali flussi sono locali e quali possono attraversare la rete.
+2. **Osservabilita prima dei blocchi:** log tecnici minimizzati di tentativi di connessione, destinazione, processo/strumento, permesso valutato e azione consentita/negata, senza registrare payload, prompt, token o segreti; integrazione Diagnostics con consenso e senza dati personali su repository pubblici.
+3. **Broker strumenti + controllo uscita dati:** autorizzazioni persistenti e revocabili, dominio/endpoint quando applicabile, separazione network del runtime, redazione di segreti. Supportare l'esecuzione autonoma delle catene di strumenti gia approvate. Sandbox/OS firewall solo dove tecnicamente compatibile; non promettere isolamento equivalente su tutte le piattaforme.
+4. **Test adversarial isolati:** modelli locali e Cloud in ambienti simulati con dati sintetici e endpoint controllati; prompt injection, tool-output injection, tentativi di esfiltrazione, escalation di permessi, condivisione impropria di memorie, cross-device, falsi positivi.
+5. **Portabilita:** nucleo di policy condiviso su Android, Windows, macOS, Linux e Web, con adattatori specifici per le capacita del sistema operativo. Web ha limiti di sandbox/browser diversi; funzioni non disponibili vanno dichiarate, non simulate.
+6. **Integrazione graduale:** prima audit-only e test CI; poi controlli deterministici sui dati protetti; infine opzioni avanzate configurabili. Nessuna attivazione silenziosa o modifica ai consensi Cloud esistenti.
+
+### 19.4 — Gate: autonomia e prestazioni prima di tutto
+
+- **Autonomia:** una richiesta autorizzata che usa ricerca, build, esecuzione, GitHub e self-repair deve completarsi senza prompt ripetuti; un tentativo di esfiltrazione sintetico verso destinazione non approvata deve essere fermato e spiegato.
+- **Prestazioni:** confrontare baseline prima/dopo su tempo primo token, latenza strumenti, CPU, RAM, batteria, crash/LOW_MEMORY su S24 FE; nessuna regressione significativa non misurata e accettata. Il monitor deve essere leggero, disattivabile nelle parti facoltative, senza disattivare l'isolamento dei dati privati.
+- **Fedelta modale:** LOCAL inferisce senza Cloud; HYBRID chiede consenso quando invia memoria privata; rifiutare non impedisce di lavorare senza invio; sincronizzazione autorizzata indipendente dal consenso per LLM Cloud.
+- **Prove reali:** CI multipiattaforma + collaudi fisici mirati dopo ogni beta; PASS CI non equivale a sicurezza dimostrata su Windows/Android/macOS/Linux/Web.
+- **Consegna:** roadmap e prototipi nel progetto indipendente; integrazione nel prodotto solo dopo misure, test di regressione e valutazione dell'impatto su Cantiere/Computer Use.
+
+Riferimenti: sezioni 11, 15, 16, 17 e 18; issue #911, #913, #915. Progetto di sicurezza **pianificato, non ancora dichiarato implementato o collaudato**.
