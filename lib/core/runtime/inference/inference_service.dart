@@ -1251,7 +1251,9 @@ class InferenceService {
       localRequest: initialLocalRequest,
       cancellationToken: cancellationToken,
     )) {
-      if (chunk.text.trim().isNotEmpty) emittedContent = true;
+      // Even a whitespace chunk is already an emitted token: never replay
+      // the same turn through a second model after any model output.
+      if (chunk.text.isNotEmpty) emittedContent = true;
       if (chunk.runtimeNotice?.trim().isNotEmpty == true) {
         // A notice may be an externally observable tool action. Never rerun
         // an already started tool sequence through a second model.
