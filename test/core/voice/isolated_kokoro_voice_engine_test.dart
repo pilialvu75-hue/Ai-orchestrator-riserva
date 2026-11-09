@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/core/voice/isolated_kokoro_voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
+import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 
 void main() {
   const assets = <String, String>{
@@ -13,6 +14,56 @@ void main() {
     'tokens': '/test/tokens.txt',
     'data': '/test/espeak-ng-data',
   };
+
+
+  test('Live multi-chunk output stays in one native PCM timeline', () async {
+    final sink = _FakeReadAloudSink();
+    final engine = IsolatedKokoroVoiceEngine(
+      delegate: _FakeVoiceEngine(),
+      assetsProvider: () async => assets,
+      languageCode: () => 'it',
+      audioSink: sink,
+      generationRunner: (_) async => KokoroTtsGeneratedAudio(
+        samples: Float32List.fromList(<double>[0.1, -0.1]),
+        sampleRate: 24000,
+      ),
+    );
+    engine.beginLiveSpeechSequence();
+    await engine.speak('Prima frase.');
+    await engine.speak('Seconda frase.');
+    expect(sink.beginCount, 1, reason: 'Live must not erase previous PCM');
+    expect(sink.pushCount, 2);
+    expect(sink.finishCount, 0, reason: 'Only the final Live chunk finishes');
+    await engine.endLiveSpeechSequence(completed: true);
+    expect(sink.finishCount, 1);
+    await engine.speak('Lettura di un normale messaggio.');
+    expect(sink.beginCount, 2, reason: 'Normal read-aloud starts fresh');
+    expect(sink.finishCount, 2);
+    await engine.dispose();
+  });
+
+  test('aborted Live output stops native PCM and keeps next replay clean',
+      () async {
+    final sink = _FakeReadAloudSink();
+    final engine = IsolatedKokoroVoiceEngine(
+      delegate: _FakeVoiceEngine(),
+      assetsProvider: () async => assets,
+      audioSink: sink,
+      generationRunner: (_) async => KokoroTtsGeneratedAudio(
+        samples: Float32List.fromList(<double>[0.2]),
+        sampleRate: 24000,
+      ),
+    );
+    engine.beginLiveSpeechSequence();
+    await engine.speak('Risposta interrotta.');
+    await engine.endLiveSpeechSequence(completed: false);
+    expect(sink.stopCount, 1);
+    expect(sink.finishCount, 0);
+    await engine.speak('Nuova lettura normale.');
+    expect(sink.beginCount, 2);
+    expect(sink.finishCount, 1);
+    await engine.dispose();
+  });
 
   test('plays the first phrase before the next synthesis finishes', () async {
     final sink = _FakeTtsAudioSink();
@@ -385,3 +436,38 @@ final class _FakeTtsAudioSink implements TtsAudioSink {
   }
 }
 
+
+
+final class _FakeReadAloudSink implements TtsAudioSink, ReadAloudSink {
+  int beginCount = 0;
+  int finishCount = 0;
+  int stopCount = 0;
+  int pushCount = 0;
+
+  @override
+  bool get isPlaying => false;
+  @override
+  ReadAloudSnapshot get snapshot => const ReadAloudSnapshot(supported: true);
+  @override
+  Future<void> beginReadAloud() async { beginCount++; }
+  @override
+  Future<void> finishReadAloud() async { finishCount++; }
+  @override
+  Future<void> stopReadAloud() async { stopCount++; }
+  @override
+  Future<ReadAloudSnapshot> refreshReadAloud() async => snapshot;
+  @override
+  Future<void> pauseReadAloud() async {}
+  @override
+  Future<void> resumeReadAloud() async {}
+  @override
+  Future<void> seekReadAloud(Duration position) async {}
+  @override
+  Future<void> skipReadAloud(Duration offset) async {}
+  @override
+  void push(Float32List samples, int sampleRate) { pushCount++; }
+  @override
+  void stop() { stopCount++; }
+  @override
+  void dispose() {}
+}
