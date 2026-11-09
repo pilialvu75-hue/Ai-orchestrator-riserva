@@ -16,6 +16,48 @@ void main() {
   };
 
 
+  test('Live Stop mid-synthesis discards old PCM and allows fresh replay',
+      () async {
+    final sink = _FakeReadAloudSink();
+    final started = Completer<void>();
+    final pending = Completer<KokoroTtsGeneratedAudio>();
+    var calls = 0;
+    final engine = IsolatedKokoroVoiceEngine(
+      delegate: _FakeVoiceEngine(),
+      assetsProvider: () async => assets,
+      audioSink: sink,
+      generationRunner: (_) {
+        calls++;
+        if (calls == 1) {
+          started.complete();
+          return pending.future;
+        }
+        return Future.value(KokoroTtsGeneratedAudio(
+          samples: Float32List.fromList(<double>[0.3]),
+          sampleRate: 24000,
+        ));
+      },
+    );
+    engine.beginLiveSpeechSequence();
+    final speaking = engine.speak('Primo testo in sintesi.');
+    await started.future;
+    await engine.stopSpeaking();
+    pending.complete(KokoroTtsGeneratedAudio(
+      samples: Float32List.fromList(<double>[0.9]),
+      sampleRate: 24000,
+    ));
+    await speaking;
+    await engine.endLiveSpeechSequence(completed: false);
+    expect(sink.pushCount, 0, reason: 'Stale Live PCM must be discarded');
+    expect(sink.stopCount, 1);
+    expect(sink.finishCount, 0);
+    await engine.speak('Seconda lettura.');
+    expect(sink.beginCount, 2);
+    expect(sink.pushCount, 1);
+    expect(sink.finishCount, 1);
+    await engine.dispose();
+  });
+
   test('Live multi-chunk output stays in one native PCM timeline', () async {
     final sink = _FakeReadAloudSink();
     final engine = IsolatedKokoroVoiceEngine(
