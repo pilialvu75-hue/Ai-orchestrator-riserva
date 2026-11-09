@@ -53,8 +53,8 @@ class LiveVoicePhaseTimeline {
     final result = LiveVoicePhaseTiming(
       previous: previous,
       current: next,
-      stageMs: (now - _phaseStartedAtMs).clamp(0, 1 << 30),
-      totalMs: (now - _startedAtMs).clamp(0, 1 << 30),
+      stageMs: now < _phaseStartedAtMs ? 0 : now - _phaseStartedAtMs,
+      totalMs: now < _startedAtMs ? 0 : now - _startedAtMs,
     );
     _phase = next;
     _phaseStartedAtMs = now;
