@@ -36,6 +36,7 @@ jobs:
         run: |
           flutter create --platforms android --project-name aivexus_module_smoke "$RUNNER_TEMP/flutter-smoke"
           cp cantiere/ci/fixtures/cantiere_generated_library_flutter_main.dart.txt "$RUNNER_TEMP/flutter-smoke/lib/main.dart"
+          rm "$RUNNER_TEMP/flutter-smoke/test/widget_test.dart"
           python3 - <<'PY'
           import os
           from pathlib import Path
