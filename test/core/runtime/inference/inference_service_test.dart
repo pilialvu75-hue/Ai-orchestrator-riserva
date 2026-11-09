@@ -453,6 +453,9 @@ void main() {
     final messages = RuntimeEventLog.instance.entries.map((x) => x.message);
     expect(messages.any((x) => x.startsWith('[LOCAL_AFFINITY_COMMIT]')), false);
     expect(messages.any((x) => x.startsWith('[LOCAL_MODEL_USED]')), false);
+    expect(messages.any((x) => x.startsWith('[INFERENCE_TIMING]') &&
+        x.contains('outcome=error')), true);
+    expect(messages.any((x) => x.startsWith('[INFERENCE_LAST_TOKEN]')), false);
   });
 
   test('LOCAL AUTO two startup failures emit one terminal error, '
