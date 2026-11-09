@@ -152,6 +152,24 @@ class VoiceLoopManager with RuntimeEventEmitter {
         onError?.call(message);
       }
     } finally {
+      // A cancelled/empty Live turn may never reach the normal Android
+      // STT -> LLM handoff. Release its native recognizer on every exit,
+      // *after* the turn has unwound, before a typed chat request can start.
+      // A false result can mean ASR was already released during inference.
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        final recognizer = _engine;
+        if (recognizer is VoiceRecognitionMemoryReclaimer) {
+          try {
+            final freed = await (recognizer as VoiceRecognitionMemoryReclaimer)
+                .releaseRecognitionMemoryForInference();
+            logEvent(_tag, '[LIVE_END_ASR_RELEASE] released=$freed');
+          } catch (error) {
+            logEvent(_tag,
+                '[LIVE_END_ASR_RELEASE_WARN] type=${error.runtimeType}');
+          }
+        }
+      }
+
       if (identical(
         _activeCancellation,
         cancellation,
