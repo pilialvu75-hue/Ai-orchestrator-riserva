@@ -900,6 +900,111 @@ void main() {
       expect(await pending(), isEmpty);
     });
 
+    test('LOCAL chat stages reviewed named correction without auto-confirm',
+        () async {
+      final fixture = await createService(const <String, Object>{});
+      final prefs = await SharedPreferences.getInstance();
+      final peopleConsent = AssistantRelationalMemoryConsentService(
+        preferences: prefs,
+      );
+      final memory = AssistantDurableMemoryService(
+        store: AssistantDurableMemoryStore(
+          persistence: _PromptMemoryPersistence(),
+        ),
+      );
+      var clock = 600;
+      final capture = AssistantDurableMemoryCaptureService(
+        memoryService: memory,
+        now: () => ++clock,
+      );
+      final context = AssistantDurableMemoryContextService(
+        memoryService: memory,
+      );
+      final delegate = _RecordingChatRepository();
+      final repo = PromptResolvingChatRepository(
+        runtimeMode: () => AiRuntimeMode.local,
+        delegate: delegate,
+        systemPromptService: fixture.service,
+        durableMemoryContextService: context,
+        durableMemoryCaptureService: capture,
+        relationalMemoryConsentService: peopleConsent,
+      );
+
+      expect(peopleConsent.enabled, isFalse);
+      await peopleConsent.setEnabled(true);
+      await repo.sendMessage(
+        sessionId: 'first',
+        userPrompt: 'Luca è alto.',
+      );
+      final oldCandidate =
+          (await capture.loadReviewableManualEntityReferenceCandidates())
+              .single;
+      expect(await capture.reviewManualEntityReferenceCandidate(
+        reviewed: oldCandidate,
+        approve: true,
+        userConfirmed: true,
+      ), isTrue);
+
+      await peopleConsent.setEnabled(false);
+      await repo.sendMessage(
+        sessionId: 'first',
+        userPrompt: 'Non Luca, Nino è alto.',
+      );
+      expect(await capture.loadReviewableNamedRelationCorrectionCandidates(),
+          isEmpty);
+
+      await peopleConsent.setEnabled(true);
+      await repo.sendMessage(
+        sessionId: 'specialized',
+        userPrompt: 'Non Luca, Nino è alto.',
+        systemPrompt: 'Specialized worker prompt.',
+      );
+      await repo.sendMessage(
+        sessionId: 'attachment',
+        userPrompt: 'Non Luca, Nino è alto.',
+        attachments: const <ChatAttachment>[
+          ChatAttachment(
+            id: 'file', type: ChatAttachmentType.file,
+            path: 'local:/test.txt', name: 'test.txt',
+          ),
+        ],
+      );
+      expect(await capture.loadReviewableNamedRelationCorrectionCandidates(),
+          isEmpty);
+
+      await repo.sendMessage(
+        sessionId: 'first',
+        userPrompt: 'Non Luca, Nino è alto.',
+      );
+      final corrections =
+          await capture.loadReviewableNamedRelationCorrectionCandidates();
+      expect(corrections, hasLength(1));
+      expect(corrections.single.content, 'Non Luca, Nino è alto.');
+      expect(corrections.single.before, 'Luca è alto.');
+      expect(delegate.lastSystemPrompt, contains('write in Italian'));
+      expect(await context.buildConfirmedContext(
+        sessionId: 'other-chat',
+        userPrompt: 'Che cosa sai di Nino?',
+      ), isNot(contains('Nino è alto.')));
+
+      expect(await capture.reviewNamedRelationCorrectionCandidate(
+        reviewed: corrections.single,
+        approve: true,
+        userConfirmed: true,
+      ), isTrue);
+      expect(await capture.loadReviewableNamedRelationCorrectionCandidates(),
+          isEmpty);
+
+      final recalled = await context.buildConfirmedContext(
+        sessionId: 'other-chat',
+        userPrompt: 'Di Luca e Nino chi è alto?',
+      );
+      expect(recalled, contains('Nino è alto.'));
+      expect(recalled, contains('superseded (NOT CURRENT): Luca è alto.'));
+      expect(recalled, isNot(contains(
+          '\\n- [fact; origin=userExplicit] Luca è alto.')));
+    });
+
     test('named colleague staging rejects attachments and specialized workers',
         () async {
       final fixture = await createService(const <String, Object>{});
