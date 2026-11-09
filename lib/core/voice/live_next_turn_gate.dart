@@ -17,15 +17,14 @@ final class LiveNextTurnGate {
     if (existing != null) return existing.future;
     final pending = Completer<void>();
     _pending = pending;
-    return pending.future.whenComplete(() {
-      if (identical(_pending, pending)) _pending = null;
-    });
+    return pending.future;
   }
 
   bool requestNextTurn() {
     if (_closed) return false;
     final pending = _pending;
     if (pending == null || pending.isCompleted) return false;
+    _pending = null;
     pending.complete();
     return true;
   }
@@ -35,6 +34,7 @@ final class LiveNextTurnGate {
     if (_closed) return;
     _closed = true;
     final pending = _pending;
+    _pending = null;
     if (pending != null && !pending.isCompleted) pending.complete();
   }
 }
