@@ -193,14 +193,26 @@ class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryAct
         relationalConsent != null &&
         relationalConsent.enabled) {
       try {
-        await _durableMemoryCaptureService
-            .proposeManualEntityReferenceCandidate(
+        // Corrections must reach the guarded review-only pipeline before
+        // ordinary named-person statements. Neither path auto-confirms.
+        final correctionProposed = await _durableMemoryCaptureService
+            .proposeNamedRelationCorrectionCandidate(
           sessionId: sessionId,
           userPrompt: userPrompt,
           consentEnabled: true,
           directUserMessage: true,
           consentStillEnabled: () => relationalConsent.enabled,
         );
+        if (!correctionProposed) {
+          await _durableMemoryCaptureService
+              .proposeManualEntityReferenceCandidate(
+            sessionId: sessionId,
+            userPrompt: userPrompt,
+            consentEnabled: true,
+            directUserMessage: true,
+            consentStillEnabled: () => relationalConsent.enabled,
+          );
+        }
       } catch (_) {
         onRuntimeNotice?.call(
           'Non è stato possibile aggiungere la proposta relazionale locale.',
