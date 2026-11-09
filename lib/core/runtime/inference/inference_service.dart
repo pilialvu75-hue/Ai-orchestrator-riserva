@@ -1244,6 +1244,7 @@ class InferenceService {
     InferenceResponse? originalFailure;
     var emittedContent = false;
     var completedNormally = false;
+    var emittedNotice = false;
     await for (final chunk in _streamWithRetryAndGuards(
       runtimeMode: AiRuntimeMode.local,
       cloudRequest: cloudRequest,
@@ -1251,6 +1252,11 @@ class InferenceService {
       cancellationToken: cancellationToken,
     )) {
       if (chunk.text.trim().isNotEmpty) emittedContent = true;
+      if (chunk.runtimeNotice?.trim().isNotEmpty == true) {
+        // A notice may be an externally observable tool action. Never rerun
+        // an already started tool sequence through a second model.
+        emittedNotice = true;
+      }
       if (chunk.isFinal && !chunk.isError) completedNormally = true;
       if (chunk.isError && !emittedContent && !completedNormally) {
         originalFailure ??= chunk;
@@ -1261,6 +1267,7 @@ class InferenceService {
 
     if (originalFailure == null || completedNormally) return;
     if (emittedContent ||
+        emittedNotice ||
         cancellationToken.isCancelled ||
         !_isRecoverableLocalStartupFailure(originalFailure)) {
       _log('[LOCAL_AUTO_RECOVERY] result=skipped reason=unsafe_or_ineligible');
