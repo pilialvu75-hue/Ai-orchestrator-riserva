@@ -31,6 +31,7 @@ class InferenceService {
   bool _runtimeLookupInProgress = false;
   String? _lastCompletedAssistantLocalModelId;
   final LocalSessionModelAffinity _localAffinity = LocalSessionModelAffinity();
+  final Future<ResourceSample?> Function() _sampleResources;
 
   InferenceService({
     required Future<AiModel?> Function() loadSelectedModel,
@@ -40,6 +41,7 @@ class InferenceService {
     required LocalRuntimeProvider runtimeProvider,
     required CloudRuntimeProvider cloudRuntimeProvider,
     required RuntimeSessionManager sessionManager,
+    Future<ResourceSample?> Function()? sampleResources,
     Tool? webSearchTool,
   })  : _loadSelectedModel = loadSelectedModel,
         _loadRuntimeMode = loadRuntimeMode,
@@ -48,6 +50,7 @@ class InferenceService {
         _runtimeProvider = runtimeProvider,
         _cloudRuntimeProvider = cloudRuntimeProvider,
         _sessionManager = sessionManager,
+        _sampleResources = sampleResources ?? ResourceMonitor.instance.sample,
         _webSearchTool = webSearchTool;
 
   final Future<AiModel?> Function() _loadSelectedModel;
@@ -200,6 +203,7 @@ class InferenceService {
        */
       var selectedModel = await _resolveModelForRequest(isolatedRequest);
       var trackLocalAutoAffinity = false;
+      List<AiModel> autoLocalModels = const <AiModel>[];
 
       // AUTO is only allowed at the ordinary Assistant boundary. Explicit
       // Workshop model identities remain immutable, including in HYBRID.
@@ -212,12 +216,13 @@ class InferenceService {
         if (selectionMode == LocalModelSelectionMode.automatic) {
           try {
             final models = await _loadAvailableLocalModels();
+            autoLocalModels = models;
             ResourceSample? resources;
             final android = !kIsWeb &&
                 defaultTargetPlatform == TargetPlatform.android;
             if (android) {
               try {
-                resources = await ResourceMonitor.instance.sample();
+                resources = await _sampleResources();
               } catch (_) {
                 // Missing telemetry is unknown, never interpreted as safe.
               }
@@ -312,14 +317,32 @@ class InferenceService {
 
       _runtimeLookupInProgress = false;
 
-      await for (final chunk in _streamWithRetryAndGuards(
-        runtimeMode: runtimeMode,
-        cloudRequest: isolatedRequest,
-        localRequest: localRequest,
-        cancellationToken: session.cancellationToken,
-      )) {
+      // Recovery is restricted to ordinary Assistant LOCAL AUTO. MANUAL,
+      // Workshop explicit models and HYBRID keep their original routing.
+      final TokenStream routedStream;
+      if (trackLocalAutoAffinity &&
+          localRequest != null &&
+          selectedModel != null) {
+        routedStream = _streamLocalAutoWithRecovery(
+          cloudRequest: isolatedRequest,
+          initialLocalRequest: localRequest,
+          initialModel: selectedModel,
+          availableModels: autoLocalModels,
+          cancellationToken: session.cancellationToken,
+          onFallbackSelected: (model) => selectedModel = model,
+        );
+      } else {
+        routedStream = _streamWithRetryAndGuards(
+          runtimeMode: runtimeMode,
+          cloudRequest: isolatedRequest,
+          localRequest: localRequest,
+          cancellationToken: session.cancellationToken,
+        );
+      }
+      await for (final chunk in routedStream) {
         if (trackLocalAutoAffinity &&
             chunk.isFinal &&
+            chunk.terminalState == InferenceTerminalState.success &&
             !chunk.isError &&
             !session.cancellationToken.isCancelled &&
             localRequest != null &&
@@ -328,11 +351,11 @@ class InferenceService {
           // Prefer the runtime-reported identity; do not promote an
           // unexpected model or an unverified Cloud fallback to affinity.
           if (actual == null ||
-              actual == selectedModel.effectiveRuntimeModelId ||
-              actual == selectedModel.id) {
+              actual == selectedModel!.effectiveRuntimeModelId ||
+              actual == selectedModel!.id) {
             _localAffinity.recordSuccess(
-                isolatedRequest.sessionId, selectedModel.id);
-            _log('[LOCAL_AFFINITY_COMMIT] model=${selectedModel.id} '
+                isolatedRequest.sessionId, selectedModel!.id);
+            _log('[LOCAL_AFFINITY_COMMIT] model=${selectedModel!.id} '
                 'turns_since_switch=${_localAffinity.get(isolatedRequest.sessionId)?.successfulTurnsSinceSwitch ?? -1}');
           }
         }
@@ -1208,6 +1231,173 @@ class InferenceService {
     }
   }
 
+
+  /// One pre-first-content LOCAL AUTO alternative, never a Cloud dispatch.
+  /// The failed runtime is drained before a different GGUF is considered.
+  TokenStream _streamLocalAutoWithRecovery({
+    required InferenceRequest cloudRequest,
+    required InferenceRequest initialLocalRequest,
+    required AiModel initialModel,
+    required List<AiModel> availableModels,
+    required CancellationToken cancellationToken,
+    required void Function(AiModel) onFallbackSelected,
+  }) async* {
+    InferenceResponse? originalFailure;
+    var emittedContent = false;
+    var completedNormally = false;
+    var emittedNotice = false;
+    await for (final chunk in _streamWithRetryAndGuards(
+      runtimeMode: AiRuntimeMode.local,
+      cloudRequest: cloudRequest,
+      localRequest: initialLocalRequest,
+      cancellationToken: cancellationToken,
+    )) {
+      // Even a whitespace chunk is already an emitted token: never replay
+      // the same turn through a second model after any model output.
+      if (chunk.text.isNotEmpty) emittedContent = true;
+      if (chunk.runtimeNotice?.trim().isNotEmpty == true) {
+        // A notice may be an externally observable tool action. Never rerun
+        // an already started tool sequence through a second model.
+        emittedNotice = true;
+      }
+      if (chunk.isFinal &&
+          !chunk.isError &&
+          chunk.terminalState == InferenceTerminalState.success) {
+        completedNormally = true;
+      }
+      if (chunk.isError && !emittedContent && !completedNormally) {
+        originalFailure ??= chunk;
+        continue;
+      }
+      yield chunk;
+    }
+
+    if (originalFailure == null || completedNormally) return;
+    if (emittedContent ||
+        emittedNotice ||
+        cancellationToken.isCancelled ||
+        !_isRecoverableLocalStartupFailure(originalFailure)) {
+      _log('[LOCAL_AUTO_RECOVERY] result=skipped reason=unsafe_or_ineligible');
+      yield originalFailure;
+      return;
+    }
+
+    final android = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android;
+    ResourceSample? resources;
+    if (android) {
+      try {
+        resources = await _sampleResources();
+      } catch (_) {
+        // Unknown RAM telemetry cannot authorize a second GGUF.
+      }
+      if (resources == null || resources.pressured ||
+          cancellationToken.isCancelled) {
+        _log('[LOCAL_AUTO_RECOVERY] result=skipped reason=ram_or_cancel');
+        yield originalFailure;
+        return;
+      }
+    }
+
+    final runtimeState =
+        _runtimeProvider.lifecycleRuntimeStateName.toLowerCase();
+    if (runtimeState.contains('unload') ||
+        runtimeState.contains('load') ||
+        runtimeState.contains('dispos') ||
+        runtimeState.contains('poison') ||
+        runtimeState.contains('unsafe') ||
+        runtimeState == 'tokenizing' ||
+        runtimeState == 'inferencing' ||
+        runtimeState == 'streaming' ||
+        runtimeState == 'stalled' ||
+        runtimeState == 'timedOut') {
+      _log('[LOCAL_AUTO_RECOVERY] result=skipped reason=runtime_transition');
+      yield originalFailure;
+      return;
+    }
+
+    // Only already validated models, excluding failed aliases of the same
+    // path. The normal router enforces device RAM and runtime compatibility.
+    final alternatives = availableModels.where((model) =>
+        model.id != initialModel.id &&
+        model.localPath != initialModel.localPath);
+    final alternative = const LocalModelOrchestrator().decide(
+      request: cloudRequest,
+      availableModels: alternatives,
+      preferredModel: null,
+      supportsModel: _runtimeProvider.supportsModel,
+      resources: resources,
+      isAndroid: android,
+    ).model;
+    if (alternative == null || cancellationToken.isCancelled) {
+      _log('[LOCAL_AUTO_RECOVERY] result=skipped reason=no_safe_alternative');
+      yield originalFailure;
+      return;
+    }
+
+    final retryRequest = _buildLocalRequest(cloudRequest, alternative);
+    if (retryRequest == null) {
+      yield originalFailure;
+      return;
+    }
+    onFallbackSelected(alternative);
+    _log('[LOCAL_AUTO_RECOVERY] result=retry phase=pre_first_token '
+        'from=${initialModel.id} to=${alternative.id}');
+
+    var secondTerminal = false;
+    await for (final chunk in _streamWithRetryAndGuards(
+      runtimeMode: AiRuntimeMode.local,
+      cloudRequest: cloudRequest,
+      localRequest: retryRequest,
+      cancellationToken: cancellationToken,
+    )) {
+      if (chunk.isFinal) secondTerminal = true;
+      yield chunk;
+    }
+    if (!secondTerminal && !cancellationToken.isCancelled) {
+      yield InferenceResponse.error('Local recovery ended without a response.');
+    }
+  }
+
+  /// Startup failures only: permission, policy, cancellation and OOM are not
+  /// routing signals and never authorize an implicit model switch.
+  bool _isRecoverableLocalStartupFailure(InferenceResponse failure) {
+    if (!failure.isError || failure.errorCode != null) return false;
+    if (failure.terminalState != InferenceTerminalState.failed &&
+        failure.terminalState != InferenceTerminalState.modelUnavailable) {
+      return false;
+    }
+    final reason = (failure.errorMessage ?? '').toLowerCase();
+    if (reason.isEmpty ||
+        <String>[
+          'memory', 'oom', 'low_memory', 'insufficiente', 'out of',
+          'cancel', 'permission', 'denied', 'consent', 'unauthoriz',
+          'forbidden', 'tool', 'invalid', 'unsafe', 'shutdown',
+          'context length', 'timeout', 'quota', 'safety',
+        ].any(reason.contains)) {
+      return false;
+    }
+    return <String>[
+      'model unavailable',
+      'model file not found',
+      // Real Android FFI startup errors are serialized by
+      // RuntimeStageException as AI_RUNTIME_ERROR|stage=session_create|...
+      'stage=session_create|message=session create failed.',
+      'stage=session_create|message=failed to create runtime session.',
+      'native session creation failed',
+      'native session inactive after create',
+      'failed to load model',
+      'model load failed',
+      'gguf load failed',
+      'failed to initialize',
+      'initialization failed',
+      'runtime unavailable',
+      'runtime startup failed',
+      'backend failed to start',
+      'process exited',
+    ].any(reason.contains);
+  }
+
   TokenStream _streamWithRetryAndGuards({
     required AiRuntimeMode runtimeMode,
     required InferenceRequest cloudRequest,
@@ -1310,7 +1500,8 @@ class InferenceService {
         }
 
         if (chunk.isFinal &&
-            !chunk.isError) {
+            !chunk.isError &&
+            chunk.terminalState == InferenceTerminalState.success) {
           _log(
             '[INFERENCE_LAST_TOKEN] '
             'session=${cloudRequest.sessionId} '
@@ -1335,11 +1526,12 @@ class InferenceService {
               'attempt=$attempt first_content_ms=${firstContentMs ?? -1} '
               'total_ms=${attemptClock.elapsedMilliseconds} '
               'reported_tokens=${chunk.tokensGenerated} text_chunks=$streamedChunkCount '
-              'outcome=${chunk.isError ? 'error' : 'success'}');
+              'outcome=${!chunk.isError && chunk.terminalState == InferenceTerminalState.success ? 'success' : 'error'}');
           // Completion is the only reliable boundary for asserting which
           // model actually answered. This intentionally excludes explicit
           // Workshop model identities and any failed LOCAL attempt.
           if (!chunk.isError &&
+              chunk.terminalState == InferenceTerminalState.success &&
               runtimeMode == AiRuntimeMode.local &&
               cloudRequest.modelId == null &&
               cloudRequest.modelPath == null &&
