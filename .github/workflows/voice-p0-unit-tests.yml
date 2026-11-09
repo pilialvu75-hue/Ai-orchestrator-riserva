@@ -6,7 +6,10 @@ on:
     paths:
       - 'lib/core/voice/voice_loop_manager.dart'
       - 'lib/core/voice/live_playback_drain.dart'
+      - 'lib/core/voice/live_next_turn_gate.dart'
+      - 'lib/presentation/chat/components/live_voice_overlay.dart'
       - 'test/core/voice/live_playback_drain_test.dart'
+      - 'test/core/voice/live_next_turn_gate_test.dart'
       - '.github/workflows/voice-p0-unit-tests.yml'
   workflow_dispatch:
 
@@ -55,7 +58,11 @@ jobs:
           flutter analyze
           lib/core/voice/voice_loop_manager.dart
           lib/core/voice/live_playback_drain.dart
+          lib/core/voice/live_next_turn_gate.dart
+          lib/presentation/chat/components/live_voice_overlay.dart
           test/core/voice/live_playback_drain_test.dart
+          test/core/voice/live_next_turn_gate_test.dart
+          test/core/voice/live_next_turn_gate_test.dart
       - name: Test Live playback drain safety
         run: >-
           flutter test --reporter expanded
