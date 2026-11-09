@@ -1356,8 +1356,9 @@ class InferenceService {
     final reason = (failure.errorMessage ?? '').toLowerCase();
     if (reason.isEmpty ||
         <String>[
-          'memory', 'oom', 'cancel', 'permission', 'consent',
-          'unauthoriz', 'forbidden', 'tool', 'invalid',
+          'memory', 'oom', 'low_memory', 'insufficiente', 'out of',
+          'cancel', 'permission', 'denied', 'consent', 'unauthoriz',
+          'forbidden', 'tool', 'invalid', 'unsafe', 'shutdown',
           'context length', 'timeout', 'quota', 'safety',
         ].any(reason.contains)) {
       return false;
@@ -1365,6 +1366,12 @@ class InferenceService {
     return <String>[
       'model unavailable',
       'model file not found',
+      // Real Android FFI startup errors are serialized by
+      // RuntimeStageException as AI_RUNTIME_ERROR|stage=session_create|...
+      'stage=session_create|message=session create failed.',
+      'stage=session_create|message=failed to create runtime session.',
+      'native session creation failed',
+      'native session inactive after create',
       'failed to load model',
       'model load failed',
       'gguf load failed',
