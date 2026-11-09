@@ -379,6 +379,38 @@ void main() {
     expect(replies.where((x) => x.isError), hasLength(1));
   });
 
+  test('LOCAL AUTO treats whitespace output as first token and never replays',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+    );
+    var loads = 0;
+    final service = buildService(
+      mode: AiRuntimeMode.local, selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (_, __) async* {
+          loads++;
+          yield InferenceResponse.token(text: ' ');
+          yield InferenceResponse.error('Failed to load model');
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final output = await service.stream(const InferenceRequest(
+      sessionId: 'whitespace-first-token', prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(loads, 1);
+    expect(output.where((x) => x.text == ' '), hasLength(1));
+    expect(output.where((x) => x.isError), hasLength(1));
+  });
+
   test('LOCAL AUTO two startup failures emit one terminal error, '
       'with no third model', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
