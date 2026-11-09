@@ -13,6 +13,18 @@ on:
       - 'lib/core/runtime/inference/**'
       - 'test/core/runtime/inference/**'
       - '.github/workflows/cantiere-first-app.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'tool/cantiere_first_app_smoke.dart'
+      - 'tool/cantiere_local_build_smoke.dart'
+      - 'test/app_factory/workshop/cantiere_first_app_smoke_test.dart'
+      - 'test/app_factory/workshop/workshop_generated_star_negative_gate_test.dart'
+      - 'lib/app_factory/**'
+      - 'lib/core/runtime/inference/**'
+      - 'test/core/runtime/inference/**'
+      - '.github/workflows/cantiere-first-app.yml'
   workflow_dispatch:
 
 permissions:
@@ -52,7 +64,7 @@ jobs:
           cache: true
 
       - name: Resolve AI Orchestrator dependencies
-        run: flutter pub get --enforce-lockfile --enforce-lockfile
+        run: flutter pub get --enforce-lockfile
 
       - name: Analyze first-app acceptance smoke
         run: |
