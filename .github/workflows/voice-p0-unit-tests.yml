@@ -62,8 +62,8 @@ jobs:
           lib/presentation/chat/components/live_voice_overlay.dart
           test/core/voice/live_playback_drain_test.dart
           test/core/voice/live_next_turn_gate_test.dart
-          test/core/voice/live_next_turn_gate_test.dart
-      - name: Test Live playback drain safety
+      - name: Test Live playback drain and explicit next-turn safety
         run: >-
           flutter test --reporter expanded
           test/core/voice/live_playback_drain_test.dart
+          test/core/voice/live_next_turn_gate_test.dart
