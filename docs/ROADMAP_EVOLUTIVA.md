@@ -1363,7 +1363,9 @@ e [report Test 3](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issu
 | 1 — candidato naturale | Messaggio `Jerome è alto.` produce una proposta di memoria locale, con review | **PASS**, non ancora ricordo confirmed prima dell'approvazione |
 | 2 — recupero cross-chat | Candidato approvato, nuova conversazione: `Che cosa sai di Jerome?` → `Sai che Jerome è alto.` | **PASS** per ricordo confermato in una nuova chat LOCAL |
 | 3 — isolamento persone | Nuova chat: `Che cosa sai di Kader?` → `Mi dispiace, non ho informazioni specifiche su Kader. Potresti fornire più dettagli?` | **PASS**: nessuna falsa attribuzione dell'altezza di Jerome a Kader nel caso provato |
-| 4 — persistenza dopo arresto app | Forzare arresto senza cancellare dati; riaprire, nuova chat LOCAL, chiedere `Che cosa sai di Jerome?` | **DA PROVARE** sul dispositivo, non dedurre PASS dai test SQLite automatizzati |
+| 4 — chat rimossa e memoria dopo arresto app | Nuovo fatto sintetico `Marco è alto.` approvato; chat origine cancellata dall'utente; Forza arresto; nuova chat LOCAL Qwen2.5 3B, domanda `Che cosa sai di Marco?` → `Marco è alto.` | **PASS fisico comportamentale** sulla versione mostrata `v1.0.15.104156`; non prova purge definitivo del cestino né ispezione SQLite |
+
+**Nota su build e ambito:** Test 1–3 verificati sulla beta 103962; Test 4, con nuova persona sintetica e chat origine rimossa, sulla versione installata `v1.0.15.104156` (canale beta da schermata aggiornamenti). Il dato è stato riportato dall'utente e accompagnato da screenshot; il test di cancellazione definitiva tramite `Svuota cestino` resta aperto. Report in [issue #899](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899).
 
 **Anomalia separata:** nel Test 1 la risposta del LLM era in inglese a
 una frase italiana; i Test 2–3 hanno risposto in italiano. Non confondere
