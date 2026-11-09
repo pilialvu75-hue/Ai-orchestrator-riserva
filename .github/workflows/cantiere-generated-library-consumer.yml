@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: pilialvu75-hue/AI-Orchestrator-Module-Library
-          ref: a57f8fdb9634d73ebec3068d1180d9b9c2951d51
+          ref: a2f9db8bae3b05cad11e6cf5b23c71cb0aa9b3e7
           path: library
       - uses: dart-lang/setup-dart@v1
       - name: Generate real module from Library spec
