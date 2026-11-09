@@ -43,7 +43,7 @@ jobs:
           pubspec = Path(os.environ["RUNNER_TEMP"]) / "flutter-smoke/pubspec.yaml"
           source = pubspec.read_text()
           marker = "dependencies:\n"
-          assert source.count(marker) == 1
+          assert source.splitlines().count("dependencies:") == 1
           source = source.replace(marker, marker + "  aivexus_running_total:\n    path: " + os.environ["RUNNER_TEMP"] + "/generated\n", 1)
           pubspec.write_text(source)
           PY
