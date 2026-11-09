@@ -1352,7 +1352,8 @@ ricordo confermato.
 ### 17.3 quinquies — Collaudo fisico ME-2 su Galaxy S24 FE (8–9 novembre 2026)
 
 Questo checkpoint registra **risposte realmente osservate** in modalità
-LOCAL sulla beta `1.0.15-beta+103962`; resta distinto dal codice più recente
+LOCAL sulle versioni `1.0.15-beta+103962` (Test 1–3) e
+`v1.0.15.104156` (Test 4); resta distinto dal codice più recente
 elencato in §17.3 quater, che non è automaticamente presente sul dispositivo.
 Fonti: [issue #899](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899),
 [report Test 2](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899#issuecomment-6717759716)
@@ -1380,9 +1381,9 @@ memorizzazione locale non autorizza in alcun modo l'invio dei ricordi a
 provider CLOUD/HYBRID; resta il gate di divulgazione distinto già previsto.
 
 **Altri gate aperti:** modifica/correzione/forget con evidenza fisica,
-cambio di modello Qwen/Phi/Nemotron, cancellazione chat origine,
+cambio di modello Qwen/Phi/Nemotron, eliminazione definitiva dal cestino,
 riferimenti omonimi, offline e condivisione cifrata fra dispositivi.
-I 3 PASS non dimostrano un grafo identitario generale o sincronizzazione.
+I quattro PASS non dimostrano un grafo identitario generale o sincronizzazione.
 
 ### 17.4 — Piano per milestone con gate di accettazione
 
