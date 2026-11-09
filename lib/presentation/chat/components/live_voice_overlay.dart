@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
+import 'package:ai_orchestrator/core/voice/live_next_turn_gate.dart';
 import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
 
 enum _LiveVoiceUiState {
@@ -39,6 +40,8 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
   bool _closing = false;
   bool _starting = false;
   bool _sessionStarted = false;
+  bool _resumeAfterInterrupt = false;
+  final LiveNextTurnGate _nextTurnGate = LiveNextTurnGate();
   bool _isDownloadingModels = false;
 
   String? _error;
@@ -76,6 +79,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
   @override
   void dispose() {
     _closing = true;
+    _nextTurnGate.close();
 
     _stateTicker?.cancel();
     _stateTicker = null;
@@ -404,8 +408,23 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
           break;
         }
 
-        // Yield between turns so UI updates and cancellation can be observed.
-        await Future<void>.delayed(const Duration(milliseconds: 150));
+        // Continuous automatic reopening is temporarily unsafe on desktop:
+        // native PCM may continue playing or enter the microphone via echo.
+        // Require a new explicit tap after EVERY completed spoken turn.
+        if (_resumeAfterInterrupt) {
+          _resumeAfterInterrupt = false;
+          _log('[TURN_RESUMED_AFTER_MANUAL_INTERRUPT]');
+          continue;
+        }
+        final nextTurn = _nextTurnGate.waitForUser();
+        _log('[TURN_WAITING_FOR_USER]');
+        if (mounted && !_closing) {
+          _syncUiStateFromEngine();
+          setState(() {});
+        }
+        await nextTurn;
+        if (!mounted || _closing) break;
+        _log('[TURN_STARTED_BY_USER]');
       }
     } finally {
       if (mounted && !_closing) {
@@ -416,6 +435,9 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
   }
 
   _LiveVoiceUiState _deriveUiState() {
+    if (_nextTurnGate.isWaiting) {
+      return _LiveVoiceUiState.idle;
+    }
     if (widget.voiceEngine.isListening) {
       return _LiveVoiceUiState.listening;
     }
@@ -464,12 +486,24 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
     RuntimeEventLog.instance.emit('[VOICE_LIVE] $message');
   }
 
+  void _requestNextTurn() {
+    if (_closing || !_sessionStarted || !_nextTurnGate.requestNextTurn()) {
+      return;
+    }
+    _log('[TURN_NEXT_MIC_TAP]');
+    if (mounted) {
+      setState(() {});
+      _syncUiStateFromEngine();
+    }
+  }
+
   Future<void> _interruptCurrentTurn() async {
     if (_closing || !_sessionStarted) {
       return;
     }
-    // The continuous loop will return to listening when the current
-    // cancelled turn unwinds. This is a manual interruption, not VAD/barge-in.
+    // Explicit user interruption is the only allowed immediate re-listening
+    // path, not automatically generated VAD or the assistant's own voice.
+    _resumeAfterInterrupt = true;
     _log('[TURN_INTERRUPT_REQUESTED]');
     await widget.voiceLoopManager.stopLiveSession();
     if (mounted && !_closing) {
@@ -483,6 +517,7 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
     }
 
     _closing = true;
+    _nextTurnGate.close();
 
     _stateTicker?.cancel();
     _stateTicker = null;
@@ -512,7 +547,9 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
         return "L'assistente parla...";
 
       case _LiveVoiceUiState.idle:
-        return 'Sessione in attesa...';
+        return _nextTurnGate.isWaiting
+            ? 'Tocca per fare un’altra domanda'
+            : 'Sessione in attesa...';
     }
   }
 
@@ -714,6 +751,17 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                       ),
                       ..._buildErrorWidgetsIfPresent(errorText),
                       const Spacer(),
+                      if (_nextTurnGate.isWaiting) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: _requestNextTurn,
+                            icon: const Icon(Icons.mic_rounded),
+                            label: const Text('Ascolta un’altra domanda'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       if (state == _LiveVoiceUiState.speaking ||
                           state == _LiveVoiceUiState.thinking) ...[
                         SizedBox(
