@@ -1002,7 +1002,7 @@ void main() {
       expect(recalled, contains('Nino è alto.'));
       expect(recalled, contains('superseded (NOT CURRENT): Luca è alto.'));
       expect(recalled, isNot(contains(
-          '\\n- [fact; origin=userExplicit] Luca è alto.')));
+          '\n- [fact; origin=userExplicit] Luca è alto.')));
     });
 
     test('named colleague staging rejects attachments and specialized workers',
