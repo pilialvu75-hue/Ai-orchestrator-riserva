@@ -1500,7 +1500,8 @@ class InferenceService {
         }
 
         if (chunk.isFinal &&
-            !chunk.isError) {
+            !chunk.isError &&
+            chunk.terminalState == InferenceTerminalState.success) {
           _log(
             '[INFERENCE_LAST_TOKEN] '
             'session=${cloudRequest.sessionId} '
@@ -1525,7 +1526,7 @@ class InferenceService {
               'attempt=$attempt first_content_ms=${firstContentMs ?? -1} '
               'total_ms=${attemptClock.elapsedMilliseconds} '
               'reported_tokens=${chunk.tokensGenerated} text_chunks=$streamedChunkCount '
-              'outcome=${chunk.isError ? 'error' : 'success'}');
+              'outcome=${!chunk.isError && chunk.terminalState == InferenceTerminalState.success ? 'success' : 'error'}');
           // Completion is the only reliable boundary for asserting which
           // model actually answered. This intentionally excludes explicit
           // Workshop model identities and any failed LOCAL attempt.
