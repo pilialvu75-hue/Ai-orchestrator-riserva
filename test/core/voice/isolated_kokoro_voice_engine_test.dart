@@ -16,6 +16,38 @@ void main() {
   };
 
 
+  test('native PCM prepare failure releases service and permits replay',
+      () async {
+    final sink = _FakeReadAloudSink()..failBegin = true;
+    final engine = IsolatedKokoroVoiceEngine(
+      delegate: _FakeVoiceEngine(),
+      assetsProvider: () async => assets,
+      audioSink: sink,
+      generationRunner: (_) async => KokoroTtsGeneratedAudio(
+        samples: Float32List.fromList(<double>[0.2]),
+        sampleRate: 24000,
+      ),
+    );
+
+    engine.beginLiveSpeechSequence();
+    await expectLater(
+      engine.speak('Preparazione audio non disponibile.'),
+      throwsStateError,
+    );
+    expect(sink.beginCount, 1);
+    expect(sink.stopCount, 1, reason: 'Failed prepare must clean service');
+    expect(sink.pushCount, 0);
+    expect(sink.finishCount, 0);
+
+    await engine.endLiveSpeechSequence(completed: false);
+    sink.failBegin = false;
+    await engine.speak('Nuova lettura normale.');
+    expect(sink.beginCount, 2);
+    expect(sink.pushCount, 1);
+    expect(sink.finishCount, 1);
+    await engine.dispose();
+  });
+
   test('Live Stop mid-synthesis discards old PCM and allows fresh replay',
       () async {
     final sink = _FakeReadAloudSink();
@@ -481,6 +513,7 @@ final class _FakeTtsAudioSink implements TtsAudioSink {
 
 
 final class _FakeReadAloudSink implements TtsAudioSink, ReadAloudSink {
+  bool failBegin = false;
   int beginCount = 0;
   int finishCount = 0;
   int stopCount = 0;
@@ -491,7 +524,10 @@ final class _FakeReadAloudSink implements TtsAudioSink, ReadAloudSink {
   @override
   ReadAloudSnapshot get snapshot => const ReadAloudSnapshot(supported: true);
   @override
-  Future<void> beginReadAloud() async { beginCount++; }
+  Future<void> beginReadAloud() async {
+    beginCount++;
+    if (failBegin) throw StateError('prepare failed');
+  }
   @override
   Future<void> finishReadAloud() async { finishCount++; }
   @override
