@@ -759,7 +759,17 @@ class VoiceLoopManager with RuntimeEventEmitter {
     Future<void> closeSpeechSequence(bool completed) async {
       if (!speechSequenceOpen) return;
       speechSequenceOpen = false;
-      await speechSequence!.endLiveSpeechSequence(completed: completed);
+      try {
+        await speechSequence!.endLiveSpeechSequence(completed: completed);
+      } catch (_) {
+        // A native finish error must not leave the playback service alive.
+        try {
+          await _engine.stopSpeaking();
+        } catch (_) {
+          logEvent(_tag, '[LIVE_PCM_SEQUENCE_STOP_WARN]');
+        }
+        rethrow;
+      }
     }
 
     try {
@@ -917,6 +927,9 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
     } finally {
       if (speechSequenceOpen) {
+        // Prevent queued speech callbacks from starting AFTER a failed turn
+        // has stopped the PCM sink, even if the inference stream failed.
+        playbackFailed = true;
         // A failed, cancelled or interrupted response may still have an
         // in-flight TTS worker. Invalidate it before stopping the PCM stream.
         try {
