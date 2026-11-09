@@ -1,0 +1,25 @@
+import 'package:flutter/material.dart';
+import 'package:aivexus_running_total/aivexus_running_total.dart';
+
+/// Experimental Flutter smoke application: real Library module dependency.
+/// This is not the autonomous Cantiere output or a certified reusable module.
+void main() => runApp(const ModuleSmokeApp());
+
+class ModuleSmokeApp extends StatelessWidget {
+  const ModuleSmokeApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final values = runningTotals(<int>[7, -2, 11]);
+    return MaterialApp(
+      title: 'AIVEXUS Module Smoke',
+      home: Scaffold(
+        appBar: AppBar(title: const Text('AIVEXUS Module Smoke')),
+        body: Center(
+          child: Text('Running totals: ${values.join(', ')}',
+              key: const Key('module-output')),
+        ),
+      ),
+    );
+  }
+}
