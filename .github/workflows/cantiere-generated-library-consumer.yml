@@ -4,6 +4,11 @@ on:
     paths:
       - 'ci/fixtures/cantiere_generated_library_consumer.dart.txt'
       - '.github/workflows/cantiere-generated-library-consumer.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ci/fixtures/cantiere_generated_library_consumer.dart.txt'
+      - '.github/workflows/cantiere-generated-library-consumer.yml'
   workflow_dispatch:
 permissions:
   contents: read
