@@ -342,6 +342,7 @@ class InferenceService {
       await for (final chunk in routedStream) {
         if (trackLocalAutoAffinity &&
             chunk.isFinal &&
+            chunk.terminalState == InferenceTerminalState.success &&
             !chunk.isError &&
             !session.cancellationToken.isCancelled &&
             localRequest != null &&
@@ -1259,7 +1260,11 @@ class InferenceService {
         // an already started tool sequence through a second model.
         emittedNotice = true;
       }
-      if (chunk.isFinal && !chunk.isError) completedNormally = true;
+      if (chunk.isFinal &&
+          !chunk.isError &&
+          chunk.terminalState == InferenceTerminalState.success) {
+        completedNormally = true;
+      }
       if (chunk.isError && !emittedContent && !completedNormally) {
         originalFailure ??= chunk;
         continue;
@@ -1525,6 +1530,7 @@ class InferenceService {
           // model actually answered. This intentionally excludes explicit
           // Workshop model identities and any failed LOCAL attempt.
           if (!chunk.isError &&
+              chunk.terminalState == InferenceTerminalState.success &&
               runtimeMode == AiRuntimeMode.local &&
               cloudRequest.modelId == null &&
               cloudRequest.modelPath == null &&
