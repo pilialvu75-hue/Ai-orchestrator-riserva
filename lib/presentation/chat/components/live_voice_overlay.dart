@@ -26,11 +26,15 @@ class LiveVoiceOverlay extends StatefulWidget {
     required this.voiceLoopManager,
     required this.voiceEngine,
     required this.voiceModelDownloader,
+    this.onUserTranscript,
+    this.onAssistantTranscript,
   });
 
   final VoiceLoopManager voiceLoopManager;
   final VoiceEngine voiceEngine;
   final VoiceModelDownloader voiceModelDownloader;
+  final Future<void> Function(String text)? onUserTranscript;
+  final Future<void> Function(String text)? onAssistantTranscript;
 
   @override
   State<LiveVoiceOverlay> createState() => _LiveVoiceOverlayState();
@@ -387,6 +391,8 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
         var turnFailed = false;
         try {
           await widget.voiceLoopManager.startLiveSession(
+            onUserTranscript: widget.onUserTranscript,
+            onAssistantTranscript: widget.onAssistantTranscript,
             onError: (message) {
               turnFailed = true;
               if (!mounted || _closing) {
