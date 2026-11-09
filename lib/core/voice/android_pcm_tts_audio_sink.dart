@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/services.dart';
 
 import 'read_aloud_transport.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Android-only offline PCM output. The app-private native file keeps played
 /// phrases available for real seek; no text is sent off-device.
@@ -51,6 +52,7 @@ class AndroidPcmTtsAudioSink implements TtsAudioSink, ReadAloudSink, ReadAloudRe
         ? <String, Object>{'resumeMs': bookmark.inMilliseconds}
         : null);
     _snapshot = const ReadAloudSnapshot(supported: true, active: true);
+    RuntimeEventLog.instance.emit('[TTS_PCM_PREPARED]');
   }
 
   /// Convert generated Float32 PCM to the Android AudioTrack PCM16 format.
@@ -68,7 +70,16 @@ class AndroidPcmTtsAudioSink implements TtsAudioSink, ReadAloudSink, ReadAloudRe
     unawaited(_send('append', <String, Object>{
       'pcm': output,
       'sampleRate': sampleRate,
-    }).catchError((Object _) {}));
+    }).then((_) {
+      // The native MethodChannel call completed, not merely a Dart push.
+      RuntimeEventLog.instance.emit(
+        '[TTS_PCM_APPEND_OK] bytes=${output.length} rate=$sampleRate',
+      );
+    }).catchError((Object error) {
+      RuntimeEventLog.instance.emit(
+        '[TTS_PCM_APPEND_FAIL] type=${error.runtimeType}',
+      );
+    }));
   }
 
   @override
@@ -79,6 +90,20 @@ class AndroidPcmTtsAudioSink implements TtsAudioSink, ReadAloudSink, ReadAloudRe
       throw StateError('PCM native append failed: $previousFailure');
     }
     await _send('finish');
+    try {
+      final status = await refreshReadAloud();
+      RuntimeEventLog.instance.emit(
+        '[TTS_PCM_FINISH_STATUS] buffered_ms=${status.buffered.inMilliseconds} '
+        'position_ms=${status.position.inMilliseconds} '
+        'active=${status.active} playing=${status.playing} '
+        'paused=${status.paused} complete=${status.complete}',
+      );
+    } catch (error) {
+      // Diagnostics are best-effort; native audio was already finalized.
+      RuntimeEventLog.instance.emit(
+        '[TTS_PCM_STATUS_WARN] type=${error.runtimeType}',
+      );
+    }
   }
 
   @override
