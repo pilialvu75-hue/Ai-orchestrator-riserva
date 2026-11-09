@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mocktail/mocktail.dart';
 
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/models/chat_message_model.dart';
