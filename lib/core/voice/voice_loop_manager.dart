@@ -76,6 +76,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
     String? modelPath,
     String? modelId,
     String? systemPrompt,
+    Future<void> Function(String text)? onUserTranscript,
+    Future<void> Function(String text)? onAssistantTranscript,
     void Function(String text, bool isFinal)?
         onSubtitle,
     void Function(String error)? onError,
@@ -130,6 +132,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
         modelPath: modelPath,
         modelId: modelId,
         systemPrompt: systemPrompt,
+        onUserTranscript: onUserTranscript,
+        onAssistantTranscript: onAssistantTranscript,
         onSubtitle: onSubtitle,
         onError: onError,
         notifyPhase: notifyPhase,
@@ -148,6 +152,24 @@ class VoiceLoopManager with RuntimeEventEmitter {
         onError?.call(message);
       }
     } finally {
+      // A cancelled/empty Live turn may never reach the normal Android
+      // STT -> LLM handoff. Release its native recognizer on every exit,
+      // *after* the turn has unwound, before a typed chat request can start.
+      // A false result can mean ASR was already released during inference.
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        final recognizer = _engine;
+        if (recognizer is VoiceRecognitionMemoryReclaimer) {
+          try {
+            final freed = await (recognizer as VoiceRecognitionMemoryReclaimer)
+                .releaseRecognitionMemoryForInference();
+            logEvent(_tag, '[LIVE_END_ASR_RELEASE] released=$freed');
+          } catch (error) {
+            logEvent(_tag,
+                '[LIVE_END_ASR_RELEASE_WARN] type=${error.runtimeType}');
+          }
+        }
+      }
+
       if (identical(
         _activeCancellation,
         cancellation,
@@ -313,6 +335,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
     required String? modelPath,
     required String? modelId,
     required String? systemPrompt,
+    required Future<void> Function(String text)? onUserTranscript,
+    required Future<void> Function(String text)? onAssistantTranscript,
     required void Function(
       String text,
       bool isFinal,
@@ -516,6 +540,20 @@ class VoiceLoopManager with RuntimeEventEmitter {
       }
     }
 
+    // Persist the recognized user turn in this same local chat before
+    // inference or Kokoro playback starts. No second LLM run occurs.
+    if (onUserTranscript != null) {
+      try {
+        await onUserTranscript(spokenText);
+        logEvent(_tag, '[LIVE_TRANSCRIPT_SAVED] role=user');
+      } catch (error) {
+        logEvent(_tag, '[LIVE_TRANSCRIPT_SAVE_FAILED] role=user');
+        onError?.call('Impossibile salvare la domanda Live nella chat.');
+        return;
+      }
+      if (_disposed || token.isCancelled || _stopRequested) return;
+    }
+
     // Start after the user's speech is fully recognized. These metrics never
     // contain the transcript, and TTS_REQUEST does not imply audible output.
     final latency = LiveVoiceLatency();
@@ -636,6 +674,8 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     final tokenBuffer =
         StringBuffer();
+    final fullResponse = StringBuffer();
+    var inferenceFailed = false;
 
     final sentenceBoundaryPattern =
         RegExp(r'[.!?\n]');
@@ -716,6 +756,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       }
 
       if (response.isError) {
+        inferenceFailed = true;
         final message =
             response.errorMessage ??
                 'Voice inference error';
@@ -746,6 +787,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       tokenBuffer.write(
         chunk,
       );
+      fullResponse.write(chunk);
 
       final currentText =
           tokenBuffer.toString();
@@ -795,6 +837,22 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
       await queueSpeech(speakChunk);
       if (playbackFailed) break;
+    }
+
+    // Persist completed output before waiting for native playback drain.
+    // A later PCM failure must not erase a successfully generated reply.
+    final completedResponseText = fullResponse.toString().trim();
+    if (!inferenceFailed &&
+        completedResponseText.isNotEmpty &&
+        onAssistantTranscript != null) {
+      try {
+        await onAssistantTranscript(completedResponseText);
+        logEvent(_tag, '[LIVE_TRANSCRIPT_SAVED] role=assistant');
+      } catch (_) {
+        logEvent(_tag, '[LIVE_TRANSCRIPT_SAVE_FAILED] role=assistant');
+        onError?.call('Impossibile salvare la risposta Live nella chat.');
+        return;
+      }
     }
 
     // -----------------------------------------------------------------------
