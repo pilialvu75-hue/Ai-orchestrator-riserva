@@ -20,6 +20,36 @@ void main() {
     }
   });
 
+  test('short named-person Italian facts and corrections keep Italian', () {
+    for (final text in [
+      'Luca è alto.',
+      'Marco è alto.',
+      'Jerome è alto.',
+      'Non Luca, Nino è alto.',
+    ]) {
+      expect(AssistantReplyLanguagePolicy.detect(text), 'Italian', reason: text);
+      expect(
+        AssistantReplyLanguagePolicy.withCurrentTurnHint(
+          systemPrompt: 'Assistant core.',
+          userPrompt: text,
+        ),
+        contains('write in Italian'),
+        reason: text,
+      );
+    }
+    for (final text in [
+      '"Luca è alto."',
+      'Luca',
+      'Luca is tall.',
+      'Luca es alto.',
+      'Luca est grand.',
+      'Non Luca, Nino è alto. Nino is tall.',
+    ]) {
+      expect(AssistantReplyLanguagePolicy.detect(text), isNot('Italian'),
+          reason: text);
+    }
+  });
+
   test('quoted greetings and ambiguous short turns do not select a language', () {
     for (final text in ['"ciao"', 'ciao hello', 'ok', 'italiano']) {
       expect(AssistantReplyLanguagePolicy.detect(text), isNull, reason: text);

@@ -3,6 +3,7 @@ import 'package:ai_orchestrator/core/config/ai/assistant_system_prompt_service.d
 import 'package:ai_orchestrator/core/config/ai/system_prompt_config.dart';
 import 'package:ai_orchestrator/core/config/app/app_constants.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_named_relation_correction_candidate.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
@@ -193,14 +194,30 @@ class PromptResolvingChatRepository implements ChatRepository, VerifiedMemoryAct
         relationalConsent != null &&
         relationalConsent.enabled) {
       try {
-        await _durableMemoryCaptureService
-            .proposeManualEntityReferenceCandidate(
+        // Corrections must reach the guarded review-only pipeline before
+        // ordinary named-person statements. Neither path auto-confirms.
+        final isNamedCorrection =
+            AssistantNamedRelationCorrectionCandidate.parse(userPrompt) != null;
+        final correctionProposed = await _durableMemoryCaptureService
+            .proposeNamedRelationCorrectionCandidate(
           sessionId: sessionId,
           userPrompt: userPrompt,
           consentEnabled: true,
           directUserMessage: true,
           consentStillEnabled: () => relationalConsent.enabled,
         );
+        // Never reinterpret a syntactically valid correction as a fresh
+        // identity fact if its predecessor is absent, stale or ambiguous.
+        if (!correctionProposed && !isNamedCorrection) {
+          await _durableMemoryCaptureService
+              .proposeManualEntityReferenceCandidate(
+            sessionId: sessionId,
+            userPrompt: userPrompt,
+            consentEnabled: true,
+            directUserMessage: true,
+            consentStillEnabled: () => relationalConsent.enabled,
+          );
+        }
       } catch (_) {
         onRuntimeNotice?.call(
           'Non è stato possibile aggiungere la proposta relazionale locale.',
