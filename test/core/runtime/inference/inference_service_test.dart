@@ -161,6 +161,161 @@ void main() {
     expect(affinityCommits.single, contains('model=${phi.id}'));
   });
 
+
+  test('Android FFI session_create startup failure can recover pre-token',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+    );
+    final seen = <String?>[];
+    final service = buildService(
+      mode: AiRuntimeMode.local,
+      selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (request, _) async* {
+          seen.add(request.modelId);
+          if (seen.length == 1) {
+            yield InferenceResponse.error(
+              'AI_RUNTIME_ERROR|stage=session_create|'
+              'message=Session create failed.|'
+              'details=StateError: Native session creation failed: backend error',
+            );
+          } else {
+            yield InferenceResponse.finalChunk(
+              text: 'Ok', tokensGenerated: 1, model: request.modelId,
+            );
+          }
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final output = await service.stream(const InferenceRequest(
+      sessionId: 'native-recovery', prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(seen, [
+      qwen.effectiveRuntimeModelId, phi.effectiveRuntimeModelId,
+    ]);
+    expect(output.where((x) => x.isError), isEmpty);
+    expect(output.where((x) => x.isFinal), hasLength(1));
+  });
+
+  test('Android FFI memory-related session_create failure never switches',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+    );
+    var calls = 0;
+    final service = buildService(
+      mode: AiRuntimeMode.local, selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (_, __) async* {
+          calls++;
+          yield InferenceResponse.error(
+            'AI_RUNTIME_ERROR|stage=session_create|'
+            'message=Session create failed.|'
+            'details=Memoria insufficiente: out of memory.',
+          );
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final output = await service.stream(const InferenceRequest(
+      sessionId: 'native-memory-error', prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(calls, 1);
+    expect(output.where((x) => x.isError), hasLength(1));
+  });
+
+  test('Android high pressure after startup failure blocks a second GGUF',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+      sizeBytes: 1700000000,
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+      sizeBytes: 1800000000,
+    );
+    var samples = 0;
+    var loads = 0;
+    final service = buildService(
+      mode: AiRuntimeMode.local, selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      sampleResources: () async {
+        samples++;
+        return ResourceSample(<Object?, Object?>{
+          'totalBytes': 8 * 1024 * 1024 * 1024,
+          'availableBytes': samples == 1
+              ? 2 * 1024 * 1024 * 1024
+              : 400 * 1024 * 1024,
+          'thresholdBytes': 256 * 1024 * 1024,
+        });
+      },
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (_, __) async* {
+          loads++;
+          yield InferenceResponse.error('Failed to load model');
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final output = await service.stream(const InferenceRequest(
+      sessionId: 'high-ram', prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(samples, 2);
+    expect(loads, 1);
+    expect(output.where((x) => x.isError), hasLength(1));
+  });
+
+  test('LOCAL AUTO cancellation after failure never loads fallback',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+    );
+    var loads = 0;
+    late InferenceService service;
+    service = buildService(
+      mode: AiRuntimeMode.local, selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (request, _) async* {
+          loads++;
+          service.cancel(request.sessionId);
+          yield InferenceResponse.error('Failed to load model');
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final output = await service.stream(const InferenceRequest(
+      sessionId: 'cancel-retry', prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(loads, 1);
+    expect(output.where((x) => x.isError), hasLength(1));
+  });
+
   test('LOCAL AUTO never switches after the first visible text', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
