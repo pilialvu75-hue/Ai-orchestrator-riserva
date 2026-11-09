@@ -316,6 +316,38 @@ void main() {
     expect(output.where((x) => x.isError), hasLength(1));
   });
 
+
+  test('LOCAL AUTO does not replay a tool notice on model fallback', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+    );
+    var loads = 0;
+    final service = buildService(
+      mode: AiRuntimeMode.local, selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (_, __) async* {
+          loads++;
+          yield InferenceResponse.notice('Local tool request started');
+          yield InferenceResponse.error('Failed to load model');
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final output = await service.stream(const InferenceRequest(
+      sessionId: 'notice-guard', prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(loads, 1);
+    expect(output.where((x) => x.runtimeNotice != null), hasLength(1));
+    expect(output.where((x) => x.isError), hasLength(1));
+  });
+
   test('LOCAL AUTO never switches after the first visible text', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
