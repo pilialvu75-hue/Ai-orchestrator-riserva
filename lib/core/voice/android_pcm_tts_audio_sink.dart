@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 
-import 'read_aloud_transport.dart';
+import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Android-only offline PCM output. The app-private native file keeps played
