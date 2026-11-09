@@ -1349,6 +1349,39 @@ ricordo confermato.
 
 **Ordine operativo conservato:** consolidare cancellazione/consistenza ME-0/ME-2 e QA; proseguire LOCAL AUTO P0 #1086 in parallelo alla risoluzione indipendente del blocco release #1076; poi benchmark qualità/costi di switch e acquisizione naturale configurabile. Il Cantiere mantiene la priorità generale della prima app autonoma funzionante: questi lavori sulla memoria non costituiscono una roadmap concorrente.
 
+### 17.3 quinquies — Collaudo fisico ME-2 su Galaxy S24 FE (8–9 novembre 2026)
+
+Questo checkpoint registra **risposte realmente osservate** in modalità
+LOCAL sulla beta `1.0.15-beta+103962`; resta distinto dal codice più recente
+elencato in §17.3 quater, che non è automaticamente presente sul dispositivo.
+Fonti: [issue #899](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899),
+[report Test 2](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899#issuecomment-6717759716)
+e [report Test 3](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899#issuecomment-6717939273).
+
+| Test | Prova reale | Esito e limite |
+| --- | --- | --- |
+| 1 — candidato naturale | Messaggio `Jerome è alto.` produce una proposta di memoria locale, con review | **PASS**, non ancora ricordo confirmed prima dell'approvazione |
+| 2 — recupero cross-chat | Candidato approvato, nuova conversazione: `Che cosa sai di Jerome?` → `Sai che Jerome è alto.` | **PASS** per ricordo confermato in una nuova chat LOCAL |
+| 3 — isolamento persone | Nuova chat: `Che cosa sai di Kader?` → `Mi dispiace, non ho informazioni specifiche su Kader. Potresti fornire più dettagli?` | **PASS**: nessuna falsa attribuzione dell'altezza di Jerome a Kader nel caso provato |
+| 4 — persistenza dopo arresto app | Forzare arresto senza cancellare dati; riaprire, nuova chat LOCAL, chiedere `Che cosa sai di Jerome?` | **DA PROVARE** sul dispositivo, non dedurre PASS dai test SQLite automatizzati |
+
+**Anomalia separata:** nel Test 1 la risposta del LLM era in inglese a
+una frase italiana; i Test 2–3 hanno risposto in italiano. Non confondere
+difetti di lingua e successo del retrieval.
+
+**Requisito successivo, NON implementato nella beta:** scelta di acquisizione
+LOCAL `non ricordare` / `chiedi sempre` / `approvazione automatica per
+categorie ordinarie autorizzate`, con categorie separabili per preferenze
+e persone nominate, deduplicazione, provenienza, possibilità di revoca,
+review per ambiguità, contraddizioni e dati sensibili. Il consenso alla
+memorizzazione locale non autorizza in alcun modo l'invio dei ricordi a
+provider CLOUD/HYBRID; resta il gate di divulgazione distinto già previsto.
+
+**Altri gate aperti:** modifica/correzione/forget con evidenza fisica,
+cambio di modello Qwen/Phi/Nemotron, cancellazione chat origine,
+riferimenti omonimi, offline e condivisione cifrata fra dispositivi.
+I 3 PASS non dimostrano un grafo identitario generale o sincronizzazione.
+
 ### 17.4 — Piano per milestone con gate di accettazione
 
 | Milestone | Priorita | Deliverable e gate verificabile |
