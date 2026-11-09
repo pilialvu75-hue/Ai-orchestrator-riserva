@@ -1,0 +1,62 @@
+name: Cantiere experimental Flutter app consumes Library module
+on:
+  pull_request:
+    paths:
+      - 'ci/fixtures/cantiere_generated_library_flutter_main.dart.txt'
+      - '.github/workflows/cantiere-library-flutter-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  flutter-app-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cantiere
+      - uses: actions/checkout@v4
+        with:
+          repository: pilialvu75-hue/AI-Orchestrator-Module-Library
+          ref: cab209c9c7599e7a675731f75b6b75795318c511
+          path: library
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Library Dart module
+        run: python3 library/tools/generate_first_dart_module.py --spec library/examples/first-generated-module-spec.json --output "$RUNNER_TEMP/generated"
+      - name: Verify Library module independently
+        working-directory: ${{ runner.temp }}/generated
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+          dart test
+      - name: Create real Android Flutter app with generated module
+        run: |
+          flutter create --platforms android --project-name aivexus_module_smoke "$RUNNER_TEMP/flutter-smoke"
+          cp cantiere/ci/fixtures/cantiere_generated_library_flutter_main.dart.txt "$RUNNER_TEMP/flutter-smoke/lib/main.dart"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          pubspec = Path(os.environ["RUNNER_TEMP"]) / "flutter-smoke/pubspec.yaml"
+          source = pubspec.read_text()
+          marker = "dependencies:\n"
+          assert source.count(marker) == 1
+          source = source.replace(marker, marker + "  aivexus_running_total:\n    path: " + os.environ["RUNNER_TEMP"] + "/generated\n", 1)
+          pubspec.write_text(source)
+          PY
+      - name: Analyze real Flutter app
+        working-directory: ${{ runner.temp }}/flutter-smoke
+        run: |
+          flutter pub get
+          flutter analyze
+      - name: Build real experimental Android APK
+        working-directory: ${{ runner.temp }}/flutter-smoke
+        run: flutter build apk --debug
+      - name: Upload build evidence (not an in-app release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cantiere-library-experimental-flutter-apk
+          path: ${{ runner.temp }}/flutter-smoke/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
