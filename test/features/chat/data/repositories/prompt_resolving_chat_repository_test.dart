@@ -972,6 +972,18 @@ void main() {
       expect(await capture.loadReviewableNamedRelationCorrectionCandidates(),
           isEmpty);
 
+      // A correction cannot create a new claim if no confirmed
+      // predecessor exists: it must remain uncommitted, not fall through
+      // to the ordinary named-person capture path.
+      await repo.sendMessage(
+        sessionId: 'first',
+        userPrompt: 'Non Edo, Tino è alto.',
+      );
+      expect(await capture.loadReviewableNamedRelationCorrectionCandidates(),
+          isEmpty);
+      expect(await capture.loadReviewableManualEntityReferenceCandidates(),
+          isEmpty);
+
       await repo.sendMessage(
         sessionId: 'first',
         userPrompt: 'Non Luca, Nino è alto.',
