@@ -343,12 +343,15 @@ final class IsolatedKokoroVoiceEngine
     // assistant response share one timeline until the manager calls end.
     final readAloud = _readAloudSink;
     final liveChunk = _liveSequenceActive;
-    if (!liveChunk || !_liveTimelinePrepared) {
-      await readAloud?.beginReadAloud();
-      if (liveChunk) _liveTimelinePrepared = true;
-    }
     var completed = false;
     try {
+    // Native prepare may throw after creating a partial playback service.
+    // It must run INSIDE the cleanup guard even on the very first chunk.
+    if (!liveChunk || !_liveTimelinePrepared) {
+      await readAloud?.beginReadAloud();
+      if (_disposed || generation != _lifecycleGeneration) return;
+      if (liveChunk && _liveSequenceActive) _liveTimelinePrepared = true;
+    }
     final preparation = Stopwatch()..start();
     final assets = await _assetsProvider();
     logEvent(_tag, '[TTS_PREPARE_TIMING] asset_ms=${preparation.elapsedMilliseconds}');
