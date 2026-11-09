@@ -6,11 +6,16 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/voice_loop_manager.dart';
 import 'package:ai_orchestrator/core/voice/live_next_turn_gate.dart';
+import 'package:ai_orchestrator/core/voice/live_voice_phase.dart';
 import 'package:ai_orchestrator/core/voice/voice_model_downloader.dart';
 
 enum _LiveVoiceUiState {
+  preparing,
   listening,
+  resolvingModel,
   thinking,
+  synthesizing,
+  playing,
   speaking,
   idle,
 }
@@ -396,6 +401,10 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
               }
               _syncUiStateFromEngine();
             },
+            onPhase: (_) {
+              if (!mounted || _closing) return;
+              _syncUiStateFromEngine();
+            },
           );
         } catch (error) {
           turnFailed = true;
@@ -435,8 +444,26 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
   }
 
   _LiveVoiceUiState _deriveUiState() {
-    if (_nextTurnGate.isWaiting) {
+    if (_nextTurnGate.isWaiting || (_error?.trim().isNotEmpty ?? false)) {
       return _LiveVoiceUiState.idle;
+    }
+    // The manager knows whether STT, inference, TTS generation or output
+    // drain is active. Engine isSpeaking alone misses queued native PCM.
+    switch (widget.voiceLoopManager.phase) {
+      case LiveVoicePhase.preparing:
+        return _LiveVoiceUiState.preparing;
+      case LiveVoicePhase.listening:
+        return _LiveVoiceUiState.listening;
+      case LiveVoicePhase.resolvingModel:
+        return _LiveVoiceUiState.resolvingModel;
+      case LiveVoicePhase.thinking:
+        return _LiveVoiceUiState.thinking;
+      case LiveVoicePhase.synthesizing:
+        return _LiveVoiceUiState.synthesizing;
+      case LiveVoicePhase.playing:
+        return _LiveVoiceUiState.playing;
+      case LiveVoicePhase.idle:
+        break;
     }
     if (widget.voiceEngine.isListening) {
       return _LiveVoiceUiState.listening;
@@ -537,11 +564,23 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
 
   String _statusLabel(_LiveVoiceUiState state) {
     switch (state) {
+      case _LiveVoiceUiState.preparing:
+        return 'Preparo il sistema vocale...';
+
       case _LiveVoiceUiState.listening:
         return 'Ti ascolto...';
 
+      case _LiveVoiceUiState.resolvingModel:
+        return 'Preparo il modello IA...';
+
       case _LiveVoiceUiState.thinking:
-        return 'Sto pensando...';
+        return 'Sto generando la risposta...';
+
+      case _LiveVoiceUiState.synthesizing:
+        return 'Sto preparando la voce...';
+
+      case _LiveVoiceUiState.playing:
+        return 'Riproduzione / fine audio...';
 
       case _LiveVoiceUiState.speaking:
         return "L'assistente parla...";
@@ -558,9 +597,13 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
       case _LiveVoiceUiState.listening:
         return const Color(0xFF4ADE80);
 
+      case _LiveVoiceUiState.preparing:
+      case _LiveVoiceUiState.resolvingModel:
       case _LiveVoiceUiState.thinking:
         return const Color(0xFFF9A826);
 
+      case _LiveVoiceUiState.synthesizing:
+      case _LiveVoiceUiState.playing:
       case _LiveVoiceUiState.speaking:
         return const Color(0xFF8AB4F8);
 
@@ -731,8 +774,9 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                           ],
                         ),
                         child: Icon(
-                          state ==
-                                  _LiveVoiceUiState.speaking
+                          (state == _LiveVoiceUiState.speaking ||
+                                  state == _LiveVoiceUiState.playing ||
+                                  state == _LiveVoiceUiState.synthesizing)
                               ? Icons.volume_up_rounded
                               : Icons.graphic_eq_rounded,
                           size: 46,
@@ -763,7 +807,10 @@ class _LiveVoiceOverlayState extends State<LiveVoiceOverlay> {
                         const SizedBox(height: 12),
                       ],
                       if (state == _LiveVoiceUiState.speaking ||
-                          state == _LiveVoiceUiState.thinking) ...[
+                          state == _LiveVoiceUiState.thinking ||
+                          state == _LiveVoiceUiState.synthesizing ||
+                          state == _LiveVoiceUiState.playing ||
+                          state == _LiveVoiceUiState.resolvingModel) ...[
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton.icon(

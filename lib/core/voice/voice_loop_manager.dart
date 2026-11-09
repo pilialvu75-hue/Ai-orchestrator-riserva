@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.da
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/live_voice_latency.dart';
+import 'package:ai_orchestrator/core/voice/live_voice_phase.dart';
 import 'package:ai_orchestrator/core/voice/live_playback_drain.dart';
 import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 
@@ -47,6 +48,9 @@ class VoiceLoopManager with RuntimeEventEmitter {
   bool _sessionActive = false;
   bool _disposed = false;
   bool _stopRequested = false;
+  LiveVoicePhase _phase = LiveVoicePhase.idle;
+
+  LiveVoicePhase get phase => _phase;
 
   CancellationToken? get activeCancellationToken =>
       _activeCancellation;
@@ -75,6 +79,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
     void Function(String text, bool isFinal)?
         onSubtitle,
     void Function(String error)? onError,
+    void Function(LiveVoicePhase phase)? onPhase,
   }) async {
     if (_disposed) {
       return;
@@ -93,6 +98,26 @@ class VoiceLoopManager with RuntimeEventEmitter {
     _activeCancellation =
         cancellation;
 
+    final phaseTimeline = LiveVoicePhaseTimeline();
+    void notifyPhase(LiveVoicePhase next) {
+      final timing = phaseTimeline.transitionTo(next);
+      if (timing == null) return;
+      _phase = next;
+      logEvent(
+        _tag,
+        '[VOICE_PHASE] previous=${timing.previous.name} '
+        'current=${next.name} '
+        'stage_ms=${timing.stageMs} total_ms=${timing.totalMs}',
+      );
+      try {
+        onPhase?.call(next);
+      } catch (_) {
+        // A widget callback must never abort the native voice pipeline.
+      }
+    }
+
+    notifyPhase(LiveVoicePhase.preparing);
+
     logEvent(
       _tag,
       '[SESSION_START] '
@@ -107,6 +132,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
         systemPrompt: systemPrompt,
         onSubtitle: onSubtitle,
         onError: onError,
+        notifyPhase: notifyPhase,
       );
     } catch (error) {
       if (!cancellation.isCancelled &&
@@ -131,6 +157,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
       _sessionActive = false;
       _stopRequested = false;
+      notifyPhase(LiveVoicePhase.idle);
 
       logEvent(
         _tag,
@@ -293,6 +320,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
     required void Function(
       String error,
     )? onError,
+    required void Function(LiveVoicePhase phase) notifyPhase,
   }) async {
     if (_disposed ||
         token.isCancelled) {
@@ -343,6 +371,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
     }
 
     try {
+      notifyPhase(LiveVoicePhase.listening);
       logEvent(
         _tag,
         '[STT_START] '
@@ -466,6 +495,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
       'chars=${spokenText.length}',
     );
 
+    notifyPhase(LiveVoicePhase.resolvingModel);
     if (android) {
       // Do not run Android local LLM and the large native Sherpa recognizer
       // together on low-RAM devices. Microphone and ASR stream are already
@@ -567,6 +597,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
         inferenceStream;
 
     try {
+      notifyPhase(LiveVoicePhase.thinking);
       logEvent(
         _tag,
         '[INFERENCE_START] '
@@ -629,6 +660,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
           return;
         }
         try {
+          notifyPhase(LiveVoicePhase.synthesizing);
           await _engine.speak(text);
         } catch (error) {
           playbackFailed = true;
@@ -644,6 +676,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
 
     Future<void> awaitAudibleOutput() async {
+      notifyPhase(LiveVoicePhase.playing);
       // speak() can finish while PCM is still playing through the native
       // output sink. Opening ASR immediately then causes acoustic feedback.
       final drained = await waitForLivePlaybackDrain(
