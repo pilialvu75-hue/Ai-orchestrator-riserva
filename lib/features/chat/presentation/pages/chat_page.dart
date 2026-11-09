@@ -3,7 +3,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:ai_orchestrator/presentation/chat/controllers/runtime_notice_presenter.dart';
 
@@ -1745,7 +1744,9 @@ class _ChatBodyState
 
   void _trackSuccessfulLocalInference(RuntimeEventEntry entry) {
     if (entry.tag != 'INFERENCE_TIMING' ||
-        !entry.message.contains('outcome=success')) return;
+        !entry.message.contains('outcome=success')) {
+      return;
+    }
     final match = RegExp(
       r'\bmodel=([A-Za-z0-9_.-]{1,80}) mode=local\b',
     ).firstMatch(entry.message);
