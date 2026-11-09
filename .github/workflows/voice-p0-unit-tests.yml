@@ -8,12 +8,15 @@ on:
       - 'lib/core/voice/live_playback_drain.dart'
       - 'lib/core/voice/live_next_turn_gate.dart'
       - 'lib/core/voice/live_voice_phase.dart'
+      - 'lib/core/voice/live_speech_sequence.dart'
+      - 'lib/core/voice/isolated_kokoro_voice_engine.dart'
       - 'lib/presentation/chat/components/live_voice_overlay.dart'
       - 'lib/features/chat/data/services/live_chat_transcript_recorder.dart'
       - 'lib/features/chat/presentation/pages/chat_page.dart'
       - 'test/core/voice/live_playback_drain_test.dart'
       - 'test/core/voice/live_next_turn_gate_test.dart'
       - 'test/core/voice/live_voice_phase_test.dart'
+      - 'test/core/voice/isolated_kokoro_voice_engine_test.dart'
       - 'test/features/chat/data/services/live_chat_transcript_recorder_test.dart'
       - '.github/workflows/voice-p0-unit-tests.yml'
   workflow_dispatch:
@@ -65,12 +68,15 @@ jobs:
           lib/core/voice/live_playback_drain.dart
           lib/core/voice/live_next_turn_gate.dart
           lib/core/voice/live_voice_phase.dart
+          lib/core/voice/live_speech_sequence.dart
+          lib/core/voice/isolated_kokoro_voice_engine.dart
           lib/presentation/chat/components/live_voice_overlay.dart
           lib/features/chat/data/services/live_chat_transcript_recorder.dart
           lib/features/chat/presentation/pages/chat_page.dart
           test/core/voice/live_playback_drain_test.dart
           test/core/voice/live_next_turn_gate_test.dart
           test/core/voice/live_voice_phase_test.dart
+          test/core/voice/isolated_kokoro_voice_engine_test.dart
           test/features/chat/data/services/live_chat_transcript_recorder_test.dart
       - name: Test Live playback drain and explicit next-turn safety
         run: >-
@@ -78,4 +84,5 @@ jobs:
           test/core/voice/live_playback_drain_test.dart
           test/core/voice/live_next_turn_gate_test.dart
           test/core/voice/live_voice_phase_test.dart
+          test/core/voice/isolated_kokoro_voice_engine_test.dart
           test/features/chat/data/services/live_chat_transcript_recorder_test.dart

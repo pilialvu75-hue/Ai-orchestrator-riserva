@@ -1,9 +1,9 @@
 export 'package:ai_orchestrator/core/voice/read_aloud_transport.dart' show TtsAudioSink;
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:ai_orchestrator/core/voice/android_pcm_tts_audio_sink.dart';
 import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
+import 'package:ai_orchestrator/core/voice/live_speech_sequence.dart';
 
 import 'package:ai_orchestrator/core/voice/kokoro_worker.dart';
 import 'package:ai_orchestrator/core/voice/tts_text_plan.dart';
@@ -121,7 +121,7 @@ final class AudioStreamTtsAudioSink implements TtsAudioSink {
 /// options and the generated Float32 PCM are transferred.
 final class IsolatedKokoroVoiceEngine
     with RuntimeEventEmitter
-    implements VoiceEngine, ReadAloudVoiceEngine, ReadAloudResumeTarget, VoiceRecognitionMemoryReclaimer {
+    implements VoiceEngine, ReadAloudVoiceEngine, ReadAloudResumeTarget, VoiceRecognitionMemoryReclaimer, LiveSpeechSequenceEngine {
   IsolatedKokoroVoiceEngine({
     required VoiceEngine delegate,
     String Function()? languageCode,
@@ -154,6 +154,40 @@ final class IsolatedKokoroVoiceEngine
   int _activeRequestGeneration = -1;
   Completer<void>? _requestFinished;
   int _queuedRequestSequence = 0;
+  bool _liveSequenceActive = false;
+  bool _liveTimelinePrepared = false;
+
+  @override
+  void beginLiveSpeechSequence() {
+    if (_disposed || _liveSequenceActive) {
+      throw StateError('Live PCM sequence is unavailable or already active.');
+    }
+    _liveSequenceActive = true;
+    _liveTimelinePrepared = false;
+    logEvent(_tag, '[LIVE_PCM_SEQUENCE_BEGIN]');
+  }
+
+  @override
+  Future<void> endLiveSpeechSequence({required bool completed}) async {
+    if (!_liveSequenceActive) return;
+    _liveSequenceActive = false;
+    final prepared = _liveTimelinePrepared;
+    _liveTimelinePrepared = false;
+    if (!prepared) return;
+    if (completed && !_disposed) {
+      await _readAloudSink?.finishReadAloud();
+      logEvent(_tag, '[LIVE_PCM_SEQUENCE_COMPLETE]');
+    } else {
+      final sink = _readAloudSink;
+      if (sink != null) {
+        await sink.stopReadAloud();
+      } else {
+        _audioSink.stop();
+      }
+      logEvent(_tag, '[LIVE_PCM_SEQUENCE_ABORT]');
+    }
+  }
+
 
   /// Only forwards an explicit post-dictation handoff. Kokoro output and
   /// its worker remain untouched while the Sherpa ASR model is released.
@@ -305,12 +339,19 @@ final class IsolatedKokoroVoiceEngine
   }
 
   Future<void> _speakRequest(String sanitized, int generation) async {
-    // Every explicit read-aloud request gets a new PCM timeline. This is
-    // independent of chat navigation; generated phrases remain seekable.
+    // A normal tap gets a fresh timeline; all Live chunks for the SAME
+    // assistant response share one timeline until the manager calls end.
     final readAloud = _readAloudSink;
-    await readAloud?.beginReadAloud();
+    final liveChunk = _liveSequenceActive;
     var completed = false;
     try {
+    // Native prepare may throw after creating a partial playback service.
+    // It must run INSIDE the cleanup guard even on the very first chunk.
+    if (!liveChunk || !_liveTimelinePrepared) {
+      await readAloud?.beginReadAloud();
+      if (_disposed || generation != _lifecycleGeneration) return;
+      if (liveChunk && _liveSequenceActive) _liveTimelinePrepared = true;
+    }
     final preparation = Stopwatch()..start();
     final assets = await _assetsProvider();
     logEvent(_tag, '[TTS_PREPARE_TIMING] asset_ms=${preparation.elapsedMilliseconds}');
@@ -341,7 +382,9 @@ final class IsolatedKokoroVoiceEngine
           detectTtsLanguage(phrases[index], defaultLang), generation, index);
     }
     if (!_disposed && generation == _lifecycleGeneration) {
-      await readAloud?.finishReadAloud();
+      // The Live manager finishes the native PCM timeline ONLY after all
+      // streamed chunks have been appended, never after an individual chunk.
+      if (!liveChunk) await readAloud?.finishReadAloud();
       completed = true;
     }
     } finally {
@@ -349,6 +392,9 @@ final class IsolatedKokoroVoiceEngine
       // user-started Android mediaPlayback foreground service orphaned.
       // When another request stopped us, its stopReadAloud owns cleanup.
       if (!completed && !_disposed && generation == _lifecycleGeneration) {
+        // A failed chunk invalidates the whole Live sequence.
+        _liveSequenceActive = false;
+        _liveTimelinePrepared = false;
         try {
           await readAloud?.stopReadAloud();
         } catch (error) {
@@ -445,6 +491,8 @@ final class IsolatedKokoroVoiceEngine
   @override
   Future<void> stopSpeaking() async {
     _lifecycleGeneration++;
+    _liveSequenceActive = false;
+    _liveTimelinePrepared = false;
 
     try {
       final readAloud = _readAloudSink;
@@ -464,6 +512,8 @@ final class IsolatedKokoroVoiceEngine
 
     _disposed = true;
     _lifecycleGeneration++;
+    _liveSequenceActive = false;
+    _liveTimelinePrepared = false;
     _worker?.close();
     _worker = null;
 

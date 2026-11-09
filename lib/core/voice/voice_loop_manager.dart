@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/core/voice/voice_engine.dart';
 import 'package:ai_orchestrator/core/voice/live_voice_latency.dart';
 import 'package:ai_orchestrator/core/voice/live_voice_phase.dart';
 import 'package:ai_orchestrator/core/voice/live_playback_drain.dart';
+import 'package:ai_orchestrator/core/voice/live_speech_sequence.dart';
 import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
@@ -746,6 +747,32 @@ class VoiceLoopManager with RuntimeEventEmitter {
       }
     }
 
+    // Live streaming can call speak() for multiple punctuation chunks. Those
+    // chunks must share ONE native PCM timeline; repeated prepare() deletes
+    // the previous audio file and truncates audible speech on Android.
+    final speechSequence = _engine is LiveSpeechSequenceEngine
+        ? _engine as LiveSpeechSequenceEngine
+        : null;
+    speechSequence?.beginLiveSpeechSequence();
+    var speechSequenceOpen = speechSequence != null;
+
+    Future<void> closeSpeechSequence(bool completed) async {
+      if (!speechSequenceOpen) return;
+      speechSequenceOpen = false;
+      try {
+        await speechSequence!.endLiveSpeechSequence(completed: completed);
+      } catch (_) {
+        // A native finish error must not leave the playback service alive.
+        try {
+          await _engine.stopSpeaking();
+        } catch (_) {
+          logEvent(_tag, '[LIVE_PCM_SEQUENCE_STOP_WARN]');
+        }
+        rethrow;
+      }
+    }
+
+    try {
     await for (
       final response in inferenceStream
     ) {
@@ -872,7 +899,9 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     if (trailing.isEmpty) {
       await Future.wait(pendingPlayback);
-      if (!_disposed && !token.isCancelled && !_stopRequested) {
+      if (!_disposed && !token.isCancelled && !_stopRequested &&
+          !playbackFailed && !inferenceFailed) {
+        await closeSpeechSequence(true);
         await awaitAudibleOutput();
       }
       return;
@@ -891,8 +920,25 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     await queueSpeech(trailing);
     await Future.wait(pendingPlayback);
-    if (!_disposed && !token.isCancelled && !_stopRequested) {
+    if (!_disposed && !token.isCancelled && !_stopRequested &&
+        !playbackFailed && !inferenceFailed) {
+      await closeSpeechSequence(true);
       await awaitAudibleOutput();
+    }
+    } finally {
+      if (speechSequenceOpen) {
+        // Prevent queued speech callbacks from starting AFTER a failed turn
+        // has stopped the PCM sink, even if the inference stream failed.
+        playbackFailed = true;
+        // A failed, cancelled or interrupted response may still have an
+        // in-flight TTS worker. Invalidate it before stopping the PCM stream.
+        try {
+          await _engine.stopSpeaking();
+        } catch (_) {
+          logEvent(_tag, '[LIVE_PCM_SEQUENCE_STOP_WARN]');
+        }
+        await closeSpeechSequence(false);
+      }
     }
   }
 }
