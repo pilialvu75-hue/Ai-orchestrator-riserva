@@ -55,6 +55,16 @@ abstract final class AssistantReplyLanguagePolicy {
     'responde en español': 'Spanish',
   };
 
+  // A complete, short Italian named-person statement is unambiguous even
+  // when the vocabulary scorer sees only "alto". Keep these patterns bounded
+  // to the reviewed relational-memory phrases; do not guess on a single word.
+  static final RegExp _shortItalianNamedStatement = RegExp(
+    r"^(?:[\p{L}\p{M}'’-]+\s+è\s+alto|"
+    r"non\s+[\p{L}\p{M}'’-]+\s*,\s*[\p{L}\p{M}'’-]+\s+è\s+alto)$",
+    unicode: true,
+    caseSensitive: false,
+  );
+
   /// Returns null when a message is too short or mixed to classify safely.
   static String? detect(String userPrompt) {
     final text = userPrompt.trim().toLowerCase();
@@ -63,6 +73,7 @@ abstract final class AssistantReplyLanguagePolicy {
         .replaceAll(RegExp(r'\s+'), ' ').trim();
     final explicitLanguage = _shortTurns[wholeTurn];
     if (explicitLanguage != null) return explicitLanguage;
+    if (_shortItalianNamedStatement.hasMatch(wholeTurn)) return 'Italian';
     final words = RegExp(
       r"[\p{L}]+(?:['’][\p{L}]+)?",
       unicode: true,
