@@ -1365,6 +1365,7 @@ e [report Test 3](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issu
 | 2 — recupero cross-chat | Candidato approvato, nuova conversazione: `Che cosa sai di Jerome?` → `Sai che Jerome è alto.` | **PASS** per ricordo confermato in una nuova chat LOCAL |
 | 3 — isolamento persone | Nuova chat: `Che cosa sai di Kader?` → `Mi dispiace, non ho informazioni specifiche su Kader. Potresti fornire più dettagli?` | **PASS**: nessuna falsa attribuzione dell'altezza di Jerome a Kader nel caso provato |
 | 4 — chat rimossa e memoria dopo arresto app | Nuovo fatto sintetico `Marco è alto.` approvato; chat origine cancellata dall'utente; Forza arresto; nuova chat LOCAL Qwen2.5 3B, domanda `Che cosa sai di Marco?` → `Marco è alto.` | **PASS fisico comportamentale** sulla versione mostrata `v1.0.15.104156`; non prova purge definitivo del cestino né ispezione SQLite |
+| 5 — dimenticanza selettiva | Dopo il Test 4, il tester comunica `Marco dimenticato correttamente` nell'esperimento locale | **PASS riferito dall'utente**, senza screenshot della risposta finale; verifica anti-resurrezione e conservazione degli altri ricordi ancora aperte. [Report #899](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899#issuecomment-6748767855) |
 
 **Nota su build e ambito:** Test 1–3 verificati sulla beta 103962; Test 4, con nuova persona sintetica e chat origine rimossa, sulla versione installata `v1.0.15.104156` (canale beta da schermata aggiornamenti). Il dato è stato riportato dall'utente e accompagnato da screenshot; il test di cancellazione definitiva tramite `Svuota cestino` resta aperto. Report in [issue #899](https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/issues/899).
 
@@ -1383,7 +1384,7 @@ provider CLOUD/HYBRID; resta il gate di divulgazione distinto già previsto.
 **Altri gate aperti:** modifica/correzione/forget con evidenza fisica,
 cambio di modello Qwen/Phi/Nemotron, eliminazione definitiva dal cestino,
 riferimenti omonimi, offline e condivisione cifrata fra dispositivi.
-I quattro PASS non dimostrano un grafo identitario generale o sincronizzazione.
+I cinque PASS (il quinto riferito dal tester senza screenshot) non dimostrano un grafo identitario generale o sincronizzazione.
 
 ### 17.4 — Piano per milestone con gate di accettazione
 
