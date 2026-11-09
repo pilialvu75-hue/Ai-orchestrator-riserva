@@ -411,6 +411,50 @@ void main() {
     expect(output.where((x) => x.isError), hasLength(1));
   });
 
+
+  test('LOCAL AUTO partial terminal failure is not a completed model',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    RuntimeEventLog.instance.clear();
+    final phi = validModel.copyWith(
+      id: 'phi3_5_mini', localPath: '/tmp/phi.gguf',
+    );
+    final qwen = validModel.copyWith(
+      id: 'qwen2_5_3b_instruct', localPath: '/tmp/qwen.gguf',
+    );
+    var loads = 0;
+    final service = buildService(
+      mode: AiRuntimeMode.local, selectedModel: phi,
+      availableModels: [phi, qwen],
+      localSelectionMode: LocalModelSelectionMode.automatic,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (request, _) async* {
+          loads++;
+          yield InferenceResponse(
+            text: 'Risposta incompleta',
+            model: request.modelId,
+            timestamp: 0,
+            isFinal: true,
+            terminalState: InferenceTerminalState.failed,
+            tokensGenerated: 2,
+          );
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(configured: false),
+    );
+    final output = await service.stream(const InferenceRequest(
+      sessionId: 'partial-terminal-failure',
+      prompt: 'Scrivi codice Dart',
+    )).toList();
+    expect(loads, 1);
+    expect(output.where((x) => x.isFinal), hasLength(1));
+    expect(output.last.terminalState, InferenceTerminalState.failed);
+    final messages = RuntimeEventLog.instance.entries.map((x) => x.message);
+    expect(messages.any((x) => x.startsWith('[LOCAL_AFFINITY_COMMIT]')), false);
+    expect(messages.any((x) => x.startsWith('[LOCAL_MODEL_USED]')), false);
+  });
+
   test('LOCAL AUTO two startup failures emit one terminal error, '
       'with no third model', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
