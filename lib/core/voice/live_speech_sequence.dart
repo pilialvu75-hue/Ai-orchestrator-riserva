@@ -1,7 +1,7 @@
 /// Optional PCM lifecycle contract for streamed Live speech.
 ///
 /// A normal read-aloud tap is its own seekable playback timeline. In Live,
-/// many separate [VoiceEngine.speak] calls may belong to ONE assistant answer.
+/// many separate speak() calls may belong to ONE assistant answer.
 /// Resetting Android PCM between these chunks truncates the preceding speech.
 /// The manager explicitly opens and closes each Live response instead.
 abstract interface class LiveSpeechSequenceEngine {
