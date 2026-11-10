@@ -158,15 +158,20 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
         linkIntent != TaskType.coding) {
       final youtubeLink = AssistantYouTubeLink.fromUserMessage(input);
       if (youtubeLink != null) {
+        final doNotOpen = _explicitDoNotOpenLink(input);
         final webDisabled = isOffline ||
             AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) ||
             AssistantWebSearchPolicy.isExplicitlyOfflineRequest(input) ||
-            _explicitDoNotOpenLink(input);
+            doNotOpen;
         if (webDisabled) {
           yield InferenceResponse.finalChunk(
-            text: 'Il link punta a un video YouTube, ma Internet è disattivato '
-                'per questa richiesta. Posso analizzare un testo o una '
-                'trascrizione che mi fornisci.',
+            text: doNotOpen
+                ? 'Ho riconosciuto il link YouTube, ma non l\'ho aperto, '
+                    'come richiesto.'
+                : 'Ho riconosciuto il link YouTube, ma non ho consultato '
+                    'Internet perché questa richiesta è in modalità '
+                    'senza accesso Web. Posso analizzare un testo o '
+                    'una trascrizione che mi fornisci.',
             tokensGenerated: 0,
             providerId: 'youtube_link_offline',
           );
@@ -202,14 +207,19 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       final publicLink = AssistantPublicWebLink.fromUserMessage(input);
       final publicReader = _publicWebReader;
       if (publicLink != null && publicReader != null) {
+        final doNotOpen = _explicitDoNotOpenLink(input);
         final webDisabled = isOffline ||
             AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) ||
             AssistantWebSearchPolicy.isExplicitlyOfflineRequest(input) ||
-            _explicitDoNotOpenLink(input);
+            doNotOpen;
         if (webDisabled) {
           yield InferenceResponse.finalChunk(
-            text: 'Ho riconosciuto il collegamento ma non ho aperto la '
-                'pagina, come richiesto.',
+            text: doNotOpen
+                ? 'Ho riconosciuto il collegamento, ma non ho aperto '
+                    'la pagina, come richiesto.'
+                : 'Ho riconosciuto il collegamento, ma non ho consultato '
+                    'la pagina perché questa richiesta è in modalità '
+                    'senza accesso Web.',
             tokensGenerated: 0,
             providerId: 'public_web_link_offline',
           );
