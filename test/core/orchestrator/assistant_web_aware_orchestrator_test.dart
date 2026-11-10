@@ -1246,6 +1246,40 @@ void main() {
     verifyNever(() => webSearch.execute(any()));
   });
 
+  test('YouTube URL with explicit Web search wording still uses metadata',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final youtube = _TestYouTubeMetadataLookup(
+      const AssistantYouTubeMetadata(
+        title: 'Titolo verificato', channel: 'Canale ufficiale',
+      ),
+    );
+    final result = await build(youtubeMetadataLookup: youtube).handleStream(
+      'cerca informazioni su https://youtube.com/shorts/hZdi0JUEFSc',
+      sessionId: 'youtube-search-wording',
+    ).toList();
+    expect(result.single.providerId, 'youtube_link_metadata');
+    expect(result.single.text, contains('Titolo verificato'));
+    expect(youtube.calls, 1);
+    verifyNever(() => webSearch.execute(any()));
+    verifyNever(() => inference.stream(any()));
+  });
+
+  test('Do-not-open YouTube request never fetches the link', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final youtube = _TestYouTubeMetadataLookup(
+      const AssistantYouTubeMetadata(title: 'Non usarlo', channel: 'Private'),
+    );
+    final result = await build(youtubeMetadataLookup: youtube).handleStream(
+      'Non aprire questo link: https://youtu.be/hZdi0JUEFSc',
+      sessionId: 'youtube-no-open',
+    ).toList();
+    expect(result.single.providerId, 'youtube_link_offline');
+    expect(youtube.calls, 0);
+    verifyNever(() => inference.stream(any()));
+    verifyNever(() => webSearch.execute(any()));
+  });
+
   test('LOCAL YouTube metadata lookup failure is explicit, not invented',
       () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
