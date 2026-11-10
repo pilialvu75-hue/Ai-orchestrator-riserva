@@ -32,10 +32,11 @@ final class AssistantPublicWebLink {
         host.endsWith('.local') ||
         host.endsWith('.home.arpa') ||
         host == 'youtube.com' ||
-        host == 'www.youtube.com' ||
-        host == 'm.youtube.com' ||
+        host.endsWith('.youtube.com') ||
         host == 'youtu.be' ||
-        host == 'www.youtu.be') {
+        host.endsWith('.youtu.be') ||
+        host == 'youtube-nocookie.com' ||
+        host.endsWith('.youtube-nocookie.com')) {
       // YouTube has a separate source-specific metadata path; never read a
       // YouTube watch page and mistake its boilerplate for video content.
       return null;
