@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+
 /// A canonical, public YouTube video identifier, parsed only from a user's
 /// current message. No arbitrary URL or tracking query is ever fetched.
 final class AssistantYouTubeLink {
@@ -94,27 +96,54 @@ final class AssistantYouTubeMetadataService
       'url': link.canonicalUrl.toString(),
       'format': 'json',
     });
+    RuntimeEventLog.instance.emit(
+      '[ASSISTANT_YOUTUBE_LINK] stage=metadata_lookup_begin provider=oembed',
+    );
     try {
       final request = http.Request('GET', endpoint)
         ..followRedirects = false;
       final response = await _client.send(request).timeout(timeout);
       if (response.statusCode != 200 || response.isRedirect) {
         // Avoid following a redirect to any other host.
+        RuntimeEventLog.instance.emit(
+          '[ASSISTANT_YOUTUBE_LINK] stage=metadata_lookup_end '
+          'status=unavailable http_status=${response.statusCode}',
+        );
         return null;
       }
       final bytes = <int>[];
       await for (final chunk in response.stream.timeout(timeout)) {
-        if (bytes.length + chunk.length > maxResponseBytes) return null;
+        if (bytes.length + chunk.length > maxResponseBytes) {
+          RuntimeEventLog.instance.emit(
+            '[ASSISTANT_YOUTUBE_LINK] stage=metadata_lookup_end '
+            'status=unavailable reason=response_too_large',
+          );
+          return null;
+        }
         bytes.addAll(chunk);
       }
       final decoded = jsonDecode(utf8.decode(bytes));
       if (decoded is! Map<String, dynamic>) return null;
       final title = _clean(decoded['title']);
       final author = _clean(decoded['author_name']);
-      if (title == null || author == null) return null;
+      if (title == null || author == null) {
+        RuntimeEventLog.instance.emit(
+          '[ASSISTANT_YOUTUBE_LINK] stage=metadata_lookup_end '
+          'status=unavailable reason=missing_metadata',
+        );
+        return null;
+      }
+      RuntimeEventLog.instance.emit(
+        '[ASSISTANT_YOUTUBE_LINK] stage=metadata_lookup_end '
+        'status=success title_chars=${title.length} channel_chars=${author.length}',
+      );
       return AssistantYouTubeMetadata(title: title, channel: author);
-    } catch (_) {
+    } catch (error) {
       // Never log request URLs, private prompts or HTTP exception bodies.
+      RuntimeEventLog.instance.emit(
+        '[ASSISTANT_YOUTUBE_LINK] stage=metadata_lookup_end '
+        'status=unavailable error_type=${error.runtimeType}',
+      );
       return null;
     }
   }
