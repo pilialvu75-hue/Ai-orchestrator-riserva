@@ -30,6 +30,15 @@ class CancelModelDownload extends ModelDownloadEvent {
   List<Object?> get props => [modelId];
 }
 
+class RemoveLocalModel extends ModelDownloadEvent {
+  const RemoveLocalModel({required this.modelId});
+
+  final String modelId;
+
+  @override
+  List<Object?> get props => [modelId];
+}
+
 class SelectActiveModel extends ModelDownloadEvent {
   const SelectActiveModel({required this.modelId});
 

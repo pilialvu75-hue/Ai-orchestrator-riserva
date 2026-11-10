@@ -27,6 +27,7 @@ class ModelDownloadBloc
     on<StartLocalModelImport>(_onStartLocalModelImport);
     on<StartCustomUrlDownload>(_onStartCustomUrlDownload);
     on<CancelModelDownload>(_onCancelModelDownload);
+    on<RemoveLocalModel>(_onRemoveLocalModel);
     on<SelectActiveModel>(
       _onSelectActiveModel,
       transformer: (events, mapper) => events.asyncExpand(mapper),
@@ -241,6 +242,31 @@ class ModelDownloadBloc
         ..remove(event.modelId);
       emit(current.copyWith(downloadProgress: newProgress));
     }
+  }
+
+  Future<void> _onRemoveLocalModel(
+      RemoveLocalModel event, Emitter<ModelDownloadState> emit) async {
+    final current = state;
+    if (current is! ModelsLoaded) return;
+    if (current.selectedModelId == event.modelId) {
+      emit(current.copyWith(
+        downloadErrorMessage:
+            'Cambia prima il modello LOCAL attivo per poterlo rimuovere.',
+      ));
+      return;
+    }
+    if (current.downloadProgress.containsKey(event.modelId)) {
+      emit(current.copyWith(
+        downloadErrorMessage: 'Attendi o annulla il download prima di eliminare.',
+      ));
+      return;
+    }
+
+    final result = await repository.deleteModel(event.modelId);
+    result.fold(
+      (failure) => emit(current.copyWith(downloadErrorMessage: failure.message)),
+      (_) => add(const LoadAvailableModels()),
+    );
   }
 
   Future<void> _onSelectActiveModel(
