@@ -148,7 +148,8 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     // search query. Resolve strictly public metadata before generating text.
     // Never run this path for document excerpts, CLOUD or consent-gated HYBRID.
     if (_runtimeSettingsService.runtimeMode == AiRuntimeMode.local &&
-        _intentAnalyzer.analyze(input) == TaskType.chat) {
+        (_intentAnalyzer.analyze(input) == TaskType.chat ||
+            AssistantWebSearchPolicy.isExplicitlyOfflineRequest(input))) {
       final youtubeLink = AssistantYouTubeLink.fromUserMessage(input);
       if (youtubeLink != null) {
         final webDisabled = isOffline ||
