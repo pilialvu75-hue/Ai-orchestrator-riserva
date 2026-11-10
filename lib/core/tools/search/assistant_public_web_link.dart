@@ -43,7 +43,7 @@ final class AssistantPublicWebLink {
     }
 
     // Fragments identify sections on a client page, not HTTP resources.
-    final normalized = parsed.replace(fragment: '');
+    final normalized = Uri.parse(parsed.toString().split('#').first);
     return AssistantPublicWebLink._(normalized);
   }
 }
