@@ -147,14 +147,17 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     // A user-supplied YouTube URL is not a transcript or an ordinary Web
     // search query. Resolve strictly public metadata before generating text.
     // Never run this path for document excerpts, CLOUD or consent-gated HYBRID.
+    final linkIntent = _intentAnalyzer.analyze(input);
     if (_runtimeSettingsService.runtimeMode == AiRuntimeMode.local &&
-        (_intentAnalyzer.analyze(input) == TaskType.chat ||
-            AssistantWebSearchPolicy.isExplicitlyOfflineRequest(input))) {
+        linkIntent != TaskType.command &&
+        linkIntent != TaskType.plan &&
+        linkIntent != TaskType.coding) {
       final youtubeLink = AssistantYouTubeLink.fromUserMessage(input);
       if (youtubeLink != null) {
         final webDisabled = isOffline ||
             AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) ||
-            AssistantWebSearchPolicy.isExplicitlyOfflineRequest(input);
+            AssistantWebSearchPolicy.isExplicitlyOfflineRequest(input) ||
+            _explicitDoNotOpenLink(input);
         if (webDisabled) {
           yield InferenceResponse.finalChunk(
             text: 'Il link punta a un video YouTube, ma Internet è disattivato '
@@ -257,6 +260,19 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
               ? trustedCloudSourceEvidence
               : null,
     );
+  }
+
+  static bool _explicitDoNotOpenLink(String input) {
+    final text = input.toLowerCase().replaceAll('’', "'").trim();
+    return RegExp(
+      r'(?:non (?:aprire|aprirei|consultare|visitare|seguire) '
+      r'(?:il |questo )?(?:link|video|url)|'
+      r'non (?:aprire|consultare|visitare|seguire) '
+      r'(?:il |questo )?(?:collegamento)|'
+      r'do not (?:open|fetch|visit|follow) (?:this |the )?(?:link|video|url)|'
+      r"don't (?:open|fetch|visit|follow) (?:this |the )?(?:link|video|url))",
+      caseSensitive: false,
+    ).hasMatch(text);
   }
 
   /// No assistant assertions or cross-chat searches; the caller provides
