@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_youtube_link_metadata.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_device_clock.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_conversation_recall.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_shopping_results.dart';
@@ -36,7 +37,10 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     required CloudRuntimeProvider cloudRuntimeProvider,
     PlannerService? plannerService,
     HybridLocalMemoryPromptEnricher? hybridLocalMemoryPromptEnricher,
-  })  : _intentAnalyzer = intentAnalyzer,
+    AssistantYouTubeMetadataLookup? youtubeMetadataLookup,
+  })  : _youTubeMetadataLookup =
+            youtubeMetadataLookup ?? AssistantYouTubeMetadataService(),
+        _intentAnalyzer = intentAnalyzer,
         _webSearchTool = webSearchTool,
         _runtimeSettingsService = runtimeSettingsService,
         _cloudRuntimeProvider = cloudRuntimeProvider,
@@ -54,6 +58,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
   static const int _maxResults = 5;
 
   final IntentAnalyzer _intentAnalyzer;
+  final AssistantYouTubeMetadataLookup _youTubeMetadataLookup;
   final WebSearchTool _webSearchTool;
   final AiRuntimeSettingsService _runtimeSettingsService;
   final CloudRuntimeProvider _cloudRuntimeProvider;
@@ -139,6 +144,51 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
           providerId: 'device_clock');
       return;
     }
+    // A user-supplied YouTube URL is not a transcript or an ordinary Web
+    // search query. Resolve strictly public metadata before generating text.
+    // Never run this path for document excerpts, CLOUD or consent-gated HYBRID.
+    if (_runtimeSettingsService.runtimeMode == AiRuntimeMode.local &&
+        _intentAnalyzer.analyze(input) == TaskType.chat) {
+      final youtubeLink = AssistantYouTubeLink.fromUserMessage(input);
+      if (youtubeLink != null) {
+        final webDisabled = isOffline ||
+            AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) ||
+            AssistantWebSearchPolicy.isExplicitlyOfflineRequest(input);
+        if (webDisabled) {
+          yield InferenceResponse.finalChunk(
+            text: 'Il link punta a un video YouTube, ma Internet è disattivato '
+                'per questa richiesta. Posso analizzare un testo o una '
+                'trascrizione che mi fornisci.',
+            tokensGenerated: 0,
+            providerId: 'youtube_link_offline',
+          );
+          return;
+        }
+        final metadata = await _youTubeMetadataLookup.fetch(youtubeLink);
+        if (metadata == null) {
+          yield InferenceResponse.finalChunk(
+            text: 'Ho riconosciuto il link YouTube, ma non sono riuscito a '
+                'recuperare titolo e canale. Non posso descrivere il '
+                'contenuto del video senza una fonte verificata.',
+            tokensGenerated: 0,
+            providerId: 'youtube_link_unavailable',
+          );
+          return;
+        }
+        yield InferenceResponse.finalChunk(
+          text: 'Ho trovato i metadati pubblici del video YouTube. '
+              'Titolo: ${metadata.title}. '
+              'Canale: ${metadata.channel}. '
+              'Questa fonte non fornisce la descrizione completa, '
+              'i sottotitoli o il contenuto visivo del video: '
+              'non posso ancora riassumerli in modo affidabile.',
+          tokensGenerated: 0,
+          providerId: 'youtube_link_metadata',
+        );
+        return;
+      }
+    }
+
     final shoppingQuery = !isOffline &&
         !AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) &&
         _runtimeSettingsService.runtimeMode == AiRuntimeMode.local
