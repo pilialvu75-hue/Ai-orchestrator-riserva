@@ -91,7 +91,7 @@ void main() {
         maxResponseBytes: 64,
         client: MockClient((_) async => http.Response(
             jsonEncode(<String, String>{
-              'title': 'X' * 100,
+              'title': List<String>.filled(100, 'X').join(),
               'author_name': 'Canale',
             }), 200)),
       );
