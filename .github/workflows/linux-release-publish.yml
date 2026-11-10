@@ -9,6 +9,12 @@ on:
       - 'linux/packaging/**'
       - 'native/linux/**'
       - 'lib/core/system/update/**'
+  workflow_dispatch:
+    inputs:
+      android_run_id:
+        description: 'Successful manual Build & Release APK run ID'
+        required: true
+        type: string
   workflow_run:
     workflows:
       - Build & Release APK
@@ -50,17 +56,48 @@ jobs:
 
   publish-linux:
     if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'workflow_dispatch'
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_dispatch') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-22.04
     timeout-minutes: 90
 
     steps:
+      - name: Checkout publisher validation sources
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate already authorized Android release
+        id: android_source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANDROID_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.android_run_id || github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          run_id="$ANDROID_RUN_ID"
+          [[ "$run_id" =~ ^[0-9]{6,16}$ ]] || { echo "Invalid Android release run ID" >&2; exit 1; }
+          source_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .name == "Build & Release APK" and
+            .event == "workflow_dispatch" and
+            .status == "completed" and
+            .conclusion == "success" and
+            .head_branch == "main" and
+            .repository.full_name == $repo and
+            (.head_sha | test("^[0-9a-f]{40}$")) and
+            (.run_number > 0)
+          ' <<< "$source_run" >/dev/null || { echo "Not an authorized successful Android release" >&2; exit 1; }
+          echo "source_sha=$(jq -r .head_sha <<< "$source_run")" >> "$GITHUB_OUTPUT"
+          echo "run_number=$(jq -r .run_number <<< "$source_run")" >> "$GITHUB_OUTPUT"
+
       - name: Checkout exact Android release commit
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ steps.android_source.outputs.source_sha }}
+          persist-credentials: false
           fetch-depth: 0
           submodules: recursive
 
@@ -90,7 +127,7 @@ jobs:
           set -euo pipefail
           raw_version="$(awk '/^version:/ {print $2; exit}' pubspec.yaml)"
           version_name="${raw_version%%+*}"
-          version_code="$((100000 + ${{ github.event.workflow_run.run_number }}))"
+          version_code="$((100000 + ${{ steps.android_source.outputs.run_number }}))"
 
           if [[ ! "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Unable to resolve semantic application version from pubspec.yaml: $raw_version" >&2
@@ -112,7 +149,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Coordinated Linux version: $release_version"
           echo "Target GitHub release: $tag"
-          echo "Source commit: ${{ github.event.workflow_run.head_sha }}"
+          echo "Source commit: ${{ steps.android_source.outputs.source_sha }}"
 
       - name: Resolve existing explicitly published release tag
         id: publish_tag
@@ -140,6 +177,11 @@ jobs:
             echo "::error::Expected exactly one explicitly published release for $base and build $build"
             exit 1
           fi
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/${matches[0]}" --jq '.object.sha')"
+          if [[ "$tag_sha" != '${{ steps.android_source.outputs.source_sha }}' ]]; then
+            echo "::error::Release tag does not point to the authorized Android source commit"
+            exit 1
+          fi
           echo "tag=${matches[0]}" >> "$GITHUB_OUTPUT"
           echo "Attaching desktop asset to ${matches[0]}"
 
@@ -161,8 +203,8 @@ jobs:
             --dir "$RUNNER_TEMP" --clobber
           enabled="$(python3 scripts/hybrid_beta_release_manifest.py resolve \
             --path "$RUNNER_TEMP/$file" \
-            --source-sha '${{ github.event.workflow_run.head_sha }}' \
-            --run-number '${{ github.event.workflow_run.run_number }}' \
+            --source-sha '${{ steps.android_source.outputs.source_sha }}' \
+            --run-number '${{ steps.android_source.outputs.run_number }}' \
             --tag '${{ steps.publish_tag.outputs.tag }}')"
           [[ "$enabled" == 'true' || "$enabled" == 'false' ]] || exit 1
           echo "enabled=$enabled" >> "$GITHUB_OUTPUT"

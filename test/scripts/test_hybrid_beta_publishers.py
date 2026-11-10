@@ -111,6 +111,41 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
                 self.assertIn("main", push_block)
                 self.assertNotIn("\n    paths:", push_block)
 
+    def test_linux_replay_requires_verified_android_manual_release(self):
+        workflow = source('.github/workflows/linux-release-publish.yml')
+        self.assertIn('  workflow_dispatch:', workflow)
+        self.assertIn('android_run_id:', workflow)
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        self.assertIn('steps.android_source.outputs.source_sha', workflow)
+        self.assertIn('steps.android_source.outputs.run_number', workflow)
+        self.assertIn('.name == "Build & Release APK"', workflow)
+        self.assertIn('.event == "workflow_dispatch"', workflow)
+        self.assertIn('.conclusion == "success"', workflow)
+        self.assertIn('Not an authorized successful Android release', workflow)
+        self.assertIn('git/ref/tags/', workflow)
+        self.assertIn('Release tag does not point to the authorized Android source commit', workflow)
+        self.assertLess(workflow.index('Validate already authorized Android release'),
+                        workflow.index('Checkout exact Android release commit'))
+        self.assertLess(workflow.index('Resolve existing explicitly published release tag'),
+                        workflow.index('Build coordinated Linux release'))
+
+    def test_owner_desktop_replay_dispatches_all_three_verified_publishers(self):
+        dispatcher = source('scripts/dispatch_authorized_desktop_replay.sh')
+        contract = source('.github/workflows/authorized-desktop-replay.yml')
+        self.assertIn('channel=desktop-replay', dispatcher)
+        self.assertIn('.event == "workflow_dispatch"', dispatcher)
+        self.assertIn('.conclusion == "success"', dispatcher)
+        self.assertIn('git/ref/tags/', dispatcher)
+        self.assertIn("github.actor == 'pilialvu75-hue'", contract)
+        self.assertIn("github.ref == 'refs/heads/release-request/desktop'", contract)
+        for platform in ('windows', 'macos', 'linux'):
+            with self.subTest(platform=platform):
+                command = 'gh workflow run ' + platform + '-release-publish.yml'
+                self.assertIn(command, dispatcher)
+                self.assertIn(command, contract)
+        self.assertLess(dispatcher.index('Published Android APK asset missing'),
+                        dispatcher.index('gh workflow run linux-release-publish.yml'))
+
     def test_desktop_publishers_verify_issued_manifest_before_build(self):
         for platform in ("windows", "macos", "linux"):
             with self.subTest(platform=platform):

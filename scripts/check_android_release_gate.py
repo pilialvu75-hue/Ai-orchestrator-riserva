@@ -72,7 +72,7 @@ def validate_desktop_publisher(source: str, platform: str) -> list[str]:
         problems.append(f"{platform}: must recognize manually published stable tag")
     if platform == "windows" and '"$base+$build"' not in source:
         problems.append("windows: must recognize manually published stable tag")
-    if platform in ("windows", "macos"):
+    if platform in ("windows", "macos", "linux"):
         # Manual recovery must be bound to the same already-published manual run
         # as the normal workflow_run trigger; never accept arbitrary refs or tags.
         if ("  workflow_dispatch:" not in source or "android_run_id:" not in source):

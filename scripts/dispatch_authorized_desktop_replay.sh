@@ -61,7 +61,8 @@ assets="$(gh release view "$matching_tag" --repo "$repo" --json assets --jq '.as
 grep -Fxq 'app-release.apk' <<< "$assets" || { echo 'Published Android APK asset missing' >&2; exit 1; }
 
 echo "Verified existing Android release $matching_tag (run $run_id)."
-echo "Dispatching official Windows/macOS publishers on main, no Android rebuild."
+echo "Dispatching official Windows/macOS/Linux publishers on main, no Android rebuild."
 gh workflow run windows-release-publish.yml --repo "$repo" --ref main -f android_run_id="$run_id"
 gh workflow run macos-release-publish.yml --repo "$repo" --ref main -f android_run_id="$run_id"
+gh workflow run linux-release-publish.yml --repo "$repo" --ref main -f android_run_id="$run_id"
 echo "Desktop replay dispatch requested. Check publisher runs and signing/notarization gates."
