@@ -98,6 +98,7 @@ jobs:
           test/core/runtime/inference/inference_service_test.dart
           test/core/runtime/inference/local_model_orchestrator_test.dart
           test/core/runtime/ai_runtime_settings_test.dart
+          test/features/local_ai/data/services/model_download_service_remove_test.dart
           test/core/memory/assistant_durable_memory_store_test.dart
           test/core/memory/assistant_natural_memory_candidate_extractor_test.dart
           test/core/memory/assistant_memory_sqlite_restart_integration_test.dart
