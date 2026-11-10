@@ -14,6 +14,8 @@ void main() {
   test('rejects YouTube, local/internal endpoints and unsafe schemes', () {
     const invalid = <String>[
       'https://youtube.com/watch?v=hZdi0JUEFSc',
+      'https://music.youtube.com/watch?v=hZdi0JUEFSc',
+      'https://www.youtube-nocookie.com/embed/hZdi0JUEFSc',
       'https://youtu.be/hZdi0JUEFSc',
       'https://localhost/admin',
       'https://router.home.arpa/',
