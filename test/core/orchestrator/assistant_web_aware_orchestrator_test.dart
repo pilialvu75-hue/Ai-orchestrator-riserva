@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:ai_orchestrator/core/orchestrator/assistant_web_aware_orchestrator.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_youtube_link_metadata.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
@@ -24,6 +25,20 @@ class _MockInferenceService extends Mock implements InferenceService {}
 class _MockWebSearchTool extends Mock implements WebSearchTool {}
 class _MockRuntimeSettings extends Mock implements AiRuntimeSettingsService {}
 class _MockCloudRuntimeProvider extends Mock implements CloudRuntimeProvider {}
+
+class _TestYouTubeMetadataLookup implements AssistantYouTubeMetadataLookup {
+  _TestYouTubeMetadataLookup(this.result);
+  final AssistantYouTubeMetadata? result;
+  String? lastId;
+  int calls = 0;
+
+  @override
+  Future<AssistantYouTubeMetadata?> fetch(AssistantYouTubeLink link) async {
+    calls++;
+    lastId = link.videoId;
+    return result;
+  }
+}
 
 void main() {
   setUpAll(() {
@@ -64,6 +79,7 @@ void main() {
   AssistantWebAwareOrchestrator build({
     WebSearchTool? actualTool,
     HybridLocalMemoryPromptEnricher? hybridMemoryEnricher,
+    AssistantYouTubeMetadataLookup? youtubeMetadataLookup,
   }) {
     return AssistantWebAwareOrchestrator(
       intentAnalyzer: const IntentAnalyzer(),
@@ -73,6 +89,7 @@ void main() {
       runtimeSettingsService: settings,
       cloudRuntimeProvider: cloud,
       hybridLocalMemoryPromptEnricher: hybridMemoryEnricher,
+      youtubeMetadataLookup: youtubeMetadataLookup,
     );
   }
 
@@ -1173,4 +1190,109 @@ void main() {
       lessThan(system.indexOf('https://www.noaa.gov/synthetic-fixture-not-a-real-page')));
     expect(system, isNot(contains('uddg=')));
   });
+
+  test('LOCAL YouTube URL returns actual metadata without model or Web search',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final youtube = _TestYouTubeMetadataLookup(
+      const AssistantYouTubeMetadata(
+        title: 'Titolo verificato', channel: 'Canale verificato',
+      ),
+    );
+    final result = await build(youtubeMetadataLookup: youtube).handleStream(
+      'ecco il link: https://youtube.com/shorts/hZdi0JUEFSc?is=tracking',
+      sessionId: 'youtube-local',
+    ).toList();
+    expect(result, hasLength(1));
+    expect(result.single.isFinal, isTrue);
+    expect(result.single.text, contains('Titolo verificato'));
+    expect(result.single.text, contains('Canale verificato'));
+    expect(result.single.text, contains('non fornisce la descrizione completa'));
+    expect(result.single.text, isNot(contains('tracking')));
+    expect(result.single.providerId, 'youtube_link_metadata');
+    expect(youtube.lastId, 'hZdi0JUEFSc');
+    expect(youtube.calls, 1);
+    verifyNever(() => webSearch.execute(any()));
+    verifyNever(() => inference.stream(any()));
+    verifyNever(() => cloud.shouldPreferCloudFor(any()));
+  });
+
+  test('LOCAL offline YouTube URL never performs a network lookup', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final youtube = _TestYouTubeMetadataLookup(
+      const AssistantYouTubeMetadata(title: 'Non usarlo', channel: 'Private'),
+    );
+    final result = await build(youtubeMetadataLookup: youtube).handleStream(
+      'ecco il link: https://youtu.be/hZdi0JUEFSc',
+      sessionId: 'youtube-offline',
+      isOffline: true,
+    ).toList();
+    expect(result.single.providerId, 'youtube_link_offline');
+    expect(youtube.calls, 0);
+    verifyNever(() => inference.stream(any()));
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('explicit no-Web request with YouTube URL cannot trigger intent search',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final youtube = _TestYouTubeMetadataLookup(null);
+    final result = await build(youtubeMetadataLookup: youtube).handleStream(
+      'Non usare internet: https://youtube.com/shorts/hZdi0JUEFSc',
+      sessionId: 'youtube-no-web',
+    ).toList();
+    expect(result.single.providerId, 'youtube_link_offline');
+    expect(youtube.calls, 0);
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('YouTube URL with explicit Web search wording still uses metadata',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final youtube = _TestYouTubeMetadataLookup(
+      const AssistantYouTubeMetadata(
+        title: 'Titolo verificato', channel: 'Canale ufficiale',
+      ),
+    );
+    final result = await build(youtubeMetadataLookup: youtube).handleStream(
+      'cerca informazioni su https://youtube.com/shorts/hZdi0JUEFSc',
+      sessionId: 'youtube-search-wording',
+    ).toList();
+    expect(result.single.providerId, 'youtube_link_metadata');
+    expect(result.single.text, contains('Titolo verificato'));
+    expect(youtube.calls, 1);
+    verifyNever(() => webSearch.execute(any()));
+    verifyNever(() => inference.stream(any()));
+  });
+
+  test('Do-not-open YouTube request never fetches the link', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final youtube = _TestYouTubeMetadataLookup(
+      const AssistantYouTubeMetadata(title: 'Non usarlo', channel: 'Private'),
+    );
+    final result = await build(youtubeMetadataLookup: youtube).handleStream(
+      'Non aprire questo link: https://youtu.be/hZdi0JUEFSc',
+      sessionId: 'youtube-no-open',
+    ).toList();
+    expect(result.single.providerId, 'youtube_link_offline');
+    expect(youtube.calls, 0);
+    verifyNever(() => inference.stream(any()));
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('LOCAL YouTube metadata lookup failure is explicit, not invented',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final youtube = _TestYouTubeMetadataLookup(null);
+    final result = await build(youtubeMetadataLookup: youtube).handleStream(
+      'https://youtube.com/shorts/hZdi0JUEFSc\ndescrizione del video',
+      sessionId: 'youtube-not-available',
+    ).toList();
+    expect(result.single.providerId, 'youtube_link_unavailable');
+    expect(result.single.text, contains('non sono riuscito'));
+    expect(youtube.calls, 1);
+    verifyNever(() => inference.stream(any()));
+  });
+
+
 }

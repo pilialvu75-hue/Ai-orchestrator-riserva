@@ -11,6 +11,11 @@ abstract final class AssistantWebSearchPolicy {
   static const String offlineOnlyMarker =
       '[AI_ORCHESTRATOR_WEB_ACCESS_DISABLED_OFFLINE]';
 
+  /// Respect explicit no-Internet instructions even when a message contains
+  /// a public URL. Shared by deterministic link readers and Web search.
+  static bool isExplicitlyOfflineRequest(String prompt) =>
+      _explicitNoWebIntent(prompt.trim().toLowerCase());
+
   static bool shouldSearch(String prompt) {
     final value = prompt.trim().toLowerCase();
     if (value.isEmpty) return false;
