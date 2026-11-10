@@ -6,6 +6,7 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:ai_orchestrator/core/orchestrator/assistant_web_aware_orchestrator.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_youtube_link_metadata.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_public_web_link.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
 import 'package:ai_orchestrator/core/orchestrator/execution_engine.dart';
 import 'package:ai_orchestrator/core/orchestrator/intent_analyzer.dart';
@@ -36,6 +37,20 @@ class _TestYouTubeMetadataLookup implements AssistantYouTubeMetadataLookup {
   Future<AssistantYouTubeMetadata?> fetch(AssistantYouTubeLink link) async {
     calls++;
     lastId = link.videoId;
+    return result;
+  }
+}
+
+class _TestPublicWebReader implements AssistantPublicWebReader {
+  _TestPublicWebReader(this.result);
+  final AssistantPublicWebExcerpt? result;
+  int calls = 0;
+  String? lastUrl;
+
+  @override
+  Future<AssistantPublicWebExcerpt?> read(AssistantPublicWebLink link) async {
+    calls++;
+    lastUrl = link.url.toString();
     return result;
   }
 }
@@ -80,6 +95,7 @@ void main() {
     WebSearchTool? actualTool,
     HybridLocalMemoryPromptEnricher? hybridMemoryEnricher,
     AssistantYouTubeMetadataLookup? youtubeMetadataLookup,
+    AssistantPublicWebReader? publicWebReader,
   }) {
     return AssistantWebAwareOrchestrator(
       intentAnalyzer: const IntentAnalyzer(),
@@ -90,6 +106,7 @@ void main() {
       cloudRuntimeProvider: cloud,
       hybridLocalMemoryPromptEnricher: hybridMemoryEnricher,
       youtubeMetadataLookup: youtubeMetadataLookup,
+      publicWebReader: publicWebReader,
     );
   }
 
@@ -1292,6 +1309,84 @@ void main() {
     expect(result.single.text, contains('non sono riuscito'));
     expect(youtube.calls, 1);
     verifyNever(() => inference.stream(any()));
+  });
+
+
+
+  test('LOCAL public HTTPS page returns verified excerpt without model calls',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final reader = _TestPublicWebReader(
+      const AssistantPublicWebExcerpt(
+        host: 'example.org',
+        text: 'Un articolo pubblico verificabile.',
+      ),
+    );
+    final response = await build(publicWebReader: reader).handleStream(
+      'leggi https://example.org/story?lang=it',
+      sessionId: 'public-excerpt',
+    ).toList();
+    expect(response.single.isFinal, isTrue);
+    expect(response.single.providerId, 'public_web_link_excerpt');
+    expect(response.single.text, contains('example.org'));
+    expect(response.single.text, contains('Un articolo pubblico verificabile.'));
+    expect(response.single.text, contains('non sono una verifica indipendente'));
+    expect(reader.calls, 1);
+    expect(reader.lastUrl, 'https://example.org/story?lang=it');
+    verifyNever(() => inference.stream(any()));
+    verifyNever(() => webSearch.execute(any()));
+    verifyNever(() => cloud.shouldPreferCloudFor(any()));
+  });
+
+  test('public link respects explicitly offline intent, no fetch', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final reader = _TestPublicWebReader(null);
+    final response = await build(publicWebReader: reader).handleStream(
+      'non usare internet https://example.org/story',
+      sessionId: 'public-offline',
+    ).toList();
+    expect(response.single.providerId, 'public_web_link_offline');
+    expect(reader.calls, 0);
+    verifyNever(() => inference.stream(any()));
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('do-not-open public link instruction never performs a fetch', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final reader = _TestPublicWebReader(null);
+    final response = await build(publicWebReader: reader).handleStream(
+      'Non aprire questo link: https://example.org/story',
+      sessionId: 'public-no-open',
+    ).toList();
+    expect(response.single.providerId, 'public_web_link_offline');
+    expect(reader.calls, 0);
+    verifyNever(() => webSearch.execute(any()));
+  });
+
+  test('public link lookup failure never invents page contents', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final reader = _TestPublicWebReader(null);
+    final response = await build(publicWebReader: reader).handleStream(
+      'riassumi https://example.org/page',
+      sessionId: 'public-unavailable',
+    ).toList();
+    expect(response.single.providerId, 'public_web_link_unavailable');
+    expect(response.single.text, contains('non sono riuscito'));
+    expect(reader.calls, 1);
+    verifyNever(() => inference.stream(any()));
+  });
+
+  test('document excerpts cannot trigger public page fetches', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    final reader = _TestPublicWebReader(null);
+    final response = await build(publicWebReader: reader).handleStream(
+      'testo di un documento: https://example.org/story',
+      sessionId: 'document-link-not-user-intent',
+      documentContext: true,
+    ).toList();
+    expect(response.single.text, 'ok');
+    expect(reader.calls, 0);
+    verify(() => inference.stream(any())).called(1);
   });
 
 

@@ -29,6 +29,7 @@ import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_public_web_link.dart';
 import 'package:ai_orchestrator/core/tools/search/duckduckgo_lite_provider.dart';
 import 'package:ai_orchestrator/core/tools/search/duckduckgo_provider.dart';
 import 'package:ai_orchestrator/core/tools/search/expiring_search_cache.dart';
@@ -63,6 +64,7 @@ abstract final class CloudRoutingBootstrap {
   static Future<void> configure(
     GetIt sl, {
     bool enableConsentGatedAssistantCloud = false,
+    AssistantPublicWebReader? publicWebReader,
   }) async {
     await _unregisterIfPresent<HybridCloudAssistantRuntimeBundle>(sl);
     await _unregisterIfPresent<ChatRepository>(sl);
@@ -208,6 +210,7 @@ abstract final class CloudRoutingBootstrap {
 
     sl.registerLazySingleton<Orchestrator>(
       () => AssistantWebAwareOrchestrator(
+        publicWebReader: publicWebReader,
         intentAnalyzer: sl<IntentAnalyzer>(),
         executor: sl<ExecutionEngine>(),
         inferenceService: sl<InferenceService>(),

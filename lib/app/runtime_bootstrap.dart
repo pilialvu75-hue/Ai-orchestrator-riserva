@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'package:ai_orchestrator/app/integrations/assistant_workshop_public_web_reader.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/core/diagnostics/diagnostics_telemetry_bridge.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
@@ -114,6 +115,9 @@ class RuntimeBootstrap {
     await CloudRoutingBootstrap.configure(
       di.sl,
       enableConsentGatedAssistantCloud: experimentalConsentGateEnabled,
+      // Reuse Cantiere's DNS-pinned HTTP transport. Never bind it to
+      // Cloud-mode inference, personal memory, or a global URL interceptor.
+      publicWebReader: const AssistantWorkshopPublicWebReader(),
     );
   }
 

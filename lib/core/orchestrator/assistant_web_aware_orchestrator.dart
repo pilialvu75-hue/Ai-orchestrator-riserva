@@ -14,6 +14,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_youtube_link_metadata.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_public_web_link.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_device_clock.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_conversation_recall.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_shopping_results.dart';
@@ -38,7 +39,9 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
     PlannerService? plannerService,
     HybridLocalMemoryPromptEnricher? hybridLocalMemoryPromptEnricher,
     AssistantYouTubeMetadataLookup? youtubeMetadataLookup,
-  })  : _youTubeMetadataLookup =
+    AssistantPublicWebReader? publicWebReader,
+  })  : _publicWebReader = publicWebReader,
+        _youTubeMetadataLookup =
             youtubeMetadataLookup ?? AssistantYouTubeMetadataService(),
         _intentAnalyzer = intentAnalyzer,
         _webSearchTool = webSearchTool,
@@ -59,6 +62,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
 
   final IntentAnalyzer _intentAnalyzer;
   final AssistantYouTubeMetadataLookup _youTubeMetadataLookup;
+  final AssistantPublicWebReader? _publicWebReader;
   final WebSearchTool _webSearchTool;
   final AiRuntimeSettingsService _runtimeSettingsService;
   final CloudRuntimeProvider _cloudRuntimeProvider;
@@ -188,6 +192,60 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
               'non posso ancora riassumerli in modo affidabile.',
           tokensGenerated: 0,
           providerId: 'youtube_link_metadata',
+        );
+        return;
+      }
+
+      // Ordinary public HTML pages can be opened with Cantiere's hardened
+      // DNS-pinned transport. This is a short SOURCE PREVIEW, never an LLM
+      // claim about unobserved page contents. YouTube remains separate.
+      final publicLink = AssistantPublicWebLink.fromUserMessage(input);
+      final publicReader = _publicWebReader;
+      if (publicLink != null && publicReader != null) {
+        final webDisabled = isOffline ||
+            AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) ||
+            AssistantWebSearchPolicy.isExplicitlyOfflineRequest(input) ||
+            _explicitDoNotOpenLink(input);
+        if (webDisabled) {
+          yield InferenceResponse.finalChunk(
+            text: 'Ho riconosciuto il collegamento ma non ho aperto la '
+                'pagina, come richiesto.',
+            tokensGenerated: 0,
+            providerId: 'public_web_link_offline',
+          );
+          return;
+        }
+
+        RuntimeEventLog.instance.emit(
+          '[ASSISTANT_PUBLIC_LINK] stage=fetch_start',
+        );
+        final page = await publicReader.read(publicLink);
+        if (page == null) {
+          RuntimeEventLog.instance.emit(
+            '[ASSISTANT_PUBLIC_LINK] stage=fetch_end status=unavailable',
+          );
+          yield InferenceResponse.finalChunk(
+            text: 'Ho riconosciuto il collegamento, ma non sono riuscito a '
+                'leggerne il contenuto pubblico. Non posso verificare '
+                'il contenuto della pagina da questo link.',
+            tokensGenerated: 0,
+            providerId: 'public_web_link_unavailable',
+          );
+          return;
+        }
+
+        RuntimeEventLog.instance.emit(
+          '[ASSISTANT_PUBLIC_LINK] stage=fetch_end status=success '
+          'extracted_chars=${page.text.length}',
+        );
+        yield InferenceResponse.finalChunk(
+          text: 'Ho recuperato un estratto testuale pubblico da '
+              '${page.host} (non è una lettura completa del sito):\n\n'
+              '${page.text}\n\n'
+              'Queste informazioni provengono dalla pagina; '
+              'non sono una verifica indipendente dei fatti.',
+          tokensGenerated: 0,
+          providerId: 'public_web_link_excerpt',
         );
         return;
       }
