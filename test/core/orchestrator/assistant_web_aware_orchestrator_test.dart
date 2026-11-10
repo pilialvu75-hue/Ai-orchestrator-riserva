@@ -1245,6 +1245,8 @@ void main() {
       isOffline: true,
     ).toList();
     expect(result.single.providerId, 'youtube_link_offline');
+    expect(result.single.text, contains('modalità senza accesso Web'));
+    expect(result.single.text, isNot(contains('come richiesto')));
     expect(youtube.calls, 0);
     verifyNever(() => inference.stream(any()));
     verifyNever(() => webSearch.execute(any()));
@@ -1292,6 +1294,9 @@ void main() {
       sessionId: 'youtube-no-open',
     ).toList();
     expect(result.single.providerId, 'youtube_link_offline');
+    expect(result.single.text, contains('non l\'ho aperto'));
+    expect(result.single.text, contains('come richiesto'));
+    expect(result.single.text, isNot(contains('Internet è disattivato')));
     expect(youtube.calls, 0);
     verifyNever(() => inference.stream(any()));
     verifyNever(() => webSearch.execute(any()));
@@ -1346,6 +1351,8 @@ void main() {
       sessionId: 'public-offline',
     ).toList();
     expect(response.single.providerId, 'public_web_link_offline');
+    expect(response.single.text, contains('modalità senza accesso Web'));
+    expect(response.single.text, isNot(contains('come richiesto')));
     expect(reader.calls, 0);
     verifyNever(() => inference.stream(any()));
     verifyNever(() => webSearch.execute(any()));
@@ -1359,6 +1366,8 @@ void main() {
       sessionId: 'public-no-open',
     ).toList();
     expect(response.single.providerId, 'public_web_link_offline');
+    expect(response.single.text, contains('come richiesto'));
+    expect(response.single.text, isNot(contains('modalità senza accesso Web')));
     expect(reader.calls, 0);
     verifyNever(() => webSearch.execute(any()));
   });
