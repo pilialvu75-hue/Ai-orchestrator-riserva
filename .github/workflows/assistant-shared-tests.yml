@@ -61,6 +61,7 @@ jobs:
           test/app/runtime_bootstrap_cloud_consent_flag_test.dart
           test/core/tools/assistant_device_clock_test.dart
           test/core/tools/assistant_web_search_policy_test.dart
+          test/core/tools/search/assistant_youtube_link_metadata_test.dart
           test/core/orchestrator/assistant_web_aware_orchestrator_test.dart
           test/features/chat/presentation/hybrid_cloud_chat_consent_gateway_test.dart
           test/presentation/chat/components/chat_audio_playback_bar_test.dart
