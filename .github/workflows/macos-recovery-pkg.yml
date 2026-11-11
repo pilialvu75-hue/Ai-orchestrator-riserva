@@ -40,6 +40,8 @@ jobs:
           bash -n native/macos/build_recovery_pkg.sh
           grep -Fq 'codesign --verify --deep --strict' native/macos/build_recovery_pkg.sh
           grep -Fq 'xattr -dr com.apple.quarantine "$app"' native/macos/build_recovery_pkg.sh
+          grep -Fq 'remaining_attributes=' native/macos/build_recovery_pkg.sh
+          grep -Fq 'Smoke test recovery PKG installation on disposable runner' .github/workflows/macos-recovery-pkg.yml
           grep -Fq 'pkgutil --payload-files' native/macos/build_recovery_pkg.sh
           grep -Fq 'github.actor == ' .github/workflows/macos-recovery-pkg.yml
           grep -Fq 'release-request/macos-recovery' .github/workflows/macos-recovery-pkg.yml
@@ -75,9 +77,10 @@ jobs:
         run: |
           set -euo pipefail
           request="$(gh api "repos/$GITHUB_REPOSITORY/contents/release-requests/macos-recovery.txt?ref=$REQUEST_COMMIT" --jq .content | base64 -D)"
-          [ "$(printf '%s\n' "$request" | wc -l | tr -d ' ')" -eq 1 ]
-          [[ "$request" == tag=* ]] || { echo 'Invalid request format' >&2; exit 1; }
-          tag="${request#tag=}"
+          [ "$(printf '%s\n' "$request" | wc -l | tr -d ' ')" -eq 2 ]
+          tag="$(sed -n '1s/^tag=//p' <<< "$request")"
+          revision="$(sed -n '2s/^revision=//p' <<< "$request")"
+          [[ "$revision" == "2" ]] || { echo 'Unsupported recovery installer revision.' >&2; exit 1; }
           [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta|-nightly|-dev)?\+[0-9]+$ ]] || {
             echo 'Invalid requested release tag' >&2; exit 1;
           }
@@ -105,6 +108,7 @@ jobs:
           version_code="${tag##*+}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
           echo "expected_digest=$expected_digest" >> "$GITHUB_OUTPUT"
           echo "expected_sidecar=$expected_sidecar" >> "$GITHUB_OUTPUT"
           echo "Authorized recovery package for latest macOS release: $tag"
@@ -157,13 +161,44 @@ jobs:
           [[ -d "$app" ]] || { echo 'Expected app missing in official DMG.' >&2; exit 1; }
           pkg_dir="$RUNNER_TEMP/aivexus-recovery-output"
           mkdir -p "$pkg_dir"
-          pkg="$pkg_dir/AI-Orchestrator-macOS-Recovery-$VERSION_CODE.pkg"
+          pkg="$pkg_dir/AI-Orchestrator-macOS-Recovery-$VERSION_CODE-r2.pkg"
           bash native/macos/build_recovery_pkg.sh "$app" "$pkg" "$VERSION_CODE"
           [[ -s "$pkg" && -s "$pkg.sha256" ]] || { echo 'Recovery package missing.' >&2; exit 1; }
           (cd "$pkg_dir" && shasum -a 256 -c "$(basename "$pkg").sha256")
           echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
           echo "sha_file=$pkg.sha256" >> "$GITHUB_OUTPUT"
           echo "digest=$(shasum -a 256 "$pkg" | awk '{print tolower($1)}')" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test recovery PKG installation on disposable runner
+        shell: bash
+        env:
+          PKG: ${{ steps.package.outputs.pkg }}
+          EXPECTED_BUILD: ${{ steps.source.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          # A real macOS installer execution; the temporary CI runner has no
+          # user chat, SQLite, models or settings to risk.
+          sudo /usr/sbin/installer -pkg "$PKG" -target / -verboseR
+          app="/Applications/AI Orchestrator.app"
+          plist="$app/Contents/Info.plist"
+          [[ -d "$app" && -f "$plist" ]] || {
+            echo "Post-install app missing." >&2; exit 1;
+          }
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")" == "$EXPECTED_BUILD" ]] || {
+            echo "Unexpected post-install application version" >&2; exit 1;
+          }
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" == "com.aiorchestrator" ]] || {
+            echo "Unexpected post-install bundle identifier." >&2; exit 1;
+          }
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
+          remaining="$(/usr/bin/xattr -lr "$app" 2>&1)" || {
+            echo "Unable to inspect post-install quarantine attributes" >&2; exit 1;
+          }
+          if /usr/bin/grep -Fq 'com.apple.quarantine' <<< "$remaining"; then
+            echo "Quarantine remains after successful PKG installation." >&2
+            exit 1
+          fi
+          echo "RECOVERY_INSTALL_SMOKE_PASS: actual pkg installed and verified on temporary macOS runner."
 
       - name: Publish recovery package to official Release
         shell: bash
