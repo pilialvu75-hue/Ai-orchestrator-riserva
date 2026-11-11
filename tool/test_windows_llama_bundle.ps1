@@ -20,25 +20,37 @@ foreach ($symbol in $forbidden) {
 }
 $imports | Set-Content -LiteralPath (Join-Path $ReleaseDir 'data\llama-imports.txt')
 
-$staticRuntimeTargets = @(
-  @{ Path = 'runtime-cpu-avx2\llama-completion.exe'; RequireVulkan = $false },
-  @{ Path = 'runtime-vulkan\llama-server.exe'; RequireVulkan = $true }
-)
-foreach ($target in $staticRuntimeTargets) {
-  $runtimePath = Join-Path $ReleaseDir $target.Path
-  if (-not (Test-Path -LiteralPath $runtimePath)) {
-    throw "Static Windows runtime is missing: $runtimePath"
-  }
-  $runtimeImports = & $dumpbin.FullName /imports $runtimePath | Out-String
-  if ($LASTEXITCODE -ne 0) { throw "Static runtime import audit failed: $runtimePath" }
-  if ($runtimeImports -match '(?im)DLL Name:\s*(?:ggml|llama|libomp)[^\r\n]*\.dll') {
-    throw "Static runtime still imports an app-owned inference DLL: $runtimePath"
-  }
-  if ($target.RequireVulkan -and $runtimeImports -notmatch '(?im)DLL Name:\s*vulkan-1\.dll') {
-    throw "Static Vulkan server does not import the system Vulkan loader: $runtimePath"
-  }
+$staticCpu = Join-Path $ReleaseDir 'runtime-cpu-avx2\llama-completion.exe'
+$staticVulkan = Join-Path $ReleaseDir 'runtime-vulkan\llama-server.exe'
+$hasStaticCpu = Test-Path -LiteralPath $staticCpu
+$hasStaticVulkan = Test-Path -LiteralPath $staticVulkan
+if ($hasStaticCpu -ne $hasStaticVulkan) {
+  throw 'Static Windows runtime bundle is incomplete: AVX2 and Vulkan outputs must appear together.'
 }
-Write-Output 'STATIC_WINDOWS_RUNTIME_IMPORT_AUDIT_OK'
+if ($hasStaticCpu) {
+  $staticRuntimeTargets = @(
+    @{ Path = $staticCpu; RequireVulkan = $false },
+    @{ Path = $staticVulkan; RequireVulkan = $true }
+  )
+  foreach ($target in $staticRuntimeTargets) {
+    $runtimePath = $target.Path
+    $runtimeImports = & $dumpbin.FullName /imports $runtimePath | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Static runtime import audit failed: $runtimePath" }
+    if ($runtimeImports -match '(?im)DLL Name:\s*(?:ggml|llama|libomp)[^\r\n]*\.dll') {
+      throw "Static runtime still imports an app-owned inference DLL: $runtimePath"
+    }
+    if ($target.RequireVulkan -and $runtimeImports -notmatch '(?im)DLL Name:\s*vulkan-1\.dll') {
+      throw "Static Vulkan server does not import the system Vulkan loader: $runtimePath"
+    }
+  }
+  Write-Output 'STATIC_WINDOWS_RUNTIME_IMPORT_AUDIT_OK'
+  # Exercise the app-owned AVX2 build in the same provider smoke that normally
+  # exercises the portable helper. Other CI lanes without these outputs retain
+  # their legacy runtime smoke rather than failing on an unbuilt optional bundle.
+  $helper = $staticCpu
+} else {
+  Write-Output 'STATIC_WINDOWS_RUNTIME_IMPORT_AUDIT_SKIPPED: this workflow does not build isolated static runtimes.'
+}
 
 
 $temporary = Join-Path $env:RUNNER_TEMP 'windows-gguf-smoke'
