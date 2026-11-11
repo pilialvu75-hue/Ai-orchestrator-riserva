@@ -56,6 +56,7 @@ final class ComputerUseSession implements Tool {
   int? _screenWidth;
   int? _screenHeight;
   bool _operationActive = false;
+  int _sessionRevision = 0;
 
   @override
   String get id => 'computer_use';
@@ -78,6 +79,9 @@ final class ComputerUseSession implements Tool {
 
   DateTime? get expiresAt => isActive ? _expiresAt : null;
 
+  /// Changes on every revoke/regrant; stale agent steps cannot use a new grant.
+  int get sessionRevision => _sessionRevision;
+
   /// This method must be invoked by a trusted user gesture, never a tool call.
   void beginSession({required bool allowInteraction}) {
     if (!isSupported) {
@@ -92,6 +96,7 @@ final class ComputerUseSession implements Tool {
   }
 
   void stop() {
+    _sessionRevision++;
     _adapter.cancel();
     _expiresAt = null;
     _interactive = false;
@@ -101,9 +106,10 @@ final class ComputerUseSession implements Tool {
 
   Future<Uint8List> captureFrame() async {
     _requireSession();
+    final revision = _sessionRevision;
     final bytes = await _adapter.capturePng();
-    // An in-flight screenshot must not revive a revoked or expired session.
-    _requireSession();
+    // A revoked screenshot cannot be adopted by a newly granted session.
+    _requireRevision(revision);
     if (bytes.length < 24 ||
         bytes.length > 16 * 1024 * 1024 ||
         bytes[0] != 0x89 ||
@@ -152,6 +158,7 @@ final class ComputerUseSession implements Tool {
     _operationActive = true;
     try {
       _requireSession();
+      final revision = _sessionRevision;
       switch (action) {
         case 'open_app':
           _requireInteraction();
@@ -163,7 +170,7 @@ final class ComputerUseSession implements Tool {
             );
           }
           await _adapter.openApplication(app);
-          _requireSession();
+          _requireRevision(revision);
           return _success('Test application launch requested.');
         case 'verify_test_marker':
           _requireInteraction();
@@ -176,7 +183,7 @@ final class ComputerUseSession implements Tool {
             );
           }
           final verified = await _adapter.verifyTestMarker(marker);
-          _requireSession();
+          _requireRevision(revision);
           if (!verified) {
             throw const ComputerUseException(
               'VERIFICATION_FAILED',
@@ -187,7 +194,7 @@ final class ComputerUseSession implements Tool {
         case 'select_window':
           _requireInteraction();
           await _adapter.selectForegroundWindow();
-          _requireSession();
+          _requireRevision(revision);
           return _success('Foreground window selected for input.');
         case 'observe':
           await captureFrame();
@@ -212,7 +219,7 @@ final class ComputerUseSession implements Tool {
             );
           }
           await _adapter.click(x, y);
-          _requireSession();
+          _requireRevision(revision);
           return _success('Clicked at ($x, $y).');
         case 'type_text':
           _requireInteraction();
@@ -224,7 +231,7 @@ final class ComputerUseSession implements Tool {
             );
           }
           await _adapter.typeText(value);
-          _requireSession();
+          _requireRevision(revision);
           // Deliberately never echo typed content into diagnostics.
           return _success('Text entered into the active window.');
         case 'press_key':
@@ -237,7 +244,7 @@ final class ComputerUseSession implements Tool {
             );
           }
           await _adapter.pressKey(key);
-          _requireSession();
+          _requireRevision(revision);
           return _success('Navigation key sent.');
         default:
           throw const ComputerUseException(
@@ -283,6 +290,16 @@ final class ComputerUseSession implements Tool {
         'Start a Computer Use session from the host UI.',
       );
     }
+  }
+
+  void _requireRevision(int revision) {
+    if (revision != _sessionRevision) {
+      throw const ComputerUseException(
+        'SESSION_REVOKED',
+        'The authorized session changed during the operation.',
+      );
+    }
+    _requireSession();
   }
 
   void _requireInteraction() {
