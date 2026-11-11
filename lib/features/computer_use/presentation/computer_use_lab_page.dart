@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_smoke_scenario.dart';
 import 'package:ai_orchestrator/features/computer_use/windows_computer_use_adapter.dart';
 
 /// Manual, local proof-of-life UI. No LLM is authorized to start a session.
@@ -79,6 +80,29 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         setState(() => _message = interactive
             ? 'Interazione attiva: tocca una finestra nella schermata.'
             : 'Sola osservazione attiva.');
+      }
+    });
+  }
+
+  Future<void> _runAutomaticSmokeTest() async {
+    if (!_session.canInteract) return;
+    await _run(() async {
+      final result = await ComputerUseSmokeScenario().run(
+        session: _session,
+        onStage: (stage) {
+          if (mounted) {
+            setState(() => _message = 'Test automatico: $stage');
+          }
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _message = result.passed
+              ? 'PASS: Blocco note avviato, testo scritto e verificato '
+                  'tramite accessibilita Windows.'
+              : 'NON SUPERATO: fase ${result.stage}, '
+                  'codice ${result.code}.';
+        });
       }
     });
   }
@@ -197,6 +221,17 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               ],
             ),
             if (interactive) ...[
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: _busy ? null : _runAutomaticSmokeTest,
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Test automatico: Blocco note'),
+              ),
+              const Text(
+                'Apre Blocco note, scrive un testo di prova e verifica '
+                'il risultato tramite accessibilita Windows. '
+                'STOP resta disponibile durante la prova.',
+              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
