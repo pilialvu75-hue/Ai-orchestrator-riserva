@@ -35,8 +35,12 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
     final file = File('${directory.path}${Platform.pathSeparator}frame.png');
     try {
       final encodedPath = _encodeUtf16(file.path);
+      final selected = _targetWindow;
+      final foregroundScript = selected == null
+          ? ''
+          : '$_inputInterop\n[AivexusDesktopInput]::Focus($selected)\n';
       await _runPowerShell(
-        _screenScript.replaceFirst('__PATH__', encodedPath),
+        '$foregroundScript${_screenScript.replaceFirst('__PATH__', encodedPath)}',
         timeout: const Duration(seconds: 20),
       );
       if (!await file.exists()) {
@@ -77,8 +81,12 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   @override
   Future<void> click(int x, int y) async {
     _requireWindows();
+    final selected = _targetWindow;
+    final focus = selected == null
+        ? ''
+        : '[AivexusDesktopInput]::Focus($selected)\n';
     final output = await _runPowerShell(
-      '$_inputInterop\n[AivexusDesktopInput]::Click($x, $y)',
+      '$_inputInterop\n$focus[AivexusDesktopInput]::Click($x, $y)',
     );
     _targetWindow = int.tryParse(output.trim());
     if (_targetWindow == null || _targetWindow == 0) {
