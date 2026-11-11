@@ -61,7 +61,18 @@ fi
 # The old in-app sandbox downloader marked its own DMG as quarantined,
 # and macOS refused exec/open: AppSandbox, NSPOSIXErrorDomain Code=153.
 # Remove quarantine only from this verified user-selected application.
-/usr/bin/xattr -dr com.apple.quarantine "$app"
+# Some macOS versions return a non-zero code when this attribute was
+# already absent. That must not turn a valid installation into a failed PKG.
+# Still fail if any quarantine attribute survives the attempted cleanup.
+/usr/bin/xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
+remaining_attributes="$(/usr/bin/xattr -lr "$app" 2>&1)" || {
+  echo "Aivexus recovery: cannot inspect installed app attributes." >&2
+  exit 1
+}
+if /usr/bin/grep -Fq 'com.apple.quarantine' <<< "$remaining_attributes"; then
+  echo "Aivexus recovery: quarantine still present after cleanup." >&2
+  exit 1
+fi
 echo "Aivexus recovery: verified application authorized; user data untouched."
 exit 0
 POSTINSTALL
