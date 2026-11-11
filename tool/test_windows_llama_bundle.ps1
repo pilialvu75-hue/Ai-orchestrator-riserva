@@ -7,7 +7,7 @@ if (-not (Test-Path -LiteralPath $helper)) { throw 'Bundled llama-completion.exe
 $vswhere = "${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe"
 $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 $dumpbin = Get-ChildItem -Path (Join-Path $vs 'VC\\Tools\\MSVC') -Filter dumpbin.exe -Recurse |
-  Where-Object FullName -match 'Hostx64\\\\x64\\\\dumpbin.exe$' | Sort-Object FullName -Descending | Select-Object -First 1
+  Where-Object { $_.FullName -like '*\Hostx64\x64\dumpbin.exe' } | Sort-Object FullName -Descending | Select-Object -First 1
 if (-not $dumpbin) { throw 'dumpbin is required for the runtime import audit' }
 $imports = & $dumpbin.FullName /imports $helper | Out-String
 if ($LASTEXITCODE -ne 0) { throw 'Runtime import audit failed' }
