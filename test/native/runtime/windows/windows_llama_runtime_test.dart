@@ -25,23 +25,23 @@ void main() {
   test('AVX2 helper is selected only when Windows reports support', () {
     expect(
       WindowsLlamaRuntime.resolveExecutable(
-        appExecutable: r'C:\app\\app.exe',
+        appExecutable: r'C:\app\app.exe',
         environment: const {},
         windowsVersion: 'Windows 11',
         avx2Available: true,
         fileExists: (_) => true,
       ),
-      r'C:\app\\runtime-cpu-avx2\\llama-completion.exe',
+      r'C:\app\runtime-cpu-avx2\llama-completion.exe',
     );
     expect(
       WindowsLlamaRuntime.resolveExecutable(
-        appExecutable: r'C:\app\\app.exe',
+        appExecutable: r'C:\app\app.exe',
         environment: const {},
         windowsVersion: 'Windows 11',
         avx2Available: false,
         fileExists: (_) => true,
       ),
-      r'C:\app\\llama-completion.exe',
+      r'C:\app\llama-completion.exe',
     );
   });
 
@@ -49,25 +49,25 @@ void main() {
     final allPresent = (String _) => true;
     expect(
       WindowsLlamaRuntime.resolveResidentServer(
-        appExecutable: r'C:\app\\ai_orchestrator.exe',
+        appExecutable: r'C:\app\ai_orchestrator.exe',
         environment: const {},
         windowsVersion: 'Windows 11',
         fileExists: allPresent,
       ),
-      r'C:\app\\runtime-vulkan\\llama-server.exe',
+      r'C:\app\runtime-vulkan\llama-server.exe',
     );
     expect(
       WindowsLlamaRuntime.resolveResidentServer(
-        appExecutable: r'C:\app\\ai_orchestrator.exe',
+        appExecutable: r'C:\app\ai_orchestrator.exe',
         environment: const {'AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME': '1'},
         windowsVersion: 'Windows 11',
         fileExists: allPresent,
       ),
-      r'C:\app\\runtime-modern\\llama-server.exe',
+      r'C:\app\runtime-modern\llama-server.exe',
     );
     expect(
       WindowsLlamaRuntime.resolveResidentServer(
-        appExecutable: r'C:\app\\ai_orchestrator.exe',
+        appExecutable: r'C:\app\ai_orchestrator.exe',
         environment: const {},
         windowsVersion: 'Windows 7 6.1',
         fileExists: allPresent,
