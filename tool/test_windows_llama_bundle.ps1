@@ -21,8 +21,8 @@ foreach ($symbol in $forbidden) {
 $imports | Set-Content -LiteralPath (Join-Path $ReleaseDir 'data\llama-imports.txt')
 
 $staticRuntimeTargets = @(
-  @{ Path = 'runtime-cpu-avx2\\llama-completion.exe'; RequireVulkan = $false },
-  @{ Path = 'runtime-vulkan\\llama-server.exe'; RequireVulkan = $true }
+  @{ Path = 'runtime-cpu-avx2\llama-completion.exe'; RequireVulkan = $false },
+  @{ Path = 'runtime-vulkan\llama-server.exe'; RequireVulkan = $true }
 )
 foreach ($target in $staticRuntimeTargets) {
   $runtimePath = Join-Path $ReleaseDir $target.Path
@@ -31,10 +31,10 @@ foreach ($target in $staticRuntimeTargets) {
   }
   $runtimeImports = & $dumpbin.FullName /imports $runtimePath | Out-String
   if ($LASTEXITCODE -ne 0) { throw "Static runtime import audit failed: $runtimePath" }
-  if ($runtimeImports -match '(?im)DLL Name:\\s*(?:ggml|llama|libomp)[^\\r\\n]*\\.dll') {
+  if ($runtimeImports -match '(?im)DLL Name:\s*(?:ggml|llama|libomp)[^\r\n]*\.dll') {
     throw "Static runtime still imports an app-owned inference DLL: $runtimePath"
   }
-  if ($target.RequireVulkan -and $runtimeImports -notmatch '(?im)DLL Name:\\s*vulkan-1\\.dll') {
+  if ($target.RequireVulkan -and $runtimeImports -notmatch '(?im)DLL Name:\s*vulkan-1\.dll') {
     throw "Static Vulkan server does not import the system Vulkan loader: $runtimePath"
   }
 }
