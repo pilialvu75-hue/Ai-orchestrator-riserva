@@ -19,10 +19,15 @@ class _BundledProvider extends LocalRuntimeProvider {
         'LLAMA_CPP_EXECUTABLE': r'C:\missing\old-workaround.exe',
         if (smokeModern) 'AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME': '1',
       },
-      windowsVersion: smokeModern ? 'Windows 11 10.0' : 'Windows 7 6.1',
+      windowsVersion: smokeModern ? 'Windows 11 10.0' : Platform.operatingSystemVersion,
+      avx2Available: WindowsLlamaRuntime.supportsAvx2(),
     );
     if (Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN'] == '1') {
       expect(resolved, contains(r'\runtime-modern\'));
+    } else if (WindowsLlamaRuntime.supportsAvx2()) {
+      expect(resolved, contains(r'\runtime-cpu-avx2\'));
+    } else {
+      expect(resolved, endsWith(r'\llama-completion.exe'));
     }
     return Process.start(resolved, arguments, workingDirectory: Directory.systemTemp.path);
   }
