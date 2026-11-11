@@ -84,7 +84,7 @@ payload="$(pkgutil --payload-files "$output" | sed 's#^\./##')"
 grep -Fq "Applications/AI Orchestrator.app/Contents/Info.plist" <<<"$payload" || {
   echo "Missing app payload." >&2; exit 1;
 }
-if grep -Ev '^(Applications/?|Applications/AI Orchestrator\.app(/.*)?)$' <<<"$payload"; then
+if grep -Ev '^(\.|Applications/?|Applications/AI Orchestrator\.app(/.*)?)$' <<<"$payload"; then
   echo "Recovery package has unexpected payload paths." >&2
   exit 1
 fi
