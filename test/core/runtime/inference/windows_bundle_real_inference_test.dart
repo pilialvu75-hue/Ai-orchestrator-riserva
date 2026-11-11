@@ -14,12 +14,12 @@ class _BundledProvider extends LocalRuntimeProvider {
     final smokeModern =
         Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN'] == '1';
     final helperIsStaticAvx2 =
-        helper.toLowerCase().contains(r'\\runtime-cpu-avx2\\');
+        helper.toLowerCase().contains('runtime-cpu-avx2');
     final appDirectory = helperIsStaticAvx2
         ? File(helper).parent.parent.path
         : File(helper).parent.path;
     final resolved = WindowsLlamaRuntime.resolveExecutable(
-      appExecutable: appDirectory + r'\\ai_orchestrator.exe',
+      appExecutable: appDirectory + Platform.pathSeparator + 'ai_orchestrator.exe',
       environment: {
         'LLAMA_CPP_EXECUTABLE': r'C:\\missing\\old-workaround.exe',
         if (smokeModern) 'AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME': '1',
@@ -28,13 +28,13 @@ class _BundledProvider extends LocalRuntimeProvider {
       avx2Available: WindowsLlamaRuntime.supportsAvx2(),
     );
     if (Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN'] == '1') {
-      expect(resolved, contains(r'\\runtime-modern\\'));
+      expect(resolved.toLowerCase(), contains('runtime-modern'));
     } else if (WindowsLlamaRuntime.supportsAvx2() && helperIsStaticAvx2) {
-      expect(resolved, contains(r'\\runtime-cpu-avx2\\'));
+      expect(resolved.toLowerCase(), contains('runtime-cpu-avx2'));
     } else {
       // Beta runners that do not build the optional static AVX2 bundle must
       // continue validating the portable helper shipped at the release root.
-      expect(resolved, endsWith(r'\\llama-completion.exe'));
+      expect(resolved.toLowerCase(), endsWith('llama-completion.exe'));
     }
     return Process.start(resolved, arguments, workingDirectory: Directory.systemTemp.path);
   }
