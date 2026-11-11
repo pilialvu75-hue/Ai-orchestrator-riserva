@@ -56,12 +56,24 @@ void main() {
     expect(inference, contains('/v1/status/'));
     expect(inference, contains('resolvePendingResponse'));
 
-    // When every route fails, only the bounded numeric upstream HTTP status is
-    // surfaced. This makes a physical Web test distinguish auth/rate/model
-    // failures without exposing the endpoint, model binding, key or body.
-    expect(inference, contains('function upstreamError(status, failureKind, routeId)'));
-    expect(inference, contains('upstreamStatus'));
-    expect(inference, contains('return upstreamError(lastFailureStatus, lastFailureKind, lastFailedRouteId)'));
+    // A provider HTTP status must be reported only if an upstream HTTP
+    // response was actually received. Transport errors and broker timeouts
+    // retain failureKind without inventing an NVIDIA status.
+    expect(
+      inference,
+      contains(
+        'function upstreamError(status, failureKind, routeId, confirmedUpstreamStatus)',
+      ),
+    );
+    expect(inference, contains('confirmedUpstreamStatus >= 400'));
+    expect(inference, contains('confirmedUpstreamStatus <= 599'));
+    expect(
+      inference,
+      contains('upstreamStatus !== null ? { upstreamStatus } : {}'),
+    );
+    expect(inference, contains('lastConfirmedUpstreamStatus = result.upstreamStatus'));
+    expect(inference, contains('lastConfirmedUpstreamStatus,'));
+    expect(inference, contains("failureKind: 'upstream_http_rejection'"));
 
     // No concrete provider endpoint, key or model is a browser/source default.
     expect(inference, isNot(contains('api.openai.com')));
