@@ -5,11 +5,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_smoke_scenario.dart';
 
-class FakeDesktop implements ComputerUseAdapter {
+class FakeDesktop implements ComputerUseAdapter, ComputerUseInteractionCapability {
   FakeDesktop({this.isSupported = true});
 
   @override
   final bool isSupported;
+
+  @override
+  bool supportsInteraction = true;
 
   int cancellations = 0;
 
@@ -147,6 +150,39 @@ void main() {
       });
       expect(result.error, 'INVALID_TEST_MARKER');
       expect(adapter.markerChecks, 0);
+    });
+  });
+
+  group('ComputerUse observation-only capabilities', () {
+    test('a read-only adapter never grants interactive access', () {
+      final desktop = FakeDesktop()..supportsInteraction = false;
+      final session = ComputerUseSession(adapter: desktop);
+      expect(
+        () => session.beginSession(allowInteraction: true),
+        throwsA(
+          isA<ComputerUseException>().having(
+            (error) => error.code, 'code', 'INTERACTION_UNSUPPORTED',
+          ),
+        ),
+      );
+      expect(session.isActive, isFalse);
+    });
+
+    test('an observation-only adapter permits authorized observation',
+        () async {
+      final desktop = FakeDesktop()..supportsInteraction = false;
+      final session = ComputerUseSession(adapter: desktop);
+      session.beginSession(allowInteraction: false);
+      final observed = await session.execute(<String, dynamic>{
+        'action': 'observe',
+      });
+      expect(observed.success, isTrue);
+      final input = await session.execute(<String, dynamic>{
+        'action': 'type_text',
+        'text': 'not allowed',
+      });
+      expect(input.error, 'READ_ONLY_SESSION');
+      expect(desktop.typing, 0);
     });
   });
 
