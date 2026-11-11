@@ -23,10 +23,10 @@ Computer Use — Laboratorio** su Windows.
 | Contratto ComputerUseAdapter | Implementato |
 | Sessione temporanea e revocabile (10 min) | Implementato |
 | Observe / screenshot PNG schermo primario | Implementato; da collaudare su Windows reale |
-| Click coordinate e target window | Implementato; da collaudare |
+| Click coordinate e selezione finestra attiva | Implementato; da collaudare |
 | Testo Unicode, tasti di navigazione | Implementato; da collaudare |
 | UI di laboratorio con consenso e STOP | Implementato; da collaudare |
-| Test automatici del gate autorizzazioni | Aggiunti; CI da verificare |
+| Test autorizzazioni, STOP in corso e concorrenza | Aggiunti; CI da verificare |
 | Interpretazione visiva LLM | NON implementata |
 | Ciclo autonomo osserva/pianifica/agisci/verifica | NON implementato |
 | Accessibilita/UI Automation | NON implementata |
@@ -40,12 +40,17 @@ Computer Use — Laboratorio** su Windows.
 2. Aprire Impostazioni > Computer Use — Laboratorio.
 3. Scegliere Osserva schermo e autorizzare: comparira l'immagine dello
    schermo primario; il pulsante Aggiorna acquisira un altro frame.
-4. Fermare, avviare Abilita interazione. Toccare sulla preview una finestra
-   di prova (per esempio Blocco note) e verificare che riceva il clic.
-5. Tornare al laboratorio, scrivere "Prova Computer Use Aivexus", premere
-   Inserisci testo. Verificare che vada nella finestra selezionata.
-6. Provare Tab, Invio, frecce e il pulsante STOP.
-7. Controllare la scadenza a 10 minuti e ripetere dopo riavvio dell'app: le
+4. Fermare, avviare Abilita interazione, poi scegliere
+   "Seleziona finestra attiva (4 secondi)". Subito dopo usare Alt+Tab per
+   portare in primo piano il Blocco note senza informazioni riservate.
+5. Tornare al laboratorio e premere Aggiorna: il sistema deve riportare la
+   schermata della finestra selezionata; toccare una posizione nella preview
+   e verificare che il clic arrivi alla finestra corretta.
+6. Tornare al laboratorio, scrivere "Prova Computer Use Aivexus", premere
+   Inserisci testo. Verificare che venga scritto nella finestra selezionata,
+   non nei controlli Aivexus.
+7. Provare Tab, Invio, frecce; premere STOP anche durante un'operazione.
+8. Controllare la scadenza a 10 minuti e ripetere dopo riavvio dell'app: le
    autorizzazioni non devono essere persistenti.
 
 Non provare su finestre che contengono password, dati riservati o modifiche
