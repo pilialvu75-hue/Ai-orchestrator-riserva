@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
+import 'package:ai_orchestrator/core/memory/assistant_confirmed_memory_conflict_resolver.dart';
 import 'package:ai_orchestrator/core/memory/assistant_natural_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_relational_memory_consent_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_context_service.dart';
@@ -390,6 +391,85 @@ void main() {
     await tester.ensureVisible(textFinder);
     await tester.pumpAndSettle();
   }
+
+  testWidgets('approved correction marks old fact as history in review UI',
+      (tester) async {
+    initializeMemory();
+    const scopeId = AssistantDurableMemoryContextService.localUserScopeId;
+    await memory.recordConfirmed(
+      recordKey: 'natural.entity.statement.luca',
+      scope: AssistantMemoryScope.user,
+      scopeId: scopeId,
+      kind: AssistantMemoryKind.fact,
+      content: 'Luca è alto.',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 20,
+    );
+    await memory.recordConfirmed(
+      recordKey: 'reviewed.entity.correction.nino-test',
+      scope: AssistantMemoryScope.user,
+      scopeId: scopeId,
+      kind: AssistantMemoryKind.fact,
+      content: 'Nino è alto.',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 30,
+      before: 'Luca è alto.',
+      after: 'Nino è alto.',
+      reason: AssistantConfirmedMemoryConflictResolver.reviewedCorrectionReason,
+    );
+    await memory.recordConfirmed(
+      recordKey: 'unrelated.person.tina',
+      scope: AssistantMemoryScope.user,
+      scopeId: scopeId,
+      kind: AssistantMemoryKind.fact,
+      content: 'Tina fa tanto sport.',
+      source: AssistantMemorySource.userExplicit,
+      updatedAt: 25,
+    );
+
+    await showPage(tester);
+    await revealConfirmed(tester, find.text('Nino è alto.'));
+    final currentTile = find.ancestor(
+      of: find.text('Nino è alto.'), matching: find.byType(ListTile),
+    );
+    expect(
+      find.descendant(
+        of: currentTile,
+        matching: find.text('Attuale · correzione approvata'),
+      ),
+      findsOneWidget,
+    );
+    await revealConfirmed(tester, find.text('Luca è alto.'));
+    final historicTile = find.ancestor(
+      of: find.text('Luca è alto.'), matching: find.byType(ListTile),
+    );
+    expect(
+      find.descendant(
+        of: historicTile,
+        matching: find.text('Storico · fatto sostituito (non attuale)'),
+      ),
+      findsOneWidget,
+    );
+    await revealConfirmed(tester, find.text('Tina fa tanto sport.'));
+    final independentTile = find.ancestor(
+      of: find.text('Tina fa tanto sport.'),
+      matching: find.byType(ListTile),
+    );
+    expect(
+      find.descendant(
+        of: independentTile,
+        matching: find.text('Storico · fatto sostituito (non attuale)'),
+      ),
+      findsNothing,
+    );
+    expect(
+      await memory.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: scopeId,
+      ),
+      hasLength(3),
+    );
+  });
 
   testWidgets('confirmed memory needs consent to forget, others survive',
       (tester) async {
