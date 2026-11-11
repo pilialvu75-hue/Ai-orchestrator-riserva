@@ -17,6 +17,9 @@ abstract interface class ComputerUseAdapter {
   /// Launch a trusted application from a fixed host-maintained allowlist.
   Future<void> openApplication(String application);
 
+  /// Verify a synthetic QA marker without returning any foreground text.
+  Future<bool> verifyTestMarker(String marker);
+
   /// Aborts any ongoing host operation and releases adapter-held targeting.
   void cancel();
 }
@@ -162,6 +165,141 @@ final class ComputerUseSession implements Tool {
           await _adapter.openApplication(app);
           _requireSession();
           return _success('Test application launch requested.');
+        case 'verify_test_marker':
+          _requireInteraction();
+          final marker = params['marker'];
+          if (marker is! String ||
+              !RegExp(r'^AIVEXUS-CU-QA-[0-9]{8,20}
+          _requireInteraction();
+          await _adapter.selectForegroundWindow();
+          _requireSession();
+          return _success('Foreground window selected for input.');
+        case 'observe':
+          await captureFrame();
+          return _success(
+            'Screenshot captured in memory. Not sent to a provider.',
+            <String, Object?>{
+              'width': _screenWidth,
+              'height': _screenHeight,
+              'expiresAt': _expiresAt!.toIso8601String(),
+            },
+          );
+        case 'click':
+          _requireInteraction();
+          final x = params['x'];
+          final y = params['y'];
+          if (x is! int || y is! int || _screenWidth == null ||
+              _screenHeight == null || x < 0 || y < 0 ||
+              x >= _screenWidth! || y >= _screenHeight!) {
+            throw const ComputerUseException(
+              'INVALID_COORDINATES',
+              'Observe the screen first, then click within its bounds.',
+            );
+          }
+          await _adapter.click(x, y);
+          _requireSession();
+          return _success('Clicked at ($x, $y).');
+        case 'type_text':
+          _requireInteraction();
+          final value = params['text'];
+          if (value is! String || value.isEmpty || value.length > 512) {
+            throw const ComputerUseException(
+              'INVALID_TEXT',
+              'Text must be between 1 and 512 UTF-16 code units.',
+            );
+          }
+          await _adapter.typeText(value);
+          _requireSession();
+          // Deliberately never echo typed content into diagnostics.
+          return _success('Text entered into the active window.');
+        case 'press_key':
+          _requireInteraction();
+          final key = params['key'];
+          if (key is! String || !allowedKeys.contains(key)) {
+            throw const ComputerUseException(
+              'INVALID_KEY',
+              'Only allowlisted navigation keys may be pressed.',
+            );
+          }
+          await _adapter.pressKey(key);
+          _requireSession();
+          return _success('Navigation key sent.');
+        default:
+          throw const ComputerUseException(
+            'INVALID_ACTION',
+            'Supported actions: observe, open_app, select_window, click, '
+            'type_text, press_key, verify_test_marker, stop.',
+          );
+      }
+    } on ComputerUseException catch (error) {
+      return ToolResult(
+        toolId: id,
+        output: error.message,
+        success: false,
+        error: error.code,
+      );
+    } catch (_) {
+      return const ToolResult(
+        toolId: 'computer_use',
+        output: 'The desktop operation failed.',
+        success: false,
+        error: 'ADAPTER_ERROR',
+      );
+    } finally {
+      _operationActive = false;
+    }
+  }
+
+  static const Set<String> allowedApplications = <String>{
+    'notepad',
+    'calculator',
+  };
+
+  static const Set<String> allowedKeys = <String>{
+    'enter', 'tab', 'escape', 'backspace',
+    'up', 'down', 'left', 'right', 'ctrl+a',
+  };
+
+  void _requireSession() {
+    if (!isActive) {
+      stop();
+      throw const ComputerUseException(
+        'SESSION_INACTIVE',
+        'Start a Computer Use session from the host UI.',
+      );
+    }
+  }
+
+  void _requireInteraction() {
+    if (!_interactive) {
+      throw const ComputerUseException(
+        'READ_ONLY_SESSION',
+        'This session only allows screen observation.',
+      );
+    }
+  }
+
+  ToolResult _success(
+    String message, [
+    Map<String, Object?> metadata = const <String, Object?>{},
+  ]) =>
+      ToolResult(toolId: id, output: message, metadata: metadata);
+}
+).hasMatch(marker)) {
+            throw const ComputerUseException(
+              'INVALID_TEST_MARKER',
+              'Only synthetic Computer Use QA markers may be verified.',
+            );
+          }
+          final verified = await _adapter.verifyTestMarker(marker);
+          _requireSession();
+          if (!verified) {
+            throw const ComputerUseException(
+              'VERIFICATION_FAILED',
+              'The test marker was not found in the selected application.',
+            );
+          }
+          return _success('Synthetic test marker verified.');
         case 'select_window':
           _requireInteraction();
           await _adapter.selectForegroundWindow();
