@@ -936,6 +936,12 @@ class ModelDownloadService {
     final prefs = await SharedPreferences.getInstance();
     if (model.isImportedModel) {
       final imported = await loadImportedModelEntries();
+      // Perform a safe, verified cache deletion before unregistering so that
+      // an I/O failure does not leave a large inaccessible orphan file.
+      final cachedCopy = await _ownedPickerCacheCopy(model, imported);
+      if (cachedCopy != null) {
+        await cachedCopy.delete();
+      }
       final remaining = imported.where((m) => m.id != model.id).toList();
       final stored = await prefs.setString(
         _importedModelsKey,
@@ -944,7 +950,6 @@ class ModelDownloadService {
       if (!stored) {
         throw StateError('Impossibile rimuovere il modello importato.');
       }
-      // IMPORTANT: never delete a GGUF supplied by Android SAF/file picker.
       return;
     }
 
@@ -993,6 +998,51 @@ class ModelDownloadService {
         throw StateError('Impossibile aggiornare i modelli personalizzati.');
       }
     }
+  }
+
+
+  /// Returns a removable file only when an imported model points at an
+  /// app-owned `file_picker` cache *copy*. Never delete an external file.
+  ///
+  /// Symbolic links are rejected at the leaf and both paths are canonicalised
+  /// to handle Android /data/data vs /data/user/0 aliases safely.
+  Future<File?> _ownedPickerCacheCopy(
+    AiModel model,
+    List<AiModel> imported,
+  ) async {
+    if (!model.isImportedModel ||
+        model.localPath.trim().isEmpty ||
+        model.fileName.trim().isEmpty ||
+        p.extension(model.localPath).toLowerCase() != '.gguf' ||
+        p.basename(model.localPath) != model.fileName) {
+      return null;
+    }
+
+    final cache = await getTemporaryDirectory();
+    final pickerRoot = Directory(p.join(cache.path, 'file_picker'));
+    if (!await pickerRoot.exists()) return null;
+    final candidate = File(model.localPath);
+    // Do not follow a symlink in the final path component.
+    if (await FileSystemEntity.type(candidate.path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      return null;
+    }
+
+    final rootPath = p.normalize(await pickerRoot.resolveSymbolicLinks());
+    final candidatePath = p.normalize(await candidate.resolveSymbolicLinks());
+    if (!p.isWithin(rootPath, candidatePath)) return null;
+
+    for (final other in imported) {
+      if (other.id == model.id || other.localPath.trim().isEmpty) continue;
+      final otherFile = File(other.localPath);
+      if (await otherFile.exists() &&
+          p.normalize(await otherFile.resolveSymbolicLinks()) == candidatePath) {
+        throw StateError(
+          'Questo file GGUF è utilizzato anche da un altro modello importato.',
+        );
+      }
+    }
+    return candidate;
   }
 
   // ── Export ─────────────────────────────────────────────────────────────────
