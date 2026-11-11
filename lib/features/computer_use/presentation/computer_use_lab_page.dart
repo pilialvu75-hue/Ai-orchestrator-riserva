@@ -205,6 +205,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               const SizedBox(height: 8),
               TextField(
                 controller: _textController,
+                onChanged: (_) => setState(() {}),
                 maxLength: 512,
                 decoration: const InputDecoration(
                   labelText: 'Testo da inserire nella finestra selezionata',
