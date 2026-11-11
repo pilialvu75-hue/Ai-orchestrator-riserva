@@ -24,6 +24,12 @@ abstract interface class ComputerUseAdapter {
   void cancel();
 }
 
+/// Optional capability boundary for adapters that can observe but cannot input.
+/// Missing this marker preserves legacy Windows adapter behavior.
+abstract interface class ComputerUseInteractionCapability {
+  bool get supportsInteraction;
+}
+
 class ComputerUseException implements Exception {
   const ComputerUseException(this.code, this.message);
 
@@ -88,6 +94,14 @@ final class ComputerUseSession implements Tool {
       throw const ComputerUseException(
         'UNSUPPORTED_HOST',
         'Computer Use is not supported by this host adapter.',
+      );
+    }
+    if (allowInteraction &&
+        _adapter is ComputerUseInteractionCapability &&
+        !(_adapter as ComputerUseInteractionCapability).supportsInteraction) {
+      throw const ComputerUseException(
+        'INTERACTION_UNSUPPORTED',
+        'This platform adapter is currently observation-only.',
       );
     }
     stop();
