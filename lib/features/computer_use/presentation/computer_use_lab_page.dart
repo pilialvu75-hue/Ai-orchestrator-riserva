@@ -83,6 +83,30 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     });
   }
 
+  Future<void> _selectTargetWindow() async {
+    await _run(() async {
+      if (mounted) {
+        setState(() => _message =
+            'Passa ora alla finestra da controllare (4 secondi).');
+      }
+      await Future<void>.delayed(const Duration(seconds: 4));
+      if (!_session.canInteract) return;
+      final result = await _session.execute(<String, dynamic>{
+        'action': 'select_window',
+      });
+      if (!result.success) {
+        throw ComputerUseException(
+          result.error ?? 'TARGET_NOT_FOUND',
+          result.output,
+        );
+      }
+      if (mounted) {
+        setState(() => _message =
+            'Finestra selezionata. Torna in Aivexus per inviare i comandi.');
+      }
+    });
+  }
+
   Future<void> _refreshFrame() async {
     final bytes = await _session.captureFrame();
     final data = ByteData.sublistView(bytes);
@@ -172,6 +196,18 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                 ),
               ],
             ),
+            if (interactive) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _selectTargetWindow,
+                icon: const Icon(Icons.select_all_outlined),
+                label: const Text('Seleziona finestra attiva (4 secondi)'),
+              ),
+              const Text(
+                'Premi il pulsante, poi passa subito a Blocco note. '
+                'La selezione non richiede password né privilegi elevati.',
+              ),
+            ],
             if (active && _session.expiresAt != null) ...[
               const SizedBox(height: 8),
               Text('Scadenza sessione: ${_session.expiresAt!.hour.toString().padLeft(2, '0')}:'
@@ -200,8 +236,9 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               ),
             if (interactive) ...[
               const SizedBox(height: 16),
-              const Text('Tocca la finestra da controllare nella schermata '
-                  'prima di inviare testo o tasti.'),
+              const Text('Seleziona prima la finestra da controllare. '
+                  'Poi torna qui per inviare testo o tasti; '
+                  'Aivexus riattiverà la finestra scelta.'),
               const SizedBox(height: 8),
               TextField(
                 controller: _textController,
