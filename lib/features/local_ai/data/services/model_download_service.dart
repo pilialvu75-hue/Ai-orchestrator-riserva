@@ -1010,18 +1010,20 @@ class ModelDownloadService {
     AiModel model,
     List<AiModel> imported,
   ) async {
+    final localPath = model.localPath;
     if (!model.isImportedModel ||
-        model.localPath.trim().isEmpty ||
+        localPath == null ||
+        localPath.trim().isEmpty ||
         model.fileName.trim().isEmpty ||
-        p.extension(model.localPath).toLowerCase() != '.gguf' ||
-        p.basename(model.localPath) != model.fileName) {
+        p.extension(localPath).toLowerCase() != '.gguf' ||
+        p.basename(localPath) != model.fileName) {
       return null;
     }
 
     final cache = await getTemporaryDirectory();
     final pickerRoot = Directory(p.join(cache.path, 'file_picker'));
     if (!await pickerRoot.exists()) return null;
-    final candidate = File(model.localPath);
+    final candidate = File(localPath);
     // Do not follow a symlink in the final path component.
     if (await FileSystemEntity.type(candidate.path, followLinks: false) !=
         FileSystemEntityType.file) {
@@ -1033,8 +1035,13 @@ class ModelDownloadService {
     if (!p.isWithin(rootPath, candidatePath)) return null;
 
     for (final other in imported) {
-      if (other.id == model.id || other.localPath.trim().isEmpty) continue;
-      final otherFile = File(other.localPath);
+      final otherPath = other.localPath;
+      if (other.id == model.id ||
+          otherPath == null ||
+          otherPath.trim().isEmpty) {
+        continue;
+      }
+      final otherFile = File(otherPath);
       if (await otherFile.exists() &&
           p.normalize(await otherFile.resolveSymbolicLinks()) == candidatePath) {
         throw StateError(
