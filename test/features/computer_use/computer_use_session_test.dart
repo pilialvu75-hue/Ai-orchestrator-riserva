@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -15,6 +16,12 @@ class FakeDesktop implements ComputerUseAdapter {
   void cancel() => cancellations++;
 
   int captures = 0;
+  int selections = 0;
+  Completer<Uint8List>? blockedCapture;
+
+  @override
+  Future<void> selectForegroundWindow() async => selections++;
+
   int clicks = 0;
   int typing = 0;
   int keys = 0;
@@ -23,6 +30,11 @@ class FakeDesktop implements ComputerUseAdapter {
   @override
   Future<Uint8List> capturePng() async {
     captures++;
+    if (blockedCapture case final pending?) return pending.future;
+    return validFrame();
+  }
+
+  static Uint8List validFrame() {
     final image = Uint8List(24);
     image.setRange(
       0,
@@ -131,6 +143,39 @@ void main() {
       expect(inserted.output, isNot(contains('segreto-sintetico')));
       expect(adapter.lastText, 'segreto-sintetico');
       expect(adapter.typing, 1);
+    });
+
+    test('target window binding needs interactive session', () async {
+      final adapter = FakeDesktop();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: false);
+      final refused = await session.execute(<String, dynamic>{
+        'action': 'select_window',
+      });
+      expect(refused.error, 'READ_ONLY_SESSION');
+      expect(adapter.selections, 0);
+      session.beginSession(allowInteraction: true);
+      final selected = await session.execute(<String, dynamic>{
+        'action': 'select_window',
+      });
+      expect(selected.success, isTrue);
+      expect(adapter.selections, 1);
+    });
+
+    test('STOP invalidates an in-flight screenshot', () async {
+      final adapter = FakeDesktop();
+      adapter.blockedCapture = Completer<Uint8List>();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      final ongoing = session.execute(<String, dynamic>{'action': 'observe'});
+      final busy = await session.execute(<String, dynamic>{'action': 'observe'});
+      expect(busy.error, 'OPERATION_BUSY');
+      final stopped = await session.execute(<String, dynamic>{'action': 'stop'});
+      expect(stopped.success, isTrue);
+      adapter.blockedCapture!.complete(FakeDesktop.validFrame());
+      final finished = await ongoing;
+      expect(finished.error, 'SESSION_INACTIVE');
+      expect(session.isActive, isFalse);
     });
 
     test('only navigation keys are supported', () async {
