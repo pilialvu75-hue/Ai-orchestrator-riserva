@@ -26,10 +26,11 @@ Computer Use — Laboratorio** su Windows.
 | Click coordinate e selezione finestra attiva | Implementato; da collaudare |
 | Testo Unicode, tasti di navigazione | Implementato; da collaudare |
 | UI di laboratorio con consenso e STOP | Implementato; da collaudare |
-| Test autorizzazioni, STOP in corso e concorrenza | Aggiunti; CI da verificare |
+| Test autorizzazioni, STOP, concorrenza, allowlist e verifica | Aggiunti; CI del nuovo commit da verificare |
 | Interpretazione visiva LLM | NON implementata |
 | Ciclo autonomo osserva/pianifica/agisci/verifica | NON implementato |
-| Accessibilita/UI Automation | NON implementata |
+| UI Automation: verifica solo marcatore sintetico QA | Implementata sperimentalmente; non validata su Windows fisico |
+| Sequenza controllata Blocco note → scrittura → verifica → screenshot | Implementata; CI da verificare e QA fisico necessario |
 | Integrazione Diagnostics anonimizzata | NON implementata |
 | Aggiornamento beta | NON rilasciato |
 
@@ -50,7 +51,13 @@ Computer Use — Laboratorio** su Windows.
    Inserisci testo. Verificare che venga scritto nella finestra selezionata,
    non nei controlli Aivexus.
 7. Provare Tab, Invio, frecce; premere STOP anche durante un'operazione.
-8. Controllare la scadenza a 10 minuti e ripetere dopo riavvio dell'app: le
+8. Fermare e riavviare Abilita interazione. Premere
+   **Test automatico: Blocco note** e non cambiare app durante l'esecuzione.
+   Il test deve avviare Blocco note, selezionarlo, scrivere un marcatore QA,
+   ritrovarlo tramite UI Automation e acquisire una schermata; conta come PASS
+   **solo** se il testo esatto e verificato. In caso di impossibilita di
+   leggere il controllo, segnare NON SUPERATO, non assumere un successo.
+9. Controllare la scadenza a 10 minuti e ripetere dopo riavvio dell'app: le
    autorizzazioni non devono essere persistenti.
 
 Non provare su finestre che contengono password, dati riservati o modifiche
@@ -60,8 +67,8 @@ risolvere firma e distribuzione: non disattivare le protezioni di Windows.
 
 ## Prossimo ciclo: agenti autonomi
 
-1. Aggiungere backend di accessibilita Windows (UI Automation) e rilevamento
-   del contesto senza OCR obbligatorio per ogni clic.
+1. Estendere la sonda UI Automation limitata ai marcatori QA a un backend
+   di accessibilita strutturato e rilevamento contesto senza OCR obbligatorio.
 2. Collegare visione locale / Cloud con consensi separati a screenshot.
 3. Implementare observe -> plan -> action -> verify -> recover con limiti
    di step e tempo, stop immediato, audit metadata-only e verifiche sullo
