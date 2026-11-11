@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -15,6 +16,8 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   int? _targetWindow;
   Process? _activeProcess;
   bool _running = false;
+  late final DynamicLibrary? _user32 =
+      Platform.isWindows ? DynamicLibrary.open('user32.dll') : null;
   int _cancelGeneration = 0;
 
   @override
@@ -35,6 +38,7 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
     final file = File('${directory.path}${Platform.pathSeparator}frame.png');
     try {
       final encodedPath = _encodeUtf16(file.path);
+      _focusTargetWindow();
       final selected = _targetWindow;
       final foregroundScript = selected == null
           ? ''
@@ -81,6 +85,7 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   @override
   Future<void> click(int x, int y) async {
     _requireWindows();
+    _focusTargetWindow();
     final selected = _targetWindow;
     final focus = selected == null
         ? ''
@@ -101,6 +106,7 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   Future<void> typeText(String text) async {
     _requireWindows();
     final handle = _requireTargetWindow();
+    _focusTargetWindow();
     final script = '''
 $_inputInterop
 [AivexusDesktopInput]::Focus($handle)
@@ -123,10 +129,30 @@ $_inputInterop
       );
     }
     final handle = _requireTargetWindow();
+    _focusTargetWindow();
     await _runPowerShell(
       '$_inputInterop\n[AivexusDesktopInput]::Focus($handle)\n'
       '[AivexusDesktopInput]::PressKey("$key")',
     );
+  }
+
+  /// Called on the Flutter application's foreground user gesture; Windows
+  /// may deny SetForegroundWindow from a child PowerShell process.
+  void _focusTargetWindow() {
+    final target = _targetWindow;
+    final library = _user32;
+    if (target == null || library == null) return;
+    final exists = library.lookupFunction<
+        Int32 Function(IntPtr), int Function(int)>('IsWindow');
+    final focus = library.lookupFunction<
+        Int32 Function(IntPtr), int Function(int)>('SetForegroundWindow');
+    if (exists(target) == 0 || focus(target) == 0) {
+      throw const ComputerUseException(
+        'TARGET_FOCUS_DENIED',
+        'Windows denied focus to the selected window. '
+        'Select an unlocked application again.',
+      );
+    }
   }
 
   int _requireTargetWindow() {
