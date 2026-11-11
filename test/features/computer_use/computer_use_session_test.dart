@@ -17,10 +17,18 @@ class FakeDesktop implements ComputerUseAdapter {
 
   int captures = 0;
   int selections = 0;
+  int launches = 0;
+  String? launchedApp;
   Completer<Uint8List>? blockedCapture;
 
   @override
   Future<void> selectForegroundWindow() async => selections++;
+
+  @override
+  Future<void> openApplication(String application) async {
+    launches++;
+    launchedApp = application;
+  }
 
   int clicks = 0;
   int typing = 0;
@@ -143,6 +151,32 @@ void main() {
       expect(inserted.output, isNot(contains('segreto-sintetico')));
       expect(adapter.lastText, 'segreto-sintetico');
       expect(adapter.typing, 1);
+    });
+
+    test('application launches require authorization and explicit allowlist',
+        () async {
+      final adapter = FakeDesktop();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: false);
+      final readOnly = await session.execute(<String, dynamic>{
+        'action': 'open_app',
+        'app': 'notepad',
+      });
+      expect(readOnly.error, 'READ_ONLY_SESSION');
+      session.beginSession(allowInteraction: true);
+      final denied = await session.execute(<String, dynamic>{
+        'action': 'open_app',
+        'app': 'powershell',
+      });
+      expect(denied.error, 'APPLICATION_NOT_ALLOWED');
+      expect(adapter.launches, 0);
+      final launched = await session.execute(<String, dynamic>{
+        'action': 'open_app',
+        'app': 'notepad',
+      });
+      expect(launched.success, isTrue);
+      expect(adapter.launches, 1);
+      expect(adapter.launchedApp, 'notepad');
     });
 
     test('target window binding needs interactive session', () async {
