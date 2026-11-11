@@ -28,7 +28,10 @@ Computer Use — Laboratorio** su Windows.
 | UI di laboratorio con consenso e STOP | Implementato; da collaudare |
 | Test autorizzazioni, STOP, concorrenza, allowlist e verifica | Aggiunti; CI del nuovo commit da verificare |
 | Interpretazione visiva LLM | NON implementata |
-| Ciclo autonomo osserva/pianifica/agisci/verifica | NON implementato |
+| Motore autonomo astratto `ComputerUseAgentRunner` | Implementato e testato con planner e verificatore simulati; NON collegato a IA reale |
+| Ciclo dinamico observe → decide → agisci → ri-osserva → verifica | Implementato nel runner isolato; manca il modello reale |
+| Revoca durante inferenza / nuova sessione | Revisioni di autorizzazione implementate; test in CI |
+| Ciclo autonomo con LLM configurato | NON implementato; esiste solo l'esecutore indipendente dal provider |
 | UI Automation: verifica solo marcatore sintetico QA | Implementata sperimentalmente; non validata su Windows fisico |
 | Sequenza controllata Blocco note → scrittura → verifica → screenshot | Implementata; CI da verificare e QA fisico necessario |
 | Integrazione Diagnostics anonimizzata | NON implementata |
@@ -69,10 +72,12 @@ risolvere firma e distribuzione: non disattivare le protezioni di Windows.
 
 1. Estendere la sonda UI Automation limitata ai marcatori QA a un backend
    di accessibilita strutturato e rilevamento contesto senza OCR obbligatorio.
-2. Collegare visione locale / Cloud con consensi separati a screenshot.
-3. Implementare observe -> plan -> action -> verify -> recover con limiti
-   di step e tempo, stop immediato, audit metadata-only e verifiche sullo
-   stato di arrivo.
+2. Collegare un planner LLM LOCAL e un verificatore indipendente al runner,
+   usando l'accessibilita strutturata o una visione locale. Cloud solo dopo
+   consenso esplicito separato per le immagini; nessun upload automatico.
+3. Consolidare il runner gia creato: limiti di step, durata, ripetizioni,
+   anti-loop e STOP; estendere al recupero dagli errori reali, audit
+   metadata-only e verifica dello stato finale.
 4. Integrazione con l'orchestratore Aivexus e il Cantiere senza introdurre
    Main/Reviewer obbligatori.
 5. Convalida fisica Windows e regressioni su Android; solo dopo espansione
