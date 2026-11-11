@@ -198,6 +198,33 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
             ),
             if (interactive) ...[
               const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _invoke(<String, dynamic>{
+                              'action': 'open_app',
+                              'app': 'notepad',
+                            }),
+                    icon: const Icon(Icons.notes_outlined),
+                    label: const Text('Apri Blocco note'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _invoke(<String, dynamic>{
+                              'action': 'open_app',
+                              'app': 'calculator',
+                            }),
+                    icon: const Icon(Icons.calculate_outlined),
+                    label: const Text('Apri Calcolatrice'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _busy ? null : _selectTargetWindow,
                 icon: const Icon(Icons.select_all_outlined),
