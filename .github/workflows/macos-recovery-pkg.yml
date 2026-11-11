@@ -1,0 +1,197 @@
+name: Build macOS Recovery Installer (owner devices)
+
+# Only an explicit owner request may publish a recovery installer.
+on:
+  push:
+    branches:
+      - release-request/macos-recovery
+    paths:
+      - 'release-requests/macos-recovery.txt'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/macos-recovery-pkg.yml'
+      - 'native/macos/build_recovery_pkg.sh'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: macos-recovery-pkg
+  cancel-in-progress: false
+
+jobs:
+  validate-recovery:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate non-destructive recovery contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n native/macos/build_recovery_pkg.sh
+          grep -Fq 'codesign --verify --deep --strict' native/macos/build_recovery_pkg.sh
+          grep -Fq 'xattr -dr com.apple.quarantine "$app"' native/macos/build_recovery_pkg.sh
+          grep -Fq 'pkgutil --payload-files' native/macos/build_recovery_pkg.sh
+          grep -Fq 'github.actor == ' .github/workflows/macos-recovery-pkg.yml
+          grep -Fq 'release-request/macos-recovery' .github/workflows/macos-recovery-pkg.yml
+          grep -Fq 'gh release upload' .github/workflows/macos-recovery-pkg.yml
+          ! grep -Eq 'spctl --master-disable|rm -rf /Applications|rm -rf .*/Library' native/macos/build_recovery_pkg.sh
+          echo 'Owner recovery contract PASS.'
+
+  publish-recovery:
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' &&
+      github.ref == 'refs/heads/release-request/macos-recovery' &&
+      github.actor == 'pilialvu75-hue'
+    permissions:
+      contents: write
+    runs-on: macos-15
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout reviewed recovery builder from main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate owner request and latest macOS Release
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          request="$(gh api "repos/$GITHUB_REPOSITORY/contents/release-requests/macos-recovery.txt?ref=$REQUEST_COMMIT" --jq .content | base64 -D)"
+          [ "$(printf '%s\n' "$request" | wc -l | tr -d ' ')" -eq 1 ]
+          [[ "$request" == tag=* ]] || { echo 'Invalid request format' >&2; exit 1; }
+          tag="${request#tag=}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta|-nightly|-dev)?\+[0-9]+$ ]] || {
+            echo 'Invalid requested release tag' >&2; exit 1;
+          }
+
+          latest_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" \
+            --jq '[.[] | select(.draft == false) |
+              select(any(.assets[]?; .name == "AI-Orchestrator-macOS.dmg" and
+                ((.digest // "") | test("^sha256:[0-9a-f]{64}$"))))][0].tag_name')"
+          [[ -n "$latest_tag" && "$latest_tag" != "null" && "$tag" == "$latest_tag" ]] || {
+            echo "Requested tag $tag is not the latest verified macOS release ($latest_tag)." >&2; exit 1;
+          }
+
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
+          jq -e --arg tag "$tag" '
+            .tag_name == $tag and .draft == false and
+            ([.assets[] | select(.name == "AI-Orchestrator-macOS.dmg")] | length) == 1 and
+            ([.assets[] | select(.name == "AI-Orchestrator-macOS.dmg.sha256")] | length) == 1
+          ' <<< "$release" >/dev/null
+          expected_digest="$(jq -r '.assets[] | select(.name == "AI-Orchestrator-macOS.dmg") | .digest' <<< "$release")"
+          expected_sidecar="$(jq -r '.assets[] | select(.name == "AI-Orchestrator-macOS.dmg.sha256") | .digest' <<< "$release")"
+          [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ &&
+             "$expected_sidecar" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo 'Published DMG is missing SHA-256 digests.' >&2; exit 1;
+          }
+          version_code="${tag##*+}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "expected_digest=$expected_digest" >> "$GITHUB_OUTPUT"
+          echo "expected_sidecar=$expected_sidecar" >> "$GITHUB_OUTPUT"
+          echo "Authorized recovery package for latest macOS release: $tag"
+
+      - name: Download and verify existing official DMG
+        id: image
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.source.outputs.tag }}
+          EXPECTED_DIGEST: ${{ steps.source.outputs.expected_digest }}
+          EXPECTED_SIDECAR: ${{ steps.source.outputs.expected_sidecar }}
+        run: |
+          set -euo pipefail
+          download_dir="$RUNNER_TEMP/aivexus-recovery-source"
+          mkdir -p "$download_dir"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'AI-Orchestrator-macOS.dmg*' --dir "$download_dir"
+          dmg="$download_dir/AI-Orchestrator-macOS.dmg"
+          checksum="$dmg.sha256"
+          [[ -s "$dmg" && -s "$checksum" ]] || { echo 'DMG or SHA-256 missing' >&2; exit 1; }
+          dmg_digest="$(shasum -a 256 "$dmg" | awk '{print tolower($1)}')"
+          sidecar_digest="$(shasum -a 256 "$checksum" | awk '{print tolower($1)}')"
+          [[ "sha256:$dmg_digest" == "$EXPECTED_DIGEST" ]] || { echo 'DMG digest mismatch' >&2; exit 1; }
+          [[ "sha256:$sidecar_digest" == "$EXPECTED_SIDECAR" ]] || { echo 'Sidecar digest mismatch' >&2; exit 1; }
+          (cd "$download_dir" && shasum -a 256 -c 'AI-Orchestrator-macOS.dmg.sha256')
+          bash native/macos/verify_dmg_with_retry.sh "$dmg"
+          echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+
+      - name: Build recovery package from verified DMG
+        id: package
+        shell: bash
+        env:
+          DMG: ${{ steps.image.outputs.dmg }}
+          VERSION_CODE: ${{ steps.source.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          mount_dir="$RUNNER_TEMP/aivexus-recovery-mount"
+          mkdir -p "$mount_dir"
+          mounted=false
+          cleanup() {
+            if [[ "$mounted" == true ]]; then
+              hdiutil detach "$mount_dir" -quiet || hdiutil detach "$mount_dir" -force -quiet || true
+            fi
+          }
+          trap cleanup EXIT
+          hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mount_dir" "$DMG" >/dev/null
+          mounted=true
+          app="$mount_dir/AI Orchestrator.app"
+          [[ -d "$app" ]] || { echo 'Expected app missing in official DMG.' >&2; exit 1; }
+          pkg_dir="$RUNNER_TEMP/aivexus-recovery-output"
+          mkdir -p "$pkg_dir"
+          pkg="$pkg_dir/AI-Orchestrator-macOS-Recovery-$VERSION_CODE.pkg"
+          bash native/macos/build_recovery_pkg.sh "$app" "$pkg" "$VERSION_CODE"
+          [[ -s "$pkg" && -s "$pkg.sha256" ]] || { echo 'Recovery package missing.' >&2; exit 1; }
+          (cd "$pkg_dir" && shasum -a 256 -c "$(basename "$pkg").sha256")
+          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
+          echo "sha_file=$pkg.sha256" >> "$GITHUB_OUTPUT"
+          echo "digest=$(shasum -a 256 "$pkg" | awk '{print tolower($1)}')" >> "$GITHUB_OUTPUT"
+
+      - name: Publish recovery package to official Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.source.outputs.tag }}
+          PKG: ${{ steps.package.outputs.pkg }}
+          SHA_FILE: ${{ steps.package.outputs.sha_file }}
+          EXPECTED_DIGEST: ${{ steps.package.outputs.digest }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "$PKG" "$SHA_FILE" --repo "$GITHUB_REPOSITORY"
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          pkg_name="$(basename "$PKG")"
+          sha_name="$(basename "$SHA_FILE")"
+          published="$(jq -r --arg name "$pkg_name" '.assets[] | select(.name == $name) | .digest' <<< "$release")"
+          sidecar="$(jq -r --arg name "$sha_name" '.assets[] | select(.name == $name) | .digest' <<< "$release")"
+          [[ "$published" == "sha256:$EXPECTED_DIGEST" ]] || { echo 'Published recovery digest mismatch' >&2; exit 1; }
+          [[ "$sidecar" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Published checksum missing' >&2; exit 1; }
+          echo "Verified recovery package: $TAG/$pkg_name sha256:$EXPECTED_DIGEST"
+          echo "::notice title=Installer published::Unsigned personal-device PKG; Gatekeeper may require owner approval; physical launch test still needed."
+
+      - name: Preserve recovery installer as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-macos-recovery-${{ steps.source.outputs.version_code }}
+          path: |
+            ${{ steps.package.outputs.pkg }}
+            ${{ steps.package.outputs.sha_file }}
+          if-no-files-found: error
+          retention-days: 14
