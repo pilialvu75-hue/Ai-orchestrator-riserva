@@ -4,10 +4,10 @@ $helper = Join-Path $ReleaseDir 'llama-completion.exe'
 if (-not (Test-Path -LiteralPath $helper)) { throw 'Bundled llama-completion.exe is missing' }
 
 # Check the actual linked executable, not just the configured Windows target.
-$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vswhere = "${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe"
 $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-$dumpbin = Get-ChildItem -Path (Join-Path $vs 'VC\Tools\MSVC') -Filter dumpbin.exe -Recurse |
-  Where-Object FullName -match 'Hostx64\\x64\\dumpbin.exe$' | Sort-Object FullName -Descending | Select-Object -First 1
+$dumpbin = Get-ChildItem -Path (Join-Path $vs 'VC\\Tools\\MSVC') -Filter dumpbin.exe -Recurse |
+  Where-Object FullName -match 'Hostx64\\\\x64\\\\dumpbin.exe$' | Sort-Object FullName -Descending | Select-Object -First 1
 if (-not $dumpbin) { throw 'dumpbin is required for the runtime import audit' }
 $imports = & $dumpbin.FullName /imports $helper | Out-String
 if ($LASTEXITCODE -ne 0) { throw 'Runtime import audit failed' }
@@ -18,10 +18,10 @@ $forbidden = @('WaitOnAddress', 'WakeByAddressSingle', 'WakeByAddressAll',
 foreach ($symbol in $forbidden) {
   if ($imports -match [regex]::Escape($symbol)) { throw "Runtime imports unsupported dependency: $symbol" }
 }
-$imports | Set-Content -LiteralPath (Join-Path $ReleaseDir 'data\llama-imports.txt')
+$imports | Set-Content -LiteralPath (Join-Path $ReleaseDir 'data\\llama-imports.txt')
 
-$staticCpu = Join-Path $ReleaseDir 'runtime-cpu-avx2\llama-completion.exe'
-$staticVulkan = Join-Path $ReleaseDir 'runtime-vulkan\llama-server.exe'
+$staticCpu = Join-Path $ReleaseDir 'runtime-cpu-avx2\\llama-completion.exe'
+$staticVulkan = Join-Path $ReleaseDir 'runtime-vulkan\\llama-server.exe'
 $hasStaticCpu = Test-Path -LiteralPath $staticCpu
 $hasStaticVulkan = Test-Path -LiteralPath $staticVulkan
 if ($hasStaticCpu) {
@@ -36,10 +36,13 @@ if ($hasStaticCpu) {
     $runtimePath = $target.Path
     $runtimeImports = & $dumpbin.FullName /imports $runtimePath | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Static runtime import audit failed: $runtimePath" }
-    if ($runtimeImports -match '(?im)DLL Name:\s*(?:ggml|llama|libomp)[^\r\n]*\.dll') {
+    $runtimeDependencies = & $dumpbin.FullName /dependents $runtimePath | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Static runtime dependency audit failed: $runtimePath" }
+    if ($runtimeDependencies -match '(?im)^\\s*(?:ggml|llama|libomp)[^\\r\\n]*\\.dll\\s*$') {
       throw "Static runtime still imports an app-owned inference DLL: $runtimePath"
     }
-    if ($target.RequireVulkan -and $runtimeImports -notmatch '(?im)DLL Name:\s*vulkan-1\.dll') {
+    if ($target.RequireVulkan -and
+        $runtimeDependencies -notmatch '(?im)^\\s*vulkan-1\\.dll\\s*$') {
       throw "Static Vulkan server does not import the system Vulkan loader: $runtimePath"
     }
   }
