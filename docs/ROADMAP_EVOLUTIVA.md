@@ -94,6 +94,19 @@ Harness reale con rete disabilitata: prompt -> plan -> implementazione -> review
 
 Estendere la stessa piattaforma a task family differenti senza duplicare il core: `software.*`, siti/web, desktop, automazioni e successivamente produzione 3D. Per il 3D: descrizione/foto/disegno -> modello parametrico -> STL -> formati CAD modificabili -> slicing -> G-code, con validator e provenance specifici per dominio.
 
+### Uno dei primissimi progetti reali del Costruttore — AIVEXUS 3D Scanner (3 novembre 2026)
+
+**Decisione di prodotto:** inserire `AIVEXUS 3D Scanner`, ispirato alle funzionalita del Creality Sermoon P1, tra i primi progetti dimostrativi da affidare al Costruttore una volta disponibili i gate operativi indispensabili. Priorita alta per la **coda di progetti del Costruttore**, non autorizzazione a sospendere le urgenze P0 correnti (affidabilita/chat/memoria) o a dichiarare pronta la produzione autonoma. **Stato: pianificato, non sviluppato ne collaudato.**
+
+**Roadmap incrementale, a costo minimo:**
+1. **MVP smartphone (Galaxy S24 FE):** acquisizione multi-foto guidata, fotogrammetria/ricostruzione ove tecnicamente fattibile, visualizzazione della mesh, esportazione in almeno un formato 3D realmente verificato (preferenza OBJ/GLB; STL quando la geometria risulta idonea). Esplicitare limiti di illuminazione, texture, superfici lucide, scala e precisione; non promettere equivalenza con il laser blu del Sermoon P1 ne inferire misure millimetriche senza calibrazione e prove.
+2. **Evoluzione hardware opzionale:** progettare, documentare e testare uno scanner 3D portatile autonomo con telecamere, illuminazione ed eventuali sensori di profondita; scegliere componenti in base a costo, disponibilita, sicurezza, fattibilita e misure reali, **senza acquisti impliciti**. Decidere successivamente se il primo prodotto debba essere software smartphone, hardware dedicato o entrambi.
+3. **Studio 3D Aivexus:** importazione, pulizia e riparazione mesh, analisi della qualita, ridimensionamento/calibrazione, esportazione per stampa 3D e videogiochi; conversione verso CAD parametrico/STEP solo tramite ricostruzione appropriata, non equiparando automaticamente una mesh a un solido parametrico modificabile.
+
+**Responsabilita e prove di autonomia:** il Costruttore coordina Ricercatore (componenti/approcci esterni), Libreria (licenze, provenienza, riuso e gate di sicurezza), implementazione, Diagnostics, test e artefatti finali. Riuso e acquisizione di componenti esterni devono avere codice reale, hash/provenienza, licenze, test, isolamento e funzionalita dimostrata; non contano proposte JSON o componenti aggiunti manualmente dall'utente come prova di autonomia. Conservare lo stato del lavoro e le evidenze per riprendere dopo interruzione.
+
+**Criteri di accettazione del primo traguardo:** un oggetto fisico di prova scansionato sul dispositivo, mesh visibile, export aperto in un visualizzatore indipendente, ripetibilita delle scansioni, errori e limiti leggibili, confronto con oggetto/misure noti quando richiesto, nessuna dipendenza Cloud nascosta in Local, nessuna dichiarazione PASS senza prova E2E sul dispositivo. Gestire permessi immagini/camera e dati delle scansioni con consenso esplicito; evitare carichi che degradino memoria, temperatura e fluidita del S24 FE. Non avviare release o installazioni manuali: usare il percorso in-app ufficiale per eventuali collaudi distribuiti.
+
 ## 6. Build Lab, artifacts e provenance
 
 Il final artifact esiste solo dopo build verificata. Ogni artifact importante deve poter essere ricondotto a project/task/execution/attempt, input, modifiche applicate, validation, build result e toolchain. Nessun controller deve dichiarare successo se l'artifact richiesto manca o e invalido.
