@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ai_orchestrator_static_runtime LANGUAGES C CXX ASM)
+project(ai_orchestrator_static_runtime LANGUAGES C CXX)
 
 set(AI_ORCHESTRATOR_RUNTIME_VARIANT "" CACHE STRING "cpu-avx2 or vulkan-server")
 set_property(CACHE AI_ORCHESTRATOR_RUNTIME_VARIANT PROPERTY STRINGS cpu-avx2 vulkan-server)
