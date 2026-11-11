@@ -95,7 +95,13 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   static String? _bundledServer() {
     final appDir = p.dirname(Platform.resolvedExecutable);
     if (Platform.isWindows) {
-      if (!WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion)) return null;
+      // The resident server belongs to the same optional DLL-based runtime
+      // as modern completion. Do not resurrect stale, SAC-blocked DLLs while
+      // the production CLI intentionally uses the statically linked helper.
+      if (!WindowsLlamaRuntime.modernRuntimeEnabled(
+        windowsVersion: Platform.operatingSystemVersion,
+        environment: Platform.environment,
+      )) return null;
       final file = p.join(appDir, 'runtime-modern', 'llama-server.exe');
       return File(file).existsSync() ? file : null;
     }
