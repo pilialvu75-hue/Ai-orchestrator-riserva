@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_smoke_scenario.dart';
 
 class FakeDesktop implements ComputerUseAdapter {
   FakeDesktop({this.isSupported = true});
@@ -34,6 +35,14 @@ class FakeDesktop implements ComputerUseAdapter {
   int typing = 0;
   int keys = 0;
   String? lastText;
+  bool verifiedMarker = true;
+  int markerChecks = 0;
+
+  @override
+  Future<bool> verifyTestMarker(String marker) async {
+    markerChecks++;
+    return verifiedMarker && lastText == marker;
+  }
 
   @override
   Future<Uint8List> capturePng() async {
@@ -69,6 +78,78 @@ class FakeDesktop implements ComputerUseAdapter {
 }
 
 void main() {
+  group('Computer Use bounded smoke workflow', () {
+    test('PASS requires verified app content, not just a tool call',
+        () async {
+      final adapter = FakeDesktop();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      final scenario = ComputerUseSmokeScenario(
+        clock: () => DateTime.utc(2026, 11, 11),
+        delay: (_) async {},
+      );
+      final result = await scenario.run(session: session);
+      expect(result.passed, isTrue);
+      expect(result.code, 'VERIFIED');
+      expect(adapter.launches, 1);
+      expect(adapter.selections, 1);
+      expect(adapter.typing, 1);
+      expect(adapter.markerChecks, 1);
+      expect(adapter.captures, 1);
+    });
+
+    test('verification failure never counts as PASS', () async {
+      final adapter = FakeDesktop()..verifiedMarker = false;
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      final scenario = ComputerUseSmokeScenario(
+        delay: (_) async {},
+      );
+      final result = await scenario.run(session: session);
+      expect(result.passed, isFalse);
+      expect(result.stage, 'verify');
+      expect(result.code, 'VERIFICATION_FAILED');
+      expect(adapter.captures, 0);
+    });
+
+    test('read-only session never launches the test application', () async {
+      final adapter = FakeDesktop();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: false);
+      final scenario = ComputerUseSmokeScenario();
+      final result = await scenario.run(session: session);
+      expect(result.passed, isFalse);
+      expect(result.stage, 'authorization');
+      expect(adapter.launches, 0);
+    });
+
+    test('STOP during wait prevents all subsequent input', () async {
+      final adapter = FakeDesktop();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      final scenario = ComputerUseSmokeScenario(
+        delay: (_) async => session.stop(),
+      );
+      final result = await scenario.run(session: session);
+      expect(result.passed, isFalse);
+      expect(result.code, 'SESSION_INACTIVE');
+      expect(adapter.launches, 1);
+      expect(adapter.typing, 0);
+    });
+
+    test('test marker verification rejects other text', () async {
+      final adapter = FakeDesktop();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      final result = await session.execute(<String, dynamic>{
+        'action': 'verify_test_marker',
+        'marker': 'password',
+      });
+      expect(result.error, 'INVALID_TEST_MARKER');
+      expect(adapter.markerChecks, 0);
+    });
+  });
+
   group('ComputerUseSession', () {
     test('no UI grant: tool calls cannot start or observe', () async {
       final adapter = FakeDesktop();
