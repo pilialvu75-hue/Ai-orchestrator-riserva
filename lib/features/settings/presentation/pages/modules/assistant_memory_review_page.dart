@@ -38,6 +38,7 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       const <AssistantDurableMemoryRecord>[];
   List<AssistantDurableMemoryRecord> _confirmedMemories =
       const <AssistantDurableMemoryRecord>[];
+  Set<String> _currentConfirmedRecordKeys = <String>{};
   bool _loading = true;
   bool _busy = false;
   bool _manualConsent = false;
@@ -84,10 +85,17 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
       ]..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       final confirmed =
           await widget.captureService.loadReviewableConfirmedUserMemory();
+      // Mirror LOCAL's canonical view: preserve audit history, but label
+      // replaced facts instead of implying they are current knowledge.
+      final currentKeys = AssistantConfirmedMemoryConflictResolver.currentView(
+        conversationRecords: const <AssistantDurableMemoryRecord>[],
+        userRecords: confirmed,
+      ).map((record) => record.recordKey).toSet();
       if (!mounted) return;
       setState(() {
         _pending = pending;
         _confirmedMemories = confirmed;
+        _currentConfirmedRecordKeys = currentKeys;
       });
     } on Object catch (_) {
       _message('read_error');
@@ -526,6 +534,12 @@ class _AssistantMemoryReviewPageState extends State<AssistantMemoryReviewPage> {
                   key: ValueKey<String>(record.recordKey),
                   child: ListTile(
                     title: Text(record.content),
+                    subtitle: !_currentConfirmedRecordKeys.contains(record.recordKey)
+                        ? Text(_t('saved_superseded'))
+                        : AssistantConfirmedMemoryConflictResolver
+                                .isReviewedNamedCorrection(record)
+                            ? Text(_t('saved_current_correction'))
+                            : null,
                     trailing: TextButton(
                       onPressed: _busy
                           ? null
