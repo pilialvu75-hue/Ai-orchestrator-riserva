@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $llamaSource)) {
 }
 
 $sdkVersion = '1.4.350.0'
-$sdkRoot = Join-Path $env:ProgramFiles "VulkanSDK\$sdkVersion"
+$sdkRoot = Join-Path 'C:\VulkanSDK' $sdkVersion
 $glslc = Join-Path $sdkRoot 'Bin\glslc.exe'
 if (-not (Test-Path -LiteralPath $glslc)) {
   $installer = Join-Path $env:RUNNER_TEMP "vulkansdk-windows-X64-$sdkVersion.exe"
