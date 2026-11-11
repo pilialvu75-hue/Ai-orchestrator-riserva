@@ -10,6 +10,9 @@ abstract interface class ComputerUseAdapter {
   Future<void> click(int x, int y);
   Future<void> typeText(String text);
   Future<void> pressKey(String key);
+
+  /// Aborts any ongoing host operation and releases adapter-held targeting.
+  void cancel();
 }
 
 class ComputerUseException implements Exception {
@@ -79,6 +82,7 @@ final class ComputerUseSession implements Tool {
   }
 
   void stop() {
+    _adapter.cancel();
     _expiresAt = null;
     _interactive = false;
     _screenWidth = null;
