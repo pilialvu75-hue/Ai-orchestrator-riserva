@@ -38,11 +38,11 @@ if ($hasStaticCpu) {
     if ($LASTEXITCODE -ne 0) { throw "Static runtime import audit failed: $runtimePath" }
     $runtimeDependencies = & $dumpbin.FullName /dependents $runtimePath | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Static runtime dependency audit failed: $runtimePath" }
-    if ($runtimeDependencies -match '(?im)^\\s*(?:ggml|llama|libomp)[^\\r\\n]*\\.dll\\s*$') {
+    if ($runtimeDependencies -match '(?im)^\s*(?:ggml|llama|libomp)[^\r\n]*\.dll\s*$') {
       throw "Static runtime still imports an app-owned inference DLL: $runtimePath"
     }
     if ($target.RequireVulkan -and
-        $runtimeDependencies -notmatch '(?im)^\\s*vulkan-1\\.dll\\s*$') {
+        $runtimeDependencies -notmatch '(?im)^\s*vulkan-1\.dll\s*$') {
       throw "Static Vulkan server does not import the system Vulkan loader: $runtimePath"
     }
   }
