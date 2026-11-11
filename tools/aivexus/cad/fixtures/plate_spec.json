@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "projectKind": "cad",
+  "specRevision": 1,
+  "domainSpec": {
+    "inputMode": "description",
+    "units": "mm",
+    "representation": "parametric_solid",
+    "parameters": {
+      "lengthMm": 60.0,
+      "widthMm": 40.0,
+      "thicknessMm": 4.0,
+      "holes": [
+        {"centerXMm": 15.0, "centerYMm": 20.0, "diameterMm": 5.0},
+        {"centerXMm": 45.0, "centerYMm": 20.0, "diameterMm": 5.0}
+      ]
+    },
+    "measurements": [],
+    "printerProfileRef": null
+  },
+  "inputs": [],
+  "requestedOutputs": ["STEP", "STL", "3MF"],
+  "artifacts": [],
+  "validationRefs": []
+}
