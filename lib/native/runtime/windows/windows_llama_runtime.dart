@@ -11,23 +11,37 @@ abstract final class WindowsLlamaRuntime {
     String windowsVersion = '',
     bool Function(String)? fileExists,
   }) {
-    final modern = path.windows.join(path.windows.dirname(appExecutable),
-        'runtime-modern', 'llama-completion.exe');
     final exists = fileExists ?? (String value) => File(value).existsSync();
-    // The modern upstream package selects CPU variants at runtime, but needs
-    // Windows 10+. Never load its DLLs on the legacy Windows route.
-    if (isModernWindows(windowsVersion) && exists(modern)) return modern;
     final bundled = path.windows.join(
       path.windows.dirname(appExecutable),
       'llama-completion.exe',
     );
-    // Prefer the shipped helper over stale machine-specific workarounds.
-    if ((fileExists ?? (value) => File(value).existsSync())(bundled)) {
-      return bundled;
+    final modern = path.windows.join(path.windows.dirname(appExecutable),
+        'runtime-modern', 'llama-completion.exe');
+
+    // Production installs ship the statically linked helper. Older installers
+    // could leave runtime-modern behind, and its unsigned DLLs may be rejected
+    // by Windows Smart App Control. Never select it merely because it exists.
+    // Explicit Windows QA can opt into the DLL runtime without changing the
+    // production default.
+    if (modernRuntimeEnabled(
+          windowsVersion: windowsVersion,
+          environment: environment,
+        ) &&
+        exists(modern)) {
+      return modern;
     }
+    if (exists(bundled)) return bundled;
     final override = environment['LLAMA_CPP_EXECUTABLE']?.trim();
     return override != null && override.isNotEmpty ? override : 'llama-cli';
   }
+
+  static bool modernRuntimeEnabled({
+    required String windowsVersion,
+    required Map<String, String> environment,
+  }) =>
+      isModernWindows(windowsVersion) &&
+      environment['AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME'] == '1';
 
   static bool isModernWindows(String version) => RegExp(
         r'(?:\bWindows\s+(?:10|11)\b|\b10\.0\b)',
