@@ -1,3 +1,4 @@
+import 'dart:ffi';
 import 'dart:io';
 import 'package:ai_orchestrator/core/runtime/inference/completion_output.dart';
 
@@ -10,6 +11,7 @@ abstract final class WindowsLlamaRuntime {
     required Map<String, String> environment,
     String windowsVersion = '',
     bool Function(String)? fileExists,
+    bool avx2Available = false,
   }) {
     final exists = fileExists ?? (String value) => File(value).existsSync();
     final bundled = path.windows.join(
@@ -18,6 +20,8 @@ abstract final class WindowsLlamaRuntime {
     );
     final modern = path.windows.join(path.windows.dirname(appExecutable),
         'runtime-modern', 'llama-completion.exe');
+    final avx2 = path.windows.join(path.windows.dirname(appExecutable),
+        'runtime-cpu-avx2', 'llama-completion.exe');
 
     // Production installs ship the statically linked helper. Older installers
     // could leave runtime-modern behind, and its unsigned DLLs may be rejected
@@ -31,9 +35,46 @@ abstract final class WindowsLlamaRuntime {
         exists(modern)) {
       return modern;
     }
+    if (avx2Available && exists(avx2)) return avx2;
     if (exists(bundled)) return bundled;
     final override = environment['LLAMA_CPP_EXECUTABLE']?.trim();
     return override != null && override.isNotEmpty ? override : 'llama-cli';
+  }
+
+  /// Reports AVX2 only when the Windows kernel says the processor and OS
+  /// context support it. Any lookup failure retains the portable baseline.
+  static bool supportsAvx2() {
+    if (!Platform.isWindows) return false;
+    try {
+      final kernel32 = DynamicLibrary.open('kernel32.dll');
+      final isProcessorFeaturePresent = kernel32.lookupFunction<
+          Int32 Function(Uint32),
+          int Function(int)>('IsProcessorFeaturePresent');
+      // PF_AVX2_INSTRUCTIONS_AVAILABLE
+      return isProcessorFeaturePresent(40) != 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Selects only runtimes compatible with the Windows generation. Production
+  /// prefers the static Vulkan server; the DLL-based server remains explicit QA.
+  static String? resolveResidentServer({
+    required String appExecutable,
+    required Map<String, String> environment,
+    required String windowsVersion,
+    bool Function(String)? fileExists,
+  }) {
+    if (!isModernWindows(windowsVersion)) return null;
+    final exists = fileExists ?? (String value) => File(value).existsSync();
+    final appDir = path.windows.dirname(appExecutable);
+    final modern = path.windows.join(appDir, 'runtime-modern', 'llama-server.exe');
+    final vulkan = path.windows.join(appDir, 'runtime-vulkan', 'llama-server.exe');
+    if (modernRuntimeEnabled(windowsVersion: windowsVersion, environment: environment) &&
+        exists(modern)) {
+      return modern;
+    }
+    return exists(vulkan) ? vulkan : null;
   }
 
   static bool modernRuntimeEnabled({
