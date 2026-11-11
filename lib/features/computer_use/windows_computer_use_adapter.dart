@@ -14,6 +14,7 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
 
   int? _targetWindow;
   Process? _activeProcess;
+  bool _running = false;
   int _cancelGeneration = 0;
 
   @override
@@ -54,6 +55,23 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
         // Temporary frame cleanup must not mask the original exception.
       }
     }
+  }
+
+  @override
+  Future<void> selectForegroundWindow() async {
+    _requireWindows();
+    final output = await _runPowerShell(
+      '$_inputInterop\n'
+      '[AivexusDesktopInput]::SelectForeground($pid)',
+    );
+    final handle = int.tryParse(output.trim());
+    if (handle == null || handle == 0) {
+      throw const ComputerUseException(
+        'TARGET_NOT_FOUND',
+        'No other foreground window is available.',
+      );
+    }
+    _targetWindow = handle;
   }
 
   @override
@@ -138,14 +156,22 @@ $_inputInterop
   }) async {
     // -Command receives only code assembled from constant templates.
     // Never echo the script or stderr: it may contain desktop metadata.
+    if (_running) {
+      throw const ComputerUseException(
+        'WINDOWS_BUSY',
+        'Windows is completing another desktop operation.',
+      );
+    }
+    _running = true;
     final generation = _cancelGeneration;
-    final process = await Process.start(
-      'powershell.exe',
-      <String>['-NoProfile', '-NonInteractive', '-Command', script],
-      runInShell: false,
-    );
-    _activeProcess = process;
+    Process? process;
     try {
+      process = await Process.start(
+        'powershell.exe',
+        <String>['-NoProfile', '-NonInteractive', '-Command', script],
+        runInShell: false,
+      );
+      _activeProcess = process;
       if (generation != _cancelGeneration) {
         process.kill();
         throw const ComputerUseException(
@@ -185,6 +211,7 @@ $_inputInterop
       if (identical(_activeProcess, process)) {
         _activeProcess = null;
       }
+      _running = false;
     }
   }
 
@@ -273,6 +300,24 @@ public static class AivexusDesktopInput {
 
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(
+        IntPtr handle, out uint processId);
+
+    public static long SelectForeground(int excludedProcessId) {
+        var window = GetForegroundWindow();
+        if (window == IntPtr.Zero)
+            throw new InvalidOperationException("No foreground window");
+        uint owningProcessId;
+        GetWindowThreadProcessId(window, out owningProcessId);
+        if (owningProcessId == (uint)excludedProcessId)
+            throw new InvalidOperationException("Aivexus is in the foreground");
+        return window.ToInt64();
+    }
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr handle);
