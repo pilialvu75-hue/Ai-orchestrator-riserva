@@ -466,7 +466,12 @@ public static class AivexusDesktopInput {
 
     public static void Focus(long handle) {
         var window = new IntPtr(handle);
-        if (!IsWindow(window) || !SetForegroundWindow(window))
+        if (!IsWindow(window))
+            throw new InvalidOperationException("Target window is no longer valid");
+        // Flutter already brought the window to the foreground. Avoid a
+        // redundant SetForegroundWindow call from the child PowerShell host,
+        // which Windows may reject due to foreground activation policy.
+        if (GetForegroundWindow() != window && !SetForegroundWindow(window))
             throw new InvalidOperationException("Unable to focus target window");
     }
 
