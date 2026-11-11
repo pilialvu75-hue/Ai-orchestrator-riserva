@@ -14,6 +14,9 @@ abstract interface class ComputerUseAdapter {
   /// Bind to the foreground application previously selected by the owner.
   Future<void> selectForegroundWindow();
 
+  /// Launch a trusted application from a fixed host-maintained allowlist.
+  Future<void> openApplication(String application);
+
   /// Aborts any ongoing host operation and releases adapter-held targeting.
   void cancel();
 }
@@ -147,6 +150,18 @@ final class ComputerUseSession implements Tool {
     try {
       _requireSession();
       switch (action) {
+        case 'open_app':
+          _requireInteraction();
+          final app = params['app'];
+          if (app is! String || !allowedApplications.contains(app)) {
+            throw const ComputerUseException(
+              'APPLICATION_NOT_ALLOWED',
+              'Only allowlisted non-destructive test applications are available.',
+            );
+          }
+          await _adapter.openApplication(app);
+          _requireSession();
+          return _success('Test application launch requested.');
         case 'select_window':
           _requireInteraction();
           await _adapter.selectForegroundWindow();
@@ -205,7 +220,7 @@ final class ComputerUseSession implements Tool {
         default:
           throw const ComputerUseException(
             'INVALID_ACTION',
-            'Supported actions: observe, select_window, click, '
+            'Supported actions: observe, open_app, select_window, click, '
             'type_text, press_key, stop.',
           );
       }
@@ -227,6 +242,11 @@ final class ComputerUseSession implements Tool {
       _operationActive = false;
     }
   }
+
+  static const Set<String> allowedApplications = <String>{
+    'notepad',
+    'calculator',
+  };
 
   static const Set<String> allowedKeys = <String>{
     'enter', 'tab', 'escape', 'backspace',
