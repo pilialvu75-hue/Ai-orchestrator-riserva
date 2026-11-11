@@ -11,6 +11,9 @@ abstract interface class ComputerUseAdapter {
   Future<void> typeText(String text);
   Future<void> pressKey(String key);
 
+  /// Bind to the foreground application previously selected by the owner.
+  Future<void> selectForegroundWindow();
+
   /// Aborts any ongoing host operation and releases adapter-held targeting.
   void cancel();
 }
@@ -46,6 +49,7 @@ final class ComputerUseSession implements Tool {
   bool _interactive = false;
   int? _screenWidth;
   int? _screenHeight;
+  bool _operationActive = false;
 
   @override
   String get id => 'computer_use';
@@ -92,6 +96,8 @@ final class ComputerUseSession implements Tool {
   Future<Uint8List> captureFrame() async {
     _requireSession();
     final bytes = await _adapter.capturePng();
+    // An in-flight screenshot must not revive a revoked or expired session.
+    _requireSession();
     if (bytes.length < 24 ||
         bytes.length > 16 * 1024 * 1024 ||
         bytes[0] != 0x89 ||
@@ -124,9 +130,28 @@ final class ComputerUseSession implements Tool {
   @override
   Future<ToolResult> execute(Map<String, dynamic> params) async {
     final action = params['action'];
+    // STOP must always work, even when an operation is still in flight.
+    if (action == 'stop') {
+      stop();
+      return _success('Computer Use session stopped.');
+    }
+    if (_operationActive) {
+      return const ToolResult(
+        toolId: 'computer_use',
+        output: 'A desktop operation is already running.',
+        success: false,
+        error: 'OPERATION_BUSY',
+      );
+    }
+    _operationActive = true;
     try {
       _requireSession();
       switch (action) {
+        case 'select_window':
+          _requireInteraction();
+          await _adapter.selectForegroundWindow();
+          _requireSession();
+          return _success('Foreground window selected for input.');
         case 'observe':
           await captureFrame();
           return _success(
@@ -150,6 +175,7 @@ final class ComputerUseSession implements Tool {
             );
           }
           await _adapter.click(x, y);
+          _requireSession();
           return _success('Clicked at ($x, $y).');
         case 'type_text':
           _requireInteraction();
@@ -161,6 +187,7 @@ final class ComputerUseSession implements Tool {
             );
           }
           await _adapter.typeText(value);
+          _requireSession();
           // Deliberately never echo typed content into diagnostics.
           return _success('Text entered into the active window.');
         case 'press_key':
@@ -173,14 +200,13 @@ final class ComputerUseSession implements Tool {
             );
           }
           await _adapter.pressKey(key);
+          _requireSession();
           return _success('Navigation key sent.');
-        case 'stop':
-          stop();
-          return _success('Computer Use session stopped.');
         default:
           throw const ComputerUseException(
             'INVALID_ACTION',
-            'Supported actions: observe, click, type_text, press_key, stop.',
+            'Supported actions: observe, select_window, click, '
+            'type_text, press_key, stop.',
           );
       }
     } on ComputerUseException catch (error) {
@@ -197,6 +223,8 @@ final class ComputerUseSession implements Tool {
         success: false,
         error: 'ADAPTER_ERROR',
       );
+    } finally {
+      _operationActive = false;
     }
   }
 
