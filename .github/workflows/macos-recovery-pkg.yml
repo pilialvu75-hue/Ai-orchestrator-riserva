@@ -43,6 +43,9 @@ jobs:
           grep -Fq 'remaining_attributes=' native/macos/build_recovery_pkg.sh
           grep -Fq 'Smoke test recovery PKG installation on disposable runner' .github/workflows/macos-recovery-pkg.yml
           grep -Fq 'pkgutil --payload-files' native/macos/build_recovery_pkg.sh
+          grep -Fq 'BundleIsRelocatable' native/macos/build_recovery_pkg.sh
+          grep -Fq -- '--component-plist "$component_plist"' native/macos/build_recovery_pkg.sh
+          grep -Fq 'lsregister' .github/workflows/macos-recovery-pkg.yml
           grep -Fq 'github.actor == ' .github/workflows/macos-recovery-pkg.yml
           grep -Fq 'release-request/macos-recovery' .github/workflows/macos-recovery-pkg.yml
           grep -Fq 'gh release upload' .github/workflows/macos-recovery-pkg.yml
@@ -80,7 +83,7 @@ jobs:
           [ "$(printf '%s\n' "$request" | wc -l | tr -d ' ')" -eq 2 ]
           tag="$(sed -n '1s/^tag=//p' <<< "$request")"
           revision="$(sed -n '2s/^revision=//p' <<< "$request")"
-          [[ "$revision" == "2" ]] || { echo 'Unsupported recovery installer revision.' >&2; exit 1; }
+          [[ "$revision" == "3" ]] || { echo 'Unsupported recovery installer revision.' >&2; exit 1; }
           [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta|-nightly|-dev)?\+[0-9]+$ ]] || {
             echo 'Invalid requested release tag' >&2; exit 1;
           }
@@ -161,7 +164,7 @@ jobs:
           [[ -d "$app" ]] || { echo 'Expected app missing in official DMG.' >&2; exit 1; }
           pkg_dir="$RUNNER_TEMP/aivexus-recovery-output"
           mkdir -p "$pkg_dir"
-          pkg="$pkg_dir/AI-Orchestrator-macOS-Recovery-$VERSION_CODE-r2.pkg"
+          pkg="$pkg_dir/AI-Orchestrator-macOS-Recovery-$VERSION_CODE-r3.pkg"
           bash native/macos/build_recovery_pkg.sh "$app" "$pkg" "$VERSION_CODE"
           [[ -s "$pkg" && -s "$pkg.sha256" ]] || { echo 'Recovery package missing.' >&2; exit 1; }
           (cd "$pkg_dir" && shasum -a 256 -c "$(basename "$pkg").sha256")
@@ -176,9 +179,33 @@ jobs:
           EXPECTED_BUILD: ${{ steps.source.outputs.version_code }}
         run: |
           set -euo pipefail
-          # A real macOS installer execution; the temporary CI runner has no
-          # user chat, SQLite, models or settings to risk.
+          # Reproduce the real Mac failure: a copy of this same bundle ID
+          # already exists at a nonstandard location, so Apple's PackageKit
+          # previously relocated the application there instead of /Applications.
+          dmg="$RUNNER_TEMP/aivexus-recovery-source/AI-Orchestrator-macOS.dmg"
+          [[ -s "$dmg" ]] || { echo "Verified source DMG absent." >&2; exit 1; }
+          mount="$RUNNER_TEMP/aivexus-recovery-smoke-mount"
+          mkdir -p "$mount"
+          hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$mount" "$dmg" >/dev/null
+          candidate="$RUNNER_TEMP/aivexus-relocation-candidate/AI Orchestrator.app"
+          mkdir -p "$(dirname "$candidate")"
+          /usr/bin/ditto "$mount/AI Orchestrator.app" "$candidate"
+          hdiutil detach "$mount" -quiet
+          /usr/bin/codesign --verify --deep --strict "$candidate"
+          lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+          [[ -x "$lsregister" ]] || { echo "LaunchServices registration utility missing" >&2; exit 1; }
+          "$lsregister" -f "$candidate"
+          [[ -d "$candidate" ]] || { echo "Failed to create relocation candidate." >&2; exit 1; }
+          [[ ! -e "/Applications/AI Orchestrator.app" ]] || {
+            echo "Smoke requires clean /Applications on disposable runner." >&2; exit 1;
+          }
+
+          # A real installer execution on the runner, now with a competing
+          # matching application already registered outside /Applications.
           sudo /usr/sbin/installer -pkg "$PKG" -target / -verboseR
+          [[ -d "$candidate" ]] || {
+            echo "Other app copy unexpectedly modified by installer." >&2; exit 1;
+          }
           app="/Applications/AI Orchestrator.app"
           plist="$app/Contents/Info.plist"
           [[ -d "$app" && -f "$plist" ]] || {
@@ -198,7 +225,7 @@ jobs:
             echo "Quarantine remains after successful PKG installation." >&2
             exit 1
           fi
-          echo "RECOVERY_INSTALL_SMOKE_PASS: actual pkg installed and verified on temporary macOS runner."
+          echo "RECOVERY_INSTALL_SMOKE_PASS: PKG installed in /Applications despite registered competing bundle elsewhere."
 
       - name: Publish recovery package to official Release
         shell: bash

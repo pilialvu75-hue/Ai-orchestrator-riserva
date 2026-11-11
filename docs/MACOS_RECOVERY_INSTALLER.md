@@ -10,6 +10,23 @@ L'installer dedicato recupera la più recente **release macOS ufficiale**
 con DMG e checksum presenti su GitHub, senza ricompilazioni superflue e
 senza abbonamento Apple Developer. Non è destinato a distribuzione pubblica.
 
+## Causa confermata sul Mac fisico (11/11/2026)
+Il registro `/var/log/install.log` mostra che i pacchetti r1/r2
+sono stati **rilocalizzati da PackageKit** verso una diversa copia di
+`AI Orchestrator.app` con lo stesso bundle ID in una cartella tecnica,
+anziché creare `/Applications/AI Orchestrator.app`.
+Il `postinstall` cerca correttamente l'app in `/Applications`, ma
+questa posizione rimane vuota e lo script termina con:
+`Aivexus recovery: expected application was not installed.`
+
+La soluzione **r3** impone nella component plist di `pkgbuild`
+`BundleIsRelocatable=false` per i bundle rilevati, tramite
+`--component-plist`. La CI registra una seconda copia in una
+cartella non standard prima di installare il pacchetto sul Mac di test.
+La pubblicazione viene bloccata se l'app non appare in `/Applications`.
+Non cancellare altre copie, compresa quella nel Cestino: non sono
+necessarie modifiche alle cartelle dati del proprietario.
+
 ## Come viene prodotto
 1. Il proprietario richiede il recupero tramite il file di controllo
    `release-requests/macos-recovery.txt` nel ramo
