@@ -11,10 +11,15 @@ class _BundledProvider extends LocalRuntimeProvider {
   final String helper;
   @override
   Future<Process> startRuntimeProcess(String executable, List<String> arguments) {
+    final smokeModern =
+        Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN'] == '1';
     final resolved = WindowsLlamaRuntime.resolveExecutable(
       appExecutable: File(helper).parent.path + r'\ai_orchestrator.exe',
-      environment: const {'LLAMA_CPP_EXECUTABLE': r'C:\missing\old-workaround.exe'},
-      windowsVersion: Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN'] == '1' ? 'Windows 11 10.0' : 'Windows 7 6.1',
+      environment: {
+        'LLAMA_CPP_EXECUTABLE': r'C:\missing\old-workaround.exe',
+        if (smokeModern) 'AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME': '1',
+      },
+      windowsVersion: smokeModern ? 'Windows 11 10.0' : 'Windows 7 6.1',
     );
     if (Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN'] == '1') {
       expect(resolved, contains(r'\runtime-modern\'));
