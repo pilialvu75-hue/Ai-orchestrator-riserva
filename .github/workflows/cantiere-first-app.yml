@@ -7,6 +7,7 @@ on:
     paths:
       - 'tool/cantiere_first_app_smoke.dart'
       - 'tool/cantiere_local_build_smoke.dart'
+      - 'tool/cantiere_emulator_ui_probe.py'
       - 'test/app_factory/workshop/cantiere_first_app_smoke_test.dart'
       - 'test/app_factory/workshop/workshop_generated_star_negative_gate_test.dart'
       - 'lib/app_factory/**'
@@ -145,8 +146,10 @@ jobs:
           test -s "$SOURCE"
           mkdir -p build/cantiere-first-app
           cp "$SOURCE" build/cantiere-first-app/cantiere-first-app.apk
-          sha256sum build/cantiere-first-app/cantiere-first-app.apk \
-            > build/cantiere-first-app/cantiere-first-app.apk.sha256
+          (
+            cd build/cantiere-first-app
+            sha256sum cantiere-first-app.apk > cantiere-first-app.apk.sha256
+          )
           cp "${RUNNER_TEMP}/cantiere-first-app.log" \
             build/cantiere-first-app/cantiere-first-app.log
 
@@ -157,3 +160,58 @@ jobs:
           path: build/cantiere-first-app/
           if-no-files-found: error
           retention-days: 14
+
+  first-app-emulator:
+    name: Install and launch actual generated APK on Android emulator
+    needs: first-app-android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout black-box emulator probe
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify emulator probe Python syntax
+        run: python3 -m py_compile tool/cantiere_emulator_ui_probe.py
+
+      - name: Download APK from guarded Cantiere production
+        uses: actions/download-artifact@v6
+        with:
+          name: cantiere-first-app-android
+          path: "${{ runner.temp }}/first-app"
+
+      - name: Verify downloaded APK identity and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${{ runner.temp }}/first-app"
+          test -s cantiere-first-app.apk
+          sha256sum -c cantiere-first-app.apk.sha256
+
+      - name: Enable KVM acceleration for emulator
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install, launch and observe generated app on real Android emulator
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: python3 tool/cantiere_emulator_ui_probe.py --apk "${{ runner.temp }}/first-app/cantiere-first-app.apk" --package ai.orchestrator.generated.cantiere_first_app --out "${{ runner.temp }}/first-app-runtime"
+
+      - name: Preserve emulator launch screenshot
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: cantiere-first-app-emulator-evidence
+          path: ${{ runner.temp }}/first-app-runtime/
+          if-no-files-found: warn
+          retention-days: 7
