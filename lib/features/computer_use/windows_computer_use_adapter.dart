@@ -75,11 +75,13 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   Future<void> typeText(String text) async {
     _requireWindows();
     final handle = _requireTargetWindow();
-    final script = _inputInterop +
-        '\n[AivexusDesktopInput]::Focus($handle)\n' +
-        '\n$payload = [System.Text.Encoding]::Unicode.GetString('
-        '[Convert]::FromBase64String("__TEXT__"))\n'
-        '[AivexusDesktopInput]::TypeText($payload)';
+    final script = '''
+$_inputInterop
+[AivexusDesktopInput]::Focus($handle)
+\$payload = [System.Text.Encoding]::Unicode.GetString(
+    [Convert]::FromBase64String("__TEXT__"))
+[AivexusDesktopInput]::TypeText(\$payload)
+''';
     await _runPowerShell(
       script.replaceFirst('__TEXT__', _encodeUtf16(text)),
     );
