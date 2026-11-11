@@ -135,6 +135,35 @@ jobs:
           glslc --version
           ccache --version
 
+      # The full release compiles both Vulkan llama.cpp and CodeQL captures.
+      # A hosted runner can run out of disk even after Flutter tests pass.
+      # Remove only unrelated preinstalled SDKs; retain Flutter, Java, Android
+      # SDK/NDK, Gradle, CodeQL and native build caches.
+      - name: Reclaim unused runner SDK disk space for Android release
+        run: |
+          set -euo pipefail
+          echo 'Disk space before optional SDK cleanup:'
+          df -h /
+
+          for unused_sdk in \
+            /usr/share/dotnet \
+            /usr/local/share/powershell \
+            /opt/ghc \
+            "${ANDROID_SDK_ROOT}/system-images"; do
+            if [ -d "$unused_sdk" ]; then
+              echo "Removing unused hosted-runner SDK: $unused_sdk"
+              sudo rm -rf -- "$unused_sdk"
+            fi
+          done
+
+          echo 'Disk space before CodeQL and Vulkan native build:'
+          df -h /
+          available_mb="$(df -Pm / | awk 'NR == 2 {print $4}')"
+          echo "android_release_disk_available_mb=$available_mb"
+          if [ "$available_mb" -lt 6144 ]; then
+            echo "::warning::Less than 6 GiB free for Android native release; disk exhaustion is possible."
+          fi
+
       # MODIFICA 2: Inizializzazione di CodeQL subito dopo l'installazione dell'NDK
       # Traccia sia il C++ che il codice Java/Kotlin di Android prima che partano le build di Flutter
       - name: Initialize CodeQL (C++ & Android Native)
