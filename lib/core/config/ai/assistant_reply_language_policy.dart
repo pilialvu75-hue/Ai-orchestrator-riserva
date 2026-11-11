@@ -102,8 +102,17 @@ abstract final class AssistantReplyLanguagePolicy {
   }) {
     final language = detect(userPrompt);
     if (language == null) return systemPrompt;
-    return '$systemPrompt\n\nFor this response, write in $language. '
+    final baseHint = '$systemPrompt\n\nFor this response, write in $language. '
         'The latest user message determines the reply language, even when '
         'earlier messages used another language. Preserve proper names.';
+    if (language != 'Italian') return baseHint;
+    // Small LOCAL models sometimes prefix otherwise-correct Italian answers
+    // with an English acknowledgment. Reinforce the *whole* turn without
+    // rewriting model output or changing the user's stored preferences.
+    return '$baseHint\n'
+        'Rispondi interamente in italiano, fin dalla prima parola. '
+        'Anche le conferme brevi e le introduzioni devono essere in italiano, '
+        'senza formule iniziali inglesi. '
+        'Lascia invariati i nomi propri, le citazioni letterali e il codice.';
   }
 }

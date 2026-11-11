@@ -679,6 +679,19 @@ void main() {
       );
       expect(delegate.lastSystemPrompt, contains('write in Italian'));
       expect(delegate.lastSystemPrompt, isNot(contains('write in French')));
+      await repository.sendMessage(
+        sessionId: 'same-conversation',
+        userPrompt: 'Nino è alto.',
+      );
+      expect(delegate.lastSystemPrompt, contains('Rispondi interamente in italiano'));
+      expect(delegate.lastSystemPrompt, contains('Anche le conferme brevi'));
+      await repository.sendMessage(
+        sessionId: 'same-conversation',
+        userPrompt: "comment s'appelle mon pote?",
+      );
+      expect(delegate.lastSystemPrompt, contains('write in French'));
+      expect(delegate.lastSystemPrompt,
+          isNot(contains('Rispondi interamente in italiano')));
     });
 
     test('natural first-name chat staging is default-off and revocable',

@@ -50,6 +50,38 @@ void main() {
     }
   });
 
+  test('Italian short turns reinforce entire reply, not just fact words', () {
+    for (final input in ['Nino è alto.', 'Luca è alto.',
+        'Non Luca, Nino è alto.']) {
+      final prompt = AssistantReplyLanguagePolicy.withCurrentTurnHint(
+        systemPrompt: 'Assistant core.',
+        userPrompt: input,
+      );
+      expect(prompt, contains('write in Italian'), reason: input);
+      expect(prompt, contains('Rispondi interamente in italiano'),
+          reason: input);
+      expect(prompt, contains('Anche le conferme brevi'), reason: input);
+      expect(prompt, contains('nomi propri'), reason: input);
+    }
+    final french = AssistantReplyLanguagePolicy.withCurrentTurnHint(
+      systemPrompt: 'Assistant core.',
+      userPrompt: 'bonjour comment allez-vous',
+    );
+    expect(french, isNot(contains('Rispondi interamente in italiano')));
+    final english = AssistantReplyLanguagePolicy.withCurrentTurnHint(
+      systemPrompt: 'Assistant core.',
+      userPrompt: 'hello',
+    );
+    expect(english, isNot(contains('Rispondi interamente in italiano')));
+    expect(
+      AssistantReplyLanguagePolicy.withCurrentTurnHint(
+        systemPrompt: 'Assistant core.',
+        userPrompt: 'ok',
+      ),
+      'Assistant core.',
+    );
+  });
+
   test('quoted greetings and ambiguous short turns do not select a language', () {
     for (final text in ['"ciao"', 'ciao hello', 'ok', 'italiano']) {
       expect(AssistantReplyLanguagePolicy.detect(text), isNull, reason: text);
