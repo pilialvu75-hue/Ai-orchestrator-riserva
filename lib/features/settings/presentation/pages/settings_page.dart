@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
+import 'package:ai_orchestrator/features/computer_use/presentation/computer_use_lab_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/ai_mode_page.dart';
@@ -244,6 +245,22 @@ class _SettingsPageState extends State<SettingsPage> {
                     );
                   },
                 ),
+
+                if (!kIsWeb &&
+                    defaultTargetPlatform == TargetPlatform.windows) ...[
+                  const SizedBox(height: 12),
+                  _ModuleCard(
+                    icon: Icons.desktop_windows_outlined,
+                    title: 'Computer Use — Laboratorio',
+                    subtitle: 'Collaudo locale: schermata e controllo Windows',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ComputerUseLabPage(),
+                      ),
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 12),
 
