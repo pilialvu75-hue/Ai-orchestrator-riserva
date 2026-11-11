@@ -54,6 +54,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\runtime-modern"
 Type: filesandordirs; Name: "{app}\runtime-vulkan"
+Type: filesandordirs; Name: "{app}\runtime-cpu-avx2"
 
 [Files]
 Source: "{#ReleaseDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
