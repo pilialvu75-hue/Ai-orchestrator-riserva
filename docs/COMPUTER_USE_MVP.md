@@ -8,7 +8,14 @@ contratto tool e a un laboratorio manuale accessibile da **Impostazioni >
 Computer Use — Laboratorio** su Windows.
 
 - Windows: prima piattaforma, azioni OS effettive ma ancora senza test fisici.
-- Android/Linux/macOS: adattatori futuri, non dichiarati supportati.
+- macOS: adattatore sperimentale di sola osservazione creato; esegue
+  screenshot con utility nativa fissa, richiede permesso Screen Recording,
+  compatibilita con sandbox/firma ancora da collaudare.
+- Android: adattatore sperimentale di sola osservazione creato; riusa il
+  servizio MediaProjection gia presente nell'app, previo consenso Android.
+- Linux: adattatore non ancora sviluppato.
+- Nessuno dei due adattatori Mac/Android e attualmente esposto nella UI del
+  laboratorio; sono componenti preparatori, non funzioni rilasciate.
 - Web: sandbox browser; non e possibile controllare il desktop dell'host.
 - Nessuna dipendenza dal Cloud o da llama.cpp per le azioni manuali.
 - Nessuna registrazione del tool nel loop del modello; il modello NON puo
@@ -21,6 +28,9 @@ Computer Use — Laboratorio** su Windows.
 | Componente | Stato |
 | --- | --- |
 | Contratto ComputerUseAdapter | Implementato |
+| Mac: acquisizione PNG con autorizzazione Screen Recording | Adattatore preparato, non testato su hardware reale; input disabilitato |
+| Android: osservazione tramite ScreenVision MediaProjection | Adattatore preparato, non testato in Computer Use; input disabilitato |
+| Protezione contro abilitazione interazione su adattatori read-only | Implementata, test aggiunti |
 | Sessione temporanea e revocabile (10 min) | Implementato |
 | Observe / screenshot PNG schermo primario | Implementato; da collaudare su Windows reale |
 | Click coordinate e selezione finestra attiva | Implementato; da collaudare |
@@ -80,10 +90,24 @@ risolvere firma e distribuzione: non disattivare le protezioni di Windows.
    metadata-only e verifica dello stato finale.
 4. Integrazione con l'orchestratore Aivexus e il Cantiere senza introdurre
    Main/Reviewer obbligatori.
-5. Convalida fisica Windows e regressioni su Android; solo dopo espansione
-   agli altri host.
+5. Convalida fisica Windows, macOS e Galaxy S24 FE dopo riparazione Aivexus.
+   Prima l'osservazione autorizzata; poi, in un secondo passo, input macOS
+   tramite permessi Accessibilita e valutazione tecnica/policy Android.
+   Nessuna richiesta di installazione beta finche il runtime non e riparato.
 
 **Criterio di completamento**: Aivexus deve eseguire da richiesta naturale
 almeno tre scenari non distruttivi su Windows (aprire un'app, compilare un
 campo di prova, verificare il risultato) senza passi manuali intermedi, con
 STOP e consensi effettivi. Il solo PASS di Flutter test non basta.
+
+
+## Disponibilita dei dispositivi
+
+L'utente ha confermato l'11 novembre 2026 di avere gia disponibili un Mac e
+un dispositivo Android. Il requisito hardware non blocca lo sviluppo. La
+riparazione dell'app Aivexus e in carico a Work: non interferire e non avviare
+collaudi fisici finche l'utente non conferma che l'app e tornata operativa.
+
+Importante: avere il dispositivo disponibile **non** significa che Computer Use
+su quella piattaforma sia gia operativo. L'obiettivo rimane autonomia
+multisistema; il test di lettura schermo e un checkpoint, non il traguardo.
