@@ -1,22 +1,150 @@
-# Minimal registration bootstrap for GitHub workflow_dispatch.
-# The default branch intentionally does not run AI inference or compile apps.
-# Once registered, GitHub allows an authorized operator to choose the
-# reviewed experimental branch in "Run workflow". The selected branch's
-# workflow definition will execute, and retain all zero-cost/Access gates.
 name: Cantiere Real Model Star Production
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tool/cantiere_real_star_smoke.dart'
+      - 'tool/cantiere_real_star_emulator_probe.py'
+      - 'tool/test_cantiere_real_star_emulator_probe.py'
+      - 'tool/cantiere_real_star_receipt_gate.py'
+      - 'tool/test_cantiere_real_star_receipt_gate.py'
+      - '.github/workflows/cantiere-real-star-production.yml'
   workflow_dispatch:
+    inputs:
+      confirm_real_model_calls:
+        description: 'Type AUTHORIZE_REAL_MODEL_CALLS to permit bounded cloud inference for this run'
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  registration-only:
+  source-check:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - name: Explain registration state; no model inference
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Resolve checked-in dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze isolated real-star producer
+        run: dart analyze tool/cantiere_real_star_smoke.dart
+      - name: Validate black-box star probe and negative controls
         run: |
-          echo "CANTIERE_DISPATCH_REGISTRATION_ONLY"
-          echo "Select an explicitly reviewed experimental branch for the real-star trial."
-          echo "No model calls, APK generation, or cost-bearing work in this job."
+          python3 -m py_compile tool/cantiere_real_star_emulator_probe.py tool/test_cantiere_real_star_emulator_probe.py
+          python3 -m unittest -v tool.test_cantiere_real_star_emulator_probe
+          python3 -m py_compile tool/cantiere_real_star_receipt_gate.py tool/test_cantiere_real_star_receipt_gate.py
+          python3 -m unittest -v tool.test_cantiere_real_star_receipt_gate
+
+  real-star-opt-in:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/cantiere/real-star-after-bootstrap-20261106' && inputs.confirm_real_model_calls == 'AUTHORIZE_REAL_MODEL_CALLS'
+    needs: source-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Resolve Cantiere dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Create isolated empty Android workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter create --platforms=android --project-name=cantiere_real_star --org=ai.orchestrator.generated "${RUNNER_TEMP}/cantiere-real-star"
+      - name: Generate real-model star through production Cantiere
+        shell: bash
+        env:
+          CANTIERE_ZERO_COST_ROUTES_VERIFIED: ${{ vars.CANTIERE_ZERO_COST_ROUTES_VERIFIED }}
+          CANTIERE_BROKER_URL: ${{ vars.CANTIERE_BROKER_URL }}
+          CANTIERE_CF_ACCESS_CLIENT_ID: ${{ secrets.CANTIERE_CF_ACCESS_CLIENT_ID }}
+          CANTIERE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CANTIERE_CF_ACCESS_CLIENT_SECRET }}
+          CANTIERE_FLUTTER_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/flutter
+          CANTIERE_DART_EXECUTABLE: ${{ env.FLUTTER_ROOT }}/bin/dart
+        run: |
+          set -euo pipefail
+          dart run tool/cantiere_real_star_smoke.dart "${RUNNER_TEMP}/cantiere-real-star"
+      - name: Verify Android APK exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="${RUNNER_TEMP}/cantiere-real-star/build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$SOURCE"
+          mkdir -p build/cantiere-real-star
+          cp "$SOURCE" build/cantiere-real-star/cantiere-real-star.apk
+          RECEIPT="${RUNNER_TEMP}/cantiere-real-star/cantiere-real-star-provenance.json"
+          test -s "$RECEIPT"
+          cp "$RECEIPT" build/cantiere-real-star/model-provenance.json
+          python3 tool/cantiere_real_star_receipt_gate.py --apk "$SOURCE" --receipt "$RECEIPT"
+          cd build/cantiere-real-star
+          sha256sum cantiere-real-star.apk > cantiere-real-star.apk.sha256
+      - uses: actions/upload-artifact@v6
+        with:
+          name: cantiere-real-star-apk-unverified-ui
+          path: build/cantiere-real-star/
+          if-no-files-found: error
+          retention-days: 7
+
+  real-star-emulator:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/cantiere/real-star-after-bootstrap-20261106' && inputs.confirm_real_model_calls == 'AUTHORIZE_REAL_MODEL_CALLS'
+    needs: real-star-opt-in
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout visual acceptance probe
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Download actual real-model-produced APK
+        uses: actions/download-artifact@v6
+        with:
+          name: cantiere-real-star-apk-unverified-ui
+          path: "${{ runner.temp }}/real-star"
+      - name: Verify APK SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/real-star"
+          test -s cantiere-real-star.apk
+          sha256sum -c cantiere-real-star.apk.sha256
+          python3 tool/cantiere_real_star_receipt_gate.py --apk cantiere-real-star.apk --receipt model-provenance.json
+      - name: Enable KVM acceleration
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install generated star APK and verify visual color change
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: python3 tool/cantiere_real_star_emulator_probe.py --apk "${{ runner.temp }}/real-star/cantiere-real-star.apk" --package ai.orchestrator.generated.cantiere_real_star --out "${{ runner.temp }}/real-star-visual"
+      - name: Preserve visual evidence regardless of outcome
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: cantiere-real-star-visual-evidence
+          path: ${{ runner.temp }}/real-star-visual/
+          if-no-files-found: warn
+          retention-days: 7
