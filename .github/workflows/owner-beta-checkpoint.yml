@@ -156,7 +156,7 @@ jobs:
                 fi
               fi
               # GITHUB_TOKEN workflow_dispatch does not trigger a workflow_run.
-              # Explicitly bridge Android SUCCESS to the Windows publisher
+              # Explicitly bridge Android SUCCESS to all desktop publishers
               # only after verifying SHA, release channel and run conclusion.
               gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_channel=beta -f hybrid_consent_beta="$hybrid_consent_beta"
               echo "Authorized beta dispatch requested for main SHA $sha, HYBRID opt-in=$hybrid_consent_beta"
@@ -201,6 +201,14 @@ jobs:
                 --repo "$GITHUB_REPOSITORY" --ref main \
                 -f android_run_id="$release_run_id"
               echo "Windows publisher explicitly dispatched for authorized Android run $release_run_id"
+              gh workflow run macos-release-publish.yml \
+                --repo "$GITHUB_REPOSITORY" --ref main \
+                -f android_run_id="$release_run_id"
+              echo "macOS publisher explicitly dispatched for authorized Android run $release_run_id"
+              gh workflow run linux-release-publish.yml \
+                --repo "$GITHUB_REPOSITORY" --ref main \
+                -f android_run_id="$release_run_id"
+              echo "Linux publisher explicitly dispatched for authorized Android run $release_run_id"
               exit 0
             fi
             sleep 45
