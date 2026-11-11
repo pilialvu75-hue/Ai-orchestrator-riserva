@@ -216,6 +216,7 @@ final class ComputerUseAgentRunner {
           onStage?.call('verify', steps);
           try {
             if (await within(_verifier.isSatisfied(observation))) {
+              if (!authorized()) return finish(ComputerUseAgentOutcome.stopped);
               return finish(ComputerUseAgentOutcome.verified);
             }
             lastError = 'GOAL_UNVERIFIED';
