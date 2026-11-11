@@ -24,12 +24,10 @@ if (-not (Test-Path -LiteralPath $glslc)) {
   if ($actualSha256 -ne $expectedSha256) {
     throw "Vulkan SDK installer SHA-256 mismatch: $actualSha256"
   }
-  $sdkInstall = Start-Process -FilePath $installer -ArgumentList @(
-    'install', '--accept-licenses', '--default-answer', '--confirm-command',
-    '--accept-messages', "--root=$sdkRoot"
-  ) -Wait -PassThru
-  if ($sdkInstall.ExitCode -ne 0) {
-    throw "Vulkan SDK install failed with exit code $($sdkInstall.ExitCode)."
+  & $installer --root $sdkRoot --accept-licenses --default-answer --confirm-command install
+  $sdkExitCode = $LASTEXITCODE
+  if ($sdkExitCode -ne 0) {
+    throw "Vulkan SDK install failed with exit code $sdkExitCode."
   }
 }
 if (-not (Test-Path -LiteralPath $glslc)) {
