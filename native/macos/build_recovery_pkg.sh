@@ -84,18 +84,7 @@ payload="$(pkgutil --payload-files "$output" | sed 's#^\./##')"
 grep -Fq "Applications/AI Orchestrator.app/Contents/Info.plist" <<<"$payload" || {
   echo "Missing app payload." >&2; exit 1;
 }
-if grep -Ev '^(Applications/?|Applications/AI Orchestrator\.app(/.*)?)
-  echo "Recovery package has unexpected payload paths." >&2
-  exit 1
-fi
-bytes="$(stat -f '%z' "$output")"
-(( bytes > 1048576 )) || { echo "Recovery package too small." >&2; exit 1; }
-digest="$(shasum -a 256 "$output" | awk '{print tolower($1)}')"
-printf '%s  %s\n' "$digest" "$(basename "$output")" > "$output.sha256"
-echo "RECOVERY_PKG=$output"
-echo "RECOVERY_PKG_BYTES=$bytes"
-echo "RECOVERY_PKG_SHA256=$digest"
- <<<"$payload"; then
+if grep -Ev '^(Applications/?|Applications/AI Orchestrator\.app(/.*)?)$' <<<"$payload"; then
   echo "Recovery package has unexpected payload paths." >&2
   exit 1
 fi
