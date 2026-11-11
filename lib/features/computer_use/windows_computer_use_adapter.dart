@@ -13,6 +13,16 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   WindowsComputerUseAdapter();
 
   int? _targetWindow;
+  Process? _activeProcess;
+  int _cancelGeneration = 0;
+
+  @override
+  void cancel() {
+    _cancelGeneration++;
+    _activeProcess?.kill();
+    _activeProcess = null;
+    _targetWindow = null;
+  }
 
   @override
   bool get isSupported => Platform.isWindows;
@@ -120,39 +130,60 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
     return base64.encode(bytes);
   }
 
-  static Future<String> _runPowerShell(
+  Future<String> _runPowerShell(
     String script, {
     Duration timeout = const Duration(seconds: 12),
   }) async {
     // -Command receives only code assembled from constant templates.
     // Never echo the script or stderr: it may contain desktop metadata.
+    final generation = _cancelGeneration;
     final process = await Process.start(
       'powershell.exe',
       <String>['-NoProfile', '-NonInteractive', '-Command', script],
       runInShell: false,
     );
-    final stdoutResult = process.stdout.transform(utf8.decoder).join();
-    final stderrDrain = process.stderr.drain<void>();
-    int exitCode;
+    _activeProcess = process;
     try {
-      exitCode = await process.exitCode.timeout(timeout);
-    } on TimeoutException {
-      process.kill();
-      await Future.wait(<Future<dynamic>>[stdoutResult, stderrDrain]);
-      throw const ComputerUseException(
-        'WINDOWS_ACTION_TIMEOUT',
-        'Windows did not finish the desktop operation in time.',
-      );
+      if (generation != _cancelGeneration) {
+        process.kill();
+        throw const ComputerUseException(
+          'SESSION_CANCELLED',
+          'Computer Use was stopped before the action started.',
+        );
+      }
+      final stdoutResult = process.stdout.transform(utf8.decoder).join();
+      final stderrDrain = process.stderr.drain<void>();
+      int exitCode;
+      try {
+        exitCode = await process.exitCode.timeout(timeout);
+      } on TimeoutException {
+        process.kill();
+        await Future.wait(<Future<dynamic>>[stdoutResult, stderrDrain]);
+        throw const ComputerUseException(
+          'WINDOWS_ACTION_TIMEOUT',
+          'Windows did not finish the desktop operation in time.',
+        );
+      }
+      final output = await stdoutResult;
+      await stderrDrain;
+      if (generation != _cancelGeneration) {
+        throw const ComputerUseException(
+          'SESSION_CANCELLED',
+          'The user stopped Computer Use.',
+        );
+      }
+      if (exitCode != 0) {
+        throw const ComputerUseException(
+          'WINDOWS_ACTION_FAILED',
+          'Windows rejected the requested desktop operation.',
+        );
+      }
+      return output;
+    } finally {
+      if (identical(_activeProcess, process)) {
+        _activeProcess = null;
+      }
     }
-    final output = await stdoutResult;
-    await stderrDrain;
-    if (exitCode != 0) {
-      throw const ComputerUseException(
-        'WINDOWS_ACTION_FAILED',
-        'Windows rejected the requested desktop operation.',
-      );
-    }
-    return output;
   }
 
   static const String _screenScript = r'''
