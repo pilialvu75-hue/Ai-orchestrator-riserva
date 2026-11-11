@@ -37,6 +37,17 @@ $env:VULKAN_SDK = $sdkRoot
 $env:Path = "$sdkRoot\Bin;$env:Path"
 
 $cmakeSource = Join-Path $repositoryRoot 'native\windows\static_runtime'
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+$vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+$msbuild = Join-Path $vsInstall 'MSBuild\Current\Bin\MSBuild.exe'
+if (-not (Test-Path -LiteralPath $msbuild)) { throw "MSBuild was not found: $msbuild" }
+function Invoke-RuntimeProjectBuild([string]$BuildDirectory, [string]$ProjectName) {
+  $project = Get-ChildItem -LiteralPath $BuildDirectory -Filter "$ProjectName.vcxproj" -File -Recurse |
+    Select-Object -First 1
+  if (-not $project) { throw "CMake did not generate $ProjectName.vcxproj under $BuildDirectory" }
+  & $msbuild $project.FullName '/m' '/p:Configuration=Release' '/p:Platform=x64'
+  if ($LASTEXITCODE -ne 0) { throw "MSBuild failed for $ProjectName with exit code $LASTEXITCODE" }
+}
 $cpuOutput = Join-Path $ReleaseDir 'runtime-cpu-avx2'
 $cpuBuild = Join-Path $env:RUNNER_TEMP 'ai-orchestrator-llama-cpu-avx2'
 New-Item -ItemType Directory -Path $cpuOutput -Force | Out-Null
@@ -44,8 +55,7 @@ New-Item -ItemType Directory -Path $cpuOutput -Force | Out-Null
   '-DAI_ORCHESTRATOR_RUNTIME_VARIANT=cpu-avx2' `
   "-DCMAKE_INSTALL_PREFIX=$cpuOutput"
 if ($LASTEXITCODE -ne 0) { throw "AVX2 runtime configure failed: $LASTEXITCODE" }
-& cmake --build $cpuBuild --config Release --target llama-completion --parallel
-if ($LASTEXITCODE -ne 0) { throw "AVX2 runtime build failed: $LASTEXITCODE" }
+Invoke-RuntimeProjectBuild -BuildDirectory $cpuBuild -ProjectName 'llama-completion'
 & cmake --install $cpuBuild --config Release
 if ($LASTEXITCODE -ne 0) { throw "AVX2 runtime install failed: $LASTEXITCODE" }
 
@@ -56,8 +66,7 @@ New-Item -ItemType Directory -Path $vulkanOutput -Force | Out-Null
   '-DAI_ORCHESTRATOR_RUNTIME_VARIANT=vulkan-server' `
   "-DCMAKE_INSTALL_PREFIX=$vulkanOutput"
 if ($LASTEXITCODE -ne 0) { throw "Static Vulkan runtime configure failed: $LASTEXITCODE" }
-& cmake --build $vulkanBuild --config Release --target llama-server --parallel
-if ($LASTEXITCODE -ne 0) { throw "Static Vulkan server build failed: $LASTEXITCODE" }
+Invoke-RuntimeProjectBuild -BuildDirectory $vulkanBuild -ProjectName 'llama-server'
 & cmake --install $vulkanBuild --config Release
 if ($LASTEXITCODE -ne 0) { throw "Static Vulkan runtime install failed: $LASTEXITCODE" }
 
