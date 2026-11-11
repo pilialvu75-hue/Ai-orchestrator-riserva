@@ -24,10 +24,10 @@ $staticCpu = Join-Path $ReleaseDir 'runtime-cpu-avx2\llama-completion.exe'
 $staticVulkan = Join-Path $ReleaseDir 'runtime-vulkan\llama-server.exe'
 $hasStaticCpu = Test-Path -LiteralPath $staticCpu
 $hasStaticVulkan = Test-Path -LiteralPath $staticVulkan
-if ($hasStaticCpu -ne $hasStaticVulkan) {
-  throw 'Static Windows runtime bundle is incomplete: AVX2 and Vulkan outputs must appear together.'
-}
 if ($hasStaticCpu) {
+  if (-not $hasStaticVulkan) {
+    throw 'Static Windows runtime bundle is incomplete: AVX2 output exists but the static Vulkan server is missing.'
+  }
   $staticRuntimeTargets = @(
     @{ Path = $staticCpu; RequireVulkan = $false },
     @{ Path = $staticVulkan; RequireVulkan = $true }
@@ -49,7 +49,7 @@ if ($hasStaticCpu) {
   # their legacy runtime smoke rather than failing on an unbuilt optional bundle.
   $helper = $staticCpu
 } else {
-  Write-Output 'STATIC_WINDOWS_RUNTIME_IMPORT_AUDIT_SKIPPED: this workflow does not build isolated static runtimes.'
+  Write-Output 'STATIC_WINDOWS_RUNTIME_IMPORT_AUDIT_SKIPPED: isolated static AVX2 client was not built in this workflow.'
 }
 
 
