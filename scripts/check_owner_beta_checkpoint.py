@@ -73,20 +73,27 @@ def validate(source: str) -> list[str]:
         problems.append("Missing owner-gated dispatch job")
     if not re.search(r"(?m)^  contract:\s*$", source):
         problems.append("Missing PR-only verification job")
-    # Two explicit dispatches are permitted only in the owner-authorized,
-    # CI-gated checkpoint: Android beta first, Windows from the successful
-    # Android workflow_dispatch run ID. No arbitrary downstream actions.
+    # Exactly four dispatches are permitted in the owner-authorized,
+    # CI-gated checkpoint: Android beta first, then all desktop publishers
+    # from the same successful Android workflow_dispatch run ID.
     dispatches = re.findall(r'gh workflow run ([\w.-]+\.yml)\b', source)
-    if sorted(dispatches) != ["build.yml", "windows-release-publish.yml"]:
-        problems.append("Only authorized Android and provenanced Windows dispatches allowed")
+    if sorted(dispatches) != [
+        "build.yml",
+        "linux-release-publish.yml",
+        "macos-release-publish.yml",
+        "windows-release-publish.yml",
+    ]:
+        problems.append("Only authorized Android and provenanced desktop dispatches allowed")
     for marker in (
         'release_state" == "success"',
         'main changed during Android release',
         'windows-release-publish.yml',
+        'macos-release-publish.yml',
+        'linux-release-publish.yml',
         '-f android_run_id="$release_run_id"',
     ):
         if marker not in source:
-            problems.append(f"Missing verified Windows handoff: {marker}")
+            problems.append(f"Missing verified desktop publisher handoff: {marker}")
     return problems
 
 
