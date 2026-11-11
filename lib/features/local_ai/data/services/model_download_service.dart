@@ -920,25 +920,78 @@ class ModelDownloadService {
             _filePickerPlatformExceptionCode;
   }
 
+  /// Removes a model safely without deleting a file selected from elsewhere.
+  ///
+  /// A GGUF imported with the file picker remains owned by its original
+  /// directory: remove only its AIVEXUS registry entry. A downloaded GGUF is
+  /// app-owned, so its private file is deleted and a custom URL entry is also
+  /// removed. Active models must be switched away before removal.
   Future<void> deleteModel(AiModel model) async {
+    if (await loadSelectedModelId() == model.id) {
+      throw StateError(
+        'Cambia prima il modello LOCAL attivo per poterlo rimuovere.',
+      );
+    }
+
+    final prefs = await SharedPreferences.getInstance();
     if (model.isImportedModel) {
+      final imported = await loadImportedModelEntries();
+      final remaining = imported.where((m) => m.id != model.id).toList();
+      final stored = await prefs.setString(
+        _importedModelsKey,
+        jsonEncode(remaining.map(_modelToJson).toList()),
+      );
+      if (!stored) {
+        throw StateError('Impossibile rimuovere il modello importato.');
+      }
+      // IMPORTANT: never delete a GGUF supplied by Android SAF/file picker.
       return;
     }
 
+    if (model.fileName.isEmpty ||
+        p.basename(model.fileName) != model.fileName ||
+        !model.fileName.toLowerCase().endsWith('.gguf')) {
+      throw const DownloadException('Nome file GGUF non valido.');
+    }
+
     final modelsDir = await _modelsDirectory();
+    final normalizedDir = p.normalize(modelsDir.path);
+    final localPath = p.normalize(p.join(normalizedDir, model.fileName));
+    if (!p.isWithin(normalizedDir, localPath)) {
+      throw const DownloadException('Percorso del modello non autorizzato.');
+    }
 
-    final file = File(
-      '${modelsDir.path}/${model.fileName}',
-    );
+    // Avoid deleting a file still referenced by another installed model.
+    final entries = await getAvailableModels();
+    if (entries.any((other) =>
+        other.id != model.id &&
+        !other.isImportedModel &&
+        other.fileName == model.fileName &&
+        other.isDownloaded)) {
+      throw StateError(
+        'Il file GGUF è condiviso con un altro modello installato.',
+      );
+    }
 
-    final partFile = File('${file.path}.part');
-
+    final file = File(localPath);
+    final partFile = File('$localPath.part');
     if (await file.exists()) {
       await file.delete();
     }
-
     if (await partFile.exists()) {
       await partFile.delete();
+    }
+
+    if (model.source == 'custom_url') {
+      final custom = await loadCustomModelEntries();
+      final remaining = custom.where((m) => m.id != model.id).toList();
+      final stored = await prefs.setString(
+        _customModelsKey,
+        jsonEncode(remaining.map(_modelToJson).toList()),
+      );
+      if (!stored) {
+        throw StateError('Impossibile aggiornare i modelli personalizzati.');
+      }
     }
   }
 

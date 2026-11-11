@@ -239,6 +239,34 @@ class _ModelsPageState extends State<ModelsPage> {
     );
   }
 
+  Future<void> _confirmRemoveModel(AiModel model) async {
+    final imported = model.isImportedModel;
+    final l10n = context.l10n;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l10n.t('model_remove_title')),
+        content: Text(imported
+            ? l10n.t('model_remove_imported_explanation')
+            : l10n.t('model_remove_downloaded_explanation')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(l10n.t('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(imported
+                ? l10n.t('model_remove_only')
+                : l10n.t('model_delete_file')),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    context.read<ModelDownloadBloc>().add(RemoveLocalModel(modelId: model.id));
+  }
+
   void _importLocalModel({String? existingModelId}) {
     context
         .read<ModelDownloadBloc>()
@@ -577,6 +605,7 @@ class _ModelsPageState extends State<ModelsPage> {
                     onRelink: model.isImportedModel
                         ? () => _importLocalModel(existingModelId: model.id)
                         : null,
+                    onRemove: () => _confirmRemoveModel(model),
                   ),
                 const SizedBox(height: 10),
                 const _ModelSectionHeader(
@@ -611,6 +640,7 @@ class _ModelsPageState extends State<ModelsPage> {
                     onRelink: model.isImportedModel
                         ? () => _importLocalModel(existingModelId: model.id)
                         : null,
+                    onRemove: () => _confirmRemoveModel(model),
                   ),
                 Align(
                   alignment: Alignment.centerRight,
@@ -680,6 +710,7 @@ class _ModelConfigTile extends StatelessWidget {
     required this.onCancel,
     required this.onSetActive,
     this.onRelink,
+    this.onRemove,
   });
 
   final AiModel model;
@@ -691,6 +722,7 @@ class _ModelConfigTile extends StatelessWidget {
   final VoidCallback onCancel;
   final VoidCallback onSetActive;
   final VoidCallback? onRelink;
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -905,6 +937,15 @@ class _ModelConfigTile extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
+              if (model.isImportedModel || model.isDownloaded) ...[
+                TextButton.icon(
+                  key: Key('remove-model-${model.id}'),
+                  onPressed: isSelected || progress != null ? null : onRemove,
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  label: Text(l10n.t('model_remove_title')),
+                ),
+                const SizedBox(width: 6),
+              ],
               if (status == 'downloading')
                 OutlinedButton(
                   onPressed: onCancel,
