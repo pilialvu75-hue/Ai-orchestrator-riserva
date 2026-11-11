@@ -78,11 +78,56 @@ exit 0
 POSTINSTALL
 chmod 0755 "$scripts/postinstall"
 
+# PackageKit can locate an existing com.aiorchestrator bundle outside
+# /Applications and silently *relocate* an update to that other directory.
+# This happened on the owner's Mac, where postinstall then failed because the
+# expected app under /Applications was missing. Explicitly prohibit bundle
+# relocation (including nested bundles), rather than trusting pkgbuild's
+# platform-dependent default. Keep all application user data untouched.
+component_plist="$work/components.plist"
+/usr/bin/pkgbuild --analyze --root "$stage" "$component_plist"
+/usr/bin/python3 - "$component_plist" <<'PY'
+import plistlib
+import sys
+from pathlib import Path
+
+p = Path(sys.argv[1])
+data = plistlib.loads(p.read_bytes())
+if not isinstance(data, list):
+    raise SystemExit("Invalid pkgbuild component plist: expected array")
+
+main_bundles = []
+seen_paths = []
+def disable_relocation(component):
+    if not isinstance(component, dict):
+        raise SystemExit("Invalid pkgbuild component: expected dict")
+    bundle_path = component.get("RootRelativeBundlePath", "")
+    if bundle_path:
+        seen_paths.append(bundle_path)
+    if bundle_path == "Applications/AI Orchestrator.app":
+        main_bundles.append(component)
+    component["BundleIsRelocatable"] = False
+    for child in component.get("ChildBundles", []):
+        disable_relocation(child)
+
+for item in data:
+    disable_relocation(item)
+if len(main_bundles) != 1:
+    raise SystemExit(
+        "Expected exactly one AI Orchestrator component, found "
+        + str(len(main_bundles)) + ": " + repr(seen_paths)
+    )
+p.write_bytes(plistlib.dumps(data, sort_keys=False))
+assert all(item.get("BundleIsRelocatable") is False for item in data)
+print("RECOVERY_BUNDLE_RELOCATION_DISABLED: " + repr(seen_paths))
+PY
+
 # Install to /Applications only. pkgbuild does not erase the user's Library.
 # The package identifier is separate from the application's bundle identifier.
-pkgbuild \
+/usr/bin/pkgbuild \
   --root "$stage" \
   --install-location "/" \
+  --component-plist "$component_plist" \
   --identifier "com.aiorchestrator.macos.recovery" \
   --version "$expected_build" \
   --ownership recommended \
