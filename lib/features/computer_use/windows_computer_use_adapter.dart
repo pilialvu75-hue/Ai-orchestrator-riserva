@@ -79,6 +79,7 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
           'The selected application is not on the host allowlist.',
         ),
     };
+    _targetWindow = null;
     await Process.start(
       executable,
       const <String>[],
@@ -189,7 +190,10 @@ $_inputInterop
         Int32 Function(IntPtr), int Function(int)>('IsWindow');
     final focus = library.lookupFunction<
         Int32 Function(IntPtr), int Function(int)>('SetForegroundWindow');
-    if (exists(target) == 0 || focus(target) == 0) {
+    final foreground = library.lookupFunction<
+        IntPtr Function(), int Function()>('GetForegroundWindow');
+    if (exists(target) == 0 ||
+        (foreground() != target && focus(target) == 0)) {
       throw const ComputerUseException(
         'TARGET_FOCUS_DENIED',
         'Windows denied focus to the selected window. '
@@ -309,7 +313,7 @@ if ($null -ne $root) {
         [System.Windows.Automation.Condition]::TrueCondition)
     $limit = [Math]::Min($nodes.Count, 256)
     for ($i = -1; $i -lt $limit; $i++) {
-        $node = if ($i -eq -1) { $root } else { $nodes.Item($i) }
+        $node = if ($i -eq -1) { $root } else { $nodes[$i] }
         try {
             $text = $node.GetCurrentPattern(
                 [System.Windows.Automation.TextPattern]::Pattern)
