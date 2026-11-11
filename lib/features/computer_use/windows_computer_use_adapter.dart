@@ -10,7 +10,9 @@ import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart'
 ///
 /// No elevation, arbitrary process launch, command execution or network access.
 final class WindowsComputerUseAdapter implements ComputerUseAdapter {
-  const WindowsComputerUseAdapter();
+  WindowsComputerUseAdapter();
+
+  int? _targetWindow;
 
   @override
   bool get isSupported => Platform.isWindows;
@@ -47,15 +49,24 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   @override
   Future<void> click(int x, int y) async {
     _requireWindows();
-    await _runPowerShell(
+    final output = await _runPowerShell(
       '$_inputInterop\n[AivexusDesktopInput]::Click($x, $y)',
     );
+    _targetWindow = int.tryParse(output.trim());
+    if (_targetWindow == null || _targetWindow == 0) {
+      throw const ComputerUseException(
+        'TARGET_NOT_FOUND',
+        'No desktop window was found at that position.',
+      );
+    }
   }
 
   @override
   Future<void> typeText(String text) async {
     _requireWindows();
+    final handle = _requireTargetWindow();
     final script = _inputInterop +
+        '\n[AivexusDesktopInput]::Focus($handle)\n' +
         '\n$payload = [System.Text.Encoding]::Unicode.GetString('
         '[Convert]::FromBase64String("__TEXT__"))\n'
         '[AivexusDesktopInput]::TypeText($payload)';
@@ -73,9 +84,22 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
         'Navigation key is not allowlisted.',
       );
     }
+    final handle = _requireTargetWindow();
     await _runPowerShell(
-      '$_inputInterop\n[AivexusDesktopInput]::PressKey("$key")',
+      '$_inputInterop\n[AivexusDesktopInput]::Focus($handle)\n'
+      '[AivexusDesktopInput]::PressKey("$key")',
     );
+  }
+
+  int _requireTargetWindow() {
+    final handle = _targetWindow;
+    if (handle == null || handle == 0) {
+      throw const ComputerUseException(
+        'NO_TARGET_WINDOW',
+        'Choose a target window by clicking the screenshot first.',
+      );
+    }
+    return handle;
   }
 
   void _requireWindows() {
@@ -96,7 +120,7 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
     return base64.encode(bytes);
   }
 
-  static Future<void> _runPowerShell(
+  static Future<String> _runPowerShell(
     String script, {
     Duration timeout = const Duration(seconds: 12),
   }) async {
@@ -107,26 +131,28 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
       <String>['-NoProfile', '-NonInteractive', '-Command', script],
       runInShell: false,
     );
-    final stdoutDrain = process.stdout.drain<void>();
+    final stdoutResult = process.stdout.transform(utf8.decoder).join();
     final stderrDrain = process.stderr.drain<void>();
     int exitCode;
     try {
       exitCode = await process.exitCode.timeout(timeout);
     } on TimeoutException {
       process.kill();
-      await Future.wait(<Future<void>>[stdoutDrain, stderrDrain]);
+      await Future.wait(<Future<dynamic>>[stdoutResult, stderrDrain]);
       throw const ComputerUseException(
         'WINDOWS_ACTION_TIMEOUT',
         'Windows did not finish the desktop operation in time.',
       );
     }
-    await Future.wait(<Future<void>>[stdoutDrain, stderrDrain]);
+    final output = await stdoutResult;
+    await stderrDrain;
     if (exitCode != 0) {
       throw const ComputerUseException(
         'WINDOWS_ACTION_FAILED',
         'Windows rejected the requested desktop operation.',
       );
     }
+    return output;
   }
 
   static const String _screenScript = r'''
@@ -200,11 +226,39 @@ public static class AivexusDesktopInput {
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint count, Input[] inputs, int size);
 
-    public static void Click(int x, int y) {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ScreenPoint {
+        public int x;
+        public int y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(ScreenPoint point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr handle, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr handle);
+
+    public static long Click(int x, int y) {
         if (!SetCursorPos(x, y))
             throw new InvalidOperationException("Unable to move cursor");
+        var root = GetAncestor(WindowFromPoint(new ScreenPoint {x=x, y=y}), 2);
+        if (root == IntPtr.Zero)
+            throw new InvalidOperationException("No target window");
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
         mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+        return root.ToInt64();
+    }
+
+    public static void Focus(long handle) {
+        var window = new IntPtr(handle);
+        if (!IsWindow(window) || !SetForegroundWindow(window))
+            throw new InvalidOperationException("Unable to focus target window");
     }
 
     public static void TypeText(string text) {
