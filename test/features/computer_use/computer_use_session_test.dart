@@ -9,6 +9,11 @@ class FakeDesktop implements ComputerUseAdapter {
   @override
   final bool isSupported;
 
+  int cancellations = 0;
+
+  @override
+  void cancel() => cancellations++;
+
   int captures = 0;
   int clicks = 0;
   int typing = 0;
@@ -169,6 +174,7 @@ void main() {
       });
       expect(stopped.success, isTrue);
       expect(session.isActive, isFalse);
+      expect(adapter.cancellations, greaterThanOrEqualTo(2));
     });
 
     test('unsupported adapters never open a session', () {
