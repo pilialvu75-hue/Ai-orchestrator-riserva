@@ -20,6 +20,27 @@ foreach ($symbol in $forbidden) {
 }
 $imports | Set-Content -LiteralPath (Join-Path $ReleaseDir 'data\llama-imports.txt')
 
+$staticRuntimeTargets = @(
+  @{ Path = 'runtime-cpu-avx2\\llama-completion.exe'; RequireVulkan = $false },
+  @{ Path = 'runtime-vulkan\\llama-server.exe'; RequireVulkan = $true }
+)
+foreach ($target in $staticRuntimeTargets) {
+  $runtimePath = Join-Path $ReleaseDir $target.Path
+  if (-not (Test-Path -LiteralPath $runtimePath)) {
+    throw "Static Windows runtime is missing: $runtimePath"
+  }
+  $runtimeImports = & $dumpbin.FullName /imports $runtimePath | Out-String
+  if ($LASTEXITCODE -ne 0) { throw "Static runtime import audit failed: $runtimePath" }
+  if ($runtimeImports -match '(?im)DLL Name:\\s*(?:ggml|llama|libomp)[^\\r\\n]*\\.dll') {
+    throw "Static runtime still imports an app-owned inference DLL: $runtimePath"
+  }
+  if ($target.RequireVulkan -and $runtimeImports -notmatch '(?im)DLL Name:\\s*vulkan-1\\.dll') {
+    throw "Static Vulkan server does not import the system Vulkan loader: $runtimePath"
+  }
+}
+Write-Output 'STATIC_WINDOWS_RUNTIME_IMPORT_AUDIT_OK'
+
+
 $temporary = Join-Path $env:RUNNER_TEMP 'windows-gguf-smoke'
 New-Item -ItemType Directory -Path $temporary -Force | Out-Null
 $model = Join-Path $temporary 'stories15M-q8_0.gguf'
