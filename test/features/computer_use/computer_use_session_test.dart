@@ -277,6 +277,24 @@ void main() {
       expect(adapter.selections, 1);
     });
 
+    test('a regrant cannot adopt a screenshot from the old session',
+        () async {
+      final adapter = FakeDesktop();
+      adapter.blockedCapture = Completer<Uint8List>();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      final revision = session.sessionRevision;
+      final pending = session.execute(<String, dynamic>{'action': 'observe'});
+      session.stop();
+      session.beginSession(allowInteraction: true);
+      expect(session.sessionRevision, isNot(revision));
+      adapter.blockedCapture!.complete(FakeDesktop.validFrame());
+      final oldResult = await pending;
+      expect(oldResult.success, isFalse);
+      expect(oldResult.error, 'SESSION_REVOKED');
+      expect(session.isActive, isTrue);
+    });
+
     test('STOP invalidates an in-flight screenshot', () async {
       final adapter = FakeDesktop();
       adapter.blockedCapture = Completer<Uint8List>();
