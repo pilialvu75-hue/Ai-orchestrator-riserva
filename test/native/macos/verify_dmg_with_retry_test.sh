@@ -26,6 +26,14 @@ case "$MOCK_MODE" in
     echo 'verify: valid'
     exit 0
     ;;
+  busy-six)
+    if (( count <= 6 )); then
+      echo 'hdiutil: verify failed - Resource temporarily unavailable' >&2
+      exit 1
+    fi
+    echo 'verify: valid after backoff'
+    exit 0
+    ;;
   always-busy)
     echo 'hdiutil: verify failed - Resource temporarily unavailable' >&2
     exit 1
@@ -40,7 +48,7 @@ MOCK
 cat > "$work/bin/sleep" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$1" == "2" ]] || exit 92
+[[ "$1" =~ ^[2-8]$ ]] || exit 92
 exit 0
 MOCK
 chmod +x "$work/bin/hdiutil" "$work/bin/sleep"
@@ -69,7 +77,8 @@ test_case() {
 
 test_case success 0 1
 test_case busy-once 0 2
-test_case always-busy 1 5
+test_case busy-six 0 7
+test_case always-busy 1 10
 test_case invalid-image 1 1
 
 # Empty/missing images fail before any external disk-image utility is called.
