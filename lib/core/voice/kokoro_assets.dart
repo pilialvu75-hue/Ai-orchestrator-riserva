@@ -17,8 +17,12 @@ class KokoroAssets {
   static const archiveUrl =
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/'
       'kokoro-multi-lang-v1_0.tar.bz2';
-  static const archiveBytes = 349906910;
+  // Upstream repackaged this asset on 2026-10-26. The three pinned
+  // inference payload hashes below are unchanged (verified from the archive).
+  static const archiveBytes = 349886476;
   static const archiveSha256 =
+      '60703707bc05ccd48d60e1eb723f38b07d6e474795a0b6a588d7220400e0f7a4';
+  static const _previousArchiveSha256 =
       'c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298';
   static const directoryName = 'kokoro-v1_0-fp32';
   // Hashes of the uncompressed upstream files, not hashes learned from
@@ -190,7 +194,10 @@ class KokoroAssets {
     try {
       final manifest = jsonDecode(await File(p.join(root, 'verified.json')).readAsString())
           as Map<String, dynamic>;
-      if (manifest['archiveSha256'] != archiveSha256) return null;
+      // Preserve already verified FP32 installations across the repackaging.
+      // Both generations still pass every file and pinned payload check below.
+      if (manifest['archiveSha256'] != archiveSha256 &&
+          manifest['archiveSha256'] != _previousArchiveSha256) return null;
       String inside(String relative) {
         final full = p.normalize(p.join(root, relative));
         if (!p.isWithin(root, full)) throw const FormatException('Invalid asset path');
@@ -217,4 +224,3 @@ class KokoroAssets {
     }
   }
 }
-
