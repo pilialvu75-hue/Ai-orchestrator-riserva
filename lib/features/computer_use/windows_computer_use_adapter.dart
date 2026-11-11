@@ -66,6 +66,26 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   }
 
   @override
+  Future<void> openApplication(String application) async {
+    _requireWindows();
+    // No user/model-provided binary paths or shell expansion allowed here.
+    final executable = switch (application) {
+      'notepad' => 'notepad.exe',
+      'calculator' => 'calc.exe',
+      _ => throw const ComputerUseException(
+          'APPLICATION_NOT_ALLOWED',
+          'The selected application is not on the host allowlist.',
+        ),
+    };
+    await Process.start(
+      executable,
+      const <String>[],
+      mode: ProcessStartMode.detached,
+      runInShell: false,
+    );
+  }
+
+  @override
   Future<void> selectForegroundWindow() async {
     _requireWindows();
     final output = await _runPowerShell(
