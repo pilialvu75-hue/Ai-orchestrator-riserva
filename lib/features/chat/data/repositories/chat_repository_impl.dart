@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/core/system/update/assistant_update_gate.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -172,6 +173,7 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
     void Function(String partialText)? onPartialResponse,
     void Function(String notice)? onRuntimeNotice,
   }) async {
+    final finishChat = AssistantUpdateGate.instance.beginChat();
     try {
       return await runInferenceGuarded<ChatMessage>(
         scope: 'chat_repository.send_message',
@@ -665,6 +667,8 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
       rethrow;
     } catch (e) {
       throw ServerFailure(e.toString());
+    } finally {
+      finishChat();
     }
   }
 
