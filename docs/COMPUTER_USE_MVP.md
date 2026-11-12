@@ -124,9 +124,12 @@ L'obiettivo e un confronto pratico fra:
 - **ASUS Windows + WEmulDroid** sul profilo Google Play Android 15
   x86_64, dopo verifica di installazione e avvio reali del titolo.
   La compatibilita del gioco con emulatore/ABI non e garantita.
-  WEmulDroid e un prodotto e repository indipendente: un eventuale
-  driver di comandi sara una integrazione opzionale e consensuale,
-  non una dipendenza nascosta del runtime Aivexus Windows.
+  Per il primo test non serve necessariamente un driver ADB:
+  Aivexus Windows Computer Use puo selezionare la finestra WEmulDroid
+  e inviare clic verificati; WEmulDroid traduce normalmente il clic
+  Windows in un tocco Android. Da collaudare fisicamente il mapping
+  coordinate, focus e scala GUI. Un driver dedicato resta opzionale,
+  separato e consensuale; WEmulDroid resta indipendente da Aivexus.
 - **2048 su Windows** resta test iniziale tecnico, con seed ripetibile
   solo per confrontare la stessa posizione iniziale. Le direzioni
   devono venire dal modello LOCAL a ogni turno: non e presente
@@ -140,6 +143,12 @@ screenshot consensuale -> riconoscimento auto/passeggeri/direzioni
 -> decisione del modello corrente -> input controllato -> nuova
 schermata -> verifica indipendente dell'esito. Nessun livello
 e' considerato vinto soltanto perche la IA lo dichiara.
+
+Car Jam e un gioco grafico Android: il solo UI Automation Windows
+puo vedere una superficie emulata senza dettagli delle auto. Occorre
+un interprete visivo locale/multimodale (o un rilevatore validato)
+per ricavare lo stato dal frame, poi il modello attivo decide.
+Non riutilizzare il reader UIA di 2048 fingendo che legga le auto.
 
 Gli annunci sono parte del test: distinguere `GAME`, `AD`,
 `MENU`, `LEVEL_COMPLETE`, `PAYMENT`, `PERMISSION`, `UNKNOWN`.
