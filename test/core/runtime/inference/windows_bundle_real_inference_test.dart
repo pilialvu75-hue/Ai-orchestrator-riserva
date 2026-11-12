@@ -11,13 +11,30 @@ class _BundledProvider extends LocalRuntimeProvider {
   final String helper;
   @override
   Future<Process> startRuntimeProcess(String executable, List<String> arguments) {
+    final smokeModern =
+        Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN'] == '1';
+    final helperIsStaticAvx2 =
+        helper.toLowerCase().contains('runtime-cpu-avx2');
+    final appDirectory = helperIsStaticAvx2
+        ? File(helper).parent.parent.path
+        : File(helper).parent.path;
     final resolved = WindowsLlamaRuntime.resolveExecutable(
-      appExecutable: File(helper).parent.path + r'\ai_orchestrator.exe',
-      environment: const {'LLAMA_CPP_EXECUTABLE': r'C:\missing\old-workaround.exe'},
-      windowsVersion: Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN'] == '1' ? 'Windows 11 10.0' : 'Windows 7 6.1',
+      appExecutable: appDirectory + Platform.pathSeparator + 'ai_orchestrator.exe',
+      environment: {
+        'LLAMA_CPP_EXECUTABLE': r'C:\\missing\\old-workaround.exe',
+        if (smokeModern) 'AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME': '1',
+      },
+      windowsVersion: smokeModern ? 'Windows 11 10.0' : Platform.operatingSystemVersion,
+      avx2Available: WindowsLlamaRuntime.supportsAvx2(),
     );
     if (Platform.environment['AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN'] == '1') {
-      expect(resolved, contains(r'\runtime-modern\'));
+      expect(resolved.toLowerCase(), contains('runtime-modern'));
+    } else if (WindowsLlamaRuntime.supportsAvx2() && helperIsStaticAvx2) {
+      expect(resolved.toLowerCase(), contains('runtime-cpu-avx2'));
+    } else {
+      // Beta runners that do not build the optional static AVX2 bundle must
+      // continue validating the portable helper shipped at the release root.
+      expect(resolved.toLowerCase(), endsWith('llama-completion.exe'));
     }
     return Process.start(resolved, arguments, workingDirectory: Directory.systemTemp.path);
   }

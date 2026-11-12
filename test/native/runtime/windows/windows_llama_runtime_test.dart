@@ -2,15 +2,125 @@ import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dar
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('modern runtime is selected only on modern Windows with a complete bundle', () {
-    for (final version in ['Windows 11 Home 10.0 (Build 22621)', 'Windows 10', 'Windows Server 2022 10.0']) {
-      expect(WindowsLlamaRuntime.resolveExecutable(appExecutable: r'C:\app\app.exe', environment: const {}, windowsVersion: version, fileExists: (_) => true), r'C:\app\runtime-modern\llama-completion.exe');
+  test('production prefers its static helper over stale modern DLLs', () {
+    for (final version in [
+      'Windows 11 Home 10.0 (Build 22621)',
+      'Windows 10',
+      'Windows Server 2022 10.0',
+      'Windows 8.1 6.3',
+      'Windows 7 6.1',
+    ]) {
+      expect(
+        WindowsLlamaRuntime.resolveExecutable(
+          appExecutable: r'C:\app\app.exe',
+          environment: const {},
+          windowsVersion: version,
+          fileExists: (_) => true,
+        ),
+        r'C:\app\llama-completion.exe',
+      );
     }
-    for (final version in ['Windows 8.1 6.3', 'Windows 7 6.1', 'unknown', '']) {
-      expect(WindowsLlamaRuntime.resolveExecutable(appExecutable: r'C:\app\app.exe', environment: const {}, windowsVersion: version, fileExists: (_) => true), r'C:\app\llama-completion.exe');
-    }
-    expect(WindowsLlamaRuntime.resolveExecutable(appExecutable: r'C:\app\app.exe', environment: const {}, windowsVersion: 'Windows 11', fileExists: (file) => file == r'C:\app\llama-completion.exe'), r'C:\app\llama-completion.exe');
   });
+
+  test('AVX2 helper is selected only when Windows reports support', () {
+    expect(
+      WindowsLlamaRuntime.resolveExecutable(
+        appExecutable: r'C:\app\app.exe',
+        environment: const {},
+        windowsVersion: 'Windows 11',
+        avx2Available: true,
+        fileExists: (_) => true,
+      ),
+      r'C:\app\runtime-cpu-avx2\llama-completion.exe',
+    );
+    expect(
+      WindowsLlamaRuntime.resolveExecutable(
+        appExecutable: r'C:\app\app.exe',
+        environment: const {},
+        windowsVersion: 'Windows 11',
+        avx2Available: false,
+        fileExists: (_) => true,
+      ),
+      r'C:\app\llama-completion.exe',
+    );
+  });
+
+  test('resident server prefers static Vulkan and gates DLL server as QA only', () {
+    final allPresent = (String _) => true;
+    expect(
+      WindowsLlamaRuntime.resolveResidentServer(
+        appExecutable: r'C:\app\ai_orchestrator.exe',
+        environment: const {},
+        windowsVersion: 'Windows 11',
+        fileExists: allPresent,
+      ),
+      r'C:\app\runtime-vulkan\llama-server.exe',
+    );
+    expect(
+      WindowsLlamaRuntime.resolveResidentServer(
+        appExecutable: r'C:\app\ai_orchestrator.exe',
+        environment: const {'AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME': '1'},
+        windowsVersion: 'Windows 11',
+        fileExists: allPresent,
+      ),
+      r'C:\app\runtime-modern\llama-server.exe',
+    );
+    expect(
+      WindowsLlamaRuntime.resolveResidentServer(
+        appExecutable: r'C:\app\ai_orchestrator.exe',
+        environment: const {},
+        windowsVersion: 'Windows 7 6.1',
+        fileExists: allPresent,
+      ),
+      isNull,
+    );
+  });
+
+  test('modern DLL helper requires explicit Windows QA opt-in', () {
+    const enabled = {'AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME': '1'};
+    for (final version in ['Windows 11', 'Windows 10']) {
+      expect(
+        WindowsLlamaRuntime.resolveExecutable(
+          appExecutable: r'C:\app\app.exe',
+          environment: enabled,
+          windowsVersion: version,
+          fileExists: (_) => true,
+        ),
+        r'C:\app\runtime-modern\llama-completion.exe',
+      );
+    }
+    expect(
+      WindowsLlamaRuntime.resolveExecutable(
+        appExecutable: r'C:\app\app.exe',
+        environment: enabled,
+        windowsVersion: 'Windows 7 6.1',
+        fileExists: (_) => true,
+      ),
+      r'C:\app\llama-completion.exe',
+    );
+    expect(
+      WindowsLlamaRuntime.resolveExecutable(
+        appExecutable: r'C:\app\app.exe',
+        environment: enabled,
+        windowsVersion: 'Windows 11',
+        fileExists: (file) => file == r'C:\app\llama-completion.exe',
+      ),
+      r'C:\app\llama-completion.exe',
+    );
+  });
+
+  test('stale modern-only directory is not an implicit production runtime', () {
+    expect(
+      WindowsLlamaRuntime.resolveExecutable(
+        appExecutable: r'C:\app\app.exe',
+        environment: const {},
+        windowsVersion: 'Windows 11',
+        fileExists: (file) => file == r'C:\app\runtime-modern\llama-completion.exe',
+      ),
+      'llama-cli',
+    );
+  });
+
   test('bundle is independent of working directory and stale user overrides', () {
     expect(
       WindowsLlamaRuntime.resolveExecutable(

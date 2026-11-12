@@ -613,6 +613,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         appExecutable: Platform.resolvedExecutable,
         environment: Platform.environment,
         windowsVersion: Platform.operatingSystemVersion,
+        avx2Available: WindowsLlamaRuntime.supportsAvx2(),
       );
     }
     final envPath =
