@@ -299,6 +299,7 @@ final class ComputerUseAgentRunner {
     'observe',
     'open_app',
     'select_window',
+    'select_window_at',
     'click',
     'type_text',
     'press_key',
