@@ -311,7 +311,8 @@ final class ComputerUseAgentRunner {
   ) {
     switch (action) {
       case 'click':
-        return 'click:${params['x']}:${params['y']}';
+      case 'select_window_at':
+        return '$action:${params['x']}:${params['y']}';
       case 'press_key':
         return 'press_key:${params['key']}';
       case 'open_app':
