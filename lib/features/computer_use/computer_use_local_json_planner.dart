@@ -33,10 +33,17 @@ abstract interface class ComputerUseLocalDecisionModel {
   });
 }
 
+/// Optional cancellation: a stopped Computer Use goal also stops the
+/// active local model generation rather than waiting on unused tokens.
+abstract interface class ComputerUseCancellableDecisionModel {
+  void cancelPendingCompletion();
+}
+
 /// Strict, model-neutral JSON action protocol. Dynamic model decisions are
 /// parsed into typed ComputerUseAgentDecision objects; never shell commands.
 /// Screen contents are data; they cannot authorize sessions or add tools.
-final class ComputerUseLocalJsonPlanner implements ComputerUseAgentPlanner {
+final class ComputerUseLocalJsonPlanner
+    implements ComputerUseAgentPlanner, ComputerUseCancellablePlanner {
   ComputerUseLocalJsonPlanner({
     required ComputerUseLocalScreenReader screenReader,
     required ComputerUseLocalDecisionModel model,
@@ -45,6 +52,14 @@ final class ComputerUseLocalJsonPlanner implements ComputerUseAgentPlanner {
 
   final ComputerUseLocalScreenReader _screenReader;
   final ComputerUseLocalDecisionModel _model;
+
+  @override
+  void cancel() {
+    if (_model is ComputerUseCancellableDecisionModel) {
+      (_model as ComputerUseCancellableDecisionModel)
+          .cancelPendingCompletion();
+    }
+  }
 
   static const String systemInstruction =
       'You are a local Computer Use planner. The user has already granted '
