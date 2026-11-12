@@ -18,7 +18,7 @@ $form = New-Object System.Windows.Forms.Form
 $form.Text = 'AIVEXUS 2048 - Offline QA'
 $form.AccessibleName = 'AIVEXUS 2048 offline QA game'
 $form.Width = 500
-$form.Height = 650
+$form.Height = 700
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
@@ -192,6 +192,14 @@ foreach ($direction in $directions) {
     })
     $form.Controls.Add($button)
 }
+
+$restart = New-Object System.Windows.Forms.Button
+$restart.Location = New-Object System.Drawing.Point(22, 606)
+$restart.Size = New-Object System.Drawing.Size(445, 35)
+$restart.Text = 'RESTART - same starting board'
+$restart.AccessibleName = '2048 restart deterministic game'
+$restart.Add_Click({ Reset-Game })
+$form.Controls.Add($restart)
 
 $form.Add_KeyDown({
     param($sender, $e)
