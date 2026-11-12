@@ -11,6 +11,7 @@ import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_2048_benchmark.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_2048_experience.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_2048_local_agent.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_agent_runner.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_aivexus_local_decision_model.dart';
@@ -377,6 +378,9 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         return;
       }
 
+      // Collect structured game-only experiences in memory. No screenshots,
+      // files, prompts, Cloud upload, or automatic weight changes.
+      final experience = ComputerUse2048ExperienceCollector(maxTransitions: 24);
       final decisionModel = AivexusComputerUseLocalDecisionModel(
         localRuntime: di.sl<LocalRuntimeProvider>(),
         modelId: model.effectiveRuntimeModelId,
@@ -389,9 +393,11 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         planner: ComputerUse2048LocalPlanner(
           screenReader: reader,
           model: decisionModel,
+          experience: experience,
         ),
         verifier: ComputerUse2048LocalVerifier(
           screenReader: reader,
+          experience: experience,
           onObservation: (game) {
             if (!mounted || !_session.canInteract ||
                 _session.sessionRevision != revision) return;
@@ -429,9 +435,14 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               'mosse tentate ${result.steps}. '
               'Punteggio osservato ${_previousGameScore?.score ?? "non disponibile"}, '
               'casella massima ${_previousGameScore?.bestTile ?? "non disponibile"}. '
+              'Esperienze temporanee: ${experience.samples.length}; '
+              'mosse osservate: ${experience.observedMoves}. '
+              'Nessun addestramento eseguito. '
               'Non interpretare un risultato non verificato come successo.';
         });
       } finally {
+        // QA-only: observations are not silently persisted or shared.
+        experience.reset();
         if (identical(_gameRunner, runner)) {
           _gameRunner = null;
         }
