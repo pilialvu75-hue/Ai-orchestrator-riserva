@@ -93,7 +93,7 @@ void main() {
     expect((await reader.describe(frame)).sensitive, isTrue);
     payload = '{"sensitive":false,"description":"Enter password"}';
     expect((await reader.describe(frame)).sensitive, isTrue);
-    payload = '{"sensitive":false,"description":"NaN"}';
+    payload = '{"sensitive":false,"description":"' + ('x' * 6001) + '"}';
     expect((await reader.describe(frame)).sensitive, isTrue);
     payload = '{"sensitive":false,"description":5}';
     expect((await reader.describe(frame)).sensitive, isTrue);
