@@ -5,14 +5,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_agent_runner.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 
-class FakeAgentDesktop implements ComputerUseAdapter {
+class FakeAgentDesktop implements ComputerUseAdapter,
+    ComputerUseDesktopTargetSelector {
   @override
   bool get isSupported => true;
 
   int captures = 0;
   int launches = 0;
   int selections = 0;
+  int coordinateSelections = 0;
+  final List<(int, int)> selectedLocations = <(int, int)>[];
   int clicks = 0;
+
+  @override
+  Future<void> selectWindowAt(int x, int y) async {
+    coordinateSelections++;
+    selectedLocations.add((x, y));
+  }
   int typing = 0;
   int cancellations = 0;
   int presses = 0;
@@ -148,6 +157,33 @@ void main() {
       expect(verifier.calls, 3);
       expect(planner.seen.length, 3);
       expect(planner.seen.last.lastAction, 'select_window');
+    });
+
+    test('agent can choose two different windows without intermediate click',
+        () async {
+      final desktop = FakeAgentDesktop();
+      final session = ComputerUseSession(adapter: desktop);
+      session.beginSession(allowInteraction: true);
+      final planner = QueueAgentPlanner(<ComputerUseAgentDecision>[
+        const ComputerUseAgentDecision.act(
+          'select_window_at', <String, dynamic>{'x': 80, 'y': 90},
+        ),
+        const ComputerUseAgentDecision.act(
+          'select_window_at', <String, dynamic>{'x': 750, 'y': 440},
+        ),
+        enter,
+      ]);
+      final runner = ComputerUseAgentRunner(
+        session: session,
+        planner: planner,
+        verifier: FakeGoalVerifier((_) async => desktop.typing == 1),
+      );
+      final result = await runner.run(goal: 'Move between test applications');
+      expect(result.outcome, ComputerUseAgentOutcome.verified);
+      expect(desktop.coordinateSelections, 2);
+      expect(desktop.selectedLocations, <(int, int)>[(80, 90), (750, 440)]);
+      expect(desktop.clicks, 0);
+      expect(desktop.typing, 1);
     });
 
     test('planner claims completion but verifier rejects it', () async {
