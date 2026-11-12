@@ -8,8 +8,8 @@ void main() {
   test('read-only Windows accessibility PowerShell syntax parses on runner',
       () async {
     final nativeScript = WindowsComputerUseAdapter.accessibilityScriptForTest;
-    expect(nativeScript, isNot(contains('ValuePattern')));
-    expect(nativeScript, isNot(contains('TextPattern')));
+    expect(nativeScript, isNot(contains('GetCurrentPattern(')));
+    expect(nativeScript, isNot(contains('DocumentRange.GetText(')));
     expect(nativeScript, contains('IsPassword'));
     expect(nativeScript, contains(r'if ($queue.Count -gt 0)'));
     final encoded = base64Encode(utf8.encode(nativeScript));
