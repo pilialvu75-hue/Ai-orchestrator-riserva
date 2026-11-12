@@ -38,6 +38,14 @@ final class ComputerUseSmokeScenario {
       );
     }
 
+    // A STOP + regrant is NOT permission for an older smoke scenario to
+    // resume in the newly authorized session.
+    final grantRevision = session.sessionRevision;
+    bool hasOriginalGrant() =>
+        session.canInteract && session.sessionRevision == grantRevision;
+    String inactiveCode() =>
+        session.canInteract ? 'SESSION_REVOKED' : 'SESSION_INACTIVE';
+
     final marker = 'AIVEXUS-CU-QA-${_clock().microsecondsSinceEpoch}';
     if (!RegExp(r'^AIVEXUS-CU-QA-[0-9]{8,20}$').hasMatch(marker)) {
       return const ComputerUseSmokeResult(
@@ -51,15 +59,22 @@ final class ComputerUseSmokeScenario {
       String stage,
       Map<String, dynamic> params,
     ) async {
-      if (!session.canInteract) {
+      if (!hasOriginalGrant()) {
         return ComputerUseSmokeResult(
           passed: false,
           stage: stage,
-          code: 'SESSION_INACTIVE',
+          code: inactiveCode(),
         );
       }
       onStage?.call(stage);
       final ToolResult result = await session.execute(params);
+      if (!hasOriginalGrant()) {
+        return ComputerUseSmokeResult(
+          passed: false,
+          stage: stage,
+          code: inactiveCode(),
+        );
+      }
       if (!result.success) {
         return ComputerUseSmokeResult(
           passed: false,
@@ -79,18 +94,37 @@ final class ComputerUseSmokeScenario {
 
     onStage?.call('waiting');
     await _delay(const Duration(milliseconds: 1800));
-    if (!session.canInteract) {
-      return const ComputerUseSmokeResult(
+    if (!hasOriginalGrant()) {
+      return ComputerUseSmokeResult(
         passed: false,
         stage: 'waiting',
-        code: 'SESSION_INACTIVE',
+        code: inactiveCode(),
       );
     }
 
-    failed = await perform('select', <String, dynamic>{
-      'action': 'select_window',
-    });
-    if (failed != null) return failed;
+    // A cold Windows Notepad launch can take longer than the initial delay.
+    // Only retry *target-not-ready* errors; NEVER accept another foreground
+    // app, even briefly. All other errors fail immediately.
+    for (var attempt = 0; attempt < 5; attempt++) {
+      failed = await perform('select', <String, dynamic>{
+        'action': 'select_window',
+      });
+      if (failed == null) break;
+      if (attempt == 4 ||
+          (failed.code != 'LAUNCHED_APP_NOT_FOREGROUND' &&
+              failed.code != 'TARGET_NOT_FOUND')) {
+        return failed;
+      }
+      onStage?.call('waiting_for_target');
+      await _delay(const Duration(milliseconds: 400));
+      if (!hasOriginalGrant()) {
+        return ComputerUseSmokeResult(
+          passed: false,
+          stage: 'select',
+          code: inactiveCode(),
+        );
+      }
+    }
 
     // Only a generated synthetic marker: no private user data.
     failed = await perform('type', <String, dynamic>{
