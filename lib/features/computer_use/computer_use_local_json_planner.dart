@@ -126,19 +126,23 @@ final class ComputerUseLocalJsonPlanner implements ComputerUseAgentPlanner {
         if (!ComputerUseSession.allowedApplications.contains(arguments['app'])) {
           throw const FormatException('Application is not allowlisted');
         }
+        break;
       case 'click':
         if (arguments['x'] is! int || arguments['y'] is! int) {
           throw const FormatException('Click needs integer coordinates');
         }
+        break;
       case 'type_text':
         final value = arguments['text'];
         if (value is! String || value.isEmpty || value.length > 512) {
           throw const FormatException('Typed text is outside limits');
         }
+        break;
       case 'press_key':
         if (!ComputerUseSession.allowedKeys.contains(arguments['key'])) {
           throw const FormatException('Navigation key is not allowlisted');
         }
+        break;
     }
     return ComputerUseAgentDecision.act(
       action,
