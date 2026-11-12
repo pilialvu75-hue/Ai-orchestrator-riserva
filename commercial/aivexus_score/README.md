@@ -35,7 +35,7 @@ publish, collect money, alter production or ask for credentials.
 ## MVP acceptance criteria (stop-ship if false)
 - [ ] CI passes on the exact PR commit SHA (analyze, model/widget tests, web build, APK).
 - [ ] The real app launches and works on Galaxy S24 FE.
-- [ ] Browser ZIP opens and works on tested desktop/mobile browsers.
+- [ ] Hosted browser ZIP loads from a subdirectory and works in tested browsers; no claim that file:// works.
 - [ ] Scores do not go negative; undo, reset confirmation and rename work.
 - [ ] State survives app close/reopen; storage failure is visibly reported.
 - [ ] No crash during 100 fast score taps and 20 resets/undo cycles.
