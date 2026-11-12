@@ -81,6 +81,22 @@ void main() {
     );
   });
 
+  test('W2 private deployment records non-secret source identity', () {
+    final workflow = File(
+      '.github/workflows/web-private-deploy.yml',
+    ).readAsStringSync();
+    final headers = File('web/_headers').readAsStringSync();
+
+    expect(workflow, contains('stamp_deployment_provenance.sh build/web'));
+    expect(workflow, contains('build/web/__aivexus_web_deployment.json'));
+    expect(workflow, contains('GITHUB_SHA'));
+    expect(workflow, contains('GITHUB_RUN_ID'));
+    expect(workflow, contains('.gitSha == \\$sha'));
+    expect(workflow, contains('.githubRunId == \\$run'));
+    expect(headers, contains('/__aivexus_web_deployment.json'));
+    expect(headers, contains('Cache-Control: no-store'));
+  });
+
   test('W2 static headers prevent indexing and basic browser embedding', () {
     final headers = File('web/_headers').readAsStringSync();
 
