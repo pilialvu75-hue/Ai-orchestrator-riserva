@@ -12,7 +12,11 @@ void main() {
     expect(nativeScript, isNot(contains('DocumentRange.GetText(')));
     expect(nativeScript, contains('IsPassword'));
     expect(nativeScript, contains(r'if ($queue.Count -gt 0 -or $truncated)'));
-    final encoded = base64Encode(utf8.encode(nativeScript));
+    // The template is not executable until the selected HWND is inserted.
+    // Parse the same rendered syntax used by the real native adapter.
+    expect(nativeScript, contains('__HANDLE__'));
+    final rendered = nativeScript.replaceFirst('__HANDLE__', '0');
+    final encoded = base64Encode(utf8.encode(rendered));
     final parseOnly = r'''
 $source = [System.Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String('__ENCODED__'))
