@@ -31,6 +31,12 @@ try {
 if (-not $invalidHandleRejected) {
     throw 'Click did not reject an invalid target before any input'
 }
+$selector = [AivexusDesktopInput].GetMethod('SelectWindowAt')
+if ($null -eq $selector -or
+    $selector.GetParameters().Count -ne 3 -or
+    $selector.ReturnType -ne [long]) {
+    throw 'Cross-window selector must accept x, y and excluded host PID'
+}
 Write-Output 'INTEROP_COMPILED'
 ''';
       final result = await Process.run(
