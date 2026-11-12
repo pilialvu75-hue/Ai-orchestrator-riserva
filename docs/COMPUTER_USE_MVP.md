@@ -129,8 +129,11 @@ Il primo test automatico e ancora strettamente limitato:
 - Aprire solo notepad.exe con argomenti vuoti.
 - Conservare il PID restituito dal processo avviato.
 - Attendere e selezionare il primo piano **solo se** il PID della finestra
-  corrisponde al processo avviato. Altrimenti ritornare il codice
-  LAUNCHED_APP_NOT_FOREGROUND, senza scrivere o premere tasti.
+  corrisponde al processo avviato. Dopo il tempo iniziale, riprovare fino a
+  cinque volte, a distanza di 400 ms, esclusivamente per finestra non pronta.
+  Altrimenti ritornare il codice LAUNCHED_APP_NOT_FOREGROUND, senza scrivere
+  o premere tasti. STOP o una nuova autorizzazione interrompono il vecchio
+  test e non permettono di riutilizzarne il permesso.
 - Digitare esclusivamente un marcatore sintetico AIVEXUS-CU-QA-...
 - Dichiarare PASS solo dopo verifica UI Automation del marcatore esatto.
 - La finestra Windows 11 di una app packaged potrebbe appartenere a un
@@ -140,7 +143,9 @@ Il primo test automatico e ancora strettamente limitato:
 
 Quattro test puri di policy controllano il PID atteso, un'altra app in
 primo piano, la finestra della stessa Aivexus e la selezione manuale priva
-di vincoli del test lanciato. Non sostituiscono la prova sul dispositivo.
+di vincoli del test lanciato. Altri test del flusso verificano avvio lento,
+finestra estranea, errore di focus, STOP durante l'attesa e STOP seguito da
+nuova autorizzazione. Non sostituiscono la prova sul dispositivo.
 
 **Gate per autorizzare una beta Windows tramite il normale aggiornamento**:
 CI Computer Use dedicata PASS; build/test Windows PASS; regressioni principali
