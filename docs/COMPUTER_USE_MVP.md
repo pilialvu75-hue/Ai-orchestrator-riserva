@@ -8,9 +8,10 @@ contratto tool e a un laboratorio manuale accessibile da **Impostazioni >
 Computer Use — Laboratorio** su Windows.
 
 - Windows: prima piattaforma, azioni OS effettive ma ancora senza test fisici.
-- macOS: adattatore sperimentale di sola osservazione creato; esegue
-  screenshot con utility nativa fissa, richiede permesso Screen Recording,
-  compatibilita con sandbox/firma ancora da collaudare.
+- macOS: adattatore sperimentale di sola osservazione collegato a
+  CoreGraphics tramite FlutterMethodChannel nativo, senza subprocess.
+  Il laboratorio chiede Screen Recording su azione esplicita dell'utente;
+  sandbox/firma e compatibilita del Mac richiedono collaudo reale.
 - Android: adattatore sperimentale di sola osservazione creato; riusa il
   servizio MediaProjection gia presente nell'app, previo consenso Android.
 - Linux: adattatore non ancora sviluppato.
@@ -34,7 +35,7 @@ Computer Use — Laboratorio** su Windows.
 | Componente | Stato |
 | --- | --- |
 | Contratto ComputerUseAdapter | Implementato |
-| Mac: acquisizione PNG con autorizzazione Screen Recording | Adattatore e schermata read-only preparati, non testati su hardware reale; input disabilitato |
+| Mac: acquisizione PNG via CoreGraphics/FlutterMethodChannel con Screen Recording TCC | Implementato sul ramo, 5 test bridge simulato aggiunti; da collaudare su hardware reale; input disabilitato |
 | Android: osservazione tramite ScreenVision MediaProjection | Adattatore e schermata read-only preparati; test con bridge simulato aggiunti, hardware non collaudato; input disabilitato |
 | Protezione contro abilitazione interazione su adattatori read-only | Implementata, test aggiunti |
 | Sessione temporanea e revocabile (10 min) | Implementato |
@@ -127,7 +128,23 @@ multisistema; il test di lettura schermo e un checkpoint, non il traguardo.
   di scadenza a 10 minuti. Non e una release per i tester.
 - Aggiunti test fittizi Android che coprono consenso schermo obbligatorio,
   frame PNG, rifiuto di click e STOP durante una cattura in ritardo.
-- Mac usa ancora la utility `screencapture` e non una integrazione con
-  ScreenCaptureKit; sandbox, permessi e compatibilita restano da provare.
+- Mac ora usa un ponte nativo CoreGraphics e non la utility `screencapture`.
+  ScreenCaptureKit (moderna API streaming) e un miglioramento futuro. Servono
+  ancora test reali per sandbox, consenso TCC, firma e compatibilita.
 - Il motore IA autonomo non e collegato a nessun provider finche l'inferenza
   Aivexus non ritorna funzionante. Continuiamo senza toccare la sua riparazione.
+
+
+## Checkpoint macOS nativo (12 novembre 2026)
+
+- Corretto il test STOP che si aspettava il vecchio codice di errore:
+  la revoca in corso ora produce `SESSION_REVOKED`, come previsto.
+- Il progetto Mac registra il canale nativo
+  `com.aiorchestrator/computer_use_mac` in `MainFlutterWindow.swift`:
+  `getStatus`, `requestScreenRecording` (solo su gesto utente) e
+  `captureScreenshot`. Nessun input o comando arbitrario esposto.
+- `MacComputerUseAdapter` usa il canale con permessi CoreGraphics e PNG in
+  memoria; eliminata l'esecuzione del tool di sistema `screencapture`.
+- Aggiunti 5 test Flutter simulati del bridge Mac: consenso, frame valido,
+  divieto interazione, STOP/riautorizzazione e revoca del consenso.
+- Ancora necessario collaudare compilazione nativa Swift, TCC e runtime su Mac.
