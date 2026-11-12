@@ -89,6 +89,72 @@ void main() {
       },
     );
   }
+
+  testWidgets('approved Web proposal survives reopening without inference', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final firstStore = await WorkshopWebProjectStorage.open();
+    final original = await firstStore.saveProject(
+      aivexusProject('approval-persisted').copyWith(
+        status: WorkshopWebProjectStatus.proposalReady,
+        progress: 0.10,
+        currentPhase: 'Proposta pronta',
+        currentItem: 'Attende approvazione del proprietario',
+        proposal: 'PROPOSAL: Web counter without external services.',
+      ),
+    );
+    final provider = _ProposalProvider();
+    final controller = WorkshopChatController(
+      inferenceGateway: WorkshopInferenceGateway(provider: provider),
+    );
+    addTearDown(controller.dispose);
+
+    Widget page(WorkshopWebProjectStorage store) => MaterialApp(
+      home: Scaffold(
+        body: WorkshopWebProjectsPage(
+          controller: controller,
+          storage: store,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(page(firstStore));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('approval-persisted'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Approva progetto'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Approva'));
+    await tester.pumpAndSettle();
+
+    final approved = (await firstStore.loadAll()).single;
+    expect(approved.id, original.id);
+    expect(approved.createdAt, original.createdAt);
+    expect(approved.status, WorkshopWebProjectStatus.approved);
+    expect(approved.progress, 0.15);
+    expect(approved.storageRevision, original.storageRevision + 1);
+    expect(approved.proposal, original.proposal);
+    expect(provider.calls, 0);
+
+    // A fresh store and a remounted page simulate reopening the Web UI,
+    // without claiming a real authenticated production browser refresh.
+    await tester.pumpWidget(const SizedBox.shrink());
+    final reopenedStore = await WorkshopWebProjectStorage.open();
+    expect((await reopenedStore.loadAll()).single.status,
+        WorkshopWebProjectStatus.approved);
+    await tester.pumpWidget(page(reopenedStore));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('approval-persisted'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('15%'), findsOneWidget);
+    expect(find.text('Inizia creazione'), findsOneWidget);
+    expect(find.textContaining('non è ancora collegato'), findsOneWidget);
+    expect(find.text('Approva progetto'), findsNothing);
+    expect(provider.calls, 0);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 final class _ProposalProvider implements RuntimeInferenceProvider {
