@@ -41,6 +41,21 @@ void main() {
     expect(score('home-score').data, '0');
   });
 
+  testWidgets('player rename is saved locally', (tester) async {
+    final preferences = await SharedPreferences.getInstance();
+    await tester.pumpWidget(ScoreApp(store: ScoreStore(preferences)));
+    await tester.tap(find.byKey(const Key('home-rename')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('name-input')), 'Alice');
+    await tester.tap(find.byKey(const Key('confirm-name')));
+    await tester.pumpAndSettle();
+    expect(find.text('Alice'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(ScoreApp(store: ScoreStore(preferences)));
+    expect(find.text('Alice'), findsOneWidget);
+  });
+
   testWidgets('score survives widget recreation using local preferences', (
     tester,
   ) async {
