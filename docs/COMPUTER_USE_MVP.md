@@ -41,6 +41,7 @@ Computer Use — Laboratorio** su Windows.
 | Sessione temporanea e revocabile (10 min) | Implementato |
 | Observe / screenshot PNG schermo primario | Implementato; da collaudare su Windows reale |
 | Click coordinate e selezione finestra attiva | Implementato; da collaudare |
+| Paint e 2048 offline QA, punteggi osservati | Implementati nel ramo Windows; CI parser e metriche in corso, prove fisiche e agente LOCAL ancora da eseguire |
 | Passaggio esplicito tra finestre (selezione da screenshot senza clic) | Implementato nel ramo QA Windows; CI e hardware da verificare |
 | Testo Unicode, tasti di navigazione | Implementato; da collaudare |
 | UI di laboratorio con consenso e STOP | Windows + read-only macOS e Android; Android ferma il proprio MediaProjection allo STOP/scadenza; QA fisica da eseguire |
@@ -105,6 +106,43 @@ CI senza disattivare Windows Security. La firma e rinviata alla release finale.
    Prima l'osservazione autorizzata; poi, in un secondo passo, input macOS
    tramite permessi Accessibilita e valutazione tecnica/policy Android.
    Nessuna richiesta di installazione beta finche il runtime non e riparato.
+
+## Nuove prove pratiche: Paint e 2048 offline (12 novembre 2026)
+
+Per misurare l'intelligenza di Computer Use (non solo l'uso del mouse),
+la allowlist Windows QA comprende anche:
+
+- **Paint** (`paint`): applicazione creativa utile per testare
+  clic precisi, trascinamenti futuri e la navigazione tra finestre.
+  I trascinamenti NON sono ancora implementati, quindi per ora i
+  test Paint si limitano ai clic e ai controlli consentiti.
+- **Gioco 2048 offline** (`qa2048`): minigioco autonomo WinForms
+  creato con script PowerShell costante, senza rete, librerie esterne,
+  download, documenti personali o installer. E' avviabile
+  **soltanto** in build con
+  `AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true`.
+
+Il gioco ha una griglia 4x4, frecce direzionali, generatore con seed
+costante `20261112` per ripetere una partita iniziale e obiettivo
+misurabile: raggiungere una casella di valore **64**. Punteggio,
+numero di mosse e miglior casella sono esposti tramite i nomi accessibili
+dei controlli Windows, senza contenuti utente.
+
+`ComputerUse2048Benchmark.parse()` legge il riepilogo UIA osservato
+e accetta solo una griglia completa di 16 caselle, valori potenza di 2
+e score/status plausibili. Il pulsante `Leggi controlli finestra (LOCAL)`
+presenta punteggio, miglior casella, mosse e differenza dal rilevamento
+precedente. Non usa output del modello come prova del risultato.
+
+**Distinzione fondamentale**: una build funzionante del minigioco e un
+test di tasti o clic non dimostrano intelligenza. Per dichiarare
+`AIVEXUS HA GIOCATO 2048`, servira' collegare un modello LOCAL reale
+al lettore semantico/UIA, fargli scegliere le mosse **dopo** ogni
+osservazione, registrare solo metriche non sensibili e verificare
+un miglioramento di punteggio con il benchmark indipendente.
+La parte agente LOCAL reale non e' ancora abilitata nella schermata.
+Nessun test fisico e' stato ancora effettuato sull'ASUS; i test di CI
+non fanno girare un gioco con finestra interattiva.
 
 ## Lettura controlli Windows tramite UI Automation (12 novembre 2026)
 
