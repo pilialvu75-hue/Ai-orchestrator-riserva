@@ -103,6 +103,34 @@ risolvere firma e distribuzione: non disattivare le protezioni di Windows.
    tramite permessi Accessibilita e valutazione tecnica/policy Android.
    Nessuna richiesta di installazione beta finche il runtime non e riparato.
 
+## Preparazione del primo collaudo fisico Windows
+
+Dopo la conferma di ripristino di Aivexus, il laboratorio rimane comunque
+isolato nella PR draft #1114; non e ancora una funzionalita installata.
+
+Il primo test automatico e ancora strettamente limitato:
+- Aprire solo notepad.exe con argomenti vuoti.
+- Conservare il PID restituito dal processo avviato.
+- Attendere e selezionare il primo piano **solo se** il PID della finestra
+  corrisponde al processo avviato. Altrimenti ritornare il codice
+  LAUNCHED_APP_NOT_FOREGROUND, senza scrivere o premere tasti.
+- Digitare esclusivamente un marcatore sintetico AIVEXUS-CU-QA-...
+- Dichiarare PASS solo dopo verifica UI Automation del marcatore esatto.
+- La finestra Windows 11 di una app packaged potrebbe appartenere a un
+  processo broker differente: in tal caso il test fallisce esplicitamente
+  anziche inviare testo a una applicazione sbagliata. L'eventuale supporto
+  broker richiede identificazione affidabile del processo, non un bypass.
+
+Quattro test puri di policy controllano il PID atteso, un'altra app in
+primo piano, la finestra della stessa Aivexus e la selezione manuale priva
+di vincoli del test lanciato. Non sostituiscono la prova sul dispositivo.
+
+**Gate per autorizzare una beta Windows tramite il normale aggiornamento**:
+CI Computer Use dedicata PASS; build/test Windows PASS; regressioni principali
+valutate; distribuzione e firma conformi, senza disabilitare Defender o
+Smart App Control; successivamente il collaudo sul vero ASUS con log e STOP.
+Non pubblicare da branch di PR draft e non fare merge per aggirare il gate.
+
 **Criterio di completamento**: Aivexus deve eseguire da richiesta naturale
 almeno tre scenari non distruttivi su Windows (aprire un'app, compilare un
 campo di prova, verificare il risultato) senza passi manuali intermedi, con
