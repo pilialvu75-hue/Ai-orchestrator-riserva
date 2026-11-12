@@ -59,6 +59,23 @@ Computer Use — Laboratorio** su Windows.
 | Integrazione Diagnostics anonimizzata | NON implementata |
 | Aggiornamento beta | NON rilasciato |
 
+## Percorso beta Windows integrato nell'updater AIVEXUS (12 novembre 2026)
+
+- **Una sola app**: il laboratorio Computer Use vive dentro AIVEXUS e rimane nascosto nelle build ordinarie. Nessun APK, ZIP portabile o installazione di una seconda app è richiesto dal percorso proprietario.
+- Il ramo draft #1114 ora prepara un flag **esclusivamente Windows** per `.github/workflows/windows-release-publish.yml`: l'input manuale `computer_use_beta` è **false di default** e può essere true solo durante `workflow_dispatch` per un tag esatto `vX.Y.Z-beta+BUILD`, già pubblicato e collegato a un precedente Android release manuale autorizzato su `main` con SHA sorgente verificato.
+- Tutte le pubblicazioni automatiche, stabili, nightly e dev mantengono il laboratorio OFF. La build Windows controlla il valore del flag con il test Flutter prima di creare Setup.exe e SHA-256. L'installer rimane quello ufficiale, rilevato e verificato dall'updater Windows.
+- **Attenzione al vincolo attuale**: Windows Release Publish usa la versione coordinata con una release Android manuale già autorizzata. Lavoriamo su Windows come piattaforma funzionale prioritaria, ma l'infrastruttura di distribuzione non è ancora Windows-only. Non improvvisare tag o asset alternativi invisibili all'updater.
+- **Nessuna beta viene pubblicata da questa modifica**: per procedere occorrono integrazione autorizzata della PR, verifica CI per il commit esatto, controlli packaging, rilascio esplicito e successivo collaudo fisico ASUS. Non dichiarare test hardware PASS senza osservazioni reali.
+- Se Smart App Control o Defender bloccano Setup.exe non firmato, non disattivare le protezioni e non suggerire procedure per aggirarle: registrare il blocco; la firma commerciale resta un capitolo separato.
+
+### Sequenza di accettazione della beta
+
+1. Compilazione/test Windows di #1114 PASS; QA del 2048 senza script di mosse; nessun invio involontario di screenshot.
+2. Autorizzare la distribuzione beta al proprietario e integrarvi esattamente il codice testato; pubblicare il tag beta coordinato solo mediante workflow manuale previsto.
+3. Per il solo Windows publisher manuale, impostare `computer_use_beta=true`, legandolo all'Android `android_run_id` verificato; assicurarsi di non sovrascrivere un installer non previsto.
+4. Su ASUS, Impostazioni > Aggiornamenti AIVEXUS in canale Beta: scaricare Setup.exe verificato e aggiornare senza disinstallare l'app né cancellare modelli/cronologia.
+5. Eseguire prima il percorso Notepad/UI Automation/STOP, poi `Fai giocare Aivexus LOCAL a 2048`, salvando metriche score e modello. Soltanto dopo il QA fisico avviare il lavoro Car Jam/WEmulDroid.
+
 ## Test manuale su ASUS Windows (senza disattivare Defender)
 
 1. Installare solo tramite il canale aggiornamenti dell'app una futura
