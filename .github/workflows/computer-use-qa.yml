@@ -1,0 +1,41 @@
+name: Computer Use Lab Source QA (non-release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/features/computer_use/**'
+      - 'test/features/computer_use/**'
+      - 'macos/Runner/MainFlutterWindow.swift'
+      - 'lib/features/settings/presentation/pages/settings_page.dart'
+      - '.github/workflows/computer-use-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Source-only QA: this does NOT prove that a signed app works on a real
+# Windows PC, Mac or Android handset, and never publishes an artifact.
+concurrency:
+  group: computer-use-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  computer-use-unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Flutter SDK
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Restore locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze Computer Use sources and tests
+        run: flutter analyze --no-fatal-infos lib/features/computer_use test/features/computer_use
+      - name: Run Computer Use fake host and planner tests
+        run: flutter test --reporter expanded test/features/computer_use
