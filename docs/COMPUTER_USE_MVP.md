@@ -103,6 +103,23 @@ risolvere firma e distribuzione: non disattivare le protezioni di Windows.
    tramite permessi Accessibilita e valutazione tecnica/policy Android.
    Nessuna richiesta di installazione beta finche il runtime non e riparato.
 
+## Gate di distribuzione: laboratorio default OFF
+
+La PR #1114 mantiene Computer Use in stato sperimentale. Il laboratorio
+non compare in Impostazioni e non concede una sessione in una build
+ordinaria: e' abilitabile esclusivamente durante la compilazione con
+\`--dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true\`.
+
+Il flag non e' una preferenza modificabile dall'LLM e non attiva
+automaticamente OS Accessibility, MediaProjection o permessi macOS.
+La CI dedicata controlla sia il comportamento OFF predefinito, sia
+l'abilitazione esplicita in una compilazione di test.
+
+Nessuna pipeline di pubblicazione attualmente attiva riceve quel flag:
+**il laboratorio non e' stato distribuito al dispositivo dell'utente**.
+Prima della distribuzione tramite updater sono richiesti i gate CI,
+sicurezza/firma e una procedura di release QA esplicitamente autorizzata.
+
 ## Preparazione del primo collaudo fisico Windows
 
 Dopo la conferma di ripristino di Aivexus, il laboratorio rimane comunque
@@ -140,9 +157,9 @@ STOP e consensi effettivi. Il solo PASS di Flutter test non basta.
 ## Disponibilita dei dispositivi
 
 L'utente ha confermato l'11 novembre 2026 di avere gia disponibili un Mac e
-un dispositivo Android. Il requisito hardware non blocca lo sviluppo. La
-riparazione dell'app Aivexus e in carico a Work: non interferire e non avviare
-collaudi fisici finche l'utente non conferma che l'app e tornata operativa.
+un dispositivo Android. Il requisito hardware non blocca lo sviluppo. L'utente ha confermato il ripristino di Aivexus il 12 novembre 2026.
+Non interferire con Work: i collaudi Computer Use inizieranno solo quando
+una build QA verificata sara disponibile tramite aggiornamento integrato.
 
 Importante: avere il dispositivo disponibile **non** significa che Computer Use
 su quella piattaforma sia gia operativo. L'obiettivo rimane autonomia
