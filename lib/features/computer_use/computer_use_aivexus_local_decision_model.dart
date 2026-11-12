@@ -100,12 +100,10 @@ final class AivexusComputerUseLocalDecisionModel
       if (!finished || cancellation.isCancelled) {
         throw StateError('Computer Use LOCAL completion is not verified.');
       }
-      final answer = (finalText != null && finalText.isNotEmpty)
-          ? finalText
+      final String answer = (finalText?.isNotEmpty ?? false)
+          ? finalText!
           : generated.toString();
-      if (answer == null ||
-          answer.trim().isEmpty ||
-          answer.length > maxOutputChars) {
+      if (answer.trim().isEmpty || answer.length > maxOutputChars) {
         throw const FormatException('Invalid LOCAL Computer Use output.');
       }
       return answer.trim();
