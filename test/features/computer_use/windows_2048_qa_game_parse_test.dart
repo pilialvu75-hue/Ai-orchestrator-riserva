@@ -59,29 +59,29 @@ Write-Output 'QA_2048_SCRIPT_PARSED'
     const entrypoint = '[System.Windows.Forms.Application]::Run(\$form)';
     expect(source, contains(entrypoint));
     const headlessChecks = r'''
-\$initial = (\$script:board -join ',')
+$initial = ($script:board -join ',')
 Reset-Game
-if ((\$script:board -join ',') -ne \$initial) {
+if (($script:board -join ',') -ne $initial) {
     throw 'Restart did not reproduce the deterministic opening board'
 }
 Move-Game 'left'
 Move-Game 'down'
 Move-Game 'right'
 Move-Game 'up'
-if (\$script:moves -le 0) { throw 'No game move changed the board' }
-if (\$script:tileControls.Count -ne 16) {
+if ($script:moves -le 0) { throw 'No game move changed the board' }
+if ($script:tileControls.Count -ne 16) {
     throw 'The accessible board must expose exactly 16 tiles'
 }
-foreach (\$tile in \$script:tileControls) {
-    if (\$tile.AccessibleName -notmatch '^2048 tile row') {
+foreach ($tile in $script:tileControls) {
+    if ($tile.AccessibleName -notmatch '^2048 tile row') {
         throw 'A tile is not accessible to Computer Use'
     }
 }
-if (\$script:scoreControl.AccessibleName -notmatch '^2048 score') {
+if ($script:scoreControl.AccessibleName -notmatch '^2048 score') {
     throw 'Game score is not accessible to Computer Use'
 }
 Write-Output 'QA_2048_ENGINE_OK'
-\$form.Dispose()
+$form.Dispose()
 ''';
     final script = source.replaceFirst(entrypoint, headlessChecks);
     final result = await Process.run(
