@@ -150,7 +150,7 @@ final class ComputerUseAgentRunner {
         _session.canInteract && _session.sessionRevision == revision;
 
     ComputerUseAgentResult finish(
-      ComputerUseAgentOutcome outcome, [String? error],
+      ComputerUseAgentOutcome outcome, [String? error]
     ) =>
         ComputerUseAgentResult(
           outcome: outcome,
