@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_2048_benchmark.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_build_policy.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_preview_policy.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
@@ -64,6 +65,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   int _frameHeight = 1;
   bool _busy = false;
   bool _selectTargetOnNextTap = false;
+  ComputerUse2048Benchmark? _previousGameScore;
   String _message = 'Nessuna sessione attiva.';
 
   @override
@@ -167,6 +169,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       try {
         _session.beginSession(allowInteraction: interactive);
         _selectTargetOnNextTap = false;
+        _previousGameScore = null;
         await _refreshFrame();
         _expiryTimer?.cancel();
         _expiryTimer = Timer(const Duration(minutes: 10), () {
@@ -247,12 +250,25 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       if (!_session.isActive ||
           _session.sessionRevision != revision ||
           !mounted) return;
+      final game = summary.sensitive
+          ? null
+          : ComputerUse2048Benchmark.parse(summary.description);
       setState(() {
-        _message = summary.sensitive
-            ? 'Analisi locale interrotta: controlli sensibili, '
-              'incompleti o non leggibili.'
-            : 'Controlli accessibili (solo LOCAL, senza dati '
-              'dei campi di testo):\n${summary.description}';
+        if (game != null) {
+          final previous = _previousGameScore;
+          final gained = previous == null ? 0 : game.score - previous.score;
+          _message = '2048 QA (dati osservati, non dichiarati dalla IA): '
+              'punteggio ${game.score}, casella massima ${game.bestTile}, '
+              'mosse ${game.moves}, stato ${game.state}. '
+              '${previous == null ? "Prima rilevazione." : "Differenza punteggio: $gained."}';
+          _previousGameScore = game;
+        } else {
+          _message = summary.sensitive
+              ? 'Analisi locale interrotta: controlli sensibili, '
+                'incompleti o non leggibili.'
+              : 'Controlli accessibili (solo LOCAL, senza dati '
+                'dei campi di testo):\n${summary.description}';
+        }
       });
     });
   }
@@ -336,6 +352,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     _expiryTimer?.cancel();
     _session.stop();
     _selectTargetOnNextTap = false;
+    _previousGameScore = null;
     unawaited(_releaseProjection());
     if (!mounted) return;
     setState(() {
@@ -453,8 +470,37 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                     icon: const Icon(Icons.calculate_outlined),
                     label: const Text('Apri Calcolatrice'),
                   ),
+                  if (_isWindows) ...[
+                    OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () => _invoke(<String, dynamic>{
+                                'action': 'open_app',
+                                'app': 'paint',
+                              }),
+                      icon: const Icon(Icons.brush_outlined),
+                      label: const Text('Apri Paint'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () => _invoke(<String, dynamic>{
+                                'action': 'open_app',
+                                'app': 'qa2048',
+                              }),
+                      icon: const Icon(Icons.sports_esports_outlined),
+                      label: const Text('Gioco 2048 offline (QA)'),
+                    ),
+                  ],
                 ],
               ),
+              if (_isWindows)
+                const Text(
+                  '2048 è un gioco locale di prova: usa le frecce per '
+                  'combinare le caselle, raggiungi 64 e confronta punteggio '
+                  'e numero di mosse tramite “Leggi controlli finestra”. '
+                  'L’IA LOCAL non gioca ancora in autonomia.',
+                ),
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _busy ? null : _selectTargetWindow,
