@@ -48,6 +48,7 @@ Computer Use — Laboratorio** su Windows.
 | Test autorizzazioni, STOP, concorrenza, allowlist e verifica | Aggiunti; CI del nuovo commit da verificare |
 | Lettura locale UI Automation (Windows) | Sorgente nativa e filtro privacy implementati nel ramo QA; test simulati/parser CI in corso; da collaudare su Windows reale |
 | Interpretazione visiva LLM | NON implementata |
+| Car Jam Solver (Ladaneta) S24 FE / WEmulDroid | Protocollo di benchmark registrato; compatibilita emulatore e input autonomo Android NON verificati |
 | Motore autonomo astratto `ComputerUseAgentRunner` | Implementato e testato con finti planner/verificatore; collegato sperimentalmente al modello reale SOLO per 2048 QA, ancora da collaudare |
 | Ciclo dinamico observe → decide → agisci → ri-osserva → verifica | Implementato; collegamento reale al modello selezionato SOLO per 2048 QA, da validare sul dispositivo |
 | Revoca durante inferenza / nuova sessione | Revisioni di autorizzazione implementate; test in CI |
@@ -106,6 +107,62 @@ CI senza disattivare Windows Security. La firma e rinviata alla release finale.
    Prima l'osservazione autorizzata; poi, in un secondo passo, input macOS
    tramite permessi Accessibilita e valutazione tecnica/policy Android.
    Nessuna richiesta di installazione beta finche il runtime non e riparato.
+
+## Benchmark reale Car Jam Solver — Android e WEmulDroid (12 novembre 2026)
+
+**Scelta del proprietario**: [Car Jam Solver: Traffic Jam di Ladaneta Games](https://play.google.com/store/apps/details?id=car.parking.jam.solver.puzzle.games), package Android esatto `car.parking.jam.solver.puzzle.games`.
+Il gioco e di terzi, contiene pubblicita e acquisti in-app; **non**
+distribuire APK modificati, automazioni di acquisto o soluzioni dei livelli.
+
+L'obiettivo e un confronto pratico fra:
+- **Galaxy S24 FE** con Aivexus Android e modello effettivamente
+  selezionato, avviando il gioco da Google Play soltanto su approvazione
+  dell'utente. L'attuale adattatore Android Computer Use e **read-only**
+  con MediaProjection; non puo ancora toccare il gioco autonomamente.
+  Per input autonomo servira una modalita di test legittima e conforme
+  alle policy Android/Google Play, senza eludere il sistema.
+- **ASUS Windows + WEmulDroid** sul profilo Google Play Android 15
+  x86_64, dopo verifica di installazione e avvio reali del titolo.
+  La compatibilita del gioco con emulatore/ABI non e garantita.
+  WEmulDroid e un prodotto e repository indipendente: un eventuale
+  driver di comandi sara una integrazione opzionale e consensuale,
+  non una dipendenza nascosta del runtime Aivexus Windows.
+- **2048 su Windows** resta test iniziale tecnico, con seed ripetibile
+  solo per confrontare la stessa posizione iniziale. Le direzioni
+  devono venire dal modello LOCAL a ogni turno: non e presente
+  una lista predefinita di mosse da vincere. Il codice agent
+  e collegato al laboratorio, ma la prova reale su ASUS manca ancora.
+
+### Validazione delle decisioni (non uno script fisso)
+
+Per Car Jam ogni turno deve passare da una **nuova** osservazione:
+screenshot consensuale -> riconoscimento auto/passeggeri/direzioni
+-> decisione del modello corrente -> input controllato -> nuova
+schermata -> verifica indipendente dell'esito. Nessun livello
+e' considerato vinto soltanto perche la IA lo dichiara.
+
+Gli annunci sono parte del test: distinguere `GAME`, `AD`,
+`MENU`, `LEVEL_COMPLETE`, `PAYMENT`, `PERMISSION`, `UNKNOWN`.
+Se un livello chiede annunci o denaro per essere sbloccato,
+marcare `AD_GATED` o `PAYWALL`; non attribuire quel blocco
+alla mancanza di intelligenza. Non aprire annunci, acquisti,
+permessi, link esterni o Play Store da decisione autonoma.
+
+Metriche: livello verificato, mosse riuscite/fallite,
+score ove disponibile, tempo per scelta/livello,
+auto-correzioni, annunci e loro durata, blocchi da monetizzazione,
+modello e modalita LOCAL/CLOUD/HYBRID, eventuali crash.
+Screenshot/account rimangono locali salvo consenso separato;
+STOP revoca la sessione. I dati visuali di gioco e annunci
+sono dati non attendibili, mai istruzioni operative.
+
+**Stato:** titolo verificato su Google Play; percorso di test e
+requisiti registrati, ma gioco non ancora installato né giocato
+automaticamente nei due ambienti. Il laboratorio Android non e ancora
+abilitato all'input. Nessun PASS fisico deve essere inferito dalla CI.
+
+WEmulDroid: [protocollo Car Jam](https://github.com/pilialvu75-hue/WEmulDroid/blob/main/docs/CAR_JAM_SOLVER_QA.md)
+e [issue #10](https://github.com/pilialvu75-hue/WEmulDroid/issues/10).
 
 ## Nuove prove pratiche: Paint e 2048 offline (12 novembre 2026)
 
