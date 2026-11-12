@@ -24,6 +24,14 @@ abstract interface class ComputerUseAdapter {
   void cancel();
 }
 
+/// Optional capability for selecting a *different* desktop window by the
+/// last observed screen coordinates. Selection itself never sends input.
+/// A task can move across applications explicitly; a click still cannot
+/// silently adopt an unrelated window.
+abstract interface class ComputerUseDesktopTargetSelector {
+  Future<void> selectWindowAt(int x, int y);
+}
+
 /// Optional capability boundary for adapters that can observe but cannot input.
 /// Missing this marker preserves legacy Windows adapter behavior.
 abstract interface class ComputerUseInteractionCapability {
@@ -210,6 +218,26 @@ final class ComputerUseSession implements Tool {
           await _adapter.selectForegroundWindow();
           _requireRevision(revision);
           return _success('Foreground window selected for input.');
+        case 'select_window_at':
+          _requireInteraction();
+          if (_adapter is! ComputerUseDesktopTargetSelector) {
+            throw const ComputerUseException(
+              'TARGET_SELECTION_UNSUPPORTED',
+              'Cross-window selection is not supported on this host.',
+            );
+          }
+          final x = params['x'];
+          final y = params['y'];
+          if (!_isObservedCoordinate(x, y)) {
+            throw const ComputerUseException(
+              'INVALID_COORDINATES',
+              'Observe the desktop first, then select a visible window.',
+            );
+          }
+          await (_adapter as ComputerUseDesktopTargetSelector)
+              .selectWindowAt(x as int, y as int);
+          _requireRevision(revision);
+          return _success('Desktop target selected. No click was sent.');
         case 'observe':
           await captureFrame();
           return _success(
@@ -224,9 +252,7 @@ final class ComputerUseSession implements Tool {
           _requireInteraction();
           final x = params['x'];
           final y = params['y'];
-          if (x is! int || y is! int || _screenWidth == null ||
-              _screenHeight == null || x < 0 || y < 0 ||
-              x >= _screenWidth! || y >= _screenHeight!) {
+          if (!_isObservedCoordinate(x, y)) {
             throw const ComputerUseException(
               'INVALID_COORDINATES',
               'Observe the screen first, then click within its bounds.',
@@ -264,7 +290,7 @@ final class ComputerUseSession implements Tool {
           throw const ComputerUseException(
             'INVALID_ACTION',
             'Supported actions: observe, open_app, select_window, click, '
-            'type_text, press_key, verify_test_marker, stop.',
+            'select_window_at, type_text, press_key, verify_test_marker, stop.',
           );
       }
     } on ComputerUseException catch (error) {
@@ -285,6 +311,16 @@ final class ComputerUseSession implements Tool {
       _operationActive = false;
     }
   }
+
+  bool _isObservedCoordinate(Object? x, Object? y) =>
+      x is int &&
+      y is int &&
+      _screenWidth != null &&
+      _screenHeight != null &&
+      x >= 0 &&
+      y >= 0 &&
+      x < _screenWidth! &&
+      y < _screenHeight!;
 
   static const Set<String> allowedApplications = <String>{
     'notepad',
