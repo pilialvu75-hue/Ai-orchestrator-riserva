@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/features/computer_use/computer_use_2048_benchmark.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_2048_experience.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_agent_runner.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_local_json_planner.dart';
 
@@ -12,11 +13,13 @@ final class ComputerUse2048LocalPlanner
   ComputerUse2048LocalPlanner({
     required ComputerUseLocalScreenReader screenReader,
     required ComputerUseLocalDecisionModel model,
+    this.experience,
   })  : _screenReader = screenReader,
         _model = model;
 
   final ComputerUseLocalScreenReader _screenReader;
   final ComputerUseLocalDecisionModel _model;
+  final ComputerUse2048ExperienceCollector? experience;
 
   static const String instruction =
       'You are playing the real 2048 tile puzzle in a Windows window. '
@@ -70,9 +73,11 @@ final class ComputerUse2048LocalPlanner
             .contains(decoded['move'])) {
       throw const FormatException('Invalid 2048 LOCAL game move');
     }
+    final move = decoded['move'] as String;
+    experience?.proposedMove(step: observation.step, before: game, move: move);
     return ComputerUseAgentDecision.act(
       'press_key',
-      <String, dynamic>{'key': decoded['move'] as String},
+      <String, dynamic>{'key': move},
     );
   }
 
@@ -93,10 +98,12 @@ final class ComputerUse2048LocalVerifier
   ComputerUse2048LocalVerifier({
     required ComputerUseLocalScreenReader screenReader,
     this.onObservation,
+    this.experience,
   }) : _screenReader = screenReader;
 
   final ComputerUseLocalScreenReader _screenReader;
   final void Function(ComputerUse2048Benchmark observation)? onObservation;
+  final ComputerUse2048ExperienceCollector? experience;
 
   @override
   Future<bool> isSatisfied(ComputerUseAgentObservation observation) async {
@@ -104,6 +111,7 @@ final class ComputerUse2048LocalVerifier
     if (summary.sensitive) return false;
     final game = ComputerUse2048Benchmark.parse(summary.description);
     if (game == null) return false;
+    experience?.observedAfter(step: observation.step, after: game);
     onObservation?.call(game);
     return game.reachedTarget;
   }
