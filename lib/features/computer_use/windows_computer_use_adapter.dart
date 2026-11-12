@@ -37,6 +37,18 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   @override
   bool get isSupported => Platform.isWindows;
 
+  /// Pure policy for foreground selection, also exercised on non-Windows CI.
+  /// A brokered app PID mismatch fails closed rather than typing elsewhere.
+  static bool isExpectedForegroundProcess({
+    required int foregroundProcessId,
+    required int hostProcessId,
+    int? launchedProcessId,
+  }) =>
+      foregroundProcessId > 0 &&
+      foregroundProcessId != hostProcessId &&
+      (launchedProcessId == null ||
+          foregroundProcessId == launchedProcessId);
+
   @override
   Future<Uint8List> capturePng() async {
     _requireWindows();
@@ -124,8 +136,11 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
       // unrelated window even when it happens to own keyboard focus.
       // On modern Windows, packaged apps may broker another PID: that
       // must be reported as an explicit non-PASS until validated on device.
-      final expectedPid = _expectedLaunchedProcessId;
-      if (expectedPid != null && ownerPid.value != expectedPid) {
+      if (!isExpectedForegroundProcess(
+        foregroundProcessId: ownerPid.value,
+        hostProcessId: pid,
+        launchedProcessId: _expectedLaunchedProcessId,
+      )) {
         throw const ComputerUseException(
           'LAUNCHED_APP_NOT_FOREGROUND',
           'The launched test app is not the foreground window. '
