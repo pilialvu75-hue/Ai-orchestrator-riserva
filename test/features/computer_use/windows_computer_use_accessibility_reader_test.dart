@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_agent_runner.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_local_json_planner.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 import 'package:ai_orchestrator/features/computer_use/windows_computer_use_accessibility_reader.dart';
 
@@ -32,6 +35,23 @@ final class FakeAccessibilityHost implements ComputerUseAdapter {
 
   @override
   Future<bool> verifyTestMarker(String marker) async => false;
+}
+
+final class RecordingAccessibilityDecisionModel
+    implements ComputerUseLocalDecisionModel {
+  int calls = 0;
+  String? lastPayload;
+
+  @override
+  Future<String> completeLocally({
+    required String systemInstruction,
+    required String userPayload,
+  }) async {
+    calls++;
+    lastPayload = userPayload;
+    return '{"status":"act","action":"select_window_at",'
+        '"arguments":{"x":40,"y":80}}';
+  }
 }
 
 void main() {
@@ -97,6 +117,44 @@ void main() {
     expect((await reader.describe(frame)).sensitive, isTrue);
     payload = '{"sensitive":false,"description":5}';
     expect((await reader.describe(frame)).sensitive, isTrue);
+  });
+
+  test('LOCAL planner gets only safe accessibility summary', () async {
+    final session = ComputerUseSession(adapter: FakeAccessibilityHost())
+      ..beginSession(allowInteraction: true);
+    var sensitive = false;
+    final reader = WindowsComputerUseAccessibilityReader(
+      session: session,
+      captureAccessibilityJson: () async => sensitive
+          ? '{"sensitive":true,"description":""}'
+          : '{"sensitive":false,'
+              '"description":"ControlType.Button (40,80) Start"}',
+    );
+    final model = RecordingAccessibilityDecisionModel();
+    final planner = ComputerUseLocalJsonPlanner(
+      screenReader: reader,
+      model: model,
+    );
+    const goal = 'Select visible test control';
+    ComputerUseAgentObservation observe() => ComputerUseAgentObservation(
+      goal: goal,
+      framePng: frame,
+      step: 0,
+      lastAction: null,
+      lastError: null,
+    );
+    final decision = await planner.decide(observe());
+    expect(decision.action, 'select_window_at');
+    expect(decision.arguments['x'], 40);
+    final payload = jsonDecode(model.lastPayload!) as Map<String, dynamic>;
+    expect(payload['screen_description'],
+        'ControlType.Button (40,80) Start');
+    expect(model.calls, 1);
+
+    sensitive = true;
+    final aborted = await planner.decide(observe());
+    expect(aborted.isAbort, isTrue);
+    expect(model.calls, 1);
   });
 
   test('STOP and new consent cannot adopt old accessibility output', () async {
