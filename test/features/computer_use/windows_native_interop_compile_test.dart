@@ -31,11 +31,24 @@ try {
 if (-not $invalidHandleRejected) {
     throw 'Click did not reject an invalid target before any input'
 }
-$selector = [AivexusDesktopInput].GetMethod('SelectWindowAt')
+$selector = [AivexusDesktopInput].GetMethod('SelectObservedWindowAt')
 if ($null -eq $selector -or
-    $selector.GetParameters().Count -ne 3 -or
+    $selector.GetParameters().Count -ne 4 -or
+    $selector.GetParameters()[2].Name -ne 'observedHandle' -or
     $selector.ReturnType -ne [long]) {
-    throw 'Cross-window selector must accept x, y and excluded host PID'
+    throw 'Cross-window selector must bind to screenshot-observed HWND'
+}
+$invalidObservedRejected = $false
+try {
+    [AivexusDesktopInput]::SelectObservedWindowAt(20, 20, 0, 31415) |
+        Out-Null
+} catch {
+    if ($_.Exception.Message -like '*Observed window is invalid*') {
+        $invalidObservedRejected = $true
+    }
+}
+if (-not $invalidObservedRejected) {
+    throw 'The observed-window selector did not reject a missing target'
 }
 Write-Output 'INTEROP_COMPILED'
 ''';
