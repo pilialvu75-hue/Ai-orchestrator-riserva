@@ -230,6 +230,27 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     });
   }
 
+  Future<void> _captureAfterDelay() async {
+    await _run(() async {
+      // Capture AFTER the user has switched to the application to observe.
+      // A screen capture must not drag focus back to the old target.
+      final grantRevision = _session.sessionRevision;
+      if (mounted) {
+        setState(() => _message =
+            'Passa ora alla finestra da osservare: acquisizione tra 4 secondi.');
+      }
+      await Future<void>.delayed(const Duration(seconds: 4));
+      if (!_session.isActive ||
+          grantRevision != _session.sessionRevision) return;
+      await _refreshFrame();
+      if (mounted) {
+        setState(() => _message =
+            'Schermata aggiornata. Torna al laboratorio per scegliere '
+            'la finestra da controllare.');
+      }
+    });
+  }
+
   Future<void> _refreshFrame() async {
     final bytes = await _session.captureFrame();
     final data = ByteData.sublistView(bytes);
@@ -340,6 +361,13 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                       : null,
                   child: const Text('Aggiorna'),
                 ),
+                if (_isWindows)
+                  OutlinedButton(
+                    onPressed: !_busy && active
+                        ? _captureAfterDelay
+                        : null,
+                    child: const Text('Acquisisci tra 4 secondi'),
+                  ),
                 OutlinedButton(
                   onPressed: active ? _stop : null,
                   child: const Text('STOP'),
