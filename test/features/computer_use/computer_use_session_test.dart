@@ -343,7 +343,8 @@ void main() {
       expect(stopped.success, isTrue);
       adapter.blockedCapture!.complete(FakeDesktop.validFrame());
       final finished = await ongoing;
-      expect(finished.error, 'SESSION_INACTIVE');
+      // STOP increments the session revision: an in-flight capture is stale.
+      expect(finished.error, 'SESSION_REVOKED');
       expect(session.isActive, isFalse);
     });
 
