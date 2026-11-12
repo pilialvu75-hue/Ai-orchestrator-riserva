@@ -103,6 +103,27 @@ risolvere firma e distribuzione: non disattivare le protezioni di Windows.
    tramite permessi Accessibilita e valutazione tecnica/policy Android.
    Nessuna richiesta di installazione beta finche il runtime non e riparato.
 
+## Decisione sul ciclo di sviluppo (12 novembre 2026)
+
+L'utente ha autorizzato a proseguire senza firma digitale durante i test.
+La firma di Windows va affrontata quando Aivexus Computer Use sara' pronto
+per la distribuzione finale: non rappresenta piu' un blocco per i test QA.
+
+E' stato aggiunto al workflow Computer Use un terzo job,
+\`windows-lab-preview\`, che su runner Windows 2022:
+- attende il PASS di test unitari e Win32 interop;
+- verifica il flag esplicito di laboratorio QA;
+- compila la app Windows in modalita' release **senza firmarla**, con
+  \`AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true\`;
+- verifica il bundle llama.cpp/local inference;
+- conserva un archivio CI temporaneo con SHA-256 e manifesto del commit,
+  marcato chiaramente come non pubblicato e non firmato.
+
+Il job non crea una GitHub Release, non modifica main, non attiva l'updater
+e non e' una istruzione a installare manualmente l'archivio. L'uso su
+hardware vero richiede un canale QA appropriato, mantenendo le protezioni
+di Windows attive. Un runner Windows non sostituisce la prova fisica ASUS.
+
 ## Gate di distribuzione: laboratorio default OFF
 
 La PR #1114 mantiene Computer Use in stato sperimentale. Il laboratorio
@@ -147,11 +168,15 @@ di vincoli del test lanciato. Altri test del flusso verificano avvio lento,
 finestra estranea, errore di focus, STOP durante l'attesa e STOP seguito da
 nuova autorizzazione. Non sostituiscono la prova sul dispositivo.
 
-**Gate per autorizzare una beta Windows tramite il normale aggiornamento**:
+**Gate per il collaudo Windows (firma differita su decisione utente)**:
 CI Computer Use dedicata PASS; build/test Windows PASS; regressioni principali
-valutate; distribuzione e firma conformi, senza disabilitare Defender o
-Smart App Control; successivamente il collaudo sul vero ASUS con log e STOP.
-Non pubblicare da branch di PR draft e non fare merge per aggirare il gate.
+valutate; prova QA con l'opt-in di laboratorio. Una firma Authenticode NON e'
+obbligatoria per compilare o verificare internamente il prototipo.
+Per collaudi sul vero ASUS, serviranno un percorso di aggiornamento/test
+controllato e l'autorizzazione del proprietario: NON disattivare Defender,
+Smart App Control o altri meccanismi di protezione.
+La firma e la reputazione saranno risolte per la distribuzione definitiva.
+Non pubblicare da branch PR draft e non fare merge per aggirare il gate.
 
 **Criterio di completamento**: Aivexus deve eseguire da richiesta naturale
 almeno tre scenari non distruttivi su Windows (aprire un'app, compilare un
