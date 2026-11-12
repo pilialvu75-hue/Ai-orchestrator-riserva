@@ -16,14 +16,19 @@ final class AndroidComputerUseAdapter
     implements ComputerUseAdapter, ComputerUseInteractionCapability {
   AndroidComputerUseAdapter({
     MethodChannel? channel,
-  }) : _channel = channel ??
-            const MethodChannel('com.aiorchestrator/screen_vision');
+    bool? supportedForTest,
+  })  : _channel = channel ??
+            const MethodChannel('com.aiorchestrator/screen_vision'),
+        _supportedForTest = supportedForTest;
 
   final MethodChannel _channel;
+
+  /// Test hook only: production always uses the actual Android platform.
+  final bool? _supportedForTest;
   int _generation = 0;
 
   @override
-  bool get isSupported => Platform.isAndroid;
+  bool get isSupported => _supportedForTest ?? Platform.isAndroid;
 
   @override
   bool get supportsInteraction => false;
