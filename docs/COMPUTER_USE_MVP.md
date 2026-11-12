@@ -129,6 +129,10 @@ Aggiunto il passaggio esplicito `select_window_at(x,y)`:
 - La cattura schermo Windows e' ora passiva e non riporta forzatamente
   in primo piano la vecchia finestra: l'agente puo' vedere il desktop
   mutato dopo un passaggio tra applicazioni.
+- Nel laboratorio il pulsante "Acquisisci tra 4 secondi" permette di passare
+  a un'altra app prima del frame; poi si torna al laboratorio, si seleziona
+  il nuovo bersaglio con un tocco **senza inviare clic**, quindi si puo'
+  agire sul bersaglio scelto. STOP durante l'attesa invalida la cattura.
 
 La scelta di una finestra non equivale a un'autorizzazione per operazioni
 sensibili: STOP, durata, controlli sulla destinazione e autorizzazioni
