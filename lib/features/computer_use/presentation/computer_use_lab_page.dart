@@ -297,7 +297,12 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
           result.output,
         );
       }
-      if (_session.isActive) await _refreshFrame();
+      // Selecting a captured window is passive. Do NOT overwrite the
+      // screenshot with Aivexus (now foreground) before the next tap.
+      // Other actions can refresh after their target has been focused.
+      if (_session.isActive && params['action'] != 'select_window_at') {
+        await _refreshFrame();
+      }
       if (mounted) setState(() => _message = result.output);
     });
   }
