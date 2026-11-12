@@ -41,18 +41,18 @@ Computer Use — Laboratorio** su Windows.
 | Sessione temporanea e revocabile (10 min) | Implementato |
 | Observe / screenshot PNG schermo primario | Implementato; da collaudare su Windows reale |
 | Click coordinate e selezione finestra attiva | Implementato; da collaudare |
-| Paint e 2048 offline QA, punteggi osservati | Implementati nel ramo Windows; CI parser e metriche in corso, prove fisiche e agente LOCAL ancora da eseguire |
+| Paint e 2048 offline QA, punteggi osservati | Implementati nel ramo Windows; script testato sintatticamente e prova headless in CI; test fisico ancora da eseguire |
 | Passaggio esplicito tra finestre (selezione da screenshot senza clic) | Implementato nel ramo QA Windows; CI e hardware da verificare |
 | Testo Unicode, tasti di navigazione | Implementato; da collaudare |
 | UI di laboratorio con consenso e STOP | Windows + read-only macOS e Android; Android ferma il proprio MediaProjection allo STOP/scadenza; QA fisica da eseguire |
 | Test autorizzazioni, STOP, concorrenza, allowlist e verifica | Aggiunti; CI del nuovo commit da verificare |
 | Lettura locale UI Automation (Windows) | Sorgente nativa e filtro privacy implementati nel ramo QA; test simulati/parser CI in corso; da collaudare su Windows reale |
 | Interpretazione visiva LLM | NON implementata |
-| Motore autonomo astratto `ComputerUseAgentRunner` | Implementato e testato con planner e verificatore simulati; NON collegato a IA reale |
-| Ciclo dinamico observe → decide → agisci → ri-osserva → verifica | Implementato nel runner isolato; manca il modello reale |
+| Motore autonomo astratto `ComputerUseAgentRunner` | Implementato e testato con finti planner/verificatore; collegato sperimentalmente al modello reale SOLO per 2048 QA, ancora da collaudare |
+| Ciclo dinamico observe → decide → agisci → ri-osserva → verifica | Implementato; collegamento reale al modello selezionato SOLO per 2048 QA, da validare sul dispositivo |
 | Revoca durante inferenza / nuova sessione | Revisioni di autorizzazione implementate; test in CI |
 | Pianificatore LOCAL JSON con descrizione schermata | Contratto e parser tipizzato implementati; 8 test simulati, nessuna inferenza reale collegata |
-| Ciclo autonomo con LLM configurato | Ponte verso LocalRuntimeProvider preparato sul ramo con test simulati; non connesso alla UI, manca visione locale reale |
+| Ciclo autonomo con LLM configurato | Prova 2048 con il LOCAL selezionato collegata al pulsante QA Windows; non provata su hardware, non abilitata per altri task |
 | UI Automation: verifica solo marcatore sintetico QA | Implementata sperimentalmente; non validata su Windows fisico |
 | Sequenza controllata Blocco note → scrittura → verifica → screenshot | Implementata; CI da verificare e QA fisico necessario |
 | Integrazione Diagnostics anonimizzata | NON implementata |
@@ -140,9 +140,38 @@ test di tasti o clic non dimostrano intelligenza. Per dichiarare
 al lettore semantico/UIA, fargli scegliere le mosse **dopo** ogni
 osservazione, registrare solo metriche non sensibili e verificare
 un miglioramento di punteggio con il benchmark indipendente.
-La parte agente LOCAL reale non e' ancora abilitata nella schermata.
+L'agente LOCAL reale e' ora collegato **solo** all'esperimento 2048
+nel laboratorio QA, ma manca una prova fisica end-to-end; non e'
+ancora disponibile nella versione stabile.
 Nessun test fisico e' stato ancora effettuato sull'ASUS; i test di CI
 non fanno girare un gioco con finestra interattiva.
+
+### Partita con il modello LOCAL reale (solo laboratorio Windows)
+
+Nel laboratorio QA, il pulsante **Fai giocare Aivexus LOCAL a 2048**
+esegue il seguente esperimento, senza Cloud e con consenso esplicito:
+
+1. Richiede una sessione interattiva e una finestra 2048 gia selezionata.
+2. Recupera il modello LOCAL attualmente scelto tramite
+   `LocalAiRepository.getSelectedModel()` e verifica che il GGUF sia
+   disponibile; usa `LocalRuntimeProvider` esistente, senza modificare
+   la selezione di modello o il runtime di chat.
+3. Il planner `ComputerUse2048LocalPlanner` riceve **solo** i 16 valori
+   della griglia, punteggio e numero di mosse tramite UI Automation locale.
+   Il modello deve produrre esattamente un JSON `{"move":"left"}`
+   o altra direzione legittima.
+4. Il runner esegue solo `press_key` su una delle quattro frecce,
+   acquisisce lo stato nuovo e usa un verificatore **indipendente**
+   per accettare come obiettivo raggiunto solo una casella da 64.
+5. L'esperimento si interrompe a 24 mosse, 8 minuti, scadenza sessione
+   o STOP; STOP annulla la generazione LOCAL in corso.
+
+Non si tratta di una sequenza di mosse fisse, di un giocatore euristico
+o di una simulazione dell'intelligenza: le decisioni sono formulate dal
+modello selezionato, **se** l'inferenza e il lettore funzionano
+nell'ambiente reale. L'esperimento non e' ancora stato collaudato
+su ASUS, e la CI usa modelli finti per verificare il protocollo.
+Se fallisce, il test deve riportare NON VERIFICATO, non un successo.
 
 ## Lettura controlli Windows tramite UI Automation (12 novembre 2026)
 
