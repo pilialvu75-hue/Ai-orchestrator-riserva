@@ -325,6 +325,8 @@ final class ComputerUseSession implements Tool {
   static const Set<String> allowedApplications = <String>{
     'notepad',
     'calculator',
+    'paint',
+    'qa2048',
   };
 
   static const Set<String> allowedKeys = <String>{
