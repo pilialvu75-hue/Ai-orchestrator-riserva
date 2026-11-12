@@ -121,6 +121,12 @@ L'obiettivo e un confronto pratico fra:
   con MediaProjection; non puo ancora toccare il gioco autonomamente.
   Per input autonomo servira una modalita di test legittima e conforme
   alle policy Android/Google Play, senza eludere il sistema.
+  Nel laboratorio QA Android e' presente un bottone
+  `Car Jam Solver — apri su Google Play`: chiede conferma esplicita,
+  quindi apre soltanto il link `https://play.google.com/store/apps/details?id=car.parking.jam.solver.puzzle.games`
+  tramite `url_launcher` verso l'app esterna. L'utente gestisce
+  direttamente eventuale download/login nel Play Store.
+  Nessuna installazione, acquisto o azione di gioco viene automatizzata.
 - **ASUS Windows + WEmulDroid** sul profilo Google Play Android 15
   x86_64, dopo verifica di installazione e avvio reali del titolo.
   La compatibilita del gioco con emulatore/ABI non e garantita.
