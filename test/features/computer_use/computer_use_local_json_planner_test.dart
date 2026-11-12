@@ -99,6 +99,28 @@ void main() {
     expect(body['previous_error'], 'INVALID_TARGET');
   });
 
+  test('LOCAL planner can explicitly select another app without clicking',
+      () async {
+    final model = FakeComputerDecisionModel(
+      '{"status":"act","action":"select_window_at","arguments":{"x":200,"y":300}}',
+    );
+    final planner = ComputerUseLocalJsonPlanner(
+      screenReader: FakeComputerScreenReader(safeSummary),
+      model: model,
+    );
+    final decision = await planner.decide(observation());
+    expect(decision.action, 'select_window_at');
+    expect(decision.arguments['x'], 200);
+    expect(decision.arguments['y'], 300);
+    expect(model.systemInstruction, contains('select_window_at'));
+    model.response =
+        '{"status":"act","action":"select_window_at","arguments":{"x":1.3,"y":200}}';
+    await expectLater(
+      planner.decide(observation()),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
   test('completion is a request, not a verification claim', () async {
     final model = FakeComputerDecisionModel('{"status":"complete"}');
     final planner = ComputerUseLocalJsonPlanner(
