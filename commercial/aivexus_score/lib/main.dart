@@ -108,9 +108,7 @@ class _ScorePageState extends State<ScorePage> {
   }
 
   Future<void> _rename(bool isHome) async {
-    final controller = TextEditingController(
-      text: isHome ? _session.homeName : _session.awayName,
-    );
+    var candidateName = isHome ? _session.homeName : _session.awayName;
     final value = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -122,13 +120,14 @@ class _ScorePageState extends State<ScorePage> {
             es: 'Nombre del jugador',
           ),
         ),
-        content: TextField(
+        content: TextFormField(
           key: const Key('name-input'),
-          controller: controller,
+          initialValue: candidateName,
           maxLength: 24,
           autofocus: true,
           textInputAction: TextInputAction.done,
-          onSubmitted: (value) => Navigator.of(context).pop(value),
+          onChanged: (value) => candidateName = value,
+          onFieldSubmitted: (value) => Navigator.of(context).pop(value),
         ),
         actions: <Widget>[
           TextButton(
@@ -139,7 +138,7 @@ class _ScorePageState extends State<ScorePage> {
           ),
           FilledButton(
             key: const Key('confirm-name'),
-            onPressed: () => Navigator.of(context).pop(controller.text),
+            onPressed: () => Navigator.of(context).pop(candidateName),
             child: Text(
               _t(it: 'Salva', en: 'Save', fr: 'Enregistrer', es: 'Guardar'),
             ),
@@ -147,7 +146,6 @@ class _ScorePageState extends State<ScorePage> {
         ],
       ),
     );
-    controller.dispose();
     if (value != null && mounted) {
       await _update(() => _session.rename(isHome: isHome, value: value));
     }
@@ -218,7 +216,7 @@ class _ScorePageState extends State<ScorePage> {
                   ),
                 ),
                 IconButton(
-                  key: Key(prefix + '-rename'),
+                  key: Key('$prefix-rename'),
                   tooltip: _t(
                     it: 'Cambia nome',
                     en: 'Rename',
@@ -232,10 +230,10 @@ class _ScorePageState extends State<ScorePage> {
             ),
             const SizedBox(height: 14),
             Semantics(
-              label: name + ': ' + score.toString(),
+              label: '$name: $score',
               child: Text(
                 score.toString(),
-                key: Key(prefix + '-score'),
+                key: Key('$prefix-score'),
                 style: Theme.of(context).textTheme.displayLarge,
               ),
             ),
@@ -244,7 +242,7 @@ class _ScorePageState extends State<ScorePage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
                 OutlinedButton(
-                  key: Key(prefix + '-minus'),
+                  key: Key('$prefix-minus'),
                   onPressed: score == 0
                       ? null
                       : () => _update(
@@ -254,7 +252,7 @@ class _ScorePageState extends State<ScorePage> {
                 ),
                 const SizedBox(width: 10),
                 FilledButton(
-                  key: Key(prefix + '-plus'),
+                  key: Key('$prefix-plus'),
                   onPressed: score >= ScoreSession.maxScore
                       ? null
                       : () => _update(
