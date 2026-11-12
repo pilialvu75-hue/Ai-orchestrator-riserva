@@ -41,6 +41,7 @@ Computer Use — Laboratorio** su Windows.
 | Sessione temporanea e revocabile (10 min) | Implementato |
 | Observe / screenshot PNG schermo primario | Implementato; da collaudare su Windows reale |
 | Click coordinate e selezione finestra attiva | Implementato; da collaudare |
+| Passaggio esplicito tra finestre (selezione da screenshot senza clic) | Implementato nel ramo QA Windows; CI e hardware da verificare |
 | Testo Unicode, tasti di navigazione | Implementato; da collaudare |
 | UI di laboratorio con consenso e STOP | Windows + read-only macOS e Android; Android ferma il proprio MediaProjection allo STOP/scadenza; QA fisica da eseguire |
 | Test autorizzazioni, STOP, concorrenza, allowlist e verifica | Aggiunti; CI del nuovo commit da verificare |
@@ -103,6 +104,37 @@ CI senza disattivare Windows Security. La firma e rinviata alla release finale.
    Prima l'osservazione autorizzata; poi, in un secondo passo, input macOS
    tramite permessi Accessibilita e valutazione tecnica/policy Android.
    Nessuna richiesta di installazione beta finche il runtime non e riparato.
+
+## Estensione del desktop multi-finestra (12 novembre 2026)
+
+Il blocco dei clic fuori dalla finestra selezionata resta specifico
+dell'azione `click`: evita un reindirizzamento involontario, **non**
+limita in modo permanente Computer Use a una sola applicazione.
+
+Aggiunto il passaggio esplicito `select_window_at(x,y)`:
+- Richiede una sessione interattiva attiva e coordinate valide della
+  schermata precedentemente osservata.
+- Su Windows individua il bersaglio visibile alle coordinate indicate
+  senza muovere il puntatore, attivare la finestra, cliccare o digitare.
+  Esclude la finestra Aivexus e quelle non valide/minimizzate.
+- Il bersaglio selezionato puo' essere diverso da quello precedente.
+  Dopo la selezione, il successivo clic rimane verificato rispetto alla
+  **nuova** finestra, non a quella originaria.
+- Il protocollo del planner LOCAL e il runner accettano il nuovo comando.
+  Le coordinate diverse sono distinte nel rilevamento anti-loop.
+- Nel laboratorio Windows e' disponibile il pulsante
+  "Scegli altra finestra dalla schermata": la prima pressione
+  sull'anteprima sceglie senza cliccare; il clic richiede una seconda
+  pressione. Per cambiare ancora applicazione si ripete la selezione.
+- La cattura schermo Windows e' ora passiva e non riporta forzatamente
+  in primo piano la vecchia finestra: l'agente puo' vedere il desktop
+  mutato dopo un passaggio tra applicazioni.
+
+La scelta di una finestra non equivale a un'autorizzazione per operazioni
+sensibili: STOP, durata, controlli sulla destinazione e autorizzazioni
+per incarico restano indipendenti. Il passaggio a una vera IA autonoma
+collegata all'inferenza LOCAL **non e' ancora implementato**.
+La verifica della UI su hardware Windows rimane da eseguire.
 
 ## Decisione sul ciclo di sviluppo (12 novembre 2026)
 
