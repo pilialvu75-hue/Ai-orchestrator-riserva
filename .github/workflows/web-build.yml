@@ -66,6 +66,9 @@ jobs:
           node --input-type=module --check < functions/api/cantiere/capabilities.js
           node --input-type=module --check < functions/api/cantiere/inference.js
 
+      - name: Test safe Web deployment provenance stamping
+        run: node --test test/airlab/web_deployment_provenance.mjs
+
       - name: Test NVIDIA synthetic probes and safe failure classifications
         run: node --test test/airlab/web_nvidia_selftest_diagnostics.mjs
 
