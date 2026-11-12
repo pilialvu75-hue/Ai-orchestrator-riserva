@@ -91,8 +91,8 @@ void main() {
     expect(workflow, contains('build/web/__aivexus_web_deployment.json'));
     expect(workflow, contains('GITHUB_SHA'));
     expect(workflow, contains('GITHUB_RUN_ID'));
-    expect(workflow, contains('.gitSha == \\$sha'));
-    expect(workflow, contains('.githubRunId == \\$run'));
+    expect(workflow, contains('.gitSha == \$sha'));
+    expect(workflow, contains('.githubRunId == \$run'));
     expect(headers, contains('/__aivexus_web_deployment.json'));
     expect(headers, contains('Cache-Control: no-store'));
   });
