@@ -10,6 +10,7 @@ import 'package:ai_orchestrator/features/computer_use/computer_use_smoke_scenari
 import 'package:ai_orchestrator/features/computer_use/android_computer_use_adapter.dart';
 import 'package:ai_orchestrator/features/computer_use/mac_computer_use_adapter.dart';
 import 'package:ai_orchestrator/features/computer_use/windows_computer_use_adapter.dart';
+import 'package:ai_orchestrator/features/computer_use/windows_computer_use_accessibility_reader.dart';
 
 /// Manual, local proof-of-life UI. No LLM is authorized to start a session.
 /// A later agent loop can reuse ComputerUseSession after physical host QA.
@@ -230,6 +231,31 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     });
   }
 
+  Future<void> _readWindowsAccessibility() async {
+    if (!_isWindows || !_session.isActive ||
+        _adapter is! WindowsComputerUseAdapter) return;
+    await _run(() async {
+      final revision = _session.sessionRevision;
+      final windowsAdapter = _adapter as WindowsComputerUseAdapter;
+      final reader = WindowsComputerUseAccessibilityReader(
+        session: _session,
+        captureAccessibilityJson:
+            windowsAdapter.captureSelectedAccessibilityJson,
+      );
+      final summary = await reader.describe(Uint8List(0));
+      if (!_session.isActive ||
+          _session.sessionRevision != revision ||
+          !mounted) return;
+      setState(() {
+        _message = summary.sensitive
+            ? 'Analisi locale interrotta: controlli sensibili, '
+              'incompleti o non leggibili.'
+            : 'Controlli accessibili (solo LOCAL, senza dati '
+              'dei campi di testo):\n${summary.description}';
+      });
+    });
+  }
+
   Future<void> _captureAfterDelay() async {
     await _run(() async {
       // Capture AFTER the user has switched to the application to observe.
@@ -361,13 +387,20 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                       : null,
                   child: const Text('Aggiorna'),
                 ),
-                if (_isWindows)
+                if (_isWindows) ...[
                   OutlinedButton(
                     onPressed: !_busy && active
                         ? _captureAfterDelay
                         : null,
                     child: const Text('Acquisisci tra 4 secondi'),
                   ),
+                  OutlinedButton(
+                    onPressed: !_busy && active
+                        ? _readWindowsAccessibility
+                        : null,
+                    child: const Text('Leggi controlli finestra (LOCAL)'),
+                  ),
+                ],
                 OutlinedButton(
                   onPressed: active ? _stop : null,
                   child: const Text('STOP'),
