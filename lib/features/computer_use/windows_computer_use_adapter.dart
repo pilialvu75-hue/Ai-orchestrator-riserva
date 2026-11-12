@@ -396,6 +396,7 @@ $queue = New-Object System.Collections.Queue
 $queue.Enqueue(@{ node = $root; depth = 0 })
 $items = New-Object 'System.Collections.Generic.List[string]'
 $sensitive = $false
+$truncated = $false
 $scanned = 0
 while ($queue.Count -gt 0 -and $scanned -lt 64) {
     $entry = $queue.Dequeue()
@@ -676,22 +677,27 @@ public static class AivexusDesktopInput {
             [void]$items.Add("$type ($x,$y) $name")
         }
     } catch {
-        # An inaccessible or transient control does not grant new privileges.
+        # An unreadable control might itself be a password field.
+        $sensitive = $true
+        break
     }
     if ($depth -ge 3) { continue }
     $child = $null
-    try { $child = $walker.GetFirstChild($node) } catch { }
+    try { $child = $walker.GetFirstChild($node) }
+    catch { $sensitive = $true; break }
     $siblings = 0
     while ($null -ne $child -and $siblings -lt 16 -and
            ($scanned + $queue.Count) -lt 64) {
         $queue.Enqueue(@{ node = $child; depth = ($depth + 1) })
         $siblings++
         try { $child = $walker.GetNextSibling($child) }
-        catch { $child = $null }
+        catch { $sensitive = $true; break }
     }
+    if ($null -ne $child) { $truncated = $true }
+    if ($sensitive) { break }
 }
 # Partial trees cannot be trusted to establish absence of password fields.
-if ($queue.Count -gt 0) { $sensitive = $true }
+if ($queue.Count -gt 0 -or $truncated) { $sensitive = $true }
 if ($sensitive) {
     [pscustomobject]@{ sensitive = $true; description = '' } |
         ConvertTo-Json -Compress
