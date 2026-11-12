@@ -247,12 +247,18 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
 
                 if (!kIsWeb &&
-                    defaultTargetPlatform == TargetPlatform.windows) ...[
+                    (defaultTargetPlatform == TargetPlatform.windows ||
+                     defaultTargetPlatform == TargetPlatform.macOS ||
+                     defaultTargetPlatform == TargetPlatform.android)) ...[
                   const SizedBox(height: 12),
                   _ModuleCard(
-                    icon: Icons.desktop_windows_outlined,
+                    icon: defaultTargetPlatform == TargetPlatform.android
+                        ? Icons.smartphone_outlined
+                        : Icons.desktop_windows_outlined,
                     title: 'Computer Use — Laboratorio',
-                    subtitle: 'Collaudo locale: schermata e controllo Windows',
+                    subtitle: defaultTargetPlatform == TargetPlatform.windows
+                        ? 'Collaudo locale: schermata e controllo Windows'
+                        : 'Sperimentale: sola osservazione, consenso esplicito',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute<void>(
