@@ -39,6 +39,12 @@ jobs:
         run: flutter analyze --no-fatal-infos lib/features/computer_use test/features/computer_use
       - name: Run Computer Use fake host and planner tests
         run: flutter test --reporter expanded test/features/computer_use
+      - name: Verify explicit QA build enables the laboratory
+        run: >-
+          flutter test --reporter expanded
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+          --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=true
+          test/features/computer_use/computer_use_build_policy_test.dart
 
   windows-native-interop:
     runs-on: windows-2025
