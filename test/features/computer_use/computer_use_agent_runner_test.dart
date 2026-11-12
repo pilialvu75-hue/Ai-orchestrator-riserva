@@ -94,7 +94,13 @@ class FakeGoalVerifier implements ComputerUseAgentVerifier {
   }
 }
 
-class HeldPlanner implements ComputerUseAgentPlanner {
+class HeldPlanner
+    implements ComputerUseAgentPlanner, ComputerUseCancellablePlanner {
+  int cancellationCalls = 0;
+
+  @override
+  void cancel() => cancellationCalls++;
+
   final Completer<ComputerUseAgentDecision> held =
       Completer<ComputerUseAgentDecision>();
 
@@ -278,6 +284,7 @@ void main() {
       final pending = runner.run(goal: 'Do not act after revocation');
       await Future<void>.delayed(Duration.zero);
       runner.stop();
+      expect(planner.cancellationCalls, 1);
       session.beginSession(allowInteraction: true);
       planner.held.complete(open);
       final result = await pending;
