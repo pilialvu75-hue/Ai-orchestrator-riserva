@@ -14,9 +14,15 @@ Computer Use — Laboratorio** su Windows.
 - Android: adattatore sperimentale di sola osservazione creato; riusa il
   servizio MediaProjection gia presente nell'app, previo consenso Android.
 - Linux: adattatore non ancora sviluppato.
-- Nessuno dei due adattatori Mac/Android e attualmente esposto nella UI del
-  laboratorio; sono componenti preparatori, non funzioni rilasciate.
+- Il laboratorio e ora raggiungibile dal codice Impostazioni su macOS e Android,
+  ma la funzione non e rilasciata; consente solo osservazione autorizzata.
+  Sull'Android il consenso MediaProjection viene richiesto dal sistema e la
+  proiezione avviata dal laboratorio si arresta con STOP o scadenza.
 - Web: sandbox browser; non e possibile controllare il desktop dell'host.
+- Su Google Play non e consentito impiegare AccessibilityService per un agente
+  generalista che pianifica/esegue azioni autonome; prima di aggiungere input
+  Android serve un'architettura e distribuzione conformi alle policy. Nessun
+  servizio di accessibilita aggiunto alla build corrente.
 - Nessuna dipendenza dal Cloud o da llama.cpp per le azioni manuali.
 - Nessuna registrazione del tool nel loop del modello; il modello NON puo
   attivare la sessione di propria iniziativa.
@@ -28,14 +34,14 @@ Computer Use — Laboratorio** su Windows.
 | Componente | Stato |
 | --- | --- |
 | Contratto ComputerUseAdapter | Implementato |
-| Mac: acquisizione PNG con autorizzazione Screen Recording | Adattatore preparato, non testato su hardware reale; input disabilitato |
-| Android: osservazione tramite ScreenVision MediaProjection | Adattatore preparato, non testato in Computer Use; input disabilitato |
+| Mac: acquisizione PNG con autorizzazione Screen Recording | Adattatore e schermata read-only preparati, non testati su hardware reale; input disabilitato |
+| Android: osservazione tramite ScreenVision MediaProjection | Adattatore e schermata read-only preparati; test con bridge simulato aggiunti, hardware non collaudato; input disabilitato |
 | Protezione contro abilitazione interazione su adattatori read-only | Implementata, test aggiunti |
 | Sessione temporanea e revocabile (10 min) | Implementato |
 | Observe / screenshot PNG schermo primario | Implementato; da collaudare su Windows reale |
 | Click coordinate e selezione finestra attiva | Implementato; da collaudare |
 | Testo Unicode, tasti di navigazione | Implementato; da collaudare |
-| UI di laboratorio con consenso e STOP | Implementato; da collaudare |
+| UI di laboratorio con consenso e STOP | Windows + read-only macOS e Android; Android ferma il proprio MediaProjection allo STOP/scadenza; QA fisica da eseguire |
 | Test autorizzazioni, STOP, concorrenza, allowlist e verifica | Aggiunti; CI del nuovo commit da verificare |
 | Interpretazione visiva LLM | NON implementata |
 | Motore autonomo astratto `ComputerUseAgentRunner` | Implementato e testato con planner e verificatore simulati; NON collegato a IA reale |
@@ -111,3 +117,17 @@ collaudi fisici finche l'utente non conferma che l'app e tornata operativa.
 Importante: avere il dispositivo disponibile **non** significa che Computer Use
 su quella piattaforma sia gia operativo. L'obiettivo rimane autonomia
 multisistema; il test di lettura schermo e un checkpoint, non il traguardo.
+
+
+## Punti di controllo (12 novembre 2026)
+
+- Corretto un errore Dart di sintassi nel runner autonomo astratto.
+- Estesa la schermata Laboratorio a Windows/macOS/Android sul ramo PR #1114,
+  con modalita read-only per Mac e Android, consenso esplicito, STOP e timer
+  di scadenza a 10 minuti. Non e una release per i tester.
+- Aggiunti test fittizi Android che coprono consenso schermo obbligatorio,
+  frame PNG, rifiuto di click e STOP durante una cattura in ritardo.
+- Mac usa ancora la utility `screencapture` e non una integrazione con
+  ScreenCaptureKit; sandbox, permessi e compatibilita restano da provare.
+- Il motore IA autonomo non e collegato a nessun provider finche l'inferenza
+  Aivexus non ritorna funzionante. Continuiamo senza toccare la sua riparazione.
