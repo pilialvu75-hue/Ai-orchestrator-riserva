@@ -16,7 +16,7 @@ on:
       - 'test/scripts/test_computer_use_windows_beta.py'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-computer-use-beta-${{ github.ref }}
@@ -39,6 +39,8 @@ jobs:
       github.actor == 'pilialvu75-hue' &&
       inputs.confirm_public_beta == 'YES_PUBLISH_WINDOWS_BETA'
     runs-on: windows-2022
+    permissions:
+      contents: write
     timeout-minutes: 90
     steps:
       - name: Checkout authorized source and native submodules
