@@ -3,8 +3,20 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/features/computer_use/windows_2048_qa_game_script.dart';
+import 'package:ai_orchestrator/features/computer_use/windows_computer_use_accessibility_script.dart';
 
 void main() {
+  test('read-only Windows UIA can enumerate the complete 2048 control tree',
+      () {
+    // The game has 16 tiles plus HUD, four direction buttons and restart.
+    // The former 16-sibling cap always yielded a truncated/sensitive tree.
+    const source = kWindowsUiAutomationSnapshotScript;
+    expect(source, contains(r'$siblings -lt 64'));
+    expect(source, contains(r'$scanned -lt 64'));
+    expect(source, contains(r'if ($queue.Count -gt 0 -or $truncated)'));
+  });
+
+
   test('standalone 2048 QA script is fixed, offline and accessibility-readable',
       () async {
     const source = kWindows2048QaGameScript;
