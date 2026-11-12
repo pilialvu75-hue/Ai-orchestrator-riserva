@@ -377,6 +377,10 @@ $_inputInterop
   /// compilation check. Does not grant desktop permissions or run input.
   static String get inputInteropSourceForTest => _inputInterop;
 
+  /// Read-only UIAutomation script exposed to Windows CI for syntax checks.
+  static String get accessibilityScriptForTest =>
+      _accessibilitySnapshotScript;
+
   // Enumerate a limited Control View tree. No ValuePattern/TextPattern reads:
   // editable controls often contain passwords or private document text.
   // Never log or upload this output; the LOCAL screen reader filters it again.
@@ -686,6 +690,8 @@ public static class AivexusDesktopInput {
         catch { $child = $null }
     }
 }
+# Partial trees cannot be trusted to establish absence of password fields.
+if ($queue.Count -gt 0) { $sensitive = $true }
 if ($sensitive) {
     [pscustomobject]@{ sensitive = $true; description = '' } |
         ConvertTo-Json -Compress
