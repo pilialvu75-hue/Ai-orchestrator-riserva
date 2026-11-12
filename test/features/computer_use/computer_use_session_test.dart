@@ -5,7 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_smoke_scenario.dart';
 
-class FakeDesktop implements ComputerUseAdapter, ComputerUseInteractionCapability {
+class FakeDesktop implements ComputerUseAdapter,
+    ComputerUseInteractionCapability, ComputerUseDesktopTargetSelector {
   FakeDesktop({this.isSupported = true});
 
   @override
@@ -21,6 +22,16 @@ class FakeDesktop implements ComputerUseAdapter, ComputerUseInteractionCapabilit
 
   int captures = 0;
   int selections = 0;
+  int crossWindowSelections = 0;
+  int? lastTargetX;
+  int? lastTargetY;
+
+  @override
+  Future<void> selectWindowAt(int x, int y) async {
+    crossWindowSelections++;
+    lastTargetX = x;
+    lastTargetY = y;
+  }
   int launches = 0;
   String? launchedApp;
   Completer<Uint8List>? blockedCapture;
@@ -248,6 +259,88 @@ void main() {
       });
       expect(result.error, 'INVALID_TEST_MARKER');
       expect(adapter.markerChecks, 0);
+    });
+  });
+
+  group('Computer Use multi-window target selection', () {
+    test('can rebind between two apps without sending clicks', () async {
+      final adapter = FakeDesktop();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      expect((await session.execute(<String, dynamic>{
+        'action': 'select_window_at', 'x': 20, 'y': 20,
+      })).error, 'INVALID_COORDINATES');
+      expect(adapter.crossWindowSelections, 0);
+
+      await session.captureFrame();
+      final first = await session.execute(<String, dynamic>{
+        'action': 'select_window_at', 'x': 100, 'y': 150,
+      });
+      expect(first.success, isTrue);
+      expect(adapter.crossWindowSelections, 1);
+      expect(adapter.clicks, 0);
+      expect(adapter.typing, 0);
+      expect(adapter.lastTargetX, 100);
+
+      final click = await session.execute(<String, dynamic>{
+        'action': 'click', 'x': 100, 'y': 150,
+      });
+      expect(click.success, isTrue);
+      expect(adapter.clicks, 1);
+
+      final second = await session.execute(<String, dynamic>{
+        'action': 'select_window_at', 'x': 500, 'y': 600,
+      });
+      expect(second.success, isTrue);
+      expect(adapter.crossWindowSelections, 2);
+      expect(adapter.lastTargetX, 500);
+      expect(adapter.lastTargetY, 600);
+      // Selecting another target still sends no mouse or keyboard input.
+      expect(adapter.clicks, 1);
+      expect(adapter.typing, 0);
+    });
+
+    test('read-only session cannot switch to another app', () async {
+      final desktop = FakeDesktop();
+      final session = ComputerUseSession(adapter: desktop);
+      session.beginSession(allowInteraction: false);
+      await session.captureFrame();
+      final result = await session.execute(<String, dynamic>{
+        'action': 'select_window_at', 'x': 100, 'y': 100,
+      });
+      expect(result.error, 'READ_ONLY_SESSION');
+      expect(desktop.crossWindowSelections, 0);
+    });
+
+    test('rejects invalid and off-screen window coordinates', () async {
+      final desktop = FakeDesktop();
+      final session = ComputerUseSession(adapter: desktop);
+      session.beginSession(allowInteraction: true);
+      await session.captureFrame();
+      for (final coords in <(Object?, Object?)>[
+        (-1, 30), (1920, 30), (40, 1080), (5.5, 4), ('7', 3),
+      ]) {
+        final result = await session.execute(<String, dynamic>{
+          'action': 'select_window_at', 'x': coords.$1, 'y': coords.$2,
+        });
+        expect(result.error, 'INVALID_COORDINATES');
+      }
+      expect(desktop.crossWindowSelections, 0);
+    });
+
+    test('STOP and a new session invalidate previous screenshot bounds',
+        () async {
+      final desktop = FakeDesktop();
+      final session = ComputerUseSession(adapter: desktop);
+      session.beginSession(allowInteraction: true);
+      await session.captureFrame();
+      session.stop();
+      session.beginSession(allowInteraction: true);
+      final result = await session.execute(<String, dynamic>{
+        'action': 'select_window_at', 'x': 10, 'y': 10,
+      });
+      expect(result.error, 'INVALID_COORDINATES');
+      expect(desktop.crossWindowSelections, 0);
     });
   });
 
