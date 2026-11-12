@@ -61,6 +61,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   int _frameWidth = 1;
   int _frameHeight = 1;
   bool _busy = false;
+  bool _selectTargetOnNextTap = false;
   String _message = 'Nessuna sessione attiva.';
 
   @override
@@ -163,6 +164,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       }
       try {
         _session.beginSession(allowInteraction: interactive);
+        _selectTargetOnNextTap = false;
         await _refreshFrame();
         _expiryTimer?.cancel();
         _expiryTimer = Timer(const Duration(minutes: 10), () {
@@ -253,7 +255,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     });
   }
 
-  Future<void> _click(TapUpDetails details, double width) async {
+  Future<void> _tapFrame(TapUpDetails details, double width) async {
     if (!_session.canInteract || _busy) return;
     final x = (details.localPosition.dx * _frameWidth / width)
         .floor()
@@ -261,12 +263,23 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     final y = (details.localPosition.dy * _frameWidth / width)
         .floor()
         .clamp(0, _frameHeight - 1);
-    await _invoke(<String, dynamic>{'action': 'click', 'x': x, 'y': y});
+    // A passive target selection and a click are separate deliberate
+    // actions. The first tap can switch apps without sending mouse input.
+    final choosingTarget = _selectTargetOnNextTap;
+    if (choosingTarget) {
+      setState(() => _selectTargetOnNextTap = false);
+    }
+    await _invoke(<String, dynamic>{
+      'action': choosingTarget ? 'select_window_at' : 'click',
+      'x': x,
+      'y': y,
+    });
   }
 
   void _stop() {
     _expiryTimer?.cancel();
     _session.stop();
+    _selectTargetOnNextTap = false;
     unawaited(_releaseProjection());
     if (!mounted) return;
     setState(() {
@@ -382,6 +395,26 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                 'Premi il pulsante, poi passa subito a Blocco note. '
                 'La selezione non richiede password né privilegi elevati.',
               ),
+              if (_isWindows) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy || _frame == null
+                      ? null
+                      : () => setState(() {
+                          _selectTargetOnNextTap = !_selectTargetOnNextTap;
+                        }),
+                  icon: const Icon(Icons.open_with_outlined),
+                  label: Text(_selectTargetOnNextTap
+                      ? 'Annulla scelta finestra'
+                      : 'Scegli altra finestra dalla schermata'),
+                ),
+                const Text(
+                  'Dopo aver aggiornato la schermata, scegli il bersaglio '
+                  'con un tocco. La scelta NON clicca: soltanto un secondo '
+                  'tocco esegue un clic nella finestra selezionata. '
+                  'Puoi ripetere la scelta per passare ad altre applicazioni.',
+                ),
+              ],
             ],
             if (active && _session.expiresAt != null) ...[
               const SizedBox(height: 8),
@@ -398,7 +431,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                   aspectRatio: _frameWidth / _frameHeight,
                   child: GestureDetector(
                     onTapUp: interactive && !_busy
-                        ? (details) => _click(details, box.maxWidth)
+                        ? (details) => _tapFrame(details, box.maxWidth)
                         : null,
                     child: Image.memory(
                       _frame!,
