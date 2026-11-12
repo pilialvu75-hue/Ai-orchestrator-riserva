@@ -38,11 +38,15 @@ ComputerUseAdapter _labAdapter() {
 class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   static const MethodChannel _screenVision =
       MethodChannel('com.aiorchestrator/screen_vision');
+  static const MethodChannel _macScreen =
+      MethodChannel('com.aiorchestrator/computer_use_mac');
   late final ComputerUseAdapter _adapter = _labAdapter();
   late final ComputerUseSession _session =
       ComputerUseSession(adapter: _adapter);
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  bool get _isMac =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
   bool get _isWindows =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
   bool get _canInput =>
@@ -75,6 +79,16 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     } catch (_) {
       // The existing ScreenVision service may already be gone.
     }
+  }
+
+  Future<bool> _requestMacScreenRecording() async {
+    final status =
+        await _macScreen.invokeMapMethod<String, dynamic>('getStatus');
+    if (status?['authorized'] == true) return true;
+    final permitted =
+        await _macScreen.invokeMethod<bool>('requestScreenRecording');
+    // macOS may require app restart after the user grants permission.
+    return permitted == true;
   }
 
   Future<bool> _requestAndroidProjection() async {
@@ -134,6 +148,14 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       if (_isAndroid && !await _requestAndroidProjection()) {
         if (mounted) {
           setState(() => _message = 'Autorizzazione schermo Android negata.');
+        }
+        return;
+      }
+      if (_isMac && !await _requestMacScreenRecording()) {
+        if (mounted) {
+          setState(() => _message =
+              'Consenti Registrazione schermo nelle Impostazioni macOS. '
+              'Potrebbe essere necessario riavviare Aivexus.');
         }
         return;
       }
