@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_build_policy.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_smoke_scenario.dart';
 import 'package:ai_orchestrator/features/computer_use/android_computer_use_adapter.dart';
@@ -119,6 +120,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   }
 
   Future<void> _begin({required bool interactive}) async {
+    if (!ComputerUseLabBuildPolicy.enabled) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -275,6 +277,14 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!ComputerUseLabBuildPolicy.enabled) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Computer Use — Laboratorio')),
+        body: const Center(
+          child: Text('Laboratorio Computer Use non abilitato in questa build.'),
+        ),
+      );
+    }
     final active = _session.isActive;
     final interactive = _session.canInteract;
     return Scaffold(
