@@ -167,9 +167,14 @@ limita in modo permanente Computer Use a una sola applicazione.
 Aggiunto il passaggio esplicito `select_window_at(x,y)`:
 - Richiede una sessione interattiva attiva e coordinate valide della
   schermata precedentemente osservata.
-- Su Windows individua il bersaglio visibile alle coordinate indicate
-  senza muovere il puntatore, attivare la finestra, cliccare o digitare.
-  Esclude la finestra Aivexus e quelle non valide/minimizzate.
+- Su Windows la selezione usa l'identita' della finestra realmente
+  in primo piano **al momento della cattura**, registrata prima di avviare
+  il processo PowerShell. Quando si torna all'anteprima Aivexus non cerca
+  la finestra presente *ora* sotto la coordinata (sarebbe Aivexus).
+  Il punto scelto deve appartenere all'HWND catturato, ancora valido,
+  visibile e di processo diverso da Aivexus. Nessun click o focus durante
+  la selezione. Le finestre in secondo piano nella stessa immagine NON
+  sono ancora selezionabili: vanno portate in primo piano e riacquisite.
 - Il bersaglio selezionato puo' essere diverso da quello precedente.
   Dopo la selezione, il successivo clic rimane verificato rispetto alla
   **nuova** finestra, non a quella originaria.
