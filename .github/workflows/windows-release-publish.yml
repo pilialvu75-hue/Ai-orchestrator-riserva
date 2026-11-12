@@ -237,10 +237,7 @@ jobs:
 
       - name: Build coordinated Windows release
         shell: pwsh
-        run: >-
-          flutter build windows --release
-          --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }}
-          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_gate.outputs.enabled }}
+        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_gate.outputs.enabled }}
 
       - name: Verify bundled Windows GGUF inference
         shell: pwsh
