@@ -173,21 +173,15 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   @override
   Future<void> click(int x, int y) async {
     _requireWindows();
+    // Never let a click implicitly choose or switch a controlled window.
+    // The owner first selects a foreground window in the authorized lab.
+    final handle = _requireTargetWindow();
     _focusTargetWindow();
-    final selected = _targetWindow;
-    final focus = selected == null
-        ? ''
-        : '[AivexusDesktopInput]::Focus($selected)\n';
-    final output = await _runPowerShell(
-      '$_inputInterop\n$focus[AivexusDesktopInput]::Click($x, $y)',
+    await _runPowerShell(
+      '$_inputInterop\n'
+      '[AivexusDesktopInput]::Focus($handle)\n'
+      '[AivexusDesktopInput]::Click($x, $y, $handle)',
     );
-    _targetWindow = int.tryParse(output.trim());
-    if (_targetWindow == null || _targetWindow == 0) {
-      throw const ComputerUseException(
-        'TARGET_NOT_FOUND',
-        'No desktop window was found at that position.',
-      );
-    }
   }
 
   @override
@@ -491,15 +485,23 @@ public static class AivexusDesktopInput {
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr handle);
 
-    public static long Click(int x, int y) {
+    public static void Click(int x, int y, long expectedHandle) {
+        var expected = new IntPtr(expectedHandle);
+        if (expected == IntPtr.Zero || !IsWindow(expected))
+            throw new InvalidOperationException("The selected window is invalid");
+        var position = new ScreenPoint {x=x, y=y};
+        // Reject coordinates over another application before ANY input.
+        var root = GetAncestor(WindowFromPoint(position), 2);
+        if (root != expected)
+            throw new InvalidOperationException("Click lies outside selected window");
         if (!SetCursorPos(x, y))
             throw new InvalidOperationException("Unable to move cursor");
-        var root = GetAncestor(WindowFromPoint(new ScreenPoint {x=x, y=y}), 2);
-        if (root == IntPtr.Zero)
-            throw new InvalidOperationException("No target window");
+        // A window can move/change while the pointer moves: check again.
+        root = GetAncestor(WindowFromPoint(position), 2);
+        if (root != expected || GetForegroundWindow() != expected)
+            throw new InvalidOperationException("Selected window lost focus");
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
         mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
-        return root.ToInt64();
     }
 
     public static void Focus(long handle) {
