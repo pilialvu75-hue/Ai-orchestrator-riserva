@@ -25,6 +25,8 @@ class _DocumentsPath extends PathProviderPlatform
   final String path;
   @override
   Future<String?> getApplicationDocumentsPath() async => path;
+  @override
+  Future<String?> getTemporaryPath() async => path + '/cache';
 }
 
 AiModel _model(String id, String path,
@@ -125,4 +127,51 @@ void main() {
     expect(await managed.exists(), isTrue);
     expect((await service.loadCustomModelEntries()).length, 2);
   });
+  test('imported file-picker cache copy is deleted but source stays intact', () async {
+    final source = File(root.path + '/Download/chimera.gguf');
+    await source.parent.create(recursive: true);
+    await source.writeAsBytes([0x47, 0x47, 0x55, 0x46, 10, 11]);
+    final cacheCopy =
+        File(root.path + '/cache/file_picker/session/chimera.gguf');
+    await cacheCopy.parent.create(recursive: true);
+    await cacheCopy.writeAsBytes(await source.readAsBytes());
+    final imported = _model('cached_chimera', cacheCopy.path);
+    await service.saveImportedModelEntry(imported);
+
+    await service.deleteModel(imported);
+
+    expect(await cacheCopy.exists(), isFalse);
+    expect(await source.readAsBytes(), [0x47, 0x47, 0x55, 0x46, 10, 11]);
+    expect(await service.loadImportedModelEntries(), isEmpty);
+  });
+
+  test('shared file-picker cache GGUF is protected from deletion', () async {
+    final cacheCopy =
+        File(root.path + '/cache/file_picker/session/chimera.gguf');
+    await cacheCopy.parent.create(recursive: true);
+    await cacheCopy.writeAsBytes([0x47, 0x47, 0x55, 0x46]);
+    final first = _model('import_one', cacheCopy.path);
+    final second = _model('import_two', cacheCopy.path);
+    await service.saveImportedModelEntry(first);
+    await service.saveImportedModelEntry(second);
+
+    await expectLater(service.deleteModel(first), throwsStateError);
+
+    expect(await cacheCopy.exists(), isTrue);
+    expect((await service.loadImportedModelEntries()).length, 2);
+  });
+
+  test('imported GGUF elsewhere in app cache is preserved', () async {
+    final other = File(root.path + '/cache/other/chimera.gguf');
+    await other.parent.create(recursive: true);
+    await other.writeAsBytes([0x47, 0x47, 0x55, 0x46]);
+    final imported = _model('import_other', other.path);
+    await service.saveImportedModelEntry(imported);
+
+    await service.deleteModel(imported);
+
+    expect(await other.exists(), isTrue);
+    expect(await service.loadImportedModelEntries(), isEmpty);
+  });
+
 }
