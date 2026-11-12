@@ -114,7 +114,7 @@ jobs:
           $digest = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "$digest  computer-use-windows-qa-unpublished.zip" | Set-Content -Path "$zipPath.sha256" -Encoding ascii
           @{
-            source_sha = '\${{ github.sha }}'
+            source_sha = '${{ github.sha }}'
             build_type = 'computer-use-experimental-unsigned'
             qa_flag = 'AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true'
             distribution = 'CI artifact ONLY; not published to updater; no installer'
