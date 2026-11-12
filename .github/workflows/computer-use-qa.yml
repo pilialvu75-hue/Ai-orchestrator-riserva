@@ -64,3 +64,69 @@ jobs:
         run: flutter analyze --no-fatal-infos lib/features/computer_use/windows_computer_use_adapter.dart test/features/computer_use/windows_foreground_target_policy_test.dart test/features/computer_use/windows_native_interop_compile_test.dart
       - name: Compile fixed Win32 input interop and test safe foreground targeting
         run: flutter test --reporter expanded test/features/computer_use/windows_foreground_target_policy_test.dart test/features/computer_use/windows_native_interop_compile_test.dart
+
+  # Unsigned QA binary, NOT a release or installer. This job validates that
+  # Windows genuinely compiles with the opt-in lab flag, without changing main.
+  # It deliberately cannot publish to the integrated in-app update channel.
+  windows-lab-preview:
+    runs-on: windows-2022
+    timeout-minutes: 65
+    needs: [computer-use-unit, windows-native-interop]
+    steps:
+      - name: Checkout exact PR revision and native submodules
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Restore locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Test explicit Computer Use laboratory activation
+        run: >-
+          flutter test --reporter expanded
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+          --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=true
+          test/features/computer_use/computer_use_build_policy_test.dart
+      - name: Build Windows QA preview (unsigned, not for public install)
+        run: >-
+          flutter build windows --release
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+      - name: Verify Windows runtime bundle and archive QA evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          $exe = Join-Path $releaseDir 'ai_orchestrator.exe'
+          if (-not (Test-Path $exe)) { throw 'QA Windows executable missing.' }
+          if (-not (Test-Path (Join-Path $releaseDir 'data'))) {
+            throw 'QA Windows Flutter data missing.'
+          }
+          & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $releaseDir
+          if ($LASTEXITCODE -ne 0) { throw 'QA local inference bundle check failed.' }
+          $zipPath = Join-Path $PWD 'computer-use-windows-qa-unpublished.zip'
+          Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
+          $digest = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  computer-use-windows-qa-unpublished.zip" | Set-Content -Path "$zipPath.sha256" -Encoding ascii
+          @{
+            source_sha = '\${{ github.sha }}'
+            build_type = 'computer-use-experimental-unsigned'
+            qa_flag = 'AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true'
+            distribution = 'CI artifact ONLY; not published to updater; no installer'
+            signed = $false
+          } | ConvertTo-Json | Set-Content -Path 'computer-use-qa-evidence.json' -Encoding utf8
+      - name: Preserve isolated QA preview for internal verification only
+        uses: actions/upload-artifact@v4
+        with:
+          name: computer-use-windows-qa-unpublished
+          path: |
+            computer-use-windows-qa-unpublished.zip
+            computer-use-windows-qa-unpublished.zip.sha256
+            computer-use-qa-evidence.json
+          if-no-files-found: error
+          retention-days: 7
