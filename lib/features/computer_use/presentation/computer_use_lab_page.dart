@@ -403,7 +403,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                       : () => setState(() {
                           _selectTargetOnNextTap = !_selectTargetOnNextTap;
                         }),
-                  icon: const Icon(Icons.open_with_outlined),
+                  icon: const Icon(Icons.open_with),
                   label: Text(_selectTargetOnNextTap
                       ? 'Annulla scelta finestra'
                       : 'Scegli altra finestra dalla schermata'),
