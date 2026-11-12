@@ -20,6 +20,17 @@ if ($parameters.Count -ne 3 -or
     $click.ReturnType -ne [void]) {
     throw 'Click must require an expected selected window handle'
 }
+$invalidHandleRejected = $false
+try {
+    [AivexusDesktopInput]::Click(0, 0, 0)
+} catch {
+    if ($_.Exception.Message -like '*selected window is invalid*') {
+        $invalidHandleRejected = $true
+    }
+}
+if (-not $invalidHandleRejected) {
+    throw 'Click did not reject an invalid target before any input'
+}
 Write-Output 'INTEROP_COMPILED'
 ''';
       final result = await Process.run(
