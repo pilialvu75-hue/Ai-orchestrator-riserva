@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
@@ -14,6 +15,7 @@ import 'package:ai_orchestrator/features/computer_use/computer_use_2048_local_ag
 import 'package:ai_orchestrator/features/computer_use/computer_use_agent_runner.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_aivexus_local_decision_model.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_build_policy.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_game_catalog.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_preview_policy.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_smoke_scenario.dart';
@@ -95,6 +97,52 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     } catch (_) {
       // The existing ScreenVision service may already be gone.
     }
+  }
+
+  Future<void> _openCarJamPlayStore() async {
+    if (!_isAndroid || !ComputerUseLabBuildPolicy.enabled) return;
+    // This is a trusted user's explicit tap, NEVER a model tool action.
+    // The Play Store owns all subsequent prompts, login and installation.
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Car Jam Solver — gioco di terzi'),
+        content: const Text(
+          'Vuoi aprire la scheda ufficiale Ladaneta Games su Google Play? '
+          'Il gioco contiene pubblicità e acquisti in-app. '
+          'Aivexus NON installerà nulla automaticamente, '
+          'non effettuerà acquisti e non userà il tuo account Google.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Annulla'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Apri Play Store'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    await _run(() async {
+      final opened = await launchUrl(
+        ComputerUseGameCatalog.carJamPlayStoreUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) {
+        throw const ComputerUseException(
+          'PLAY_STORE_UNAVAILABLE',
+          'Non posso aprire Google Play su questo dispositivo.',
+        );
+      }
+      if (mounted) {
+        setState(() => _message =
+            'Scheda Play Store aperta. Installazione sotto il tuo '
+            'controllo. Computer Use Android resta in sola osservazione.');
+      }
+    });
   }
 
   Future<bool> _requestMacScreenRecording() async {
@@ -505,6 +553,19 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                   'Permesso schermo richiesto dal sistema operativo; '
                   'mouse, tastiera e agente IA non sono abilitati.',
           ),
+          if (_isAndroid) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _openCarJamPlayStore,
+              icon: const Icon(Icons.shop_outlined),
+              label: const Text('Car Jam Solver — apri su Google Play'),
+            ),
+            const Text(
+              'Installazione solo con tua conferma nel Play Store. '
+              'Aivexus Android può osservare il gioco con consenso, '
+              'ma non controllarlo ancora autonomamente.',
+            ),
+          ],
           const SizedBox(height: 12),
           if (!_session.isSupported)
             const Text('Computer Use non disponibile su questa piattaforma.')
