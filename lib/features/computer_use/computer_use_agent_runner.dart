@@ -54,6 +54,12 @@ abstract interface class ComputerUseAgentPlanner {
   );
 }
 
+/// Optional cancellation hook: STOP must also abort LOCAL inference, not
+/// merely ignore the model's eventual answer.
+abstract interface class ComputerUseCancellablePlanner {
+  void cancel();
+}
+
 /// Independent goal verifier. The planner's claim of completion is NOT proof.
 abstract interface class ComputerUseAgentVerifier {
   Future<bool> isSatisfied(ComputerUseAgentObservation observation);
@@ -118,7 +124,12 @@ final class ComputerUseAgentRunner {
 
   /// Revokes authorization and stops host operations. Planner results that
   /// arrive after this call cannot re-use a freshly granted session.
-  void stop() => _session.stop();
+  void stop() {
+    _session.stop();
+    if (_planner is ComputerUseCancellablePlanner) {
+      (_planner as ComputerUseCancellablePlanner).cancel();
+    }
+  }
 
   Future<ComputerUseAgentResult> run({
     required String goal,
