@@ -18,6 +18,10 @@ final class WindowsComputerUseAdapter
   WindowsComputerUseAdapter();
 
   int? _targetWindow;
+
+  // Foreground HWND recorded at screenshot time, *before* PowerShell starts.
+  // Returning to the Aivexus preview must not silently change the target.
+  int? _observedForegroundWindow;
   // The smoke test must never silently type into another foreground app.
   // Process identity is checked before accepting the launched test window.
   int? _expectedLaunchedProcessId;
@@ -33,6 +37,7 @@ final class WindowsComputerUseAdapter
     _activeProcess?.kill();
     _activeProcess = null;
     _targetWindow = null;
+    _observedForegroundWindow = null;
     _expectedLaunchedProcessId = null;
   }
 
@@ -54,6 +59,9 @@ final class WindowsComputerUseAdapter
   @override
   Future<Uint8List> capturePng() async {
     _requireWindows();
+    // Snapshot the actual foreground BEFORE the screenshot helper starts.
+    // If Aivexus owns focus, no external window may be selected from it.
+    _observedForegroundWindow = _readExternalForeground();
     final directory = await Directory.systemTemp.createTemp('aivexus_cu_');
     final file = File('${directory.path}${Platform.pathSeparator}frame.png');
     try {
@@ -95,6 +103,7 @@ final class WindowsComputerUseAdapter
         ),
     };
     _targetWindow = null;
+    _observedForegroundWindow = null;
     _expectedLaunchedProcessId = null;
     final launched = await Process.start(
       executable,
@@ -156,22 +165,29 @@ final class WindowsComputerUseAdapter
   @override
   Future<void> selectWindowAt(int x, int y) async {
     _requireWindows();
-    // Look up the visible top-level window under a screen coordinate.
-    // No cursor movement, activation, mouse input or text is performed.
+    // The preview is itself a window. Looking up WindowFromPoint() NOW
+    // would select Aivexus, not the app the user saw in the last capture.
+    // Revalidate the exact HWND observed at capture time without mouse input.
+    final observed = _observedForegroundWindow;
+    if (observed == null) {
+      throw const ComputerUseException(
+        'NO_OBSERVED_WINDOW',
+        'Switch to the target app and capture it before selecting it.',
+      );
+    }
     final output = await _runPowerShell(
       '$_inputInterop\n'
-      '[AivexusDesktopInput]::SelectWindowAt($x, $y, $pid)',
+      '[AivexusDesktopInput]::SelectObservedWindowAt('
+      '$x, $y, $observed, $pid)',
     );
     final handle = int.tryParse(output.trim());
-    if (handle == null || handle == 0) {
+    if (handle != observed || handle == 0) {
       throw const ComputerUseException(
-        'TARGET_NOT_FOUND',
-        'No eligible desktop window was found at that position.',
+        'TARGET_CHANGED',
+        'The window observed in the screenshot is no longer eligible.',
       );
     }
     _targetWindow = handle;
-    // This is an explicit transition to a new target, separate from the
-    // single-application smoke test's foreground PID requirement.
     _expectedLaunchedProcessId = null;
   }
 
@@ -255,6 +271,27 @@ $_inputInterop
       '$_inputInterop\n[AivexusDesktopInput]::Focus($handle)\n'
       '[AivexusDesktopInput]::PressKey("$key")',
     );
+  }
+
+  int? _readExternalForeground() {
+    final library = _user32;
+    if (library == null) return null;
+    final foreground = library.lookupFunction<
+        IntPtr Function(), int Function()>('GetForegroundWindow')();
+    if (foreground == 0) return null;
+    final getProcessId = library.lookupFunction<
+        Uint32 Function(IntPtr, Pointer<Uint32>),
+        int Function(int, Pointer<Uint32>)>('GetWindowThreadProcessId');
+    final owner = calloc<Uint32>();
+    try {
+      getProcessId(foreground, owner);
+      return isExpectedForegroundProcess(
+        foregroundProcessId: owner.value,
+        hostProcessId: pid,
+      ) ? foreground : null;
+    } finally {
+      calloc.free(owner);
+    }
   }
 
   /// Called on the Flutter application's foreground user gesture; Windows
@@ -555,18 +592,33 @@ public static class AivexusDesktopInput {
 
     // Selection is deliberately passive. It does not click or activate an
     // app. A separate subsequent Click must still pass the HWND guard.
-    public static long SelectWindowAt(int x, int y, int excludedProcessId) {
-        var point = new ScreenPoint {x=x, y=y};
-        var root = GetAncestor(WindowFromPoint(point), 2);
-        if (root == IntPtr.Zero || !IsWindow(root) ||
-            !IsWindowVisible(root) || IsIconic(root))
-            throw new InvalidOperationException("No eligible desktop target");
-        uint owningProcessId;
-        GetWindowThreadProcessId(root, out owningProcessId);
-        if (owningProcessId == 0 ||
-            owningProcessId == (uint)excludedProcessId)
-            throw new InvalidOperationException("Cannot select Aivexus or desktop system surface");
-        return root.ToInt64();
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowRect {
+        public int left, top, right, bottom;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(
+        IntPtr handle, out WindowRect rect);
+
+    public static long SelectObservedWindowAt(
+        int x, int y, long observedHandle, int excludedProcessId) {
+        // The foreground at tap time could be Aivexus, so never reselect
+        // it from WindowFromPoint. Only validate the captured HWND.
+        var observed = new IntPtr(observedHandle);
+        if (observed == IntPtr.Zero || !IsWindow(observed) ||
+            !IsWindowVisible(observed) || IsIconic(observed))
+            throw new InvalidOperationException("Observed window is invalid");
+        uint ownerPid;
+        GetWindowThreadProcessId(observed, out ownerPid);
+        if (ownerPid == 0 || ownerPid == (uint)excludedProcessId)
+            throw new InvalidOperationException("Observed window cannot be Aivexus");
+        WindowRect rect;
+        if (!GetWindowRect(observed, out rect) ||
+            x < rect.left || x >= rect.right ||
+            y < rect.top || y >= rect.bottom)
+            throw new InvalidOperationException("Point outside observed window");
+        return observed.ToInt64();
     }
 
     public static void Focus(long handle) {
