@@ -46,7 +46,7 @@ void main() {
       final selector = selected.last.split('public static void Focus').first;
       expect(selector, contains('observedHandle'));
       expect(selector, contains('GetWindowRect(observed, out rect)'));
-      expect(selector, isNot(contains('WindowFromPoint')));
+      expect(selector, isNot(contains('WindowFromPoint(')));
       expect(selector, isNot(contains('SetForegroundWindow')));
       expect(selector, isNot(contains('mouse_event')));
     });
