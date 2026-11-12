@@ -54,7 +54,7 @@ while ($queue.Count -gt 0 -and $scanned -lt 64) {
     try { $child = $walker.GetFirstChild($node) }
     catch { $sensitive = $true; break }
     $siblings = 0
-    while ($null -ne $child -and $siblings -lt 16 -and
+    while ($null -ne $child -and $siblings -lt 64 -and
            ($scanned + $queue.Count) -lt 64) {
         $queue.Enqueue(@{ node = $child; depth = ($depth + 1) })
         $siblings++
