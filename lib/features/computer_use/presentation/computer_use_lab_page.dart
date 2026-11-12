@@ -1,8 +1,13 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_smoke_scenario.dart';
+import 'package:ai_orchestrator/features/computer_use/android_computer_use_adapter.dart';
+import 'package:ai_orchestrator/features/computer_use/mac_computer_use_adapter.dart';
 import 'package:ai_orchestrator/features/computer_use/windows_computer_use_adapter.dart';
 
 /// Manual, local proof-of-life UI. No LLM is authorized to start a session.
@@ -14,10 +19,37 @@ class ComputerUseLabPage extends StatefulWidget {
   State<ComputerUseLabPage> createState() => _ComputerUseLabPageState();
 }
 
+ComputerUseAdapter _labAdapter() {
+  if (!kIsWeb) {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return AndroidComputerUseAdapter();
+      case TargetPlatform.macOS:
+        return MacComputerUseAdapter();
+      case TargetPlatform.windows:
+        return WindowsComputerUseAdapter();
+      default:
+        break;
+    }
+  }
+  return WindowsComputerUseAdapter();
+}
+
 class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
-  final ComputerUseSession _session = ComputerUseSession(
-    adapter: WindowsComputerUseAdapter(),
-  );
+  static const MethodChannel _screenVision =
+      MethodChannel('com.aiorchestrator/screen_vision');
+  late final ComputerUseAdapter _adapter = _labAdapter();
+  late final ComputerUseSession _session =
+      ComputerUseSession(adapter: _adapter);
+  bool get _isAndroid =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  bool get _isWindows =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  bool get _canInput =>
+      _adapter is! ComputerUseInteractionCapability ||
+      (_adapter as ComputerUseInteractionCapability).supportsInteraction;
+  bool _projectionStartedByLab = false;
+  Timer? _expiryTimer;
   final TextEditingController _textController = TextEditingController();
 
   Uint8List? _frame;
@@ -28,9 +60,34 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
 
   @override
   void dispose() {
+    _expiryTimer?.cancel();
     _session.stop();
+    unawaited(_releaseProjection());
     _textController.dispose();
     super.dispose();
+  }
+
+  Future<void> _releaseProjection() async {
+    if (!_projectionStartedByLab) return;
+    _projectionStartedByLab = false;
+    try {
+      await _screenVision.invokeMethod<void>('stopProjection');
+    } catch (_) {
+      // The existing ScreenVision service may already be gone.
+    }
+  }
+
+  Future<bool> _requestAndroidProjection() async {
+    final status =
+        await _screenVision.invokeMapMethod<String, dynamic>('getStatus');
+    if (status?['active'] == true) return true;
+    final granted =
+        await _screenVision.invokeMethod<bool>('requestProjection');
+    if (granted == true) {
+      _projectionStartedByLab = true;
+      return true;
+    }
+    return false;
   }
 
   Future<void> _run(Future<void> Function() operation) async {
@@ -74,12 +131,28 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     );
     if (confirmed != true || !mounted) return;
     await _run(() async {
-      _session.beginSession(allowInteraction: interactive);
-      await _refreshFrame();
-      if (mounted) {
-        setState(() => _message = interactive
-            ? 'Interazione attiva: tocca una finestra nella schermata.'
-            : 'Sola osservazione attiva.');
+      if (_isAndroid && !await _requestAndroidProjection()) {
+        if (mounted) {
+          setState(() => _message = 'Autorizzazione schermo Android negata.');
+        }
+        return;
+      }
+      try {
+        _session.beginSession(allowInteraction: interactive);
+        await _refreshFrame();
+        _expiryTimer?.cancel();
+        _expiryTimer = Timer(const Duration(minutes: 10), () {
+          if (mounted) _stop();
+        });
+        if (mounted) {
+          setState(() => _message = interactive
+              ? 'Interazione attiva: tocca una finestra nella schermata.'
+              : 'Sola osservazione attiva. Nessun dato inviato al Cloud.');
+        }
+      } catch (_) {
+        _session.stop();
+        await _releaseProjection();
+        rethrow;
       }
     });
   }
@@ -168,7 +241,10 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   }
 
   void _stop() {
+    _expiryTimer?.cancel();
     _session.stop();
+    unawaited(_releaseProjection());
+    if (!mounted) return;
     setState(() {
       _frame = null;
       _message = 'Sessione interrotta.';
@@ -184,13 +260,17 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
-            'Test Windows locale: schermata, clic, testo e navigazione. '
-            'Nessuna esecuzione di shell o invio automatico di immagini.',
+          Text(
+            _isWindows
+                ? 'Test Windows locale: schermata, clic, testo e navigazione. '
+                  'Nessuna esecuzione di shell o invio automatico di immagini.'
+                : 'Test sperimentale di sola osservazione. '
+                  'Permesso schermo richiesto dal sistema operativo; '
+                  'mouse, tastiera e agente IA non sono abilitati.',
           ),
           const SizedBox(height: 12),
           if (!_session.isSupported)
-            const Text('Computer Use Windows non disponibile qui.')
+            const Text('Computer Use non disponibile su questa piattaforma.')
           else ...[
             Wrap(
               spacing: 8,
@@ -202,12 +282,13 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                       : null,
                   child: const Text('Osserva schermo'),
                 ),
-                FilledButton(
-                  onPressed: !_busy && !active
-                      ? () => _begin(interactive: true)
-                      : null,
-                  child: const Text('Abilita interazione'),
-                ),
+                if (_canInput)
+                  FilledButton(
+                    onPressed: !_busy && !active
+                        ? () => _begin(interactive: true)
+                        : null,
+                    child: const Text('Abilita interazione'),
+                  ),
                 OutlinedButton(
                   onPressed: !_busy && active
                       ? () => _run(_refreshFrame)
