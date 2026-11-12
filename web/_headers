@@ -4,3 +4,6 @@
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
   X-Robots-Tag: noindex, nofollow, noarchive
+
+/__aivexus_web_deployment.json
+  Cache-Control: no-store

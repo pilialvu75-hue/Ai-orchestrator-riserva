@@ -210,6 +210,10 @@ jobs:
       - name: Build ordinary Cantiere Web application
         run: flutter build web --release --target lib/web_main.dart
 
+      - name: Stamp Web deployment source identity
+        shell: bash
+        run: bash scripts/web/stamp_deployment_provenance.sh build/web "$GITHUB_SHA" "$GITHUB_RUN_ID"
+
       - name: Install Cloudflare Pages hardening metadata
         run: cp web/_headers build/web/_headers
 
@@ -221,6 +225,10 @@ jobs:
           test -s build/web/index.html
           test -s build/web/main.dart.js
           test -s build/web/_headers
+          test -s build/web/__aivexus_web_deployment.json
+          jq -e --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
+            '.schemaVersion == 1 and .product == "aivexus-web" and .gitSha == $sha and .githubRunId == $run' \
+            build/web/__aivexus_web_deployment.json > /dev/null
 
       - name: Deploy private Cantiere to Cloudflare Pages
         id: deploy
