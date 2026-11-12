@@ -16,6 +16,9 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
   WindowsComputerUseAdapter();
 
   int? _targetWindow;
+  // The smoke test must never silently type into another foreground app.
+  // Process identity is checked before accepting the launched test window.
+  int? _expectedLaunchedProcessId;
   Process? _activeProcess;
   bool _running = false;
   late final DynamicLibrary? _user32 =
@@ -28,6 +31,7 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
     _activeProcess?.kill();
     _activeProcess = null;
     _targetWindow = null;
+    _expectedLaunchedProcessId = null;
   }
 
   @override
@@ -80,12 +84,14 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
         ),
     };
     _targetWindow = null;
-    await Process.start(
+    _expectedLaunchedProcessId = null;
+    final launched = await Process.start(
       executable,
       const <String>[],
       mode: ProcessStartMode.detached,
       runInShell: false,
     );
+    _expectedLaunchedProcessId = launched.pid;
   }
 
   @override
@@ -114,10 +120,23 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
           'Select another application, not the Aivexus window.',
         );
       }
+      // If Aivexus just launched an allowlisted test app, reject any
+      // unrelated window even when it happens to own keyboard focus.
+      // On modern Windows, packaged apps may broker another PID: that
+      // must be reported as an explicit non-PASS until validated on device.
+      final expectedPid = _expectedLaunchedProcessId;
+      if (expectedPid != null && ownerPid.value != expectedPid) {
+        throw const ComputerUseException(
+          'LAUNCHED_APP_NOT_FOREGROUND',
+          'The launched test app is not the foreground window. '
+          'No text or keyboard input was sent.',
+        );
+      }
     } finally {
       calloc.free(ownerPid);
     }
     _targetWindow = handle;
+    _expectedLaunchedProcessId = null;
   }
 
   @override
