@@ -56,6 +56,7 @@ final class ComputerUseLocalJsonPlanner implements ComputerUseAgentPlanner {
       'JSON object, without markdown or explanation. Valid formats: '
       '{"status":"act","action":"open_app","arguments":{"app":"notepad"}}, '
       '{"status":"act","action":"select_window","arguments":{}}, '
+      '{"status":"act","action":"select_window_at","arguments":{"x":10,"y":20}}, '
       '{"status":"act","action":"click","arguments":{"x":10,"y":20}}, '
       '{"status":"act","action":"type_text","arguments":{"text":"demo"}}, '
       '{"status":"act","action":"press_key","arguments":{"key":"tab"}}, '
@@ -112,6 +113,7 @@ final class ComputerUseLocalJsonPlanner implements ComputerUseAgentPlanner {
     final expected = switch (action) {
       'open_app' => const <String>{'app'},
       'select_window' => const <String>{},
+      'select_window_at' => const <String>{'x', 'y'},
       'click' => const <String>{'x', 'y'},
       'type_text' => const <String>{'text'},
       'press_key' => const <String>{'key'},
@@ -127,6 +129,7 @@ final class ComputerUseLocalJsonPlanner implements ComputerUseAgentPlanner {
           throw const FormatException('Application is not allowlisted');
         }
         break;
+      case 'select_window_at':
       case 'click':
         if (arguments['x'] is! int || arguments['y'] is! int) {
           throw const FormatException('Click needs integer coordinates');
