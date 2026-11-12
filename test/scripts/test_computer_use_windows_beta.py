@@ -28,7 +28,7 @@ class ComputerUseWindowsBetaContractTest(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/main'", w)
         self.assertIn("github.actor == 'pilialvu75-hue'", w)
         self.assertIn("YES_PUBLISH_WINDOWS_BETA", w)
-        self.assertIn("default: NO", w)
+        self.assertIn("default: 'NO'", w)
         self.assertIn("if: github.event_name == 'pull_request'", w)
         self.assertNotIn("push:\n", w)
 
