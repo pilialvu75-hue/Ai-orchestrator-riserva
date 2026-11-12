@@ -340,6 +340,10 @@ $_inputInterop
     }
   }
 
+  /// Exposes only the fixed source template for an isolated Windows CI
+  /// compilation check. Does not grant desktop permissions or run input.
+  static String get inputInteropSourceForTest => _inputInterop;
+
   // Verify only a synthetic marker; return FOUND/NOT_FOUND, never UI text.
   static const String _verificationScript = r'''
 $ErrorActionPreference = 'Stop'
