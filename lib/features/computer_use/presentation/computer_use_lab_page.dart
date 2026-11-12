@@ -236,7 +236,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         _adapter is! WindowsComputerUseAdapter) return;
     await _run(() async {
       final revision = _session.sessionRevision;
-      final windowsAdapter = _adapter as WindowsComputerUseAdapter;
+      final windowsAdapter = _adapter;
       final reader = WindowsComputerUseAccessibilityReader(
         session: _session,
         captureAccessibilityJson:
