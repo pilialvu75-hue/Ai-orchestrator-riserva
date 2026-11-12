@@ -7,8 +7,8 @@ on:
         description: 'Windows beta visible to everyone opted into Beta; explicit owner authorization'
         required: true
         type: choice
-        options: [NO, YES_PUBLISH_WINDOWS_BETA]
-        default: NO
+        options: ['NO', 'YES_PUBLISH_WINDOWS_BETA']
+        default: 'NO'
   pull_request:
     branches: [main]
     paths:
