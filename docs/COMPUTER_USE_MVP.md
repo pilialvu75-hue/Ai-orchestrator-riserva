@@ -48,7 +48,8 @@ Computer Use — Laboratorio** su Windows.
 | Motore autonomo astratto `ComputerUseAgentRunner` | Implementato e testato con planner e verificatore simulati; NON collegato a IA reale |
 | Ciclo dinamico observe → decide → agisci → ri-osserva → verifica | Implementato nel runner isolato; manca il modello reale |
 | Revoca durante inferenza / nuova sessione | Revisioni di autorizzazione implementate; test in CI |
-| Ciclo autonomo con LLM configurato | NON implementato; esiste solo l'esecutore indipendente dal provider |
+| Pianificatore LOCAL JSON con descrizione schermata | Contratto e parser tipizzato implementati; 8 test simulati, nessuna inferenza reale collegata |
+| Ciclo autonomo con LLM configurato | NON implementato; esecutore e protocollo LOCAL pronti per futura integrazione, senza modello reale |
 | UI Automation: verifica solo marcatore sintetico QA | Implementata sperimentalmente; non validata su Windows fisico |
 | Sequenza controllata Blocco note → scrittura → verifica → screenshot | Implementata; CI da verificare e QA fisico necessario |
 | Integrazione Diagnostics anonimizzata | NON implementata |
@@ -148,3 +149,28 @@ multisistema; il test di lettura schermo e un checkpoint, non il traguardo.
 - Aggiunti 5 test Flutter simulati del bridge Mac: consenso, frame valido,
   divieto interazione, STOP/riautorizzazione e revoca del consenso.
 - Ancora necessario collaudare compilazione nativa Swift, TCC e runtime su Mac.
+
+
+## Protocollo per futura IA autonoma (12 novembre 2026)
+
+La classe `ComputerUseLocalJsonPlanner` trasforma l'osservazione del desktop
+in un'unica azione GUI tipizzata per passo, senza affidarsi a macro fisse.
+Riceve due dipendenze ancora **non collegate alla produzione**:
+
+- `ComputerUseLocalScreenReader`: un interprete locale che produce una
+  descrizione strutturata e indica se lo schermo e sensibile. Una schermata
+  segnalata sensibile interrompe il ciclo prima della chiamata al modello.
+- `ComputerUseLocalDecisionModel`: modello LLM vincolato a inferenza LOCAL.
+  Non e un adapter Cloud; la concreta implementazione, dopo il ripristino
+  della inferenza, deve impedire esplicitamente ogni fallback online.
+
+Il parser accetta solo un JSON esatto: `act` con azioni `open_app`,
+`select_window`, `click`, `type_text`, `press_key`; oppure `complete`
+o `abort`. Rifiuta comandi shell, extra chiavi, click con coordinate non
+intere, app non consentite e tasti non in allowlist. La conferma `complete`
+richiede una verifica indipendente del risultato finale nel runner.
+
+I test attuali simulano interpretazione dello schermo e risposte del modello:
+**non dimostrano che Aivexus ragioni o veda gia il desktop**. La visione
+reale, consenso Cloud (se usato) e collegamento del runtime saranno valutati
+solo dopo che Work avra ripristinato Aivexus.
