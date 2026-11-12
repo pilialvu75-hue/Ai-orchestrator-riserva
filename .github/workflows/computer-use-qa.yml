@@ -39,3 +39,22 @@ jobs:
         run: flutter analyze --no-fatal-infos lib/features/computer_use test/features/computer_use
       - name: Run Computer Use fake host and planner tests
         run: flutter test --reporter expanded test/features/computer_use
+
+  windows-native-interop:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Flutter SDK
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Restore locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze Windows native Computer Use path
+        run: flutter analyze --no-fatal-infos lib/features/computer_use/windows_computer_use_adapter.dart test/features/computer_use/windows_foreground_target_policy_test.dart test/features/computer_use/windows_native_interop_compile_test.dart
+      - name: Compile fixed Win32 input interop and test safe foreground targeting
+        run: flutter test --reporter expanded test/features/computer_use/windows_foreground_target_policy_test.dart test/features/computer_use/windows_native_interop_compile_test.dart
