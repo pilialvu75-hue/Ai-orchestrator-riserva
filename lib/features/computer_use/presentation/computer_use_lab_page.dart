@@ -1,10 +1,18 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:ai_orchestrator/injection_container.dart' as di;
+import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
+import 'package:ai_orchestrator/core/ai/providers/local_ai_repository.dart';
+import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_2048_benchmark.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_2048_local_agent.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_agent_runner.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_aivexus_local_decision_model.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_build_policy.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_preview_policy.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
@@ -66,11 +74,13 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   bool _busy = false;
   bool _selectTargetOnNextTap = false;
   ComputerUse2048Benchmark? _previousGameScore;
+  ComputerUseAgentRunner? _gameRunner;
   String _message = 'Nessuna sessione attiva.';
 
   @override
   void dispose() {
     _expiryTimer?.cancel();
+    _gameRunner?.stop();
     _session.stop();
     unawaited(_releaseProjection());
     _textController.dispose();
@@ -273,6 +283,114 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     });
   }
 
+  Future<void> _play2048WithLocalAi() async {
+    if (!_isWindows || !_session.canInteract ||
+        _adapter is! WindowsComputerUseAdapter ||
+        _gameRunner?.isRunning == true) {
+      return;
+    }
+    await _run(() async {
+      final revision = _session.sessionRevision;
+      final windowsAdapter = _adapter;
+      final selected = await di.sl<LocalAiRepository>().getSelectedModel();
+      final AiModel? model = selected.fold<AiModel?>(
+        (_) => null,
+        (value) => value,
+      );
+      if (!_session.canInteract || _session.sessionRevision != revision) {
+        return;
+      }
+      if (model == null || !model.isDownloaded ||
+          model.localPath == null || model.localPath!.trim().isEmpty ||
+          !await File(model.localPath!).exists()) {
+        throw const ComputerUseException(
+          'LOCAL_MODEL_UNAVAILABLE',
+          'Seleziona prima un modello LOCAL già scaricato e funzionante.',
+        );
+      }
+
+      final reader = WindowsComputerUseAccessibilityReader(
+        session: _session,
+        captureAccessibilityJson:
+            windowsAdapter.captureSelectedAccessibilityJson,
+      );
+      final initial = await reader.describe(Uint8List(0));
+      final board = initial.sensitive
+          ? null
+          : ComputerUse2048Benchmark.parse(initial.description);
+      if (board == null) {
+        throw const ComputerUseException(
+          'GAME_NOT_SELECTED',
+          'Apri 2048, seleziona la sua finestra e leggine i controlli '
+          'prima di avviare l’IA LOCAL.',
+        );
+      }
+      if (!_session.canInteract || _session.sessionRevision != revision) {
+        return;
+      }
+
+      final decisionModel = AivexusComputerUseLocalDecisionModel(
+        localRuntime: di.sl<LocalRuntimeProvider>(),
+        modelId: model.effectiveRuntimeModelId,
+        modelPath: model.localPath!,
+        sessionId: 'cu2048-${DateTime.now().microsecondsSinceEpoch}',
+        timeout: const Duration(seconds: 60),
+      );
+      final runner = ComputerUseAgentRunner(
+        session: _session,
+        planner: ComputerUse2048LocalPlanner(
+          screenReader: reader,
+          model: decisionModel,
+        ),
+        verifier: ComputerUse2048LocalVerifier(
+          screenReader: reader,
+          onObservation: (game) {
+            if (!mounted || !_session.canInteract ||
+                _session.sessionRevision != revision) return;
+            setState(() {
+              _previousGameScore = game;
+              _message = 'IA LOCAL 2048: ${game.moves} mosse, '
+                  'punteggio ${game.score}, '
+                  'casella massima ${game.bestTile}. '
+                  'Obiettivo: 64.';
+            });
+          },
+        ),
+        maxSteps: 24,
+        maxDuration: const Duration(minutes: 8),
+        operationTimeout: const Duration(seconds: 70),
+      );
+      _gameRunner = runner;
+      try {
+        final result = await runner.run(
+          goal: 'Gioca a 2048 scegliendo le mosse in base alla griglia '
+              'osservata per raggiungere almeno una casella 64.',
+          onStage: (stage, step) {
+            if (mounted && _session.canInteract &&
+                _session.sessionRevision == revision) {
+              setState(() {
+                _message = 'IA LOCAL 2048: fase $stage, '
+                    'passo ${step + 1}/24. STOP disponibile.';
+              });
+            }
+          },
+        );
+        if (!mounted || _session.sessionRevision != revision) return;
+        setState(() {
+          _message = 'IA LOCAL 2048: risultato ${result.outcome.name}; '
+              'mosse tentate ${result.steps}. '
+              'Punteggio osservato ${_previousGameScore?.score ?? "non disponibile"}, '
+              'casella massima ${_previousGameScore?.bestTile ?? "non disponibile"}. '
+              'Non interpretare un risultato non verificato come successo.';
+        });
+      } finally {
+        if (identical(_gameRunner, runner)) {
+          _gameRunner = null;
+        }
+      }
+    });
+  }
+
   Future<void> _captureAfterDelay() async {
     await _run(() async {
       // Capture AFTER the user has switched to the application to observe.
@@ -350,6 +468,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
 
   void _stop() {
     _expiryTimer?.cancel();
+    _gameRunner?.stop();
     _session.stop();
     _selectTargetOnNextTap = false;
     _previousGameScore = null;
@@ -494,13 +613,21 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                   ],
                 ],
               ),
-              if (_isWindows)
-                const Text(
-                  '2048 è un gioco locale di prova: usa le frecce per '
-                  'combinare le caselle, raggiungi 64 e confronta punteggio '
-                  'e numero di mosse tramite “Leggi controlli finestra”. '
-                  'L’IA LOCAL non gioca ancora in autonomia.',
+              if (_isWindows) ...[
+                FilledButton.icon(
+                  onPressed: _busy ? null : _play2048WithLocalAi,
+                  icon: const Icon(Icons.psychology_outlined),
+                  label: const Text('Fai giocare Aivexus LOCAL a 2048'),
                 ),
+                const Text(
+                  'Esperimento di ragionamento reale: apri 2048, '
+                  'seleziona la sua finestra e poi avvia il modello LOCAL '
+                  'già scaricato. L’IA sceglie solo le frecce, massimo '
+                  '24 mosse; il punteggio è letto indipendentemente '
+                  'dalla finestra di gioco. STOP annulla anche l’inferenza. '
+                  'Funzione sperimentale, non ancora provata su ASUS.',
+                ),
+              ],
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _busy ? null : _selectTargetWindow,
