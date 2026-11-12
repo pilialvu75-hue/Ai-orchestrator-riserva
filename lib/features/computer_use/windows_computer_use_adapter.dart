@@ -12,7 +12,8 @@ import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart'
 /// text/path values are encoded as data, never evaluated as PowerShell code.
 ///
 /// No elevation, arbitrary process launch, command execution or network access.
-final class WindowsComputerUseAdapter implements ComputerUseAdapter {
+final class WindowsComputerUseAdapter
+    implements ComputerUseAdapter, ComputerUseDesktopTargetSelector {
   WindowsComputerUseAdapter();
 
   int? _targetWindow;
@@ -56,13 +57,10 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
     final file = File('${directory.path}${Platform.pathSeparator}frame.png');
     try {
       final encodedPath = _encodeUtf16(file.path);
-      _focusTargetWindow();
-      final selected = _targetWindow;
-      final foregroundScript = selected == null
-          ? ''
-          : '$_inputInterop\n[AivexusDesktopInput]::Focus($selected)\n';
+      // Observation must not reactivate the old selected application:
+      // an agent needs to see other windows to plan a cross-app transition.
       await _runPowerShell(
-        '$foregroundScript${_screenScript.replaceFirst('__PATH__', encodedPath)}',
+        _screenScript.replaceFirst('__PATH__', encodedPath),
         timeout: const Duration(seconds: 20),
       );
       if (!await file.exists()) {
@@ -151,6 +149,28 @@ final class WindowsComputerUseAdapter implements ComputerUseAdapter {
       calloc.free(ownerPid);
     }
     _targetWindow = handle;
+    _expectedLaunchedProcessId = null;
+  }
+
+  @override
+  Future<void> selectWindowAt(int x, int y) async {
+    _requireWindows();
+    // Look up the visible top-level window under a screen coordinate.
+    // No cursor movement, activation, mouse input or text is performed.
+    final output = await _runPowerShell(
+      '$_inputInterop\n'
+      '[AivexusDesktopInput]::SelectWindowAt($x, $y, $pid)',
+    );
+    final handle = int.tryParse(output.trim());
+    if (handle == null || handle == 0) {
+      throw const ComputerUseException(
+        'TARGET_NOT_FOUND',
+        'No eligible desktop window was found at that position.',
+      );
+    }
+    _targetWindow = handle;
+    // This is an explicit transition to a new target, separate from the
+    // single-application smoke test's foreground PID requirement.
     _expectedLaunchedProcessId = null;
   }
 
@@ -465,6 +485,12 @@ public static class AivexusDesktopInput {
     private static extern bool IsWindow(IntPtr handle);
 
     [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr handle);
+
+    [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
@@ -502,6 +528,22 @@ public static class AivexusDesktopInput {
             throw new InvalidOperationException("Selected window lost focus");
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
         mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+    }
+
+    // Selection is deliberately passive. It does not click or activate an
+    // app. A separate subsequent Click must still pass the HWND guard.
+    public static long SelectWindowAt(int x, int y, int excludedProcessId) {
+        var point = new ScreenPoint {x=x, y=y};
+        var root = GetAncestor(WindowFromPoint(point), 2);
+        if (root == IntPtr.Zero || !IsWindow(root) ||
+            !IsWindowVisible(root) || IsIconic(root))
+            throw new InvalidOperationException("No eligible desktop target");
+        uint owningProcessId;
+        GetWindowThreadProcessId(root, out owningProcessId);
+        if (owningProcessId == 0 ||
+            owningProcessId == (uint)excludedProcessId)
+            throw new InvalidOperationException("Cannot select Aivexus or desktop system surface");
+        return root.ToInt64();
     }
 
     public static void Focus(long handle) {
