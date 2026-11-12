@@ -1,21 +1,29 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 
-/// macOS observation-only proof of life. Uses a fixed OS screenshot utility,
-/// no shell, no model-controlled command, no arbitrary executable arguments.
+/// macOS read-only capture via the app's native CoreGraphics bridge.
+/// No shell process is launched and the LLM cannot request TCC permission.
+/// That request is reserved for an explicit user gesture in the lab UI.
 ///
-/// Screen Recording permission must be granted explicitly in macOS System
-/// Settings. Sandbox/signing support is unverified until physical Mac QA.
+/// ScreenCaptureKit remains the future backend for long-lived vision streams.
 final class MacComputerUseAdapter
     implements ComputerUseAdapter, ComputerUseInteractionCapability {
-  Process? _captureProcess;
+  MacComputerUseAdapter({
+    MethodChannel? channel,
+    bool? supportedForTest,
+  })  : _channel = channel ??
+            const MethodChannel('com.aiorchestrator/computer_use_mac'),
+        _supportedForTest = supportedForTest;
+
+  final MethodChannel _channel;
+  final bool? _supportedForTest;
   int _generation = 0;
 
   @override
-  bool get isSupported => Platform.isMacOS;
+  bool get isSupported => _supportedForTest ?? Platform.isMacOS;
 
   @override
   bool get supportsInteraction => false;
@@ -23,70 +31,54 @@ final class MacComputerUseAdapter
   @override
   void cancel() {
     _generation++;
-    _captureProcess?.kill();
-    _captureProcess = null;
   }
 
   @override
   Future<Uint8List> capturePng() async {
     if (!isSupported) throw _unsupported();
     final generation = _generation;
-    final directory = await Directory.systemTemp.createTemp('aivexus_mac_cu_');
-    final target = File(
-      directory.path + Platform.pathSeparator + 'screen.png',
-    );
     try {
-      final Process process;
-      try {
-        process = await Process.start(
-          '/usr/sbin/screencapture',
-          <String>['-x', '-t', 'png', target.path],
-          runInShell: false,
-        );
-      } on ProcessException {
+      final status = await _channel.invokeMapMethod<String, dynamic>(
+        'getStatus',
+      );
+      if (status?['authorized'] != true) {
         throw const ComputerUseException(
-          'SCREEN_CAPTURE_UNAVAILABLE',
-          'macOS screenshot utility could not start.',
+          'SCREEN_CONSENT_REQUIRED',
+          'Allow Screen Recording in macOS System Settings.',
         );
       }
-      _captureProcess = process;
-      // Consume output without logging potentially sensitive information.
-      final stdoutDone = process.stdout.drain<void>();
-      final stderrDone = process.stderr.drain<void>();
-      final int code;
-      try {
-        code = await process.exitCode.timeout(
-          const Duration(seconds: 15),
-        );
-      } on TimeoutException {
-        process.kill();
-        throw const ComputerUseException(
-          'SCREEN_CAPTURE_TIMEOUT',
-          'macOS capture exceeded its time limit.',
-        );
-      } finally {
-        if (identical(_captureProcess, process)) _captureProcess = null;
-      }
-      await Future.wait<void>(<Future<void>>[stdoutDone, stderrDone]);
+      final bytes = await _channel.invokeMethod<Uint8List>(
+        'captureScreenshot',
+      );
       if (generation != _generation) {
         throw const ComputerUseException(
           'SESSION_REVOKED',
-          'The screen capture was cancelled.',
+          'The authorized screen capture was cancelled.',
         );
       }
-      if (code != 0 || !await target.exists()) {
+      if (bytes == null || bytes.isEmpty) {
         throw const ComputerUseException(
-          'SCREEN_CAPTURE_FAILED',
-          'macOS could not capture the screen. Check Screen Recording permission.',
+          'INVALID_FRAME',
+          'macOS returned no screen frame.',
         );
       }
-      return await target.readAsBytes();
-    } finally {
-      try {
-        await directory.delete(recursive: true);
-      } catch (_) {
-        // Cleanup should not mask an actual capture or permission error.
+      return bytes;
+    } on PlatformException catch (error) {
+      if (error.code == 'SCREEN_CONSENT_REQUIRED') {
+        throw const ComputerUseException(
+          'SCREEN_CONSENT_REQUIRED',
+          'Allow Screen Recording in macOS System Settings.',
+        );
       }
+      throw const ComputerUseException(
+        'SCREEN_CAPTURE_FAILED',
+        'The native macOS capture failed.',
+      );
+    } on MissingPluginException {
+      throw const ComputerUseException(
+        'MAC_CAPTURE_UNAVAILABLE',
+        'The macOS Screen Recording bridge is not registered.',
+      );
     }
   }
 
