@@ -45,6 +45,7 @@ Computer Use — Laboratorio** su Windows.
 | Testo Unicode, tasti di navigazione | Implementato; da collaudare |
 | UI di laboratorio con consenso e STOP | Windows + read-only macOS e Android; Android ferma il proprio MediaProjection allo STOP/scadenza; QA fisica da eseguire |
 | Test autorizzazioni, STOP, concorrenza, allowlist e verifica | Aggiunti; CI del nuovo commit da verificare |
+| Lettura locale UI Automation (Windows) | Sorgente nativa e filtro privacy implementati nel ramo QA; test simulati/parser CI in corso; da collaudare su Windows reale |
 | Interpretazione visiva LLM | NON implementata |
 | Motore autonomo astratto `ComputerUseAgentRunner` | Implementato e testato con planner e verificatore simulati; NON collegato a IA reale |
 | Ciclo dinamico observe → decide → agisci → ri-osserva → verifica | Implementato nel runner isolato; manca il modello reale |
@@ -104,6 +105,35 @@ CI senza disattivare Windows Security. La firma e rinviata alla release finale.
    Prima l'osservazione autorizzata; poi, in un secondo passo, input macOS
    tramite permessi Accessibilita e valutazione tecnica/policy Android.
    Nessuna richiesta di installazione beta finche il runtime non e riparato.
+
+## Lettura controlli Windows tramite UI Automation (12 novembre 2026)
+
+Aggiunta una prima sorgente di osservazione strutturata in Computer Use,
+specifica per Windows. Non sostituisce la futura visione completa dello
+schermo: legge **solo la finestra gia' selezionata**, attraverso le API
+locali UI Automation, senza cambiare il focus o inviare input.
+
+- `WindowsComputerUseAdapter.captureSelectedAccessibilityJson()` usa uno
+  script PowerShell costante, che enumera al massimo 64 controlli e
+  non oltre tre livelli di profondita', con limite sui fratelli.
+- Produce tipo controllo, coordinate e nomi brevi, senza chiamare
+  `ValuePattern` o `TextPattern`. I contenuti di Edit/Text/Document
+  non vengono letti. Le schermate con controllo password e gli alberi
+  incompleti producono un segnale sensibile e **nessun riepilogo**.
+- `WindowsComputerUseAccessibilityReader` valida il JSON, limita
+  dimensione/lunghezza, intercetta indicatori sensibili e richiede una
+  sessione attiva: STOP + nuova autorizzazione invalidano risposte vecchie.
+- Il pulsante QA `Leggi controlli finestra (LOCAL)` mostra il risultato
+  sul dispositivo; non usa rete, servizi Cloud o log con contenuti.
+- Aggiunti test Dart per consenso, dati benigni, password, JSON
+  malformato, limite dimensionale e STOP/regrant. Un test Windows analizza
+  staticamente la sintassi PowerShell, senza leggere il desktop CI.
+
+Letture incompiute possono risultare inutilizzabili; comportamento corretto
+in QA: fermarsi e NON generare azioni non verificate. L'accessibilita'
+non offre una rappresentazione visuale completa di tutte le applicazioni;
+serviranno integrazione vision/semantica e collaudo reale ASUS.
+Questa sorgente non e' ancora collegata automaticamente al modello LOCAL.
 
 ## Collegamento LOCAL isolato — ancora non attivato (12 novembre 2026)
 
