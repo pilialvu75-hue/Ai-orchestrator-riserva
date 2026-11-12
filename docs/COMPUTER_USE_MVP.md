@@ -83,8 +83,9 @@ Computer Use — Laboratorio** su Windows.
 
 Non provare su finestre che contengono password, dati riservati o modifiche
 irreversibili. Windows UAC/elevazione, sessioni bloccate e Secure Desktop
-non sono in scope. Se Defender/SmartScreen blocca un binario non firmato,
-risolvere firma e distribuzione: non disattivare le protezioni di Windows.
+non sono in scope. Se Defender/Smart App Control blocca un binario non firmato,
+registrare il blocco come limite dei test fisici; proseguire con i controlli
+CI senza disattivare Windows Security. La firma e rinviata alla release finale.
 
 ## Prossimo ciclo: agenti autonomi
 
@@ -138,8 +139,9 @@ l'abilitazione esplicita in una compilazione di test.
 
 Nessuna pipeline di pubblicazione attualmente attiva riceve quel flag:
 **il laboratorio non e' stato distribuito al dispositivo dell'utente**.
-Prima della distribuzione tramite updater sono richiesti i gate CI,
-sicurezza/firma e una procedura di release QA esplicitamente autorizzata.
+Prima di coinvolgere l'updater sono richiesti gate CI, verifiche di
+sicurezza e una procedura QA esplicitamente autorizzata. La firma non
+blocca i test interni, ma rimane un obiettivo della distribuzione finale.
 
 ## Preparazione del primo collaudo fisico Windows
 
