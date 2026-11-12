@@ -8,11 +8,6 @@ on:
         description: 'Successful manual Build & Release APK run ID'
         type: string
         required: true
-      computer_use_beta:
-        description: 'Owner opt-in: enable Computer Use lab ONLY in a Windows beta (default OFF)'
-        type: boolean
-        required: false
-        default: false
   pull_request:
     branches:
       - main
@@ -177,32 +172,6 @@ jobs:
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Attaching desktop asset to $tag"
 
-      # Owner-only manual beta, using the existing AIVEXUS Windows updater.
-      # Automatic releases and stable/nightly/dev never enable the lab.
-      - name: Resolve manual Windows Computer Use QA opt-in
-        id: computer_use_gate
-        shell: pwsh
-        env:
-          OWNER_OPT_IN: ${{ github.event_name == 'workflow_dispatch' && inputs.computer_use_beta || false }}
-          AUTHORIZED_TAG: ${{ steps.publish_tag.outputs.tag }}
-        run: |
-          $enabled = [string]$env:OWNER_OPT_IN
-          $enabled = $enabled.Trim().ToLowerInvariant()
-          if ($enabled -notin @('true','false')) {
-            throw 'Invalid Computer Use beta opt-in value.'
-          }
-          if ($enabled -eq 'true') {
-            if ($env:GITHUB_EVENT_NAME -ne 'workflow_dispatch' -or
-                $env:AUTHORIZED_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+-beta\+[0-9]+$') {
-              throw 'Computer Use QA is restricted to explicit manual Windows beta releases.'
-            }
-            if (-not (Test-Path 'lib/features/computer_use/computer_use_build_policy.dart')) {
-              throw 'Computer Use QA build policy missing from the authorized source.'
-            }
-          }
-          "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Windows Computer Use QA flag: $enabled; tag: $env:AUTHORIZED_TAG"
-
       - name: Verify release-bound HYBRID beta consent attestation
         id: hybrid_gate
         shell: pwsh
@@ -227,17 +196,9 @@ jobs:
         shell: pwsh
         run: flutter pub get --enforce-lockfile
 
-      - name: Validate Windows Computer Use QA build flag
-        shell: pwsh
-        run: >-
-          flutter test --reporter expanded
-          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_gate.outputs.enabled }}
-          --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=${{ steps.computer_use_gate.outputs.enabled }}
-          test/features/computer_use/computer_use_build_policy_test.dart
-
       - name: Build coordinated Windows release
         shell: pwsh
-        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_gate.outputs.enabled }}
+        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }}
 
       - name: Verify bundled Windows GGUF inference
         shell: pwsh
