@@ -6,6 +6,8 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'package:ai_orchestrator/features/computer_use/computer_use_build_policy.dart';
+import 'package:ai_orchestrator/features/computer_use/windows_2048_qa_game_script.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 import 'package:ai_orchestrator/features/computer_use/windows_computer_use_accessibility_script.dart';
 
@@ -93,21 +95,41 @@ final class WindowsComputerUseAdapter
   @override
   Future<void> openApplication(String application) async {
     _requireWindows();
-    // No user/model-provided binary paths or shell expansion allowed here.
+    // No user/model-provided binary paths, shell expressions or downloads.
+    if (application == 'qa2048' && !ComputerUseLabBuildPolicy.enabled) {
+      throw const ComputerUseException(
+        'QA_GAME_DISABLED',
+        'The game is available only in explicit Computer Use QA builds.',
+      );
+    }
     final executable = switch (application) {
       'notepad' => 'notepad.exe',
       'calculator' => 'calc.exe',
+      'paint' => 'mspaint.exe',
+      'qa2048' => 'powershell.exe',
       _ => throw const ComputerUseException(
           'APPLICATION_NOT_ALLOWED',
           'The selected application is not on the host allowlist.',
         ),
     };
+    final args = application == 'qa2048'
+        ? const <String>[
+            '-NoLogo',
+            '-NoProfile',
+            '-NonInteractive',
+            '-STA',
+            '-WindowStyle',
+            'Hidden',
+            '-Command',
+            kWindows2048QaGameScript,
+          ]
+        : const <String>[];
     _targetWindow = null;
     _observedForegroundWindow = null;
     _expectedLaunchedProcessId = null;
     final launched = await Process.start(
       executable,
-      const <String>[],
+      args,
       mode: ProcessStartMode.detached,
       runInShell: false,
     );
