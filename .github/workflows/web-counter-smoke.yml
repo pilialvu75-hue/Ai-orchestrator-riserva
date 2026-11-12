@@ -1,0 +1,68 @@
+name: Aivexus Web Counter Toolchain Smoke
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/web/build_counter_smoke.py'
+      - 'test/airlab/web_counter_smoke.mjs'
+      - '.github/workflows/web-counter-smoke.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/web/build_counter_smoke.py'
+      - 'test/airlab/web_counter_smoke.mjs'
+      - '.github/workflows/web-counter-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  counter-toolchain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Install Python for isolated build
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Node for functional tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test build integrity and counter interaction
+        run: node --test test/airlab/web_counter_smoke.mjs
+
+      - name: Generate a real offline counter Web artifact
+        run: |
+          python3 scripts/web/build_counter_smoke.py --output build/web-counter
+          python3 -m zipfile -t build/web-counter/aivexus-web-counter-smoke.zip
+          node --check build/web-counter/source/app.js
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          output = Path('build/web-counter')
+          receipt = json.loads((output / 'receipt.json').read_text())
+          blob = (output / receipt['artifactName']).read_bytes()
+          assert receipt['artifactSha256'] == hashlib.sha256(blob).hexdigest()
+          assert receipt['buildState'] == 'files_packaged'
+          assert receipt['validationState'] == 'separate_ci_gate_required'
+          print('Web counter ZIP and receipt verified; no production deployment.')
+          PY
+
+      - name: Publish toolchain smoke artifact only
+        uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-web-counter-smoke-${{ github.run_id }}
+          path: |
+            build/web-counter/aivexus-web-counter-smoke.zip
+            build/web-counter/receipt.json
+          if-no-files-found: error
+          retention-days: 7
