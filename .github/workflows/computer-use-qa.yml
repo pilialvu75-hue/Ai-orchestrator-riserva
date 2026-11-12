@@ -61,9 +61,9 @@ jobs:
       - name: Restore locked dependencies
         run: flutter pub get --enforce-lockfile
       - name: Analyze Windows native Computer Use path
-        run: flutter analyze --no-fatal-infos lib/features/computer_use/windows_computer_use_adapter.dart test/features/computer_use/windows_foreground_target_policy_test.dart test/features/computer_use/windows_native_interop_compile_test.dart test/features/computer_use/windows_accessibility_powershell_parse_test.dart
+        run: flutter analyze --no-fatal-infos lib/features/computer_use/windows_computer_use_adapter.dart test/features/computer_use/windows_foreground_target_policy_test.dart test/features/computer_use/windows_native_interop_compile_test.dart test/features/computer_use/windows_accessibility_powershell_parse_test.dart test/features/computer_use/windows_2048_qa_game_parse_test.dart
       - name: Compile fixed Win32 input interop and test safe foreground targeting
-        run: flutter test --reporter expanded test/features/computer_use/windows_foreground_target_policy_test.dart test/features/computer_use/windows_native_interop_compile_test.dart test/features/computer_use/windows_accessibility_powershell_parse_test.dart
+        run: flutter test --reporter expanded test/features/computer_use/windows_foreground_target_policy_test.dart test/features/computer_use/windows_native_interop_compile_test.dart test/features/computer_use/windows_accessibility_powershell_parse_test.dart test/features/computer_use/windows_2048_qa_game_parse_test.dart
 
   # Unsigned QA binary, NOT a release or installer. This job validates that
   # Windows genuinely compiles with the opt-in lab flag, without changing main.
