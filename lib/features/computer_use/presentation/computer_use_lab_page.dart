@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_build_policy.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_preview_policy.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_session.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_smoke_scenario.dart';
 import 'package:ai_orchestrator/features/computer_use/android_computer_use_adapter.dart';
@@ -300,7 +301,10 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       // Selecting a captured window is passive. Do NOT overwrite the
       // screenshot with Aivexus (now foreground) before the next tap.
       // Other actions can refresh after their target has been focused.
-      if (_session.isActive && params['action'] != 'select_window_at') {
+      if (_session.isActive &&
+          ComputerUsePreviewPolicy.shouldRefreshAfterAction(
+            params['action'] as String?,
+          )) {
         await _refreshFrame();
       }
       if (mounted) setState(() => _message = result.output);
