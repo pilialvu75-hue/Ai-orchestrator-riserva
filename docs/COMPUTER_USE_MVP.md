@@ -50,7 +50,7 @@ Computer Use — Laboratorio** su Windows.
 | Ciclo dinamico observe → decide → agisci → ri-osserva → verifica | Implementato nel runner isolato; manca il modello reale |
 | Revoca durante inferenza / nuova sessione | Revisioni di autorizzazione implementate; test in CI |
 | Pianificatore LOCAL JSON con descrizione schermata | Contratto e parser tipizzato implementati; 8 test simulati, nessuna inferenza reale collegata |
-| Ciclo autonomo con LLM configurato | NON implementato; esecutore e protocollo LOCAL pronti per futura integrazione, senza modello reale |
+| Ciclo autonomo con LLM configurato | Ponte verso LocalRuntimeProvider preparato sul ramo con test simulati; non connesso alla UI, manca visione locale reale |
 | UI Automation: verifica solo marcatore sintetico QA | Implementata sperimentalmente; non validata su Windows fisico |
 | Sequenza controllata Blocco note → scrittura → verifica → screenshot | Implementata; CI da verificare e QA fisico necessario |
 | Integrazione Diagnostics anonimizzata | NON implementata |
@@ -104,6 +104,29 @@ CI senza disattivare Windows Security. La firma e rinviata alla release finale.
    Prima l'osservazione autorizzata; poi, in un secondo passo, input macOS
    tramite permessi Accessibilita e valutazione tecnica/policy Android.
    Nessuna richiesta di installazione beta finche il runtime non e riparato.
+
+## Collegamento LOCAL isolato — ancora non attivato (12 novembre 2026)
+
+L'app Aivexus funziona nuovamente. Per evitare di toccarne l'inferenza
+principale, e' stata preparata una classe di collegamento **solo nel ramo
+Computer Use**: `AivexusComputerUseLocalDecisionModel`.
+
+- Riceve un `LocalRuntimeProvider` esistente come dipendenza tipizzata;
+  nessun Cloud router o fallback puo' essere fornito tramite il contratto.
+- Forma `InferenceRequest` con `localOnly`, `isOffline=true`,
+  `allowWebSearchTool=false`, `allowCloudProviderFailover=false`,
+  `maxTokens=256` e temperatura 0.1.
+- Accetta soltanto un output finale positivo, esamina un massimo di 4096
+  caratteri, e rifiuta stream incompleti, errori e risposte vuote.
+- STOP nell'agent runner notifica il planner e il modello; il token di
+  cancellazione interrompe una generazione LOCAL ancora in esecuzione.
+- Test isolati con runtime falso coprono routing offline, risposta finale,
+  errore, stream incompleto, STOP e configurazione mancante.
+
+**Non e' ancora attivo**: manca un componente affidabile per descrivere
+la schermata (accessibilita' strutturata / visione locale), collegare il
+modello reale selezionato alla sessione UI e verificare l'esito su hardware.
+Il test Win32/passaggio tra finestre non equivale a Computer Use autonomo.
 
 ## Estensione del desktop multi-finestra (12 novembre 2026)
 
