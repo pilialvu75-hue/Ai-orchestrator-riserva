@@ -174,6 +174,25 @@ final class WindowsComputerUseAdapter
     _expectedLaunchedProcessId = null;
   }
 
+  /// Reads a bounded, read-only accessibility snapshot of the *selected*
+  /// Windows window. It never retrieves Edit/Document values or types input.
+  /// The result is local JSON; no provider is called here.
+  Future<String> captureSelectedAccessibilityJson() async {
+    _requireWindows();
+    final handle = _requireTargetWindow();
+    final output = await _runPowerShell(
+      _accessibilitySnapshotScript.replaceFirst('__HANDLE__', '$handle'),
+      timeout: const Duration(seconds: 16),
+    );
+    if (output.isEmpty || output.length > 12000) {
+      throw const ComputerUseException(
+        'INVALID_ACCESSIBILITY_SUMMARY',
+        'Windows returned an invalid or oversized accessibility snapshot.',
+      );
+    }
+    return output.trim();
+  }
+
   @override
   Future<bool> verifyTestMarker(String marker) async {
     _requireWindows();
@@ -357,6 +376,326 @@ $_inputInterop
   /// Exposes only the fixed source template for an isolated Windows CI
   /// compilation check. Does not grant desktop permissions or run input.
   static String get inputInteropSourceForTest => _inputInterop;
+
+  // Enumerate a limited Control View tree. No ValuePattern/TextPattern reads:
+  // editable controls often contain passwords or private document text.
+  // Never log or upload this output; the LOCAL screen reader filters it again.
+  static const String _accessibilitySnapshotScript = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$root = [System.Windows.Automation.AutomationElement]::FromHandle(
+    [IntPtr]__HANDLE__)
+if ($null -eq $root) { throw 'Selected accessibility window is missing' }
+$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+$queue = New-Object System.Collections.Queue
+$queue.Enqueue(@{ node = $root; depth = 0 })
+$items = New-Object 'System.Collections.Generic.List[string]'
+$sensitive = $false
+$scanned = 0
+while ($queue.Count -gt 0 -and $scanned -lt 64) {
+    $entry = $queue.Dequeue()
+    $node = $entry.node
+    $depth = [int]$entry.depth
+    $scanned++
+    try {
+        $info = $node.Current
+        if ($info.IsPassword) {
+            $sensitive = $true
+            break
+        }
+        $type = $info.ControlType.ProgrammaticName
+        # Edit, Text and Document Name may include the user's document data.
+        $hideName = $type -match '\.(Edit|Text|Document)
+  static const String _verificationScript = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$marker = [Text.Encoding]::Unicode.GetString(
+    [Convert]::FromBase64String('__MARKER__'))
+$root = [System.Windows.Automation.AutomationElement]::FromHandle(
+    [IntPtr]__HANDLE__)
+$found = $false
+if ($null -ne $root) {
+    $scope = [System.Windows.Automation.TreeScope]::Descendants
+    $nodes = $root.FindAll($scope,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    $limit = [Math]::Min($nodes.Count, 256)
+    for ($i = -1; $i -lt $limit; $i++) {
+        $node = if ($i -eq -1) { $root } else { $nodes[$i] }
+        try {
+            $text = $node.GetCurrentPattern(
+                [System.Windows.Automation.TextPattern]::Pattern)
+            if ($null -ne $text -and
+                $text.DocumentRange.GetText(-1).Contains($marker)) {
+                $found = $true
+                break
+            }
+        } catch { }
+        try {
+            $value = $node.GetCurrentPattern(
+                [System.Windows.Automation.ValuePattern]::Pattern)
+            if ($null -ne $value -and $value.Current.Value.Contains($marker)) {
+                $found = $true
+                break
+            }
+        } catch { }
+    }
+}
+if ($found) { Write-Output 'FOUND' }
+else { Write-Output 'NOT_FOUND' }
+''';
+
+  static const String _screenScript = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$path = [System.Text.Encoding]::Unicode.GetString(
+    [Convert]::FromBase64String('__PATH__'))
+$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bitmap = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+try {
+    $graphics.CopyFromScreen($bounds.Location,
+        [System.Drawing.Point]::Empty, $bounds.Size)
+    $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+} finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+}
+''';
+
+  static const String _inputInterop = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class AivexusDesktopInput {
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint x, uint y,
+        uint data, UIntPtr extraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte key, byte scan,
+        uint flags, UIntPtr extraInfo);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KeyInput {
+        public ushort vk;
+        public ushort scan;
+        public uint flags;
+        public uint time;
+        public UIntPtr extraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MouseInput {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public UIntPtr extraInfo;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputUnion {
+        [FieldOffset(0)] public KeyInput keyboard;
+        [FieldOffset(0)] public MouseInput mouse;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Input {
+        public uint type;
+        public InputUnion data;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint count, Input[] inputs, int size);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ScreenPoint {
+        public int x;
+        public int y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(ScreenPoint point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr handle, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(
+        IntPtr handle, out uint processId);
+
+    public static long SelectForeground(int excludedProcessId) {
+        var window = GetForegroundWindow();
+        if (window == IntPtr.Zero)
+            throw new InvalidOperationException("No foreground window");
+        uint owningProcessId;
+        GetWindowThreadProcessId(window, out owningProcessId);
+        if (owningProcessId == (uint)excludedProcessId)
+            throw new InvalidOperationException("Aivexus is in the foreground");
+        return window.ToInt64();
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr handle);
+
+    public static void Click(int x, int y, long expectedHandle) {
+        var expected = new IntPtr(expectedHandle);
+        if (expected == IntPtr.Zero || !IsWindow(expected))
+            throw new InvalidOperationException("The selected window is invalid");
+        var position = new ScreenPoint {x=x, y=y};
+        // Reject coordinates over another application before ANY input.
+        var root = GetAncestor(WindowFromPoint(position), 2);
+        if (root != expected)
+            throw new InvalidOperationException("Click lies outside selected window");
+        if (!SetCursorPos(x, y))
+            throw new InvalidOperationException("Unable to move cursor");
+        // A window can move/change while the pointer moves: check again.
+        root = GetAncestor(WindowFromPoint(position), 2);
+        if (root != expected || GetForegroundWindow() != expected)
+            throw new InvalidOperationException("Selected window lost focus");
+        mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+    }
+
+    // Selection is deliberately passive. It does not click or activate an
+    // app. A separate subsequent Click must still pass the HWND guard.
+    public static long SelectWindowAt(int x, int y, int excludedProcessId) {
+        var point = new ScreenPoint {x=x, y=y};
+        var root = GetAncestor(WindowFromPoint(point), 2);
+        if (root == IntPtr.Zero || !IsWindow(root) ||
+            !IsWindowVisible(root) || IsIconic(root))
+            throw new InvalidOperationException("No eligible desktop target");
+        uint owningProcessId;
+        GetWindowThreadProcessId(root, out owningProcessId);
+        if (owningProcessId == 0 ||
+            owningProcessId == (uint)excludedProcessId)
+            throw new InvalidOperationException("Cannot select Aivexus or desktop system surface");
+        return root.ToInt64();
+    }
+
+    public static void Focus(long handle) {
+        var window = new IntPtr(handle);
+        if (!IsWindow(window))
+            throw new InvalidOperationException("Target window is no longer valid");
+        // Flutter already brought the window to the foreground. Avoid a
+        // redundant SetForegroundWindow call from the child PowerShell host,
+        // which Windows may reject due to foreground activation policy.
+        if (GetForegroundWindow() != window && !SetForegroundWindow(window))
+            throw new InvalidOperationException("Unable to focus target window");
+    }
+
+    public static void TypeText(string text) {
+        foreach (char c in text) {
+            var down = new Input {
+                type = 1,
+                data = new InputUnion {
+                    keyboard = new KeyInput {scan = c, flags = 0x0004}
+                }
+            };
+            var up = new Input {
+                type = 1,
+                data = new InputUnion {
+                    keyboard = new KeyInput {scan = c, flags = 0x0006}
+                }
+            };
+            var input = new Input[] {down, up};
+            if (SendInput(2, input, Marshal.SizeOf(typeof(Input))) != 2)
+                throw new InvalidOperationException("Unable to send text");
+        }
+    }
+
+    private static void Key(byte vk, bool release) {
+        keybd_event(vk, 0, release ? 0x0002u : 0u, UIntPtr.Zero);
+    }
+
+    public static void PressKey(string key) {
+        byte vk;
+        switch (key) {
+            case "enter": vk = 0x0D; break;
+            case "tab": vk = 0x09; break;
+            case "escape": vk = 0x1B; break;
+            case "backspace": vk = 0x08; break;
+            case "up": vk = 0x26; break;
+            case "down": vk = 0x28; break;
+            case "left": vk = 0x25; break;
+            case "right": vk = 0x27; break;
+            case "ctrl+a":
+                Key(0x11, false);
+                try { Key(0x41, false); Key(0x41, true); }
+                finally { Key(0x11, true); }
+                return;
+            default: throw new ArgumentException("Unknown navigation key");
+        }
+        Key(vk, false);
+        Key(vk, true);
+    }
+}
+"@
+''';
+}
+
+        $name = if ($hideName) { '[content hidden]' } else { $info.Name }
+        if (-not $hideName -and $name -match '(?i)(password|passcode|credit.card|card.number|bank.account|security.code|two.factor|verification.code)') {
+            $sensitive = $true
+            break
+        }
+        $name = [string]$name
+        $name = $name.Replace([char]10, ' ').Replace([char]13, ' ')
+        if ($name.Length -gt 64) { $name = $name.Substring(0, 64) }
+        $rect = $info.BoundingRectangle
+        if ($rect.Width -gt 0 -and $rect.Height -gt 0 -and
+            -not [double]::IsInfinity($rect.X) -and
+            -not [double]::IsInfinity($rect.Y)) {
+            $x = [int][Math]::Round($rect.X)
+            $y = [int][Math]::Round($rect.Y)
+            [void]$items.Add("$type ($x,$y) $name")
+        }
+    } catch {
+        # An inaccessible or transient control does not grant new privileges.
+    }
+    if ($depth -ge 3) { continue }
+    $child = $null
+    try { $child = $walker.GetFirstChild($node) } catch { }
+    $siblings = 0
+    while ($null -ne $child -and $siblings -lt 16 -and
+           ($scanned + $queue.Count) -lt 64) {
+        $queue.Enqueue(@{ node = $child; depth = ($depth + 1) })
+        $siblings++
+        try { $child = $walker.GetNextSibling($child) }
+        catch { $child = $null }
+    }
+}
+if ($sensitive) {
+    [pscustomobject]@{ sensitive = $true; description = '' } |
+        ConvertTo-Json -Compress
+} else {
+    [pscustomobject]@{
+        sensitive = $false
+        description = ($items -join [Environment]::NewLine)
+    } | ConvertTo-Json -Compress
+}
+''';
 
   // Verify only a synthetic marker; return FOUND/NOT_FOUND, never UI text.
   static const String _verificationScript = r'''
