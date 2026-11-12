@@ -9,7 +9,7 @@ on:
         type: string
         required: true
       computer_use_beta:
-        description: 'Owner opt-in: include the Computer Use lab in a Windows beta ONLY (default OFF)'
+        description: 'Owner opt-in: enable Computer Use lab ONLY in a Windows beta (default OFF)'
         type: boolean
         required: false
         default: false
@@ -177,9 +177,8 @@ jobs:
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Attaching desktop asset to $tag"
 
-      # A published Windows beta uses the SAME app and in-app updater.
-      # An explicitly dispatched recovery build may opt into the Computer Use
-      # laboratory. Ordinary Windows, stable and automatic publishers stay OFF.
+      # Owner-only manual beta, using the existing AIVEXUS Windows updater.
+      # Automatic releases and stable/nightly/dev never enable the lab.
       - name: Resolve manual Windows Computer Use QA opt-in
         id: computer_use_gate
         shell: pwsh
@@ -194,7 +193,17 @@ jobs:
           }
           if ($enabled -eq 'true') {
             if ($env:GITHUB_EVENT_NAME -ne 'workflow_dispatch' -or
-                $env:AUTHORIZED_TAG -notmatch '^v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\+[0-9]+
+                $env:AUTHORIZED_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+-beta\+[0-9]+$') {
+              throw 'Computer Use QA is restricted to explicit manual Windows beta releases.'
+            }
+            if (-not (Test-Path 'lib/features/computer_use/computer_use_build_policy.dart')) {
+              throw 'Computer Use QA build policy missing from the authorized source.'
+            }
+          }
+          "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Windows Computer Use QA flag: $enabled; tag: $env:AUTHORIZED_TAG"
+
+      - name: Verify release-bound HYBRID beta consent attestation
         id: hybrid_gate
         shell: pwsh
         env:
@@ -232,220 +241,6 @@ jobs:
           flutter build windows --release
           --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }}
           --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_gate.outputs.enabled }}
-
-      - name: Verify bundled Windows GGUF inference
-        shell: pwsh
-        run: |
-          & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
-
-      - name: Validate Windows compatibility bundle
-        shell: pwsh
-        run: |
-          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
-
-      - name: Prepare Windows release payload
-        id: payload
-        shell: pwsh
-        run: |
-          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
-          if (-not (Test-Path $releaseDir)) {
-            throw "Windows release directory not found: $releaseDir"
-          }
-
-          $exe = Join-Path $releaseDir 'ai_orchestrator.exe'
-          if (-not (Test-Path $exe)) {
-            throw "Windows executable not found: $exe"
-          }
-          if (-not (Test-Path (Join-Path $releaseDir 'data'))) {
-            throw 'Flutter data directory is missing from the Windows release bundle.'
-          }
-
-          $runtimeDlls = @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
-          foreach ($dll in $runtimeDlls) {
-            if (Test-Path (Join-Path $releaseDir $dll)) {
-              continue
-            }
-            $candidate = $null
-            if ($env:VCToolsRedistDir) {
-              $candidate = Get-ChildItem -Path $env:VCToolsRedistDir -Filter $dll -Recurse -ErrorAction SilentlyContinue |
-                Where-Object { $_.FullName -match '\\x64\\' } |
-                Select-Object -First 1
-            }
-            if ($candidate) {
-              Copy-Item $candidate.FullName (Join-Path $releaseDir $dll)
-            }
-          }
-
-          $isccCandidates = @(
-            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
-            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
-            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
-          )
-          $iscc = $isccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-          if (-not $iscc) {
-            $isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-            if ($isccCommand) {
-              $iscc = $isccCommand.Source
-            }
-          }
-          if (-not $iscc) {
-            throw 'Inno Setup compiler ISCC.exe was not found on the windows-2022 runner.'
-          }
-
-          $redist = $null
-          if ($env:VCToolsRedistDir -and (Test-Path $env:VCToolsRedistDir)) {
-            $redist = Get-ChildItem -Path $env:VCToolsRedistDir -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-          }
-          if (-not $redist) {
-            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-            if (Test-Path $vswhere) {
-              $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-              if ($vsInstall) {
-                $redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
-                if (Test-Path $redistRoot) {
-                  $redist = Get-ChildItem -Path $redistRoot -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
-                    Sort-Object FullName -Descending |
-                    Select-Object -First 1
-                }
-              }
-            }
-          }
-          if (-not $redist) {
-            throw 'Matching Visual Studio 2022 vc_redist.x64.exe was not found.'
-          }
-
-          $outputDir = Join-Path $PWD 'build\windows\release-publish'
-          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
-          $generatedDefines = Join-Path $PWD 'windows\installer\ci_generated.iss'
-          @(
-            "#define AppVersion `"${{ steps.version.outputs.release_version }}`"",
-            "#define ReleaseDir `"$releaseDir`"",
-            "#define VCRedistPath `"$($redist.FullName)`"",
-            "#define OutputDir `"$outputDir`""
-          ) | Set-Content -Path $generatedDefines -Encoding ASCII
-
-          "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "output_dir=$outputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Build versioned Windows Setup.exe
-        id: installer
-        shell: pwsh
-        run: |
-          $iscc = '${{ steps.payload.outputs.iscc }}'
-          $outputDir = '${{ steps.payload.outputs.output_dir }}'
-          $script = Join-Path $PWD 'windows\installer\ai_orchestrator.iss'
-
-          & $iscc $script
-          if ($LASTEXITCODE -ne 0) {
-            throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
-          }
-
-          $setupPath = Join-Path $outputDir 'AI-Orchestrator-Setup-x64.exe'
-          if (-not (Test-Path $setupPath)) {
-            throw "Expected Setup.exe was not produced: $setupPath"
-          }
-          $setupSize = (Get-Item $setupPath).Length
-          if ($setupSize -lt 1048576) {
-            throw "Generated Setup.exe is unexpectedly small: $setupSize bytes"
-          }
-
-          $hash = Get-FileHash -Path $setupPath -Algorithm SHA256
-          $hashPath = "$setupPath.sha256"
-          "$($hash.Hash.ToLowerInvariant())  AI-Orchestrator-Setup-x64.exe" | Set-Content -Path $hashPath -Encoding ASCII
-
-          "setup_path=$setupPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "hash_path=$hashPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "setup_sha256=$($hash.Hash.ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Windows release installer: $setupPath ($setupSize bytes)"
-          Write-Host "SHA256: $($hash.Hash)"
-
-      - name: Verify matching Android release exists
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $gh = Get-Command gh -ErrorAction SilentlyContinue
-          if (-not $gh) {
-            throw 'GitHub CLI is unavailable on the hosted runner.'
-          }
-          gh release view '${{ steps.publish_tag.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json tagName,publishedAt
-          if ($LASTEXITCODE -ne 0) {
-            throw 'The matching Android GitHub Release does not exist; refusing to publish a mismatched Windows installer.'
-          }
-
-      - name: Publish Windows installer into matching GitHub Release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload '${{ steps.publish_tag.outputs.tag }}' '${{ steps.installer.outputs.setup_path }}' '${{ steps.installer.outputs.hash_path }}' --clobber --repo "$env:GITHUB_REPOSITORY"
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Failed to upload Windows installer assets to the coordinated GitHub Release.'
-          }
-
-      - name: Verify published Windows release assets
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $release = gh release view '${{ steps.publish_tag.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json assets | ConvertFrom-Json
-          $assetNames = @($release.assets | ForEach-Object { $_.name })
-          if ($assetNames -notcontains 'AI-Orchestrator-Setup-x64.exe') {
-            throw 'Published release is missing AI-Orchestrator-Setup-x64.exe.'
-          }
-          if ($assetNames -notcontains 'AI-Orchestrator-Setup-x64.exe.sha256') {
-            throw 'Published release is missing the Windows installer SHA-256 file.'
-          }
-          Write-Host "Windows release assets published on ${{ steps.publish_tag.outputs.tag }}"
-
-      - name: Preserve published installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-orchestrator-windows-release-${{ steps.version.outputs.release_version }}
-          path: |
-            ${{ steps.installer.outputs.setup_path }}
-            ${{ steps.installer.outputs.hash_path }}
-          if-no-files-found: error
-          retention-days: 14
-) {
-              throw 'Computer Use lab may only be enabled by explicit owner dispatch for a verified Windows beta release.'
-            }
-            if (-not (Test-Path 'lib/features/computer_use/computer_use_build_policy.dart')) {
-              throw 'Computer Use build policy missing from the release-bound source.'
-            }
-          }
-          "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Windows Computer Use QA enabled: $enabled; release: $env:AUTHORIZED_TAG"
-
-      - name: Verify release-bound HYBRID beta consent attestation
-        id: hybrid_gate
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $enabled = 'false'
-          if (Test-Path 'scripts/hybrid_beta_release_manifest.py') {
-            $file = 'HYBRID-BETA-RELEASE-ATTESTATION.txt'
-            gh release download '${{ steps.publish_tag.outputs.tag }}' --repo $env:GITHUB_REPOSITORY --pattern $file --dir $env:RUNNER_TEMP --clobber
-            if ($LASTEXITCODE -ne 0) { throw 'Missing signed-off HYBRID release attestation' }
-            $enabled = python scripts/hybrid_beta_release_manifest.py resolve --path (Join-Path $env:RUNNER_TEMP $file) --source-sha '${{ steps.android_source.outputs.source_sha }}' --run-number '${{ steps.android_source.outputs.run_number }}' --tag '${{ steps.publish_tag.outputs.tag }}'
-            if ($LASTEXITCODE -ne 0) { throw 'HYBRID attestation mismatch with the authorized Android release' }
-            $enabled = [string]$enabled
-            $enabled = $enabled.Trim()
-          }
-          if ($enabled -notin @('true','false')) { throw 'Invalid HYBRID beta build flag' }
-          "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Protected HYBRID consent Windows build: $enabled"
-
-      - name: Resolve Flutter dependencies
-        shell: pwsh
-        run: flutter pub get --enforce-lockfile
-
-      - name: Build coordinated Windows release
-        shell: pwsh
-        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }}
 
       - name: Verify bundled Windows GGUF inference
         shell: pwsh
