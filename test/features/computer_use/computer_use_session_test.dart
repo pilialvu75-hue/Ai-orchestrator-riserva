@@ -103,6 +103,33 @@ class FakeDesktop implements ComputerUseAdapter,
 }
 
 void main() {
+  test('practical Windows QA apps are explicit aliases, not arbitrary shell',
+      () async {
+    expect(ComputerUseSession.allowedApplications,
+        containsAll(<String>['notepad', 'calculator', 'paint', 'qa2048']));
+    expect(ComputerUseSession.allowedApplications,
+        isNot(contains('powershell')));
+    expect(ComputerUseSession.allowedApplications,
+        isNot(contains('explorer')));
+    final adapter = FakeDesktop();
+    final session = ComputerUseSession(adapter: adapter);
+    session.beginSession(allowInteraction: false);
+    final rejected = await session.execute(<String, dynamic>{
+      'action': 'open_app',
+      'app': 'qa2048',
+    });
+    expect(rejected.error, 'READ_ONLY_SESSION');
+    expect(adapter.launches, 0);
+    session.stop();
+    session.beginSession(allowInteraction: true);
+    final opened = await session.execute(<String, dynamic>{
+      'action': 'open_app',
+      'app': 'qa2048',
+    });
+    expect(opened.success, isTrue);
+    expect(adapter.launchedApp, 'qa2048');
+  });
+
   group('Computer Use bounded smoke workflow', () {
     test('PASS requires verified app content, not just a tool call',
         () async {
