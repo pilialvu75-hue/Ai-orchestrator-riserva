@@ -1,0 +1,32 @@
+name: Aivexus Web Owned Approval Reservation Contract
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/web/approved_execution_reservation.mjs'
+      - 'test/airlab/web_approval_reservation.mjs'
+      - '.github/workflows/web-approval-reservation.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/web/approved_execution_reservation.mjs'
+      - 'test/airlab/web_approval_reservation.mjs'
+      - '.github/workflows/web-approval-reservation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  approval-reservation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test trusted approval and concurrent idempotency
+        run: node --test test/airlab/web_approval_reservation.mjs
