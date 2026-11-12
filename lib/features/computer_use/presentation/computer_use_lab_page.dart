@@ -470,10 +470,11 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                       : 'Scegli altra finestra dalla schermata'),
                 ),
                 const Text(
-                  'Dopo aver aggiornato la schermata, scegli il bersaglio '
-                  'con un tocco. La scelta NON clicca: soltanto un secondo '
-                  'tocco esegue un clic nella finestra selezionata. '
-                  'Puoi ripetere la scelta per passare ad altre applicazioni.',
+                  'Porta prima l’app desiderata in primo piano e usa '
+                  '“Acquisisci tra 4 secondi”. Tornato qui, scegli un punto '
+                  'di quella finestra nella cattura. Questo primo tocco '
+                  'seleziona SENZA cliccare; un secondo tocco può cliccare. '
+                  'Per passare a un’altra app, acquisiscila di nuovo.',
                 ),
               ],
             ],
