@@ -38,6 +38,19 @@ void main() {
       }
     });
 
+    test('cross-app selection is bound to screenshot HWND, not live cursor',
+        () {
+      final source = WindowsComputerUseAdapter.inputInteropSourceForTest;
+      final selected = source.split('public static long SelectObservedWindowAt');
+      expect(selected, hasLength(2));
+      final selector = selected.last.split('public static void Focus').first;
+      expect(selector, contains('observedHandle'));
+      expect(selector, contains('GetWindowRect(observed, out rect)'));
+      expect(selector, isNot(contains('WindowFromPoint')));
+      expect(selector, isNot(contains('SetForegroundWindow')));
+      expect(selector, isNot(contains('mouse_event')));
+    });
+
     test('manual targeting works without a pending launched test app', () {
       expect(
         WindowsComputerUseAdapter.isExpectedForegroundProcess(
