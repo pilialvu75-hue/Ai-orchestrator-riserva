@@ -24,9 +24,20 @@ class FakeDesktop implements ComputerUseAdapter, ComputerUseInteractionCapabilit
   int launches = 0;
   String? launchedApp;
   Completer<Uint8List>? blockedCapture;
+  int pendingForegroundFailures = 0;
+  String foregroundFailureCode = 'LAUNCHED_APP_NOT_FOREGROUND';
 
   @override
-  Future<void> selectForegroundWindow() async => selections++;
+  Future<void> selectForegroundWindow() async {
+    selections++;
+    if (pendingForegroundFailures > 0) {
+      pendingForegroundFailures--;
+      throw ComputerUseException(
+        foregroundFailureCode,
+        'A test window is not ready for foreground selection.',
+      );
+    }
+  }
 
   @override
   Future<void> openApplication(String application) async {
@@ -137,6 +148,93 @@ void main() {
       expect(result.passed, isFalse);
       expect(result.code, 'SESSION_INACTIVE');
       expect(adapter.launches, 1);
+      expect(adapter.typing, 0);
+    });
+
+    test('waits for a slow Notepad foreground without sending early input',
+        () async {
+      final adapter = FakeDesktop()..pendingForegroundFailures = 3;
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      final scenario = ComputerUseSmokeScenario(
+        delay: (_) async {},
+      );
+      final result = await scenario.run(session: session);
+      expect(result.passed, isTrue);
+      expect(adapter.selections, 4);
+      expect(adapter.typing, 1);
+      expect(adapter.markerChecks, 1);
+    });
+
+    test('never types when an unrelated app retains foreground', () async {
+      final adapter = FakeDesktop()..pendingForegroundFailures = 100;
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      final scenario = ComputerUseSmokeScenario(
+        delay: (_) async {},
+      );
+      final result = await scenario.run(session: session);
+      expect(result.passed, isFalse);
+      expect(result.stage, 'select');
+      expect(result.code, 'LAUNCHED_APP_NOT_FOREGROUND');
+      expect(adapter.selections, 5);
+      expect(adapter.typing, 0);
+      expect(adapter.markerChecks, 0);
+    });
+
+    test('unexpected target error aborts without retries or typing', () async {
+      final adapter = FakeDesktop()
+        ..pendingForegroundFailures = 1
+        ..foregroundFailureCode = 'TARGET_FOCUS_DENIED';
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      final result = await ComputerUseSmokeScenario(
+        delay: (_) async {},
+      ).run(session: session);
+      expect(result.passed, isFalse);
+      expect(result.code, 'TARGET_FOCUS_DENIED');
+      expect(adapter.selections, 1);
+      expect(adapter.typing, 0);
+    });
+
+    test('STOP then regrant during launch wait cannot adopt new grant',
+        () async {
+      final adapter = FakeDesktop();
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      var waits = 0;
+      final scenario = ComputerUseSmokeScenario(
+        delay: (_) async {
+          waits++;
+          session.stop();
+          session.beginSession(allowInteraction: true);
+        },
+      );
+      final result = await scenario.run(session: session);
+      expect(result.passed, isFalse);
+      expect(result.stage, 'waiting');
+      expect(result.code, 'SESSION_REVOKED');
+      expect(waits, 1);
+      expect(adapter.selections, 0);
+      expect(adapter.typing, 0);
+      expect(session.isActive, isTrue);
+    });
+
+    test('STOP during target retry blocks all remaining attempts', () async {
+      final adapter = FakeDesktop()..pendingForegroundFailures = 10;
+      final session = ComputerUseSession(adapter: adapter);
+      session.beginSession(allowInteraction: true);
+      var waits = 0;
+      final result = await ComputerUseSmokeScenario(
+        delay: (_) async {
+          waits++;
+          if (waits == 2) session.stop();
+        },
+      ).run(session: session);
+      expect(result.passed, isFalse);
+      expect(result.stage, 'select');
+      expect(result.code, 'SESSION_INACTIVE');
+      expect(adapter.selections, 1);
       expect(adapter.typing, 0);
     });
 
