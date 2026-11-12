@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - 'scripts/web/approved_execution_reservation.mjs'
+      - 'scripts/web/d1_approval_reservation_store.mjs'
+      - 'scripts/web/sql/001_web_approval_reservation.sql'
+      - 'test/airlab/web_d1_approval_reservation.mjs'
+      - 'test/airlab/web_d1_sqlite_contract_test.py'
       - 'test/airlab/web_approval_reservation.mjs'
       - '.github/workflows/web-approval-reservation.yml'
   push:
@@ -11,6 +15,10 @@ on:
       - main
     paths:
       - 'scripts/web/approved_execution_reservation.mjs'
+      - 'scripts/web/d1_approval_reservation_store.mjs'
+      - 'scripts/web/sql/001_web_approval_reservation.sql'
+      - 'test/airlab/web_d1_approval_reservation.mjs'
+      - 'test/airlab/web_d1_sqlite_contract_test.py'
       - 'test/airlab/web_approval_reservation.mjs'
       - '.github/workflows/web-approval-reservation.yml'
 
@@ -29,4 +37,7 @@ jobs:
         with:
           node-version: '22'
       - name: Test trusted approval and concurrent idempotency
-        run: node --test test/airlab/web_approval_reservation.mjs
+        run: |
+          node --test test/airlab/web_approval_reservation.mjs
+          node --test test/airlab/web_d1_approval_reservation.mjs
+          python3 -m unittest discover -s test/airlab -p 'web_d1_sqlite_contract_test.py' -v
