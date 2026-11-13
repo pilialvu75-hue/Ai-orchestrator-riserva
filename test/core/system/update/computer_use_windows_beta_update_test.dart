@@ -80,7 +80,7 @@ void main() {
       UpdateTargetPlatform.windows, ReleaseChannel.beta,
     );
     expect(manifest, isNotNull);
-    expect(manifest!.version, '1.0.15-beta+200001');
+    expect(manifest!.version, 'v1.0.15.200001-beta');
     expect(manifest.windowsArtifact?.sha256, sha);
     expect(manifest.artifactFor(UpdateTargetPlatform.android), isNull);
   });
@@ -89,7 +89,7 @@ void main() {
     final manifest = await discover(
       UpdateTargetPlatform.android, ReleaseChannel.beta,
     );
-    expect(manifest?.version, '1.0.15-beta+104164');
+    expect(manifest?.version, 'v1.0.15.104164-beta');
     expect(manifest?.artifactFor(UpdateTargetPlatform.android), isNotNull);
   });
 
