@@ -251,6 +251,32 @@ void main() {
       expect(desktop.launches, 2);
     });
 
+    test('2048 repeated arrows are allowed within a strict step limit', () async {
+      final desktop = FakeAgentDesktop();
+      final session = ComputerUseSession(adapter: desktop);
+      session.beginSession(allowInteraction: true);
+      const left = ComputerUseAgentDecision.act(
+        'press_key', <String, dynamic>{'key': 'left'},
+      );
+      // Three or more identical directions may be the actual LOCAL model
+      // choice after observing new 2048 boards, not a stuck desktop action.
+      final planner = QueueAgentPlanner(<ComputerUseAgentDecision>[
+        left, left, left, left,
+      ]);
+      final runner = ComputerUseAgentRunner(
+        session: session,
+        planner: planner,
+        verifier: FakeGoalVerifier((_) async => false),
+        maxSteps: 4,
+        maxConsecutiveIdenticalActions: 0,
+      );
+      final result = await runner.run(goal: 'Play 2048 offline');
+      expect(result.outcome, ComputerUseAgentOutcome.maxSteps);
+      expect(result.steps, 4);
+      expect(desktop.presses, 4);
+      expect(planner.seen.length, 4);
+    });
+
     test('max steps bounds a changing plan', () async {
       final desktop = FakeAgentDesktop();
       final session = ComputerUseSession(adapter: desktop);
