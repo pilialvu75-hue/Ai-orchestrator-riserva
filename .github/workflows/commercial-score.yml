@@ -72,11 +72,13 @@ jobs:
           "$AAPT" dump badging "$APK" | tee "$RUNNER_TEMP/aivexus-score-android-badging.txt"
           grep -Fq "package: name='dev.aivexus.aivexus_score'" "$RUNNER_TEMP/aivexus-score-android-badging.txt"
           "$AAPT" dump permissions "$APK" | tee "$RUNNER_TEMP/aivexus-score-android-permissions.txt"
-          # v0.1 performs only local tallying and must not request runtime/data/network permissions.
-          if grep -Eq 'uses-(implied-)?permission' "$RUNNER_TEMP/aivexus-score-android-permissions.txt"; then
-            echo 'Unexpected Android permission in the commercial candidate; stop ship.' >&2
-            exit 1
-          fi
+          # Flutter/AndroidX may declare an app-scoped, non-exported receiver
+          # permission. Audit that exact name and reject any other request,
+          # including INTERNET, CAMERA, LOCATION and unrecognized syntax.
+          python3 -m unittest discover \
+            -s commercial/aivexus_score/tool -p 'test_audit_*.py' -v
+          python3 commercial/aivexus_score/tool/audit_android_permissions.py \
+            "$RUNNER_TEMP/aivexus-score-android-permissions.txt"
 
       - name: Package test evidence (no public deployment)
         shell: bash
