@@ -43,7 +43,7 @@ class ComputerUseWindowsBetaContractTest(unittest.TestCase):
         self.assertIn("if ($releaseLookup.StatusCode -eq 200)", w)
         self.assertIn("if ($releaseLookup.StatusCode -ne 404)", w)
         self.assertIn("refusing overwrite", w)
-        self.assertNotIn("gh release view $tag", w)
+        self.assertNotIn("gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName", w)
         self.assertIn("gh release create $tag", w)
         self.assertIn("--target $env:GITHUB_SHA", w)
         self.assertIn("--prerelease", w)
