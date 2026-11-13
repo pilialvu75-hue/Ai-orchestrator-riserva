@@ -63,8 +63,24 @@ jobs:
           $base = $versionLine.Matches[0].Groups[1].Value
           $build = 200000 + [int]$env:GITHUB_RUN_NUMBER
           $tag = "v$base-beta+$build"
-          gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName *> $null
-          if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; refusing overwrite." }
+          # A release that does not exist is the normal path. Do NOT invoke
+          # the old GitHub CLI lookup under ErrorActionPreference=Stop: exits 1
+          # for 404 and a PowerShell native-command error can abort this job.
+          # Only an authenticated HTTP 404 authorizes creation; an API/auth
+          # failure must never be misread as "free to publish".
+          $encodedTag = [Uri]::EscapeDataString($tag)
+          $releaseUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$encodedTag"
+          $releaseLookup = Invoke-WebRequest -Method Get -Uri $releaseUri -SkipHttpErrorCheck -Headers @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          if ($releaseLookup.StatusCode -eq 200) {
+            throw "Release $tag already exists; refusing overwrite."
+          }
+          if ($releaseLookup.StatusCode -ne 404) {
+            throw "GitHub release lookup failed with HTTP $($releaseLookup.StatusCode)."
+          }
           $releaseVersion = "$base+$build"
           $pubspec = Get-Content 'pubspec.yaml' -Raw
           $updated = $pubspec -replace '(?m)^version:\s*.*$', "version: $releaseVersion"
