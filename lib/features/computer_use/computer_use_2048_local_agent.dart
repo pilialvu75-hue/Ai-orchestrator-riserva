@@ -65,7 +65,73 @@ final class ComputerUse2048LocalPlanner
     if (answer.length > 1024) {
       throw const FormatException('2048 LOCAL decision too large');
     }
-    final decoded = jsonDecode(answer);
+    // A small LOCAL model can wrap otherwise valid JSON in a single
+    // Markdown code fence. Normalize only that exact wrapper: never search
+    // natural language for hidden tool commands or parse multiple objects.
+    var jsonText = answer.trim();
+    if (jsonText.startsWith('```')) {
+      final fenced = RegExp(
+        r'^\`\`\`(?:json)?[ \\t]*\\r?\\n'
+        r'([\\s\\S]*?)'
+        r'\\r?\\n\`\`\`[ \\t]*
+        decoded.length != 1 ||
+        decoded['move'] is! String ||
+        !const <String>{'left', 'right', 'up', 'down'}
+            .contains(decoded['move'])) {
+      throw const FormatException('Invalid 2048 LOCAL game move');
+    }
+    final move = decoded['move'] as String;
+    experience?.proposedMove(step: observation.step, before: game, move: move);
+    return ComputerUseAgentDecision.act(
+      'press_key',
+      <String, dynamic>{'key': move},
+    );
+  }
+
+  @override
+  void cancel() {
+    if (_model is ComputerUseCancellableDecisionModel) {
+      (_model as ComputerUseCancellableDecisionModel)
+          .cancelPendingCompletion();
+    }
+  }
+}
+
+/// Independent game-specific verifier. Completion never depends on the
+/// model claiming success; the real observed window must contain a complete
+/// 4x4 board and a best tile of 64 or greater.
+final class ComputerUse2048LocalVerifier
+    implements ComputerUseAgentVerifier {
+  ComputerUse2048LocalVerifier({
+    required ComputerUseLocalScreenReader screenReader,
+    this.onObservation,
+    this.experience,
+  }) : _screenReader = screenReader;
+
+  final ComputerUseLocalScreenReader _screenReader;
+  final void Function(ComputerUse2048Benchmark observation)? onObservation;
+  final ComputerUse2048ExperienceCollector? experience;
+
+  @override
+  Future<bool> isSatisfied(ComputerUseAgentObservation observation) async {
+    final summary = await _screenReader.describe(observation.framePng);
+    if (summary.sensitive) return false;
+    final game = ComputerUse2048Benchmark.parse(summary.description);
+    if (game == null) return false;
+    experience?.observedAfter(step: observation.step, after: game);
+    onObservation?.call(game);
+    return game.reachedTarget;
+  }
+}
+,
+        caseSensitive: false,
+      ).firstMatch(jsonText);
+      if (fenced == null) {
+        throw const FormatException('Invalid fenced 2048 LOCAL decision');
+      }
+      jsonText = fenced.group(1)!.trim();
+    }
+    final decoded = jsonDecode(jsonText);
     if (decoded is! Map<String, dynamic> ||
         decoded.length != 1 ||
         decoded['move'] is! String ||
