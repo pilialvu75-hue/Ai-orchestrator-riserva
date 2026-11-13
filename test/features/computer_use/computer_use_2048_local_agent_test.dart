@@ -103,6 +103,25 @@ void main() {
     expect(ComputerUse2048LocalPlanner.instruction, contains('ONLY'));
   });
 
+  test('fenced single JSON from a small LOCAL model is allowed', () async {
+    final reader = Stub2048Reader(ComputerUseScreenSummary(
+      description: summary2048(), sensitive: false,
+    ));
+    final model = Stub2048Model('```json\n{"move":"up"}\n```');
+    final planner = ComputerUse2048LocalPlanner(
+      screenReader: reader, model: model,
+    );
+    final decision = await planner.decide(observation());
+    expect(decision.action, 'press_key');
+    expect(decision.arguments['key'], 'up');
+    model.answer = '```json\n{"move":"up","action":"shell"}\n```';
+    await expectLater(planner.decide(observation()),
+        throwsA(isA<FormatException>()));
+    model.answer = 'Please do this: ```json\n{"move":"up"}\n```';
+    await expectLater(planner.decide(observation()),
+        throwsA(isA<FormatException>()));
+  });
+
   test('rejects model output that is not a single valid move', () async {
     final reader = Stub2048Reader(ComputerUseScreenSummary(
       description: summary2048(), sensitive: false,
