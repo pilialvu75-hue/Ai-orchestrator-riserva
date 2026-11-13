@@ -1,14 +1,9 @@
 name: AIVEXUS Windows Computer Use beta (manual)
 
 on:
+  # Personal ASUS test: starting this workflow manually is the owner action.
+  # Do not add tester enrollment or separate approval steps at this stage.
   workflow_dispatch:
-    inputs:
-      confirm_public_beta:
-        description: 'Windows beta visible to everyone opted into Beta; explicit owner authorization'
-        required: true
-        type: choice
-        options: ['NO', 'YES_PUBLISH_WINDOWS_BETA']
-        default: 'NO'
   pull_request:
     branches: [main]
     paths:
@@ -36,8 +31,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'pilialvu75-hue' &&
-      inputs.confirm_public_beta == 'YES_PUBLISH_WINDOWS_BETA'
+      github.actor == 'pilialvu75-hue'
     runs-on: windows-2022
     permissions:
       contents: write
