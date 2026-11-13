@@ -1,0 +1,174 @@
+name: AIVEXUS Windows Computer Use beta (manual)
+
+on:
+  # Personal ASUS test: starting this workflow manually is the owner action.
+  # Do not add tester enrollment or separate approval steps at this stage.
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-computer-use-beta.yml'
+      - 'test/scripts/test_computer_use_windows_beta.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-computer-use-beta-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contract-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 -m unittest discover -s test/scripts -p 'test_computer_use_windows_beta.py'
+
+  publish-windows-beta:
+    # Only a reviewed main SHA; no PR build can publish.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'pilialvu75-hue'
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    timeout-minutes: 90
+    steps:
+      - name: Checkout authorized source and native submodules
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Stamp NEW updater-detectable Windows beta version
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $versionLine = Select-String -Path 'pubspec.yaml' -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)(?:\+\d+)?\s*$' | Select-Object -First 1
+          if (-not $versionLine) { throw 'Invalid pubspec version.' }
+          $base = $versionLine.Matches[0].Groups[1].Value
+          $build = 200000 + [int]$env:GITHUB_RUN_NUMBER
+          $tag = "v$base-beta+$build"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; refusing overwrite." }
+          $releaseVersion = "$base+$build"
+          $pubspec = Get-Content 'pubspec.yaml' -Raw
+          $updated = $pubspec -replace '(?m)^version:\s*.*$', "version: $releaseVersion"
+          if ($updated -eq $pubspec) { throw 'Version stamp failed.' }
+          Set-Content -Path 'pubspec.yaml' -Value $updated -Encoding utf8
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$releaseVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Restore locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze Computer Use
+        run: flutter analyze --no-fatal-infos lib/features/computer_use test/features/computer_use
+
+      - name: Test interactive QA flag and Computer Use
+        run: >-
+          flutter test --reporter expanded
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+          --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=true
+          test/features/computer_use
+
+      - name: Build AIVEXUS Windows (not a second application)
+        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+
+      - name: Verify bundled LOCAL inference
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $dir
+          if ($LASTEXITCODE -ne 0) { throw 'LOCAL runtime bundle failed.' }
+          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir $dir
+          if ($LASTEXITCODE -ne 0) { throw 'Windows compatibility bundle failed.' }
+          if (-not (Test-Path (Join-Path $dir 'ai_orchestrator.exe'))) { throw 'Missing app EXE.' }
+          if (-not (Test-Path (Join-Path $dir 'data'))) { throw 'Missing Flutter data.' }
+
+      - name: Prepare Inno Setup with existing installation identity
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $iscc) {
+            $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($compiler) { $iscc = $compiler.Source }
+          }
+          if (-not $iscc) { throw 'Missing Inno Setup compiler.' }
+          $redist = $null
+          if ($env:VCToolsRedistDir) {
+            $redist = Get-ChildItem $env:VCToolsRedistDir -Filter vc_redist.x64.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $redist) {
+            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            if (Test-Path $vswhere) {
+              $visualStudio = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+              if ($visualStudio) {
+                $redist = Get-ChildItem (Join-Path $visualStudio 'VC\Redist\MSVC') -Filter vc_redist.x64.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+              }
+            }
+          }
+          if (-not $redist) { throw 'Missing verified VC++ 2022 redistributable.' }
+          $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          $outDir = Join-Path $PWD 'build\windows\computer-use-beta'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          @(
+            "#define AppVersion `"${{ steps.version.outputs.version }}`"",
+            "#define ReleaseDir `"$dir`"",
+            "#define VCRedistPath `"$($redist.FullName)`"",
+            "#define OutputDir `"$outDir`""
+          ) | Set-Content 'windows\installer\ci_generated.iss' -Encoding ascii
+          "iscc=$iscc" | Out-File $env:GITHUB_OUTPUT -Append
+          "out_dir=$outDir" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: Produce verified versioned Setup.exe
+        id: installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & '${{ steps.package.outputs.iscc }}' (Join-Path $PWD 'windows\installer\ai_orchestrator.iss')
+          if ($LASTEXITCODE -ne 0) { throw 'Setup compiler failed.' }
+          $exe = Join-Path '${{ steps.package.outputs.out_dir }}' 'AI-Orchestrator-Setup-x64.exe'
+          if (-not (Test-Path $exe) -or (Get-Item $exe).Length -lt 1048576) { throw 'Missing or invalid Setup.exe.' }
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $digest = "$exe.sha256"
+          "$sha  AI-Orchestrator-Setup-x64.exe" | Set-Content $digest -Encoding ascii
+          "exe=$exe" | Out-File $env:GITHUB_OUTPUT -Append
+          "digest=$digest" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: Create NEW Windows-only beta GitHub Release for in-app updater
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = '${{ steps.version.outputs.tag }}'
+          gh release create $tag '${{ steps.installer.outputs.exe }}' '${{ steps.installer.outputs.digest }}' --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "AIVEXUS Windows Computer Use $tag" --notes "Same AIVEXUS application, Windows-only beta with Computer Use QA. Requires owner-approved interactive session; physical ASUS test pending. Install via AIVEXUS Settings > Updates (Beta channel). No Android installer." --prerelease
+          if ($LASTEXITCODE -ne 0) { throw 'Release creation failed.' }
+          $release = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
+          $names = @($release.assets | ForEach-Object { $_.name })
+          if ($names -notcontains 'AI-Orchestrator-Setup-x64.exe' -or $names -notcontains 'AI-Orchestrator-Setup-x64.exe.sha256') {
+            throw 'Missing installer or checksum in published release.'
+          }

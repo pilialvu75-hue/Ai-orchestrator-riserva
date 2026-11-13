@@ -8,6 +8,8 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
+import 'package:ai_orchestrator/features/computer_use/computer_use_build_policy.dart';
+import 'package:ai_orchestrator/features/computer_use/presentation/computer_use_lab_page.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_bloc.dart';
 import 'package:ai_orchestrator/features/local_ai/presentation/bloc/model_download_state.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/ai_mode_page.dart';
@@ -244,6 +246,29 @@ class _SettingsPageState extends State<SettingsPage> {
                     );
                   },
                 ),
+
+                if (ComputerUseLabBuildPolicy.enabled &&
+                    !kIsWeb &&
+                    (defaultTargetPlatform == TargetPlatform.windows ||
+                     defaultTargetPlatform == TargetPlatform.macOS ||
+                     defaultTargetPlatform == TargetPlatform.android)) ...[
+                  const SizedBox(height: 12),
+                  _ModuleCard(
+                    icon: defaultTargetPlatform == TargetPlatform.android
+                        ? Icons.smartphone_outlined
+                        : Icons.desktop_windows_outlined,
+                    title: 'Computer Use — Laboratorio',
+                    subtitle: defaultTargetPlatform == TargetPlatform.windows
+                        ? 'Collaudo locale: schermata e controllo Windows'
+                        : 'Sperimentale: sola osservazione, consenso esplicito',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ComputerUseLabPage(),
+                      ),
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 12),
 
