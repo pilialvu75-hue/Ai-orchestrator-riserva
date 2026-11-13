@@ -67,4 +67,22 @@ void main() {
     expect(cap.adjust(isHome: true, by: 1), isFalse);
     expect(cap.home, ScoreSession.maxScore);
   });
+  test('100 sequential score actions and 20 reset/undo cycles stay consistent', () {
+    final session = ScoreSession();
+    for (var i = 0; i < 100; i++) {
+      expect(session.adjust(isHome: i.isEven, by: 1), isTrue);
+    }
+    expect((session.home, session.away), (50, 50));
+
+    for (var i = 0; i < 20; i++) {
+      expect(session.reset(), isTrue);
+      expect((session.home, session.away), (0, 0));
+      expect(session.undo(), isTrue);
+      expect((session.home, session.away), (50, 50));
+    }
+
+    final resumed = ScoreSession.fromEncoded(jsonEncode(session.toJson()));
+    expect((resumed.home, resumed.away), (50, 50));
+  });
+
 }
