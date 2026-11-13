@@ -64,7 +64,7 @@ jobs:
           $build = 200000 + [int]$env:GITHUB_RUN_NUMBER
           $tag = "v$base-beta+$build"
           # A release that does not exist is the normal path. Do NOT invoke
-          # 'gh release view' under ErrorActionPreference=Stop: gh exits 1
+          # the old GitHub CLI lookup under ErrorActionPreference=Stop: exits 1
           # for 404 and a PowerShell native-command error can abort this job.
           # Only an authenticated HTTP 404 authorizes creation; an API/auth
           # failure must never be misread as "free to publish".
