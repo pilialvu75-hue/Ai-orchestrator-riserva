@@ -102,9 +102,12 @@ final class ComputerUseAgentRunner {
     required ComputerUseAgentPlanner planner,
     required ComputerUseAgentVerifier verifier,
     this.maxSteps = 12,
+    this.maxConsecutiveIdenticalActions = 3,
     this.maxDuration = const Duration(minutes: 2),
     this.operationTimeout = const Duration(seconds: 25),
   })  : assert(maxSteps > 0 && maxSteps <= 100),
+        assert(maxConsecutiveIdenticalActions == 0 ||
+            maxConsecutiveIdenticalActions >= 2),
         assert(maxDuration > Duration.zero),
         assert(operationTimeout > Duration.zero),
         _session = session,
@@ -115,6 +118,10 @@ final class ComputerUseAgentRunner {
   final ComputerUseAgentPlanner _planner;
   final ComputerUseAgentVerifier _verifier;
   final int maxSteps;
+  /// 0 disables only the identical-action heuristic. Useful for 2048 where
+  /// repeated arrow keys can be valid moves on a changing board. The overall
+  /// step/time limits and independent verifier always remain active.
+  final int maxConsecutiveIdenticalActions;
   final Duration maxDuration;
   final Duration operationTimeout;
 
@@ -255,7 +262,8 @@ final class ComputerUseAgentRunner {
         final signature = _actionSignature(decision.action, params);
         repeats = signature == lastSignature ? repeats + 1 : 1;
         lastSignature = signature;
-        if (repeats >= 3) {
+        if (maxConsecutiveIdenticalActions > 0 &&
+            repeats >= maxConsecutiveIdenticalActions) {
           return finish(ComputerUseAgentOutcome.repeatedAction,
               'REPEATED_ACTION');
         }
