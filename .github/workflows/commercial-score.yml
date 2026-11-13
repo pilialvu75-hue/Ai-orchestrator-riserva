@@ -53,6 +53,31 @@ jobs:
           flutter build web --release
           flutter build apk --release
 
+      - name: Run widget tests in headless Chrome
+        shell: bash
+        working-directory: ${{ runner.temp }}/aivexus_score
+        run: |
+          set -euo pipefail
+          flutter test --platform chrome --reporter expanded
+
+      - name: Verify Android app identity and privacy permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$RUNNER_TEMP/aivexus_score/build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          AAPT="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
+          test -n "$AAPT"
+          "$AAPT" dump badging "$APK" | tee "$RUNNER_TEMP/aivexus-score-android-badging.txt"
+          grep -Fq "package: name='dev.aivexus.aivexus_score'" "$RUNNER_TEMP/aivexus-score-android-badging.txt"
+          "$AAPT" dump permissions "$APK" | tee "$RUNNER_TEMP/aivexus-score-android-permissions.txt"
+          # v0.1 performs only local tallying and must not request runtime/data/network permissions.
+          if grep -Eq 'uses-(implied-)?permission' "$RUNNER_TEMP/aivexus-score-android-permissions.txt"; then
+            echo 'Unexpected Android permission in the commercial candidate; stop ship.' >&2
+            exit 1
+          fi
+
       - name: Package test evidence (no public deployment)
         shell: bash
         run: |
@@ -70,6 +95,8 @@ jobs:
             zip -q -r "$GITHUB_WORKSPACE/build/commercial-score/aivexus-score-web.zip" .)
           cp "$RUNNER_TEMP/aivexus_score/build/app/outputs/flutter-apk/app-release.apk" \
             build/commercial-score/aivexus-score-android-test.apk
+          cp "$RUNNER_TEMP/aivexus-score-android-permissions.txt" \
+            build/commercial-score/android-permissions.txt
           (cd build/commercial-score && unzip -Z1 aivexus-score-web.zip | grep -qx 'index.html' && sha256sum *.apk *.zip > SHA256SUMS.txt)
           ls -lh build/commercial-score
 
