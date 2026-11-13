@@ -65,71 +65,22 @@ final class ComputerUse2048LocalPlanner
     if (answer.length > 1024) {
       throw const FormatException('2048 LOCAL decision too large');
     }
-    // A small LOCAL model can wrap otherwise valid JSON in a single
-    // Markdown code fence. Normalize only that exact wrapper: never search
-    // natural language for hidden tool commands or parse multiple objects.
+    // Small LOCAL models may wrap exactly one JSON decision in a Markdown
+    // code block. Accept only an isolated fence, never prose or extra tools.
     var jsonText = answer.trim();
     if (jsonText.startsWith('```')) {
-      final fenced = RegExp(
-        r'^\`\`\`(?:json)?[ \\t]*\\r?\\n'
-        r'([\\s\\S]*?)'
-        r'\\r?\\n\`\`\`[ \\t]*
-        decoded.length != 1 ||
-        decoded['move'] is! String ||
-        !const <String>{'left', 'right', 'up', 'down'}
-            .contains(decoded['move'])) {
-      throw const FormatException('Invalid 2048 LOCAL game move');
-    }
-    final move = decoded['move'] as String;
-    experience?.proposedMove(step: observation.step, before: game, move: move);
-    return ComputerUseAgentDecision.act(
-      'press_key',
-      <String, dynamic>{'key': move},
-    );
-  }
-
-  @override
-  void cancel() {
-    if (_model is ComputerUseCancellableDecisionModel) {
-      (_model as ComputerUseCancellableDecisionModel)
-          .cancelPendingCompletion();
-    }
-  }
-}
-
-/// Independent game-specific verifier. Completion never depends on the
-/// model claiming success; the real observed window must contain a complete
-/// 4x4 board and a best tile of 64 or greater.
-final class ComputerUse2048LocalVerifier
-    implements ComputerUseAgentVerifier {
-  ComputerUse2048LocalVerifier({
-    required ComputerUseLocalScreenReader screenReader,
-    this.onObservation,
-    this.experience,
-  }) : _screenReader = screenReader;
-
-  final ComputerUseLocalScreenReader _screenReader;
-  final void Function(ComputerUse2048Benchmark observation)? onObservation;
-  final ComputerUse2048ExperienceCollector? experience;
-
-  @override
-  Future<bool> isSatisfied(ComputerUseAgentObservation observation) async {
-    final summary = await _screenReader.describe(observation.framePng);
-    if (summary.sensitive) return false;
-    final game = ComputerUse2048Benchmark.parse(summary.description);
-    if (game == null) return false;
-    experience?.observedAfter(step: observation.step, after: game);
-    onObservation?.call(game);
-    return game.reachedTarget;
-  }
-}
-,
-        caseSensitive: false,
-      ).firstMatch(jsonText);
-      if (fenced == null) {
+      final firstNewline = jsonText.indexOf('\n');
+      if (firstNewline < 0 || !jsonText.endsWith('```')) {
         throw const FormatException('Invalid fenced 2048 LOCAL decision');
       }
-      jsonText = fenced.group(1)!.trim();
+      final header = jsonText.substring(0, firstNewline).trim().toLowerCase();
+      if (header != '```' && header != '```json') {
+        throw const FormatException('Invalid fenced 2048 LOCAL header');
+      }
+      jsonText = jsonText.substring(firstNewline + 1, jsonText.length - 3).trim();
+      if (jsonText.contains('```')) {
+        throw const FormatException('Nested 2048 LOCAL fenced decision');
+      }
     }
     final decoded = jsonDecode(jsonText);
     if (decoded is! Map<String, dynamic> ||
