@@ -1,0 +1,71 @@
+name: AIVEXUS Score Android emulator smoke (non-release)
+
+on:
+  pull_request:
+    paths:
+      - 'commercial/aivexus_score/**'
+      - '.github/workflows/commercial-score-emulator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aivexus-score-emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-emulator-launch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Create isolated standalone Flutter application
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter create --platforms=android --org=dev.aivexus \
+            --project-name=aivexus_score "$RUNNER_TEMP/aivexus_score"
+          cp commercial/aivexus_score/pubspec.yaml "$RUNNER_TEMP/aivexus_score/pubspec.yaml"
+          cp commercial/aivexus_score/lib/*.dart "$RUNNER_TEMP/aivexus_score/lib/"
+          cp commercial/aivexus_score/test/*.dart "$RUNNER_TEMP/aivexus_score/test/"
+          (cd "$RUNNER_TEMP/aivexus_score" && flutter pub get && flutter build apk --release)
+
+      - name: Enable KVM acceleration when present
+        shell: bash
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+          fi
+
+      - name: Boot Android emulator and smoke test release APK
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          emulator-boot-timeout: 600
+          disable-animations: true
+          script: bash commercial/aivexus_score/tool/android_emulator_smoke.sh
+
+      - name: Upload emulator screenshot (CI evidence only)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-score-emulator-screenshot-${{ github.run_id }}
+          path: ${{ runner.temp }}/aivexus-score-emulator.png
+          retention-days: 7
+          if-no-files-found: ignore
