@@ -283,6 +283,20 @@ internal static class AivexusRecovery
         }
         if (!seen.Contains("app\\ai_orchestrator.exe"))
             throw new InvalidDataException("Recovery does not contain installed executable.");
+        // Reject any additional payload that was not hashed in the manifest.
+        // Otherwise a modified snapshot could smuggle a native DLL into the
+        // restored application even though every listed file was intact.
+        foreach (string area in new[] { "app", "data" })
+        {
+            string areaRoot = Path.Combine(snapshot, area);
+            RequireSafeTree(areaRoot);
+            foreach (FileInfo file in Files(areaRoot))
+            {
+                string rel = file.FullName.Substring(areaRoot.Length).TrimStart('\\');
+                if (!seen.Contains(area + "\\" + rel))
+                    throw new InvalidDataException("Unexpected unverified recovery file: " + rel);
+            }
+        }
     }
 
     static void Restore(string app, string data, string store)
