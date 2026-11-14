@@ -14,7 +14,7 @@ using System.Windows.Forms;
 
 internal static class AivexusRecovery
 {
-    const string Header = "AIVEXUS_ROLLBACK_V1";
+    const string Header = "AIVEXUS_ROLLBACK_V2";
     const string Pointer = "latest.txt";
     static readonly StringComparison Cmp = StringComparison.OrdinalIgnoreCase;
 
@@ -55,6 +55,8 @@ internal static class AivexusRecovery
             {
                 AssertNotRunning();
                 VerifyCurrent(store, app, data);
+                if (!File.Exists(Path.Combine(app, "ai_orchestrator.exe")))
+                    throw new InvalidOperationException("Cannot accept a broken installation.");
                 File.Delete(Path.Combine(store, Pointer));
                 Console.WriteLine("Recovery checkpoint accepted. Historic snapshot retained.");
             }
@@ -187,8 +189,8 @@ internal static class AivexusRecovery
     {
         AssertNotRunning();
         ValidatePaths(app, data, store);
-        if (!File.Exists(Path.Combine(app, "ai_orchestrator.exe")))
-            throw new InvalidOperationException("No installed AI Orchestrator executable: backup refused.");
+        if (updateLatest && !File.Exists(Path.Combine(app, "ai_orchestrator.exe")))
+            throw new InvalidOperationException("No installed AI Orchestrator executable: pre-update backup refused.");
         if (updateLatest && File.Exists(Path.Combine(store, Pointer)))
             throw new InvalidOperationException(
                 "A previous recovery checkpoint is still pending; confirm it works or restore first.");
@@ -212,10 +214,20 @@ internal static class AivexusRecovery
             records.Add("APP\t" + Encode(app));
             records.Add("DATA\t" + Encode(data ?? ""));
             records.Add("TIME\t" + DateTime.UtcNow.ToString("o"));
-            CopyArea("app", app, partial, records);
-            if (data != null) CopyArea("data", data, partial, records);
+            bool dataPresent = data != null && Directory.Exists(data);
+            records.Add("DATA_PRESENT\t" + (dataPresent ? "1" : "0"));
+            if (Directory.Exists(app))
+            {
+                Directory.CreateDirectory(Path.Combine(partial, "app"));
+                CopyArea("app", app, partial, records);
+            }
+            if (dataPresent)
+            {
+                Directory.CreateDirectory(Path.Combine(partial, "data"));
+                CopyArea("data", data, partial, records);
+            }
             File.WriteAllLines(Path.Combine(partial, "manifest.tsv"), records.ToArray(), Encoding.UTF8);
-            Verify(partial, app, data);
+            Verify(partial, app, data, updateLatest);
             Directory.Move(partial, final);
             if (updateLatest)
             {
@@ -267,18 +279,30 @@ internal static class AivexusRecovery
         Console.WriteLine("Recovery checkpoint verification: PASS.");
     }
 
-    static void Verify(string snapshot, string app, string data)
+    static bool SnapshotDataPresent(string snapshot)
     {
         string[] rows = File.ReadAllLines(Path.Combine(snapshot, "manifest.tsv"), Encoding.UTF8);
-        if (rows.Length < 4 || rows[0].Trim('\uFEFF') != Header)
+        if (rows.Length < 5 || rows[4] != "DATA_PRESENT\t0" && rows[4] != "DATA_PRESENT\t1")
+            throw new InvalidDataException("Snapshot missing data-root existence record.");
+        return rows[4] == "DATA_PRESENT\t1";
+    }
+
+    static void Verify(string snapshot, string app, string data, bool requireAppExecutable = true)
+    {
+        string[] rows = File.ReadAllLines(Path.Combine(snapshot, "manifest.tsv"), Encoding.UTF8);
+        if (rows.Length < 5 || rows[0].Trim('\uFEFF') != Header)
             throw new InvalidDataException("Recovery manifest missing or invalid.");
         string expectedApp = Decode(rows[1].Split('\t')[1]);
         string expectedData = Decode(rows[2].Split('\t')[1]);
         if (!string.Equals(expectedApp, app, Cmp) ||
             !string.Equals(expectedData, data ?? "", Cmp))
             throw new InvalidDataException("Recovery snapshot targets another installation.");
+        bool dataPresent = SnapshotDataPresent(snapshot);
+        if (dataPresent && data == null ||
+            dataPresent != Directory.Exists(Path.Combine(snapshot, "data")))
+            throw new InvalidDataException("Snapshot data-root existence mismatch.");
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string row in rows.Skip(4))
+        foreach (string row in rows.Skip(5))
         {
             string[] fields = row.Split('\t');
             if (fields.Length != 5 || fields[0] != "FILE" ||
@@ -299,7 +323,7 @@ internal static class AivexusRecovery
                 !string.Equals(Digest(file), fields[4], StringComparison.Ordinal))
                 throw new InvalidDataException("Corrupted recovery file: " + rel);
         }
-        if (!seen.Contains("app\\ai_orchestrator.exe"))
+        if (requireAppExecutable && !seen.Contains("app\\ai_orchestrator.exe"))
             throw new InvalidDataException("Recovery does not contain installed executable.");
         // Reject any additional payload that was not hashed in the manifest.
         // Otherwise a modified snapshot could smuggle a native DLL into the
@@ -327,6 +351,7 @@ internal static class AivexusRecovery
         // safety snapshot of the current binaries and user data. Never overwrite
         // the last-known-working pointer.
         Backup(app, data, store, false);
+        bool dataWasPresent = SnapshotDataPresent(snapshot);
         string suffix = ".aivexus-restore-" + Guid.NewGuid().ToString("N").Substring(0, 8);
         string stageApp = app + suffix + "-staging";
         string quarantineApp = app + suffix + "-newer";
@@ -337,14 +362,16 @@ internal static class AivexusRecovery
         try
         {
             CopyDirectory(Path.Combine(snapshot, "app"), stageApp);
-            if (data != null && Directory.Exists(Path.Combine(snapshot, "data")))
+            if (data != null && dataWasPresent)
                 CopyDirectory(Path.Combine(snapshot, "data"), stageData);
             if (Directory.Exists(app)) { Directory.Move(app, quarantineApp); movedOldApp = true; }
             Directory.Move(stageApp, app); movedNewApp = true;
-            if (stageData != null && Directory.Exists(stageData))
+            if (data != null)
             {
+                // A missing original directory is meaningful: do not leave a
+                // database created by the failed new build alongside old code.
                 if (Directory.Exists(data)) { Directory.Move(data, quarantineData); movedOldData = true; }
-                Directory.Move(stageData, data); movedNewData = true;
+                if (dataWasPresent) { Directory.Move(stageData, data); movedNewData = true; }
             }
             // A second hash validation after swap catches any incomplete copy.
             VerifyRestoredFiles(snapshot, app, data);
@@ -384,7 +411,7 @@ internal static class AivexusRecovery
     static void VerifyRestoredFiles(string snapshot, string app, string data)
     {
         string[] rows = File.ReadAllLines(Path.Combine(snapshot, "manifest.tsv"), Encoding.UTF8);
-        foreach (string row in rows.Skip(4))
+        foreach (string row in rows.Skip(5))
         {
             string[] fields = row.Split('\t');
             string root = fields[1] == "app" ? app : data;
@@ -393,5 +420,8 @@ internal static class AivexusRecovery
             if (!File.Exists(path) || Digest(path) != fields[4])
                 throw new InvalidDataException("Restored file mismatch: " + path);
         }
+        if (data != null &&
+            Directory.Exists(data) != SnapshotDataPresent(snapshot))
+            throw new InvalidDataException("Restored data-root existence mismatch.");
     }
 }
