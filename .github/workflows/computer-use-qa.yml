@@ -110,6 +110,11 @@ jobs:
           }
           & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $releaseDir
           if ($LASTEXITCODE -ne 0) { throw 'QA local inference bundle check failed.' }
+          # Match the release pipeline's compatibility import patch. This
+          # does not claim that current Flutter supports Windows 8.1; it
+          # only keeps the preview's native bundle aligned with AIVEXUS.
+          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir $releaseDir
+          if ($LASTEXITCODE -ne 0) { throw 'QA Windows compatibility patch failed.' }
           $zipPath = Join-Path $PWD 'computer-use-windows-qa-unpublished.zip'
           Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
           # Confirm the delivered archive is self-contained before uploading it.
