@@ -50,6 +50,32 @@ try {
     throw 'Restore should clear the pending checkpoint.'
   }
 
+  # Interrupted upgrade: the target EXE disappeared before replacement.
+  # The out-of-app recovery helper must still be able to restore it.
+  Invoke-Recovery backup $app $data $store
+  Remove-Item (Join-Path $app 'ai_orchestrator.exe') -Force
+  Invoke-Recovery restore $app $data $store
+  if ((Get-Content (Join-Path $app 'ai_orchestrator.exe') -Raw) -ne 'original-build-1.0.12.2') {
+    throw 'Recovery could not restore after interrupted upgrade.'
+  }
+
+  # Previously absent user data MUST remove data created by the bad upgrade.
+  Remove-Item $data -Recurse -Force
+  Invoke-Recovery backup $app $data $store
+  New-Item $data -ItemType Directory -Force | Out-Null
+  Set-Content (Join-Path $data 'newer.db') 'incompatible' -NoNewline
+  Invoke-Recovery restore $app $data $store
+  if (Test-Path $data) { throw 'Restore left newer data when old data directory did not exist.' }
+
+  # Previously empty user data MUST come back empty.
+  New-Item $data -ItemType Directory -Force | Out-Null
+  Invoke-Recovery backup $app $data $store
+  Set-Content (Join-Path $data 'newer.db') 'incompatible' -NoNewline
+  Invoke-Recovery restore $app $data $store
+  if (-not (Test-Path $data) -or @(Get-ChildItem $data -Recurse).Count -ne 0) {
+    throw 'Restore did not preserve originally empty database directory.'
+  }
+
   Invoke-Recovery backup $app $data $store
   $snapshotId = Get-Content (Join-Path $store 'latest.txt') -Raw
   $snapshotPath = Join-Path $store ($snapshotId.Trim())
