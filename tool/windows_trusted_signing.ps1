@@ -103,11 +103,17 @@ switch ($Mode) {
     if ($files.Count -lt 1) { throw 'Release bundle contains no executables.' }
     foreach ($file in $files) {
       $sig = Get-AuthenticodeSignature -LiteralPath $file.FullName
-      if ($sig.Status -ne 'Valid') {
+      # A pre-signed third-party DLL may retain its valid publisher. The
+      # AIVEXUS application executable MUST be signed by our release identity.
+      $ourApp = ($file.Name -ieq 'ai_orchestrator.exe')
+      $wrongPublisher = $ourApp -and
+        ($null -eq $sig.SignerCertificate -or
+         $sig.SignerCertificate.Thumbprint -ne $env:AIVEXUS_WINDOWS_SIGNING_THUMBPRINT)
+      if ($sig.Status -ne 'Valid' -or $wrongPublisher) {
         & $PSCommandPath -Mode Sign -FilePath $file.FullName
         if ($LASTEXITCODE -ne 0) { throw "Could not sign $($file.Name)" }
       }
-      Assert-ValidSignature $file.FullName $false
+      Assert-ValidSignature $file.FullName $ourApp
     }
     Write-Host "Verified Authenticode on $($files.Count) bundled PE files."
   }
