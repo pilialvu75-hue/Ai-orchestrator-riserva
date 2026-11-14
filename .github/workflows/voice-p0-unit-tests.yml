@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'lib/core/voice/voice_loop_manager.dart'
+      - 'lib/core/voice/live_response_text_assembler.dart'
+      - 'lib/core/voice/android_pcm_tts_audio_sink.dart'
       - 'lib/core/voice/live_playback_drain.dart'
       - 'lib/core/voice/live_next_turn_gate.dart'
       - 'lib/core/voice/live_voice_phase.dart'
@@ -16,6 +18,7 @@ on:
       - 'test/core/voice/live_playback_drain_test.dart'
       - 'test/core/voice/live_next_turn_gate_test.dart'
       - 'test/core/voice/live_voice_phase_test.dart'
+      - 'test/core/voice/live_response_text_assembler_test.dart'
       - 'test/core/voice/isolated_kokoro_voice_engine_test.dart'
       - 'test/features/chat/data/services/live_chat_transcript_recorder_test.dart'
       - '.github/workflows/voice-p0-unit-tests.yml'
@@ -65,6 +68,8 @@ jobs:
         run: >-
           flutter analyze
           lib/core/voice/voice_loop_manager.dart
+          lib/core/voice/live_response_text_assembler.dart
+          lib/core/voice/android_pcm_tts_audio_sink.dart
           lib/core/voice/live_playback_drain.dart
           lib/core/voice/live_next_turn_gate.dart
           lib/core/voice/live_voice_phase.dart
@@ -76,6 +81,7 @@ jobs:
           test/core/voice/live_playback_drain_test.dart
           test/core/voice/live_next_turn_gate_test.dart
           test/core/voice/live_voice_phase_test.dart
+          test/core/voice/live_response_text_assembler_test.dart
           test/core/voice/isolated_kokoro_voice_engine_test.dart
           test/features/chat/data/services/live_chat_transcript_recorder_test.dart
       - name: Test Live playback drain and explicit next-turn safety
@@ -84,5 +90,6 @@ jobs:
           test/core/voice/live_playback_drain_test.dart
           test/core/voice/live_next_turn_gate_test.dart
           test/core/voice/live_voice_phase_test.dart
+          test/core/voice/live_response_text_assembler_test.dart
           test/core/voice/isolated_kokoro_voice_engine_test.dart
           test/features/chat/data/services/live_chat_transcript_recorder_test.dart

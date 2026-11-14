@@ -14,6 +14,7 @@ import 'package:ai_orchestrator/core/voice/live_voice_latency.dart';
 import 'package:ai_orchestrator/core/voice/live_voice_phase.dart';
 import 'package:ai_orchestrator/core/voice/live_playback_drain.dart';
 import 'package:ai_orchestrator/core/voice/live_speech_sequence.dart';
+import 'package:ai_orchestrator/core/voice/live_response_text_assembler.dart';
 import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
 
 /// Manages the closed-loop Voice-to-Voice pipeline.
@@ -36,6 +37,14 @@ class VoiceLoopManager with RuntimeEventEmitter {
         _localAiRepository = localAiRepository;
 
   static const String _tag = 'VOICE_LOOP';
+
+  // The current shipped Live recognizer uses it-IT by default. Live bypasses
+  // ChatRepository, so it must explicitly provide the assistant's language
+  // instruction. An explicit systemPrompt still takes precedence.
+  static const String _defaultLiveItalianSystemPrompt =
+      'Sei AIVEXUS in conversazione vocale. Rispondi in italiano '
+      'con frasi brevi e naturali. Non cambiare lingua a meno che '
+      "l'utente non lo chieda esplicitamente. Non ripetere la risposta.";
 
   static const Duration _sttTimeout =
       Duration(seconds: 30);
@@ -622,7 +631,9 @@ class VoiceLoopManager with RuntimeEventEmitter {
           'voice_loop_'
           '${DateTime.now().microsecondsSinceEpoch}',
       prompt: spokenText,
-      systemPrompt: systemPrompt,
+      systemPrompt: systemPrompt?.trim().isNotEmpty == true
+          ? systemPrompt
+          : _defaultLiveItalianSystemPrompt,
       isOffline: true,
       // Constrain Android Live PCM and inference peak while the 8 GB
       // device's native allocation pressure is being investigated.
@@ -675,7 +686,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     final tokenBuffer =
         StringBuffer();
-    final fullResponse = StringBuffer();
+    final responseAssembler = LiveResponseTextAssembler();
     var inferenceFailed = false;
 
     final sentenceBoundaryPattern =
@@ -799,9 +810,15 @@ class VoiceLoopManager with RuntimeEventEmitter {
         break;
       }
 
-      final chunk =
-          response.text;
-
+      // Final chunks contain the FULL canonical reply; all earlier token
+      // chunks are deltas. Forward only genuinely new text to chat and TTS.
+      final chunk = responseAssembler.add(
+        text: response.text,
+        isFinal: response.isFinal,
+      );
+      if (response.isFinal && responseAssembler.finalMismatch) {
+        logEvent(_tag, '[LIVE_FINAL_TEXT_MISMATCH] deduped=true');
+      }
       if (chunk.isEmpty) {
         continue;
       }
@@ -814,8 +831,6 @@ class VoiceLoopManager with RuntimeEventEmitter {
       tokenBuffer.write(
         chunk,
       );
-      fullResponse.write(chunk);
-
       final currentText =
           tokenBuffer.toString();
 
@@ -868,7 +883,7 @@ class VoiceLoopManager with RuntimeEventEmitter {
 
     // Persist completed output before waiting for native playback drain.
     // A later PCM failure must not erase a successfully generated reply.
-    final completedResponseText = fullResponse.toString().trim();
+    final completedResponseText = responseAssembler.text.trim();
     if (!inferenceFailed &&
         completedResponseText.isNotEmpty &&
         onAssistantTranscript != null) {
