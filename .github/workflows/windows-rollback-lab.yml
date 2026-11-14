@@ -1,0 +1,22 @@
+name: Windows legacy rollback lab (source-only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tool/windows_rollback/**'
+      - '.github/workflows/windows-rollback-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recovery-contract:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Compile .NET Framework recovery helper and test snapshot/restore
+        shell: pwsh
+        run: .\tool\windows_rollback\test_recovery.ps1
