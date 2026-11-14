@@ -454,14 +454,14 @@ abstract final class AssistantWebSearchPolicy {
 
   static bool _recencyBoundIntent(String value) {
     final recency = RegExp(
-      r"\b(?:oggi|today|hoy|attuale|attualmente|current|currently|latest|recent|ultimo|ultima|ultime|récent|reciente|stasera|tonight)\b",
+      r"\b(?:oggi|today|hoy|attuale|attualmente|current|currently|latest|recent|recente|recenti|ultimo|ultima|ultime|récent|reciente|stasera|tonight)\b",
     );
     if (!recency.hasMatch(value)) {
       return false;
     }
 
     final changingSubject = RegExp(
-      r'\b(?:versione|version|release|aggiornamento|update|disponibilit[aà]|availability|orari|hours|schedule|programma|evento|event|traffico|traffic|stato del servizio|service status|prezzo|price|prix|precio|partita|match|classifica|standings|risultato|score)\b',
+      r'\b(?:versione|version|release|aggiornamento|update|disponibilit[aà]|availability|orari|hours|schedule|programma|evento|event|traffico|traffic|stato del servizio|service status|budget|bilancio|government|governo|prezzo|price|prix|precio|partita|match|classifica|standings|risultato|score)\b',
     );
 
     return changingSubject.hasMatch(value);
