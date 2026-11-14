@@ -85,14 +85,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/commercial-score
-          # itch.io embeds HTML under a subpath, so root-relative asset URLs fail.
-          python3 - <<'PY'
-          from pathlib import Path
-          page = Path(__import__('os').environ['RUNNER_TEMP']) / 'aivexus_score/build/web/index.html'
-          html = page.read_text()
-          assert '<base href="/">' in html, 'Unknown Flutter HTML base; stop rather than ship broken ZIP'
-          page.write_text(html.replace('<base href="/">', '<base href="./">', 1))
-          PY
+          # Keep HTML5 distribution local-only and nested-path safe.
+          python3 -m unittest discover \
+            -s commercial/aivexus_score/tool -p 'test_prepare_web_bundle.py' -v
+          python3 commercial/aivexus_score/tool/prepare_web_bundle.py \
+            "$RUNNER_TEMP/aivexus_score/build/web"
           (cd "$RUNNER_TEMP/aivexus_score/build/web" && \
             zip -q -r "$GITHUB_WORKSPACE/build/commercial-score/aivexus-score-web.zip" .)
           cp "$RUNNER_TEMP/aivexus_score/build/app/outputs/flutter-apk/app-release.apk" \

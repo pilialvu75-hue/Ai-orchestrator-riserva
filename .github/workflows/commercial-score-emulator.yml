@@ -3,7 +3,9 @@ name: AIVEXUS Score Android emulator smoke (non-release)
 on:
   pull_request:
     paths:
-      - 'commercial/aivexus_score/**'
+      - 'commercial/aivexus_score/lib/**'
+      - 'commercial/aivexus_score/pubspec.yaml'
+      - 'commercial/aivexus_score/tool/android_emulator_smoke.sh'
       - '.github/workflows/commercial-score-emulator.yml'
   workflow_dispatch:
 
