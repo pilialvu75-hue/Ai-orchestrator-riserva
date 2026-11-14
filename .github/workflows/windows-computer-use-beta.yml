@@ -162,6 +162,28 @@ jobs:
         run: |
           & (Join-Path $PWD 'tool\windows_trusted_signing.ps1') -Mode Bundle -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
 
+      - name: Compile and sign Windows 8.1-compatible recovery helper
+        id: recovery
+        shell: pwsh
+        env:
+          AIVEXUS_WINDOWS_SIGNING_PFX_B64: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_B64 }}
+          AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path $csc)) { throw 'Missing legacy .NET Framework compiler.' }
+          $dir = Join-Path $PWD 'build\windows\computer-use-beta'
+          New-Item $dir -ItemType Directory -Force | Out-Null
+          $exe = Join-Path $dir 'AivexusRecovery.exe'
+          $manifest = Join-Path $PWD 'tool\windows_rollback\recovery.manifest'
+          $source = Join-Path $PWD 'tool\windows_rollback\AivexusRecovery.cs'
+          & $csc /nologo /target:exe /r:System.Windows.Forms.dll "/win32manifest:$manifest" "/out:$exe" $source
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) {
+            throw 'Could not compile Windows 8.1 recovery helper.'
+          }
+          & (Join-Path $PWD 'tool\windows_trusted_signing.ps1') -Mode Sign -FilePath $exe
+          "helper=$exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Prepare Inno Setup with existing installation identity
         id: package
         shell: pwsh
@@ -197,6 +219,7 @@ jobs:
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
           @(
             "#define AivexusTrustedSignedBuild 1",
+            "#define AivexusRecoveryHelper `"${{ steps.recovery.outputs.helper }}`"",
             "#define AppVersion `"${{ steps.version.outputs.version }}`"",
             "#define ReleaseDir `"$dir`"",
             "#define VCRedistPath `"$($redist.FullName)`"",
