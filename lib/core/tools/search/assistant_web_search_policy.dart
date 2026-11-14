@@ -439,7 +439,17 @@ abstract final class AssistantWebSearchPolicy {
       'tipo de cambio',
     ];
 
-    return explicitMarketPhrases.any(value.contains);
+    if (explicitMarketPhrases.any(value.contains)) return true;
+
+    // A current currency value is live market data, unlike the current
+    // value of a programming variable or a generic explanatory question.
+    final currency = RegExp(
+      r'\b(?:euro|eur|dollar|usd|pound|gbp|yen|jpy|bitcoin|btc|ethereum|eth|currency|valuta|devise|moneda)\b',
+    );
+    final currentValue = RegExp(
+      r'\b(?:current value|value today|valore attuale|valore oggi|valeur actuelle|valor actual)\b',
+    );
+    return currency.hasMatch(value) && currentValue.hasMatch(value);
   }
 
   static bool _recencyBoundIntent(String value) {
