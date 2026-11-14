@@ -25,6 +25,24 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: python3 -m unittest discover -s test/scripts -p 'test_computer_use_windows_beta.py'
+      - name: Parse signing PowerShell and prove missing credentials are rejected
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $path = Join-Path $PWD 'tool/windows_trusted_signing.ps1'
+          [Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) { throw "Signing PowerShell parser found $($errors.Count) errors." }
+          Remove-Item Env:AIVEXUS_WINDOWS_SIGNING_PFX_B64 -ErrorAction SilentlyContinue
+          Remove-Item Env:AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD -ErrorAction SilentlyContinue
+          $rejected = $false
+          try {
+            & $path -Mode Prepare
+          } catch {
+            if ("$_" -notmatch 'refusing to publish an unsigned Windows beta') { throw }
+            $rejected = $true
+          }
+          if (-not $rejected) { throw 'Missing credentials did not block the beta.' }
 
   publish-windows-beta:
     # Only a reviewed main SHA; no PR build can publish.
