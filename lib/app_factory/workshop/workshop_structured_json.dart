@@ -46,6 +46,20 @@ abstract final class WorkshopStructuredJson {
       // Fall through to bounded-object recovery.
     }
 
+    // Prefer bounded repair of the full top-level object before scanning
+    // nested braces. Otherwise a malformed free-text summary can cause the
+    // nested changes[] element to be mistaken for the complete proposal.
+    final repairedOuter = repairMalformedContentStrings(normalized);
+    if (repairedOuter != null) {
+      try {
+        if (jsonDecode(repairedOuter) is Map) {
+          return repairedOuter;
+        }
+      } on FormatException {
+        // Structural fields remain strict; preserve the existing fallback.
+      }
+    }
+
     for (var start = normalized.indexOf('{');
         start >= 0;
         start = normalized.indexOf('{', start + 1)) {
