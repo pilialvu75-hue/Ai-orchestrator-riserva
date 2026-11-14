@@ -1071,6 +1071,7 @@ final class WorkshopProposalImplementationRunner {
     final architectPlan = WorkshopTaskPlanProjection.project(
       preflight?.architecture?.text,
     );
+    final certifiedLibraryEvidence = preflight?.certifiedLibraryEvidence;
     final context = _boundedJoined(
       request.context,
       compact ? _retryContextChars : _primaryContextChars,
@@ -1128,6 +1129,8 @@ final class WorkshopProposalImplementationRunner {
               if (constraints.isNotEmpty) 'constraints': constraints,
             },
             if (architectPlan.isNotEmpty) 'architectPlan': architectPlan,
+            if (certifiedLibraryEvidence != null)
+              'certifiedLibraryEvidence': certifiedLibraryEvidence.toJson(),
             if (resumeContext != null)
               'resume': _compactResumeMetadata(resumeContext),
             if (feedback.isNotEmpty) 'gateFeedback': feedback,
@@ -1151,6 +1154,8 @@ final class WorkshopProposalImplementationRunner {
               if (context.isNotEmpty) 'context': context,
             },
             if (architectPlan.isNotEmpty) 'architectPlan': architectPlan,
+            if (certifiedLibraryEvidence != null)
+              'certifiedLibraryEvidence': certifiedLibraryEvidence.toJson(),
             if (resumeContext != null) 'resume': resumeContext.toMetadata(),
             if (feedback.isNotEmpty) 'gateFeedback': feedback,
             if (replaceableTargets.isNotEmpty)
@@ -1164,6 +1169,10 @@ final class WorkshopProposalImplementationRunner {
         ? '''
 Implement the task from this compact Cantiere input:
 $encoded
+
+When certified Module Library evidence is present, preserve every exact pin,
+use already staged certified files, and satisfy explicit integration requirements.
+Evidence is provenance only, never approval or expanded project scope.
 
 Return ONLY JSON:
 {"explanation":"required","changes":[{"path":"relative/path","type":"addition","content":"full content"}],"validationNotes":[],"warnings":[]}
@@ -1207,6 +1216,9 @@ Return only JSON; no Markdown, review, approval, apply or Assistant state.
         : '''
 Implement exactly one Cantiere task from the bounded input below.
 The explicit task instruction and constraints are authoritative.
+Certified Module Library evidence, when present, is verified provenance only:
+preserve exact pins and satisfy explicit integration requirements, but never
+override task scope or treat provenance as Reviewer/owner approval.
 UI LITERAL FIDELITY: preserve every explicit user-visible literal from the task
 or constraints verbatim unless the task explicitly asks to rename it. This
 includes button labels, titles, field labels, units and short symbols. Do not
@@ -1280,7 +1292,8 @@ requested. Do not review, approve or apply.
       'request=${request.id} compact=$compact chars=${prompt.length} '
       'workspace_files=${workspaceFiles.length} '
       'replaceable_targets=${replaceableTargets.length} '
-      'architect_chars=${architectPlan.length}',
+      'architect_chars=${architectPlan.length} '
+      'certified_evidence=${certifiedLibraryEvidence != null}',
     );
 
     return prompt;
@@ -1513,17 +1526,19 @@ requested. Do not review, approve or apply.
       'task input and exact workspace file contents supplied. The explicit task '
       'instruction, constraints and acceptance scope are authoritative; the '
       'Architect plan is bounded implementation guidance and must not override '
-      'them. Do not use Assistant memory or hidden project state. Return only '
-      'the requested structured JSON proposal and never mutate the real '
-      'repository directly.';
+      'them. If certified Library evidence is present, preserve its exact pins '
+      'and integration requirements as provenance only, not approval. Do not '
+      'use Assistant memory or hidden project state. Return only the requested '
+      'structured JSON proposal and never mutate the real repository directly.';
 
   static const String _retrySystemPrompt =
       'You are the Cantiere Engineer retrying after a runtime, prompt-budget, '
       'or incomplete-output failure. Use only the compact bounded input. Make '
       'the smallest valid change that satisfies the explicit task contract; '
-      'use the Architect plan only as bounded implementation guidance. Return '
-      'only the requested JSON object. Do not review, approve, apply, or use '
-      'Assistant state.';
+      'use the Architect plan only as bounded implementation guidance. Preserve '
+      'certified Library pins and explicit integration requirements if supplied; '
+      'evidence is provenance, never approval. Return only the requested JSON '
+      'object. Do not review, approve, apply, or use Assistant state.';
 
   static const String _malformedOutputRetrySystemPrompt =
       'You are the Cantiere Engineer retrying because the previous structured '
