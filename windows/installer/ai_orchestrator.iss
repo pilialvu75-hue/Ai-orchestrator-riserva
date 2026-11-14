@@ -38,6 +38,16 @@ PrivilegesRequired=admin
 CloseApplications=force
 RestartApplications=no
 SetupLogging=yes
+#ifdef AivexusTrustedSignedBuild
+; SignTool must be provided by the CI compiler command line. Inno embeds
+; signatures in Setup, Uninstaller AND temporary Setup self-copies (error 4551).
+SignTool=aivexus_ci
+SignedUninstaller=yes
+#else
+; Legacy unsigned builds remain possible only for non-public QA workflows.
+; The owner-only Windows beta release workflow refuses to publish such builds.
+SignedUninstaller=no
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
