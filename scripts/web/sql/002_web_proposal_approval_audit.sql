@@ -67,6 +67,33 @@ BEGIN
      NEW.updated_at);
 END;
 
+
+-- Once a revision is approved its digest and approval identity cannot be
+-- edited in-place to silently repurpose an earlier approval. Revoke first,
+-- then persist a *new* proposal/revision through the trusted writer.
+CREATE TRIGGER IF NOT EXISTS web_approved_identity_immutable
+BEFORE UPDATE ON web_project_approvals
+WHEN OLD.status = 'approved' AND (
+  NEW.status NOT IN ('approved', 'revoked') OR
+  (NEW.status = 'approved' AND (
+    NEW.current_revision IS NOT OLD.current_revision OR
+    NEW.approved_revision IS NOT OLD.approved_revision OR
+    NEW.approved_spec_sha256 IS NOT OLD.approved_spec_sha256 OR
+    NEW.proposal_spec_sha256 IS NOT OLD.proposal_spec_sha256 OR
+    NEW.approval_id IS NOT OLD.approval_id
+  )) OR
+  (NEW.status = 'revoked' AND (
+    NEW.current_revision IS NOT OLD.current_revision OR
+    NEW.proposal_spec_sha256 IS NOT OLD.proposal_spec_sha256 OR
+    NEW.approved_revision IS NOT NULL OR
+    NEW.approved_spec_sha256 IS NOT NULL OR
+    NEW.approval_id IS NOT NULL
+  ))
+)
+BEGIN
+  SELECT RAISE(ABORT, 'immutable_web_approved_revision');
+END;
+
 -- Audit history is append-only. Retention/deletion policy requires a separate
 -- explicitly reviewed data-governance migration, not an application endpoint.
 CREATE TRIGGER IF NOT EXISTS web_approval_audit_no_update

@@ -127,12 +127,49 @@ class WebProposalApprovalSQLiteTest(unittest.TestCase):
             self.db.execute('DELETE FROM web_approval_audit')
         self.assertEqual(len(self.audit()), 1)
 
+    def test_approved_digest_revision_and_identity_cannot_be_silently_changed(self):
+        self.assertEqual(self.approve(), 1)
+        for sql, param in [
+            ("UPDATE web_project_approvals SET proposal_spec_sha256=?",
+             'b' * 64),
+            ("UPDATE web_project_approvals SET current_revision=?", 4),
+            ("UPDATE web_project_approvals SET approval_id=?", 'forged'),
+            ("UPDATE web_project_approvals SET status=?", 'draft'),
+        ]:
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.db.execute(sql, (param,))
+        self.assertEqual(len(self.audit()), 1)
+        self.assertEqual(self.revoke(), 1)
+        self.assertEqual([event[0] for event in self.audit()],
+                         ['approved', 'revoked'])
+
+    def test_revocation_cannot_rewrite_proposal_provenance_or_keep_approval(self):
+        self.assertEqual(self.approve(), 1)
+        for sql, param in [
+            ("""UPDATE web_project_approvals
+                SET status='revoked', approved_revision=NULL,
+                    approved_spec_sha256=NULL, approval_id=NULL,
+                    proposal_spec_sha256=?""", 'b' * 64),
+            ("""UPDATE web_project_approvals
+                SET status='revoked', approved_revision=NULL,
+                    approved_spec_sha256=NULL, approval_id=NULL,
+                    current_revision=?""", 4),
+            ("""UPDATE web_project_approvals
+                SET status='revoked', updated_at=?""", 'forged'),
+        ]:
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.db.execute(sql, (param,))
+        self.assertEqual([event[0] for event in self.audit()], ['approved'])
+        self.assertEqual(self.revoke(), 1)
+        self.assertEqual([event[0] for event in self.audit()],
+                         ['approved', 'revoked'])
+
     def test_migration_requires_valid_lowercase_sha256_for_proposals(self):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("""
               UPDATE web_project_approvals SET proposal_spec_sha256=?
               WHERE project_id='counter'
-            """, ('INVALID' * 10 + 'XXXX',))
+            """, ('A' * 64,))
         self.assertEqual(self.approve(), 1)
 
 
