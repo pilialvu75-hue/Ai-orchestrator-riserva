@@ -1,0 +1,108 @@
+name: AIVEXUS Score isolated commercial candidate CI
+
+on:
+  pull_request:
+    paths:
+      - 'commercial/aivexus_score/**'
+      - '.github/workflows/commercial-score.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aivexus-score-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Generate standalone Flutter project outside AIVEXUS checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter create --platforms=android,web --org=dev.aivexus \
+            --project-name=aivexus_score "$RUNNER_TEMP/aivexus_score"
+          cp commercial/aivexus_score/pubspec.yaml "$RUNNER_TEMP/aivexus_score/pubspec.yaml"
+          cp commercial/aivexus_score/lib/*.dart "$RUNNER_TEMP/aivexus_score/lib/"
+          cp commercial/aivexus_score/test/*.dart "$RUNNER_TEMP/aivexus_score/test/"
+
+      - name: Analyze, run functional tests and build web / Android
+        shell: bash
+        working-directory: ${{ runner.temp }}/aivexus_score
+        run: |
+          set -euo pipefail
+          flutter pub get
+          flutter analyze
+          flutter test --reporter expanded
+          flutter build web --release
+          flutter build apk --release
+
+      - name: Run widget tests in headless Chrome
+        shell: bash
+        working-directory: ${{ runner.temp }}/aivexus_score
+        run: |
+          set -euo pipefail
+          flutter test --platform chrome --reporter expanded
+
+      - name: Verify Android app identity and privacy permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$RUNNER_TEMP/aivexus_score/build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          AAPT="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
+          test -n "$AAPT"
+          "$AAPT" dump badging "$APK" | tee "$RUNNER_TEMP/aivexus-score-android-badging.txt"
+          grep -Fq "package: name='dev.aivexus.aivexus_score'" "$RUNNER_TEMP/aivexus-score-android-badging.txt"
+          "$AAPT" dump permissions "$APK" | tee "$RUNNER_TEMP/aivexus-score-android-permissions.txt"
+          # Flutter/AndroidX may declare an app-scoped, non-exported receiver
+          # permission. Audit that exact name and reject any other request,
+          # including INTERNET, CAMERA, LOCATION and unrecognized syntax.
+          python3 -m unittest discover \
+            -s commercial/aivexus_score/tool -p 'test_audit_*.py' -v
+          python3 commercial/aivexus_score/tool/audit_android_permissions.py \
+            "$RUNNER_TEMP/aivexus-score-android-permissions.txt"
+
+      - name: Package test evidence (no public deployment)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/commercial-score
+          # Keep HTML5 distribution local-only and nested-path safe.
+          python3 -m unittest discover \
+            -s commercial/aivexus_score/tool -p 'test_prepare_web_bundle.py' -v
+          python3 commercial/aivexus_score/tool/prepare_web_bundle.py \
+            "$RUNNER_TEMP/aivexus_score/build/web"
+          (cd "$RUNNER_TEMP/aivexus_score/build/web" && \
+            zip -q -r "$GITHUB_WORKSPACE/build/commercial-score/aivexus-score-web.zip" .)
+          cp "$RUNNER_TEMP/aivexus_score/build/app/outputs/flutter-apk/app-release.apk" \
+            build/commercial-score/aivexus-score-android-test.apk
+          cp "$RUNNER_TEMP/aivexus-score-android-permissions.txt" \
+            build/commercial-score/android-permissions.txt
+          (cd build/commercial-score && unzip -Z1 aivexus-score-web.zip | grep -qx 'index.html' && sha256sum *.apk *.zip > SHA256SUMS.txt)
+          ls -lh build/commercial-score
+
+      - name: Upload candidate artifacts (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-score-candidate-${{ github.run_id }}
+          path: build/commercial-score/
+          retention-days: 14
+          if-no-files-found: error
