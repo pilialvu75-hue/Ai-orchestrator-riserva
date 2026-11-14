@@ -208,6 +208,116 @@ void main() {
     ), isNull);
   });
 
+  test('exact current fact cannot be proposed twice after approval',
+      () async {
+    expect(await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Jerome è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+    final first = (await capture
+        .loadReviewableManualEntityReferenceCandidates()).single;
+    expect(await capture.reviewManualEntityReferenceCandidate(
+      reviewed: first, approve: true, userConfirmed: true,
+    ), isTrue);
+
+    // Different trailing punctuation and casing are the same user-stated fact.
+    expect(await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'jerome è alto',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isFalse);
+    expect(await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Jerome è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isFalse);
+    expect(await capture.loadReviewableManualEntityReferenceCandidates(),
+        isEmpty);
+    final saved = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user, scopeId: scopeId,
+    );
+    expect(saved, hasLength(1));
+    expect(saved.single.status, AssistantMemoryStatus.confirmed);
+    expect(saved.single.content, 'Jerome è alto.');
+    // A different stated named fact can still become a candidate.
+    expect(await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Kader è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+    expect(await capture.loadReviewableManualEntityReferenceCandidates(),
+        hasLength(1));
+  });
+
+  test('superseded history stays confirmed and cannot be overwritten',
+      () async {
+    expect(await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Luca è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+    final old = (await capture
+        .loadReviewableManualEntityReferenceCandidates()).single;
+    expect(await capture.reviewManualEntityReferenceCandidate(
+      reviewed: old, approve: true, userConfirmed: true,
+    ), isTrue);
+
+    // A candidate may already be pending before the correction is approved.
+    expect(await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Nino è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+    final duplicateBeforeReview = (await capture
+        .loadReviewableManualEntityReferenceCandidates()).single;
+    expect(await capture.proposeNamedRelationCorrectionCandidate(
+      userPrompt: 'Non Luca, Nino è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isTrue);
+    final replacement = (await capture
+        .loadReviewableNamedRelationCorrectionCandidates()).single;
+    expect(await capture.reviewNamedRelationCorrectionCandidate(
+      reviewed: replacement, approve: true, userConfirmed: true,
+    ), isTrue);
+
+    // The now-redundant proposal is hidden and cannot be approved from a
+    // stale screen even though audit history in SQLite is preserved.
+    expect(await capture.loadReviewableManualEntityReferenceCandidates(),
+        isEmpty);
+    expect(await capture.reviewManualEntityReferenceCandidate(
+      reviewed: duplicateBeforeReview, approve: true, userConfirmed: true,
+    ), isFalse);
+    expect(await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Nino è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isFalse);
+    // Repeating the superseded Luca statement must not downgrade the
+    // historical confirmed record to a candidate.
+    expect(await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Luca è alto.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isFalse);
+    final history = await memory.loadConfirmed(
+      scope: AssistantMemoryScope.user, scopeId: scopeId,
+    );
+    expect(history.map((r) => r.content).toSet(),
+        containsAll(<String>['Luca è alto.', 'Nino è alto.']));
+    expect(history.every((r) => r.status == AssistantMemoryStatus.confirmed),
+        isTrue);
+
+    // Unreviewed new body-characteristic descriptions must not be inferred
+    // as confirmed memories merely because the model mentions them.
+    expect(await capture.proposeManualEntityReferenceCandidate(
+      userPrompt: 'Nino è grasso.',
+      consentEnabled: true,
+      directUserMessage: true,
+    ), isFalse);
+  });
+
   test('rejected candidate never enters confirmed recall', () async {
     await capture.proposeManualEntityReferenceCandidate(
       userPrompt: 'Mika fa tanto sport',
