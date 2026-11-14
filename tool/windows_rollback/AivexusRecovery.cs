@@ -10,6 +10,7 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Windows.Forms;
 
 internal static class AivexusRecovery
 {
@@ -32,7 +33,24 @@ internal static class AivexusRecovery
             else if (string.Equals(mode, "verify", Cmp))
                 VerifyCurrent(store, app, data);
             else if (string.Equals(mode, "restore", Cmp))
+            {
+                if (!settings.ContainsKey("confirm"))
+                {
+                    DialogResult consent = MessageBox.Show(
+                        "Ripristinare la versione precedente di AIVEXUS?\n" +
+                        "Il programma deve essere chiuso. Lo stato corrente sara' " +
+                        "salvato come copia di sicurezza. I dati successivi " +
+                        "alla versione salvata potrebbero non essere compatibili.",
+                        "AIVEXUS - Ripristino della versione precedente",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                        MessageBoxDefaultButton.Button2);
+                    if (consent != DialogResult.Yes)
+                        throw new InvalidOperationException("Recovery cancelled by user.");
+                }
+                else if (settings["confirm"] != "yes")
+                    throw new InvalidOperationException("Invalid explicit confirmation.");
                 Restore(app, data, store);
+            }
             else if (string.Equals(mode, "accept", Cmp))
             {
                 AssertNotRunning();
@@ -59,7 +77,7 @@ internal static class AivexusRecovery
             if (!args[i].StartsWith("--", StringComparison.Ordinal))
                 throw new ArgumentException("Unknown option: " + args[i]);
             string key = args[i].Substring(2);
-            if (!new[] { "mode", "store", "app", "data" }.Contains(key))
+            if (!new[] { "mode", "store", "app", "data", "confirm" }.Contains(key))
                 throw new ArgumentException("Unsupported option: " + key);
             if (result.ContainsKey(key)) throw new ArgumentException("Duplicate option: " + key);
             result.Add(key, args[i + 1]);
