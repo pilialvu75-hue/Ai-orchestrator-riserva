@@ -9,6 +9,7 @@ on:
       - 'macos/Runner/MainFlutterWindow.swift'
       - 'lib/features/settings/presentation/pages/settings_page.dart'
       - '.github/workflows/computer-use-qa.yml'
+      - 'docs/COMPUTER_USE_PORTABLE_QA.md'
   workflow_dispatch:
 
 permissions:
@@ -109,8 +110,26 @@ jobs:
           }
           & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $releaseDir
           if ($LASTEXITCODE -ne 0) { throw 'QA local inference bundle check failed.' }
+          # Match the release pipeline's compatibility import patch. This
+          # does not claim that current Flutter supports Windows 8.1; it
+          # only keeps the preview's native bundle aligned with AIVEXUS.
+          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir $releaseDir
+          if ($LASTEXITCODE -ne 0) { throw 'QA Windows compatibility patch failed.' }
           $zipPath = Join-Path $PWD 'computer-use-windows-qa-unpublished.zip'
           Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
+          # Confirm the delivered archive is self-contained before uploading it.
+          # The test does not invoke the unsigned application or touch user
+          # profiles on CI; physical launch remains a separate opt-in test.
+          $probe = Join-Path $env:RUNNER_TEMP 'aivexus-computer-use-portable-probe'
+          New-Item $probe -ItemType Directory -Force | Out-Null
+          Expand-Archive -Path $zipPath -DestinationPath $probe -Force
+          if (-not (Test-Path (Join-Path $probe 'ai_orchestrator.exe')) -or
+              -not (Test-Path (Join-Path $probe 'data'))) {
+            throw 'Portable QA archive is missing executable or Flutter data.'
+          }
+          if (Test-Path (Join-Path $probe 'AI-Orchestrator-Setup-x64.exe')) {
+            throw 'Portable QA archive must not contain an installer.'
+          }
           $digest = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "$digest  computer-use-windows-qa-unpublished.zip" | Set-Content -Path "$zipPath.sha256" -Encoding ascii
           @{
@@ -119,7 +138,11 @@ jobs:
             qa_flag = 'AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true'
             distribution = 'CI artifact ONLY; not published to updater; no installer'
             signed = $false
+            requires_separate_windows_user = $true
+            supports_windows_8_1 = $false
+            disclaimer = 'Unsigned diagnostic preview; not an installable release. Never disable Smart App Control.'
           } | ConvertTo-Json | Set-Content -Path 'computer-use-qa-evidence.json' -Encoding utf8
+          Copy-Item 'docs/COMPUTER_USE_PORTABLE_QA.md' 'COMPUTER-USE-PORTABLE-READ-ME.md'
       - name: Preserve isolated QA preview for internal verification only
         uses: actions/upload-artifact@v4
         with:
@@ -128,5 +151,6 @@ jobs:
             computer-use-windows-qa-unpublished.zip
             computer-use-windows-qa-unpublished.zip.sha256
             computer-use-qa-evidence.json
+            COMPUTER-USE-PORTABLE-READ-ME.md
           if-no-files-found: error
           retention-days: 7
