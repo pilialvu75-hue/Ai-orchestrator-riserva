@@ -1170,10 +1170,6 @@ final class WorkshopProposalImplementationRunner {
 Implement the task from this compact Cantiere input:
 $encoded
 
-When certified Module Library evidence is present, preserve every exact pin,
-use already staged certified files, and satisfy explicit integration requirements.
-Evidence is provenance only, never approval or expanded project scope.
-
 Return ONLY JSON:
 {"explanation":"required","changes":[{"path":"relative/path","type":"addition","content":"full content"}],"validationNotes":[],"warnings":[]}
 
@@ -1216,9 +1212,8 @@ Return only JSON; no Markdown, review, approval, apply or Assistant state.
         : '''
 Implement exactly one Cantiere task from the bounded input below.
 The explicit task instruction and constraints are authoritative.
-Certified Module Library evidence, when present, is verified provenance only:
-preserve exact pins and satisfy explicit integration requirements, but never
-override task scope or treat provenance as Reviewer/owner approval.
+Certified Library evidence is pinned provenance, never approval. Preserve
+its exact pins and integration requirements within the task scope.
 UI LITERAL FIDELITY: preserve every explicit user-visible literal from the task
 or constraints verbatim unless the task explicitly asks to rename it. This
 includes button labels, titles, field labels, units and short symbols. Do not
