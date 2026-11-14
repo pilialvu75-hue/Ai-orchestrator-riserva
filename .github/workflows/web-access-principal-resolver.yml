@@ -1,0 +1,40 @@
+name: Aivexus Web Access JWKS Principal Resolver
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/web/cloudflare_access_principal_resolver.mjs'
+      - 'test/airlab/web_access_principal_resolver.mjs'
+      - '.github/workflows/web-access-principal-resolver.yml'
+      - 'scripts/web/cloudflare_access_jwt_verifier.mjs'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/web/cloudflare_access_principal_resolver.mjs'
+      - 'test/airlab/web_access_principal_resolver.mjs'
+      - '.github/workflows/web-access-principal-resolver.yml'
+      - 'scripts/web/cloudflare_access_jwt_verifier.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  principal-resolver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify crypto, JWKS rotation, cache and fail-closed cases
+        run: |
+          node --test test/airlab/web_access_jwt_verifier.mjs
+          node --test test/airlab/web_access_principal_resolver.mjs
+      - name: Regression - Web-only trusted approval writer
+        run: |
+          node --test test/airlab/web_d1_proposal_approval_writer.mjs
+          node --test test/airlab/web_d1_approval_reservation.mjs
