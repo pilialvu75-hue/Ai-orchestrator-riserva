@@ -210,7 +210,7 @@ final class AssistantDurableMemoryCaptureService {
   // audit history; proposals must not restage its already-current facts.
   static String? _namedStatementKey(String text) =>
       AssistantEntityReferenceAnalyzer.parseDirectUserStatement(text)
-          ?.userStatement.toLowerCase().replaceAll(RegExp(r'\\s+'), ' ').trim();
+          ?.userStatement.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
 
   Future<List<AssistantDurableMemoryRecord>> _confirmedLocalUserFacts() =>
       _memoryService.loadConfirmed(
