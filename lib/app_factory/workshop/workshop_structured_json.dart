@@ -160,7 +160,7 @@ abstract final class WorkshopStructuredJson {
         // A later known free-text field may need the same bounded repair.
       }
 
-      final repaired = _repairContentFields(
+      final repaired = _repairKnownStringFields(
         candidate,
         searchStart: valueStart + escapedValue.length + 1,
         depth: depth + 1,
