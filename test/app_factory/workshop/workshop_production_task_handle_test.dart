@@ -567,6 +567,7 @@ void main() {
       <AppAiRole>[
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
+        AppAiRole.architect,
         AppAiRole.engineer,
         AppAiRole.reviewer,
         AppAiRole.reviewer,
