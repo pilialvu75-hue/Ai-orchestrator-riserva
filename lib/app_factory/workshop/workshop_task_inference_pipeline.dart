@@ -140,6 +140,16 @@ final class WorkshopTaskInferencePipeline {
     CancellationToken? cancellationToken,
     void Function(WorkshopStage stage)? onStage,
   }) async {
+    if (session.status == WorkspaceSessionStatus.review ||
+        session.status == WorkspaceSessionStatus.validation) {
+      return _resumeStagedGateState(
+        session: session,
+        preflight: preflight,
+        isOffline: isOffline,
+        cancellationToken: cancellationToken,
+        onStage: onStage,
+      );
+    }
     final revisionBaseline =
         Map<String, String>.from(session.workspace.snapshot);
     onStage?.call(WorkshopStage.implementation);
