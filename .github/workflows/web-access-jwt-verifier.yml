@@ -1,0 +1,36 @@
+name: Aivexus Web Cloudflare Access JWT Verification Contract
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/web/cloudflare_access_jwt_verifier.mjs'
+      - 'test/airlab/web_access_jwt_verifier.mjs'
+      - '.github/workflows/web-access-jwt-verifier.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/web/cloudflare_access_jwt_verifier.mjs'
+      - 'test/airlab/web_access_jwt_verifier.mjs'
+      - '.github/workflows/web-access-jwt-verifier.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-access-jwt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify forged tokens are rejected and valid signed claims accepted
+        run: node --test test/airlab/web_access_jwt_verifier.mjs
+      - name: Verify existing Web approval and reservation contracts
+        run: |
+          node --test test/airlab/web_d1_proposal_approval_writer.mjs
+          node --test test/airlab/web_d1_approval_reservation.mjs
