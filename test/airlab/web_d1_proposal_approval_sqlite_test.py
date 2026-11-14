@@ -143,6 +143,27 @@ class WebProposalApprovalSQLiteTest(unittest.TestCase):
         self.assertEqual([event[0] for event in self.audit()],
                          ['approved', 'revoked'])
 
+    def test_revocation_cannot_rewrite_proposal_provenance_or_keep_approval(self):
+        self.assertEqual(self.approve(), 1)
+        for sql, param in [
+            ("""UPDATE web_project_approvals
+                SET status='revoked', approved_revision=NULL,
+                    approved_spec_sha256=NULL, approval_id=NULL,
+                    proposal_spec_sha256=?""", 'b' * 64),
+            ("""UPDATE web_project_approvals
+                SET status='revoked', approved_revision=NULL,
+                    approved_spec_sha256=NULL, approval_id=NULL,
+                    current_revision=?""", 4),
+            ("""UPDATE web_project_approvals
+                SET status='revoked', updated_at=?""", 'forged'),
+        ]:
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.db.execute(sql, (param,))
+        self.assertEqual([event[0] for event in self.audit()], ['approved'])
+        self.assertEqual(self.revoke(), 1)
+        self.assertEqual([event[0] for event in self.audit()],
+                         ['approved', 'revoked'])
+
     def test_migration_requires_valid_lowercase_sha256_for_proposals(self):
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.execute("""
