@@ -32,6 +32,7 @@ jobs:
           $outDir = Join-Path $base 'installer'
           New-Item $payload, $outDir -ItemType Directory -Force | Out-Null
           Set-Content (Join-Path $payload 'ai_orchestrator.exe') 'fake-ci-only' -NoNewline
+          Set-Content (Join-Path $payload 'flutter_windows.dll') 'fake-ci-only' -NoNewline
           $redist = Join-Path $base 'vc_redist.x64.exe'
           Set-Content $redist 'fake-ci-only' -NoNewline
           $recovery = Join-Path $base 'AivexusRecovery.exe'
