@@ -82,7 +82,18 @@ final class WorkshopProposalReviewGate {
       emptyMessage: 'Workshop reviewer response cannot be empty.',
     );
 
-    final decoded = jsonDecode(jsonText);
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(jsonText);
+    } on FormatException {
+      final repaired =
+          WorkshopStructuredJson.repairMalformedContentStrings(jsonText);
+      if (repaired == null) {
+        rethrow;
+      }
+      decoded = jsonDecode(repaired);
+    }
+
     if (decoded is! Map) {
       throw const FormatException(
         'Workshop reviewer response must be a JSON object.',
