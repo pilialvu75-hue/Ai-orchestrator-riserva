@@ -25,6 +25,24 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: python3 -m unittest discover -s test/scripts -p 'test_computer_use_windows_beta.py'
+      - name: Parse signing PowerShell and prove missing credentials are rejected
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $path = Join-Path $PWD 'tool/windows_trusted_signing.ps1'
+          [Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) { throw "Signing PowerShell parser found $($errors.Count) errors." }
+          Remove-Item Env:AIVEXUS_WINDOWS_SIGNING_PFX_B64 -ErrorAction SilentlyContinue
+          Remove-Item Env:AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD -ErrorAction SilentlyContinue
+          $rejected = $false
+          try {
+            & $path -Mode Prepare
+          } catch {
+            if ("$_" -notmatch 'refusing to publish an unsigned Windows beta') { throw }
+            $rejected = $true
+          }
+          if (-not $rejected) { throw 'Missing credentials did not block the beta.' }
 
   publish-windows-beta:
     # Only a reviewed main SHA; no PR build can publish.
@@ -43,6 +61,17 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
+
+      - name: Refuse unsigned Windows beta before using build resources
+        shell: pwsh
+        env:
+          AIVEXUS_WINDOWS_SIGNING_PFX_B64: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_B64 }}
+          AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:AIVEXUS_WINDOWS_SIGNING_PFX_B64) -or
+              [string]::IsNullOrWhiteSpace($env:AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD)) {
+            throw 'Windows beta release disabled: a trusted Authenticode certificate must be configured.'
+          }
 
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
@@ -117,6 +146,22 @@ jobs:
           if (-not (Test-Path (Join-Path $dir 'ai_orchestrator.exe'))) { throw 'Missing app EXE.' }
           if (-not (Test-Path (Join-Path $dir 'data'))) { throw 'Missing Flutter data.' }
 
+      - name: Require trusted code-signing identity (fail closed)
+        shell: pwsh
+        env:
+          AIVEXUS_WINDOWS_SIGNING_PFX_B64: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_B64 }}
+          AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          & (Join-Path $PWD 'tool\windows_trusted_signing.ps1') -Mode Prepare
+
+      - name: Authenticode-sign all bundled Windows PE files
+        shell: pwsh
+        env:
+          AIVEXUS_WINDOWS_SIGNING_PFX_B64: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_B64 }}
+          AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          & (Join-Path $PWD 'tool\windows_trusted_signing.ps1') -Mode Bundle -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
+
       - name: Prepare Inno Setup with existing installation identity
         id: package
         shell: pwsh
@@ -151,6 +196,7 @@ jobs:
           $outDir = Join-Path $PWD 'build\windows\computer-use-beta'
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
           @(
+            "#define AivexusTrustedSignedBuild 1",
             "#define AppVersion `"${{ steps.version.outputs.version }}`"",
             "#define ReleaseDir `"$dir`"",
             "#define VCRedistPath `"$($redist.FullName)`"",
@@ -159,15 +205,21 @@ jobs:
           "iscc=$iscc" | Out-File $env:GITHUB_OUTPUT -Append
           "out_dir=$outDir" | Out-File $env:GITHUB_OUTPUT -Append
 
-      - name: Produce verified versioned Setup.exe
+      - name: Produce trusted versioned Setup.exe (including temporary self-copy)
         id: installer
         shell: pwsh
+        env:
+          AIVEXUS_WINDOWS_SIGNING_PFX_B64: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_B64 }}
+          AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
-          & '${{ steps.package.outputs.iscc }}' (Join-Path $PWD 'windows\installer\ai_orchestrator.iss')
+          $signerScript = Join-Path $PWD 'tool\windows_trusted_signing.ps1'
+          $innoSignTool = '/Saivexus_ci=pwsh.exe -NoProfile -File $q' + $signerScript + '$q -Mode Sign -FilePath $f'
+          & '${{ steps.package.outputs.iscc }}' $innoSignTool (Join-Path $PWD 'windows\installer\ai_orchestrator.iss')
           if ($LASTEXITCODE -ne 0) { throw 'Setup compiler failed.' }
           $exe = Join-Path '${{ steps.package.outputs.out_dir }}' 'AI-Orchestrator-Setup-x64.exe'
           if (-not (Test-Path $exe) -or (Get-Item $exe).Length -lt 1048576) { throw 'Missing or invalid Setup.exe.' }
+          & (Join-Path $PWD 'tool\windows_trusted_signing.ps1') -Mode Verify -FilePath $exe
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $digest = "$exe.sha256"
           "$sha  AI-Orchestrator-Setup-x64.exe" | Set-Content $digest -Encoding ascii
@@ -187,4 +239,13 @@ jobs:
           $names = @($release.assets | ForEach-Object { $_.name })
           if ($names -notcontains 'AI-Orchestrator-Setup-x64.exe' -or $names -notcontains 'AI-Orchestrator-Setup-x64.exe.sha256') {
             throw 'Missing installer or checksum in published release.'
+          }
+
+      - name: Erase ephemeral signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:AIVEXUS_WINDOWS_SIGNING_PFX_PATH -and
+              (Test-Path -LiteralPath $env:AIVEXUS_WINDOWS_SIGNING_PFX_PATH)) {
+            Remove-Item -LiteralPath $env:AIVEXUS_WINDOWS_SIGNING_PFX_PATH -Force
           }
