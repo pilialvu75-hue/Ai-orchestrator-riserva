@@ -44,6 +44,17 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Refuse unsigned Windows beta before using build resources
+        shell: pwsh
+        env:
+          AIVEXUS_WINDOWS_SIGNING_PFX_B64: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_B64 }}
+          AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:AIVEXUS_WINDOWS_SIGNING_PFX_B64) -or
+              [string]::IsNullOrWhiteSpace($env:AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD)) {
+            throw 'Windows beta release disabled: a trusted Authenticode certificate must be configured.'
+          }
+
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
