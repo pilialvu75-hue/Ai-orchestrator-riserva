@@ -1,0 +1,46 @@
+name: Aivexus Web Trusted Proposal Approval Writer
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/web/d1_web_proposal_approval_writer.mjs'
+      - 'scripts/web/sql/002_web_proposal_approval_audit.sql'
+      - 'test/airlab/web_d1_proposal_approval_writer.mjs'
+      - 'test/airlab/web_d1_proposal_approval_sqlite_test.py'
+      - '.github/workflows/web-proposal-approval-writer.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/web/d1_web_proposal_approval_writer.mjs'
+      - 'scripts/web/sql/002_web_proposal_approval_audit.sql'
+      - 'test/airlab/web_d1_proposal_approval_writer.mjs'
+      - 'test/airlab/web_d1_proposal_approval_sqlite_test.py'
+      - '.github/workflows/web-proposal-approval-writer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  proposal-approval-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Test Web-only owner and CAS contract
+        run: node --test test/airlab/web_d1_proposal_approval_writer.mjs
+      - name: Test actual SQLite migrations and immutable audit
+        run: python3 -m unittest discover -s test/airlab -p 'web_d1_proposal_approval_sqlite_test.py' -v
+      - name: Regression - existing execution reservation
+        run: |
+          node --test test/airlab/web_approval_reservation.mjs test/airlab/web_d1_approval_reservation.mjs
+          python3 -m unittest discover -s test/airlab -p 'web_d1_sqlite_contract_test.py' -v
