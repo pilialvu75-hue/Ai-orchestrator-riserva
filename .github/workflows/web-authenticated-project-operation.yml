@@ -1,0 +1,48 @@
+name: Aivexus Web Authenticated D1 Operation Gate
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/web/authenticated_web_project_operation.mjs'
+      - 'test/airlab/web_authenticated_project_operation.mjs'
+      - '.github/workflows/web-authenticated-project-operation.yml'
+      - 'scripts/web/cloudflare_access_principal_resolver.mjs'
+      - 'scripts/web/cloudflare_access_jwt_verifier.mjs'
+      - 'scripts/web/d1_web_proposal_approval_writer.mjs'
+      - 'scripts/web/d1_approval_reservation_store.mjs'
+      - 'scripts/web/approved_execution_reservation.mjs'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/web/authenticated_web_project_operation.mjs'
+      - 'test/airlab/web_authenticated_project_operation.mjs'
+      - '.github/workflows/web-authenticated-project-operation.yml'
+      - 'scripts/web/cloudflare_access_principal_resolver.mjs'
+      - 'scripts/web/cloudflare_access_jwt_verifier.mjs'
+      - 'scripts/web/d1_web_proposal_approval_writer.mjs'
+      - 'scripts/web/d1_approval_reservation_store.mjs'
+      - 'scripts/web/approved_execution_reservation.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  authenticated-web-project-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify authenticated HTTP-to-D1 operation contract
+        run: node --test test/airlab/web_authenticated_project_operation.mjs
+      - name: Regression for verified Access JWT and D1 reservations
+        run: |
+          node --test test/airlab/web_access_jwt_verifier.mjs
+          node --test test/airlab/web_access_principal_resolver.mjs
+          node --test test/airlab/web_d1_proposal_approval_writer.mjs
+          node --test test/airlab/web_d1_approval_reservation.mjs
