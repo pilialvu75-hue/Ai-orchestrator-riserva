@@ -471,7 +471,10 @@ void main() {
     final architect = _QueueGateway(
       role: AppAiRole.architect,
       calls: calls,
-      results: <WorkshopInferenceResult>[_success('{}')],
+      results: <WorkshopInferenceResult>[
+        _success(_planningJson),
+        _success('{}'),
+      ],
     );
     final engineer = _QueueGateway(
       role: AppAiRole.engineer,
@@ -584,7 +587,10 @@ void main() {
     final architect = _QueueGateway(
       role: AppAiRole.architect,
       calls: calls,
-      results: <WorkshopInferenceResult>[_success('{}')],
+      results: <WorkshopInferenceResult>[
+        _success(_planningJson),
+        _success('{}'),
+      ],
     );
     final engineer = _QueueGateway(
       role: AppAiRole.engineer,
@@ -659,7 +665,10 @@ void main() {
     final architect = _QueueGateway(
       role: AppAiRole.architect,
       calls: calls,
-      results: <WorkshopInferenceResult>[_success('{}')],
+      results: <WorkshopInferenceResult>[
+        _success(_planningJson),
+        _success('{}'),
+      ],
     );
     final engineer = _QueueGateway(
       role: AppAiRole.engineer,
