@@ -81,6 +81,13 @@ WHEN OLD.status = 'approved' AND (
     NEW.approved_spec_sha256 IS NOT OLD.approved_spec_sha256 OR
     NEW.proposal_spec_sha256 IS NOT OLD.proposal_spec_sha256 OR
     NEW.approval_id IS NOT OLD.approval_id
+  )) OR
+  (NEW.status = 'revoked' AND (
+    NEW.current_revision IS NOT OLD.current_revision OR
+    NEW.proposal_spec_sha256 IS NOT OLD.proposal_spec_sha256 OR
+    NEW.approved_revision IS NOT NULL OR
+    NEW.approved_spec_sha256 IS NOT NULL OR
+    NEW.approval_id IS NOT NULL
   ))
 )
 BEGIN
