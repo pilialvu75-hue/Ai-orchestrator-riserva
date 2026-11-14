@@ -6,6 +6,8 @@ on:
     paths:
       - 'tool/windows_rollback/**'
       - '.github/workflows/windows-rollback-lab.yml'
+      - '.github/workflows/windows-computer-use-beta.yml'
+      - 'windows/installer/ai_orchestrator.iss'
   workflow_dispatch:
 
 permissions:
@@ -20,3 +22,40 @@ jobs:
       - name: Compile .NET Framework recovery helper and test snapshot/restore
         shell: pwsh
         run: .\tool\windows_rollback\test_recovery.ps1
+      - name: Compile the recovery-enabled Inno installer (CI only; not released)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          $base = Join-Path $env:RUNNER_TEMP 'recovery-inno-contract'
+          $payload = Join-Path $base 'payload'
+          $outDir = Join-Path $base 'installer'
+          New-Item $payload, $outDir -ItemType Directory -Force | Out-Null
+          Set-Content (Join-Path $payload 'ai_orchestrator.exe') 'fake-ci-only' -NoNewline
+          $redist = Join-Path $base 'vc_redist.x64.exe'
+          Set-Content $redist 'fake-ci-only' -NoNewline
+          $recovery = Join-Path $base 'AivexusRecovery.exe'
+          $source = Join-Path $PWD 'tool\windows_rollback\AivexusRecovery.cs'
+          $manifest = Join-Path $PWD 'tool\windows_rollback\recovery.manifest'
+          & $csc /nologo /target:exe /r:System.Windows.Forms.dll "/win32manifest:$manifest" "/out:$recovery" $source
+          if ($LASTEXITCODE -ne 0) { throw 'Recovery helper with UAC manifest did not compile.' }
+          @(
+            '#define AppVersion "1.0.15.123456"',
+            "#define ReleaseDir `"$payload`"",
+            "#define VCRedistPath `"$redist`"",
+            "#define OutputDir `"$outDir`"",
+            "#define AivexusRecoveryHelper `"$recovery`""
+          ) | Set-Content 'windows\installer\ci_generated.iss' -Encoding ascii
+          $candidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          )
+          $iscc = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $iscc) { throw 'Inno Setup compiler missing on CI runner.' }
+          & $iscc (Join-Path $PWD 'windows\installer\ai_orchestrator.iss')
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $outDir 'AI-Orchestrator-Setup-x64.exe'))) {
+            throw 'Recovery-enabled Inno package failed to compile.'
+          }
+          Write-Host 'PASS: recovery-enabled Inno installer compiles without public release.'
