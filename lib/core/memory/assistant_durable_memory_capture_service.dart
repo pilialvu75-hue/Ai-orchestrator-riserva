@@ -205,6 +205,35 @@ final class AssistantDurableMemoryCaptureService {
     return operation;
   }
 
+  // Exact normalized *statement* equality only, never a name or identity
+  // match. The canonical view shadows superseded versions without deleting
+  // audit history; proposals must not restage its already-current facts.
+  static String? _namedStatementKey(String text) =>
+      AssistantEntityReferenceAnalyzer.parseDirectUserStatement(text)
+          ?.userStatement.toLowerCase().replaceAll(RegExp(r'\\s+'), ' ').trim();
+
+  Future<List<AssistantDurableMemoryRecord>> _confirmedLocalUserFacts() =>
+      _memoryService.loadConfirmed(
+        scope: AssistantMemoryScope.user,
+        scopeId: AssistantDurableMemoryContextService.localUserScopeId,
+        limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
+      );
+
+  static bool _matchesCurrentNamedFact(
+    String input,
+    List<AssistantDurableMemoryRecord> confirmed,
+  ) {
+    final statementKey = _namedStatementKey(input);
+    if (statementKey == null) return false;
+    final current = AssistantConfirmedMemoryConflictResolver.currentView(
+      conversationRecords: const <AssistantDurableMemoryRecord>[],
+      userRecords: confirmed,
+    );
+    return current.any((item) =>
+        item.kind == AssistantMemoryKind.fact &&
+        _namedStatementKey(item.content) == statementKey);
+  }
+
   /// A directly written named-person statement, never model-inferred.
   ///
   /// Manual review uses per-action consent. Ordinary chat may call this only
@@ -233,6 +262,14 @@ final class AssistantDurableMemoryCaptureService {
       final key =
           AssistantManualEntityReferenceCandidate.recordKeyFor(userPrompt);
       if (key == null) return false;
+      final confirmed = await _confirmedLocalUserFacts();
+      // Do not overwrite a confirmed record (including a superseded one)
+      // by staging the same logical key as a candidate.
+      if (confirmed.any((item) => item.recordKey == key) ||
+          _matchesCurrentNamedFact(userPrompt, confirmed) ||
+          (consentStillEnabled != null && !consentStillEnabled())) {
+        return false;
+      }
       await _memoryService.recordUserCandidate(
         recordKey: key,
         scope: AssistantMemoryScope.user,
@@ -259,6 +296,10 @@ final class AssistantDurableMemoryCaptureService {
       scopeId: AssistantDurableMemoryContextService.localUserScopeId,
       limit: AssistantDurableMemoryPolicy.maxRecordsPerScope,
     );
+    final confirmed = await _confirmedLocalUserFacts();
+    // A pending suggestion may predate approval of a correction with a
+    // different recordKey. Do not show an identical fact twice for review.
+    // This is a read-only filter: it does not delete any SQLite record.
     return List<AssistantDurableMemoryRecord>.unmodifiable(
       records.where((record) =>
           record.recordKey ==
@@ -267,7 +308,8 @@ final class AssistantDurableMemoryCaptureService {
               ) &&
           record.reason == 'manual_entity_reference:it' &&
           record.kind == AssistantMemoryKind.fact &&
-          record.source == AssistantMemorySource.userStatement),
+          record.source == AssistantMemorySource.userStatement &&
+          !_matchesCurrentNamedFact(record.content, confirmed)),
     );
   }
 
@@ -311,8 +353,17 @@ final class AssistantDurableMemoryCaptureService {
     if (approve && originalAlias != revisedAlias) {
       return Future<bool>.value(false);
     }
-    final operation = _pendingWrites.then((_) {
-      if (_resetInProgress) return Future<bool>.value(false);
+    final operation = _pendingWrites.then((_) async {
+      if (_resetInProgress) return false;
+      // A candidate held open while another review approved the same fact
+      // cannot be promoted again from an outdated UI snapshot.
+      if (approve &&
+          _matchesCurrentNamedFact(
+            requestedContent,
+            await _confirmedLocalUserFacts(),
+          )) {
+        return false;
+      }
       return _memoryService.resolveUserStatementCandidate(
         reviewed: reviewed,
         approve: approve,
