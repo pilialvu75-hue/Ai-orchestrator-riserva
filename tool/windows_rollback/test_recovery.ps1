@@ -7,12 +7,14 @@ if (-not (Test-Path $csc)) {
 $working = Join-Path $env:RUNNER_TEMP ('aivexus-recovery-ci-' + [guid]::NewGuid().ToString('N'))
 New-Item $working -ItemType Directory -Force | Out-Null
 $exe = Join-Path $working 'AivexusRecovery.exe'
-& $csc /nologo /target:exe "/out:$exe" "$source"
+& $csc /nologo /target:exe /r:System.Windows.Forms.dll "/out:$exe" "$source"
 if ($LASTEXITCODE -ne 0) { throw 'Windows 8.1 compatible recovery helper did not compile.' }
 
 function Invoke-Recovery {
   param([string] $Mode, [string] $App, [string] $Data, [string] $Store, [bool] $MustSucceed = $true)
-  & $exe --mode $Mode --app $App --data $Data --store $Store
+  $arguments = @('--mode', $Mode, '--app', $App, '--data', $Data, '--store', $Store)
+  if ($Mode -eq 'restore') { $arguments += @('--confirm', 'yes') }
+  & $exe @arguments
   $exit = $LASTEXITCODE
   if ($MustSucceed -and $exit -ne 0) { throw "$Mode failed: $exit" }
   if (-not $MustSucceed -and $exit -eq 0) { throw "$Mode should have been rejected" }
