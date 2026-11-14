@@ -58,6 +58,7 @@ try {
     throw 'Rejected corrupt restore changed the installed app.'
   }
   Write-Host 'PASS: backup, verify, refusal to overwrite unapproved backup, clean restore, rollback of data, corrupt snapshot rejection.'
+  exit 0
 } finally {
   Remove-Item -LiteralPath $working -Recurse -Force -ErrorAction SilentlyContinue
 }
