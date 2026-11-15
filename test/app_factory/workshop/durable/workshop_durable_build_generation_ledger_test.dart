@@ -2,22 +2,15 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:ai_orchestrator/app_factory/workshop/durable/workshop_durable_build_generation_ledger.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_source_snapshot.dart';
-import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-
-  setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
-
   test('first reservation survives restart and blocks accidental redispatch',
       () async {
-    final prefs = PreferencesService(await SharedPreferences.getInstance());
-    final first = WorkshopDurableBuildGenerationLedger(preferences: prefs);
+    final store = _InMemoryGenerationStorage();
+    final first = WorkshopDurableBuildGenerationLedger(storage: store);
     final request = _request('demo', 'ui-1');
     final frozenSource = _snapshot('void main() {}');
 
@@ -29,7 +22,7 @@ void main() {
     expect(ticket.state, WorkshopDurableGenerationState.active);
     expect(ticket.buildId, startsWith('durable-v2-'));
 
-    final reopened = WorkshopDurableBuildGenerationLedger(preferences: prefs);
+    final reopened = WorkshopDurableBuildGenerationLedger(storage: store);
     final recovered = await reopened.recoverLatest(_request('demo', 'ui-2'));
     expect(recovered?.buildId, ticket.buildId);
     expect(recovered?.sourceSha256, ticket.sourceSha256);
@@ -45,8 +38,8 @@ void main() {
 
   test('terminal outcome allows new generation even on identical source',
       () async {
-    final prefs = PreferencesService(await SharedPreferences.getInstance());
-    final ledger = WorkshopDurableBuildGenerationLedger(preferences: prefs);
+    final store = _InMemoryGenerationStorage();
+    final ledger = WorkshopDurableBuildGenerationLedger(storage: store);
     final request = _request('demo', 'ui-1');
     final source = _snapshot('void main() {}');
     final first = await ledger.reserveNew(request: request, source: source);
@@ -66,7 +59,7 @@ void main() {
     expect(second.sourceSha256, first.sourceSha256);
 
     final recovered = await WorkshopDurableBuildGenerationLedger(
-      preferences: prefs,
+      storage: store,
     ).recoverLatest(_request('demo', 'ui-4'));
     expect(recovered?.generation, 2);
     expect(recovered?.state, WorkshopDurableGenerationState.active);
@@ -74,8 +67,8 @@ void main() {
 
   test('stale terminal completion never overwrites a later active generation',
       () async {
-    final prefs = PreferencesService(await SharedPreferences.getInstance());
-    final ledger = WorkshopDurableBuildGenerationLedger(preferences: prefs);
+    final store = _InMemoryGenerationStorage();
+    final ledger = WorkshopDurableBuildGenerationLedger(storage: store);
     final req = _request('demo', 'first');
     final first = await ledger.reserveNew(
       request: req,
@@ -108,8 +101,8 @@ void main() {
 
   test('terminal transition is idempotent but conflicting status is rejected',
       () async {
-    final prefs = PreferencesService(await SharedPreferences.getInstance());
-    final ledger = WorkshopDurableBuildGenerationLedger(preferences: prefs);
+    final store = _InMemoryGenerationStorage();
+    final ledger = WorkshopDurableBuildGenerationLedger(storage: store);
     final request = _request('demo', 'ui');
     final reserved = await ledger.reserveNew(
       request: request,
@@ -138,9 +131,9 @@ void main() {
 
   test('concurrent instances preserve reservations for different intents',
       () async {
-    final prefs = PreferencesService(await SharedPreferences.getInstance());
-    final first = WorkshopDurableBuildGenerationLedger(preferences: prefs);
-    final second = WorkshopDurableBuildGenerationLedger(preferences: prefs);
+    final store = _InMemoryGenerationStorage();
+    final first = WorkshopDurableBuildGenerationLedger(storage: store);
+    final second = WorkshopDurableBuildGenerationLedger(storage: store);
     final results = await Future.wait(<Future<WorkshopDurableBuildReservation>>[
       first.reserveNew(
         request: _request('a', 'ui-a'),
@@ -158,12 +151,9 @@ void main() {
 
   test('corrupted journal refuses allocation and retains original bytes',
       () async {
-    final prefs = PreferencesService(await SharedPreferences.getInstance());
-    await prefs.setString(
-      WorkshopDurableBuildGenerationLedger.storageKey,
-      '{invalid',
-    );
-    final ledger = WorkshopDurableBuildGenerationLedger(preferences: prefs);
+    final store = _InMemoryGenerationStorage();
+    store.raw = '{invalid';
+    final ledger = WorkshopDurableBuildGenerationLedger(storage: store);
     await expectLater(
       ledger.reserveNew(
         request: _request('demo', 'ui'),
@@ -171,21 +161,52 @@ void main() {
       ),
       throwsStateError,
     );
-    expect(prefs.getString(WorkshopDurableBuildGenerationLedger.storageKey),
-        '{invalid');
+    expect(store.raw, '{invalid');
+  });
+
+  test('platform write rejected cannot be mistaken for a reservation',
+      () async {
+    final store = _InMemoryGenerationStorage()..rejectWrites = true;
+    final ledger = WorkshopDurableBuildGenerationLedger(storage: store);
+    final request = _request('demo', 'ui-rejected');
+    await expectLater(
+      ledger.reserveNew(request: request, source: _snapshot('source')),
+      throwsStateError,
+    );
+    expect(store.raw, isNull);
+    store.rejectWrites = false;
+    expect(await ledger.recoverLatest(_request('demo', 'ui-after-restart')),
+        isNull);
+    final valid = await ledger.reserveNew(
+      request: request,
+      source: _snapshot('source'),
+    );
+    expect(valid.generation, 1);
+  });
+
+  test('false-positive write acknowledgement fails readback gate',
+      () async {
+    final store = _InMemoryGenerationStorage()..ackWithoutPersist = true;
+    final ledger = WorkshopDurableBuildGenerationLedger(storage: store);
+    await expectLater(
+      ledger.reserveNew(
+        request: _request('demo', 'ui'),
+        source: _snapshot('source'),
+      ),
+      throwsStateError,
+    );
+    expect(store.raw, isNull);
   });
 
   test('journal persists only hashes, counters and states, never source',
       () async {
-    final prefs = PreferencesService(await SharedPreferences.getInstance());
-    final ledger = WorkshopDurableBuildGenerationLedger(preferences: prefs);
+    final store = _InMemoryGenerationStorage();
+    final ledger = WorkshopDurableBuildGenerationLedger(storage: store);
     await ledger.reserveNew(
       request: _request('private-project', 'ui-1'),
       source: _snapshot('PRIVATE CODE / DO NOT UPLOAD'),
     );
-    final raw = prefs.getString(
-      WorkshopDurableBuildGenerationLedger.storageKey,
-    )!;
+    final raw = store.raw!;
     expect(jsonDecode(raw), isA<Map>());
     expect(raw, isNot(contains('private-project')));
     expect(raw, isNot(contains('/workspace/')));
@@ -210,4 +231,21 @@ WorkshopBuildSourceSnapshot _snapshot(String text) {
     ],
     totalBytes: bytes.lengthInBytes,
   );
+}
+
+final class _InMemoryGenerationStorage
+    implements WorkshopDurableGenerationStorage {
+  String? raw;
+  bool rejectWrites = false;
+  bool ackWithoutPersist = false;
+
+  @override
+  Future<String?> read() async => raw;
+
+  @override
+  Future<bool> write(String value) async {
+    if (rejectWrites) return false;
+    if (!ackWithoutPersist) raw = value;
+    return true;
+  }
 }

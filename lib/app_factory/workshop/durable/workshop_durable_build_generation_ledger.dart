@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:ai_orchestrator/core/config/storage/preferences_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../workshop_build_lab.dart';
 import '../workshop_build_source_snapshot.dart';
@@ -48,8 +48,42 @@ final class WorkshopDurableBuildReservation {
       };
 }
 
-/// Preferences-backed generation reservation, deliberately NOT wired into
-/// production dispatch. It stores ONLY hashes and counters, never files,
+/// No-cache storage boundary for durable generation reservations.
+///
+/// Production uses SharedPreferencesAsync, which reads platform state instead
+/// of legacy SharedPreferences' optimistic in-memory cache. A failed write or
+/// read-back mismatch is an error; no reservation is returned.
+abstract interface class WorkshopDurableGenerationStorage {
+  Future<String?> read();
+  Future<bool> write(String value);
+}
+
+final class WorkshopAsyncPreferencesGenerationStorage
+    implements WorkshopDurableGenerationStorage {
+  WorkshopAsyncPreferencesGenerationStorage({
+    SharedPreferencesAsync? preferences,
+  }) : _preferences = preferences ?? SharedPreferencesAsync();
+
+  final SharedPreferencesAsync _preferences;
+
+  @override
+  Future<String?> read() =>
+      _preferences.getString(WorkshopDurableBuildGenerationLedger.storageKey);
+
+  @override
+  Future<bool> write(String value) async {
+    await _preferences.setString(
+      WorkshopDurableBuildGenerationLedger.storageKey,
+      value,
+    );
+    // No application cache is involved. An uncommitted/rejected write is
+    // observable as a mismatch or platform exception.
+    return await read() == value;
+  }
+}
+
+/// Durable generation reservation, deliberately NOT wired into production
+/// dispatch. It stores ONLY hashes and counters, never files,
 /// credentials, prompts or project paths.
 ///
 /// The caller must first persist a frozen and independently verified source
@@ -58,17 +92,18 @@ final class WorkshopDurableBuildReservation {
 /// source snapshot, a reserved identity must NOT be used for remote dispatch.
 ///
 /// A single serialized queue protects all instances within one Dart isolate.
-/// Cross-isolate/process coordination is not provided by SharedPreferences;
+/// Cross-isolate/process coordination is not provided by this boundary;
 /// production wiring must enforce a single scheduler authority.
 final class WorkshopDurableBuildGenerationLedger {
-  WorkshopDurableBuildGenerationLedger({required PreferencesService preferences})
-      : _preferences = preferences;
+  WorkshopDurableBuildGenerationLedger({
+    WorkshopDurableGenerationStorage? storage,
+  }) : _storage = storage ?? WorkshopAsyncPreferencesGenerationStorage();
 
   static const String storageKey = 'workshop.durable.generations.v1';
   static const int _maxIntents = 10000;
   static Future<void> _mutationTail = Future<void>.value();
 
-  final PreferencesService _preferences;
+  final WorkshopDurableGenerationStorage _storage;
 
   /// Refuses to allocate a second generation while the previous durable
   /// execution remains active. Reopen via recoverLatest() instead.
@@ -77,7 +112,7 @@ final class WorkshopDurableBuildGenerationLedger {
     required WorkshopBuildSourceSnapshot source,
   }) =>
       _serialize(() async {
-        final all = _read();
+        final all = await _read();
         final intent = WorkshopStableBuildRequestIdentity.forRequest(request);
         final previous = all[intent];
         if (previous?.state == WorkshopDurableGenerationState.active) {
@@ -115,7 +150,7 @@ final class WorkshopDurableBuildGenerationLedger {
     WorkshopBuildRequest request,
   ) =>
       _serialize(() async {
-        final all = _read();
+        final all = await _read();
         return all[WorkshopStableBuildRequestIdentity.forRequest(request)];
       });
 
@@ -128,7 +163,7 @@ final class WorkshopDurableBuildGenerationLedger {
     required bool succeeded,
   }) =>
       _serialize(() async {
-        final all = _read();
+        final all = await _read();
         final intent = WorkshopStableBuildRequestIdentity.forRequest(request);
         final current = all[intent];
         if (current == null || current.buildId != expectedBuildId) {
@@ -147,8 +182,8 @@ final class WorkshopDurableBuildGenerationLedger {
         return completed;
       });
 
-  Map<String, WorkshopDurableBuildReservation> _read() {
-    final raw = _preferences.getString(storageKey);
+  Future<Map<String, WorkshopDurableBuildReservation>> _read() async {
+    final raw = await _storage.read();
     if (raw == null) return <String, WorkshopDurableBuildReservation>{};
     try {
       final root = jsonDecode(raw);
@@ -222,8 +257,10 @@ final class WorkshopDurableBuildGenerationLedger {
         for (final entry in entries.entries) entry.key: entry.value.toJson(),
       },
     });
-    await _preferences.setString(storageKey, encoded);
-    if (_preferences.getString(storageKey) != encoded) {
+    if (!await _storage.write(encoded)) {
+      throw StateError('Durable generation platform rejected the write.');
+    }
+    if (await _storage.read() != encoded) {
       throw StateError('Durable generation write could not be verified.');
     }
   }
