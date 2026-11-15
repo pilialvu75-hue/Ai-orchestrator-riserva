@@ -210,6 +210,26 @@ jobs:
         run: |
           & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
 
+      - name: Compile mandatory Windows rollback recovery helper
+        id: recovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path $csc)) { throw 'Cannot release Windows without a recovery helper compiler.' }
+          $source = Join-Path $PWD 'tool\windows_rollback\AivexusRecovery.cs'
+          $manifest = Join-Path $PWD 'tool\windows_rollback\recovery.manifest'
+          $helperDir = Join-Path $PWD 'build\windows\recovery'
+          New-Item -ItemType Directory -Path $helperDir -Force | Out-Null
+          $helper = Join-Path $helperDir 'AivexusRecovery.exe'
+          & $csc /nologo /target:exe /r:System.Windows.Forms.dll "/win32manifest:$manifest" "/out:$helper" "$source"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $helper)) {
+            throw 'Recovery helper failed to compile: refusing to publish Windows installer.'
+          }
+          & $helper --mode invalid --store "$helperDir" --app "$helperDir\not-installed"
+          if ($LASTEXITCODE -eq 0) { throw 'Invalid recovery mode was accepted.' }
+          "helper=$helper" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Prepare Windows release payload
         id: payload
         shell: pwsh
@@ -287,6 +307,7 @@ jobs:
           New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
           $generatedDefines = Join-Path $PWD 'windows\installer\ci_generated.iss'
           @(
+            "#define AivexusRecoveryHelper `"${{ steps.recovery.outputs.helper }}`"",
             "#define AppVersion `"${{ steps.version.outputs.release_version }}`"",
             "#define ReleaseDir `"$releaseDir`"",
             "#define VCRedistPath `"$($redist.FullName)`"",
