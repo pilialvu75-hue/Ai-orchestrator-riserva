@@ -139,6 +139,25 @@ void main() {
         isNull);
   });
 
+  test('capture from different project root cannot allocate a generation',
+      () async {
+    final service = _service(
+      archive: archive,
+      ledger: ledger,
+      capture: (path) async => _source(
+        p.join(root.path, 'other-project'),
+        'void main() {}',
+      ),
+    );
+    await expectLater(
+      service.beginNew(_request(workspace.path, 'ui-wrong-project')),
+      throwsStateError,
+    );
+    expect(await ledger.recoverLatest(
+      _request(workspace.path, 'ui-wrong-project'),
+    ), isNull);
+  });
+
   test('wrong owner namespace cannot restore active execution', () async {
     final first = _service(
       archive: archive,

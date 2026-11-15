@@ -1,3 +1,5 @@
+import 'package:path/path.dart' as p;
+
 import '../workshop_build_lab.dart';
 import '../workshop_build_source_snapshot.dart';
 import 'workshop_durable_build_generation_ledger.dart';
@@ -56,7 +58,7 @@ final class WorkshopDurableBuildPreflight {
       throw StateError('A durable build is still active; recover it first.');
     }
     final candidate = await _capture(request.projectPath);
-    _validateSource(candidate);
+    _validateSource(candidate, request);
     // Freeze and verify the exact bytes BEFORE reserving any generation.
     final handle = await _frozenSources.persist(
       request: request,
@@ -68,7 +70,7 @@ final class WorkshopDurableBuildPreflight {
       handle: handle,
       namespace: _namespace,
     );
-    _validateSource(frozen);
+    _validateSource(frozen, request);
     final ticket = await _ledger.reserveNew(
       request: request,
       source: frozen,
@@ -104,7 +106,7 @@ final class WorkshopDurableBuildPreflight {
       handle: handle,
       namespace: _namespace,
     );
-    _validateSource(frozen);
+    _validateSource(frozen, request);
     return WorkshopDurablePreparedBuild(
       reservation: saved,
       sourceHandle: handle,
@@ -128,11 +130,21 @@ final class WorkshopDurableBuildPreflight {
       handle: prepared.sourceHandle,
       namespace: _namespace,
     );
-    _validateSource(frozen);
+    _validateSource(frozen, request);
     return frozen;
   }
 
-  static void _validateSource(WorkshopBuildSourceSnapshot source) {
+  static void _validateSource(
+    WorkshopBuildSourceSnapshot source,
+    WorkshopBuildRequest request,
+  ) {
+    // Do not freeze a snapshot from a DIFFERENT workspace than the
+    // user-approved build request, even with an injected capture callback.
+    final capturedRoot = p.normalize(p.absolute(source.rootPath));
+    final requestedRoot = p.normalize(p.absolute(request.projectPath));
+    if (!p.equals(capturedRoot, requestedRoot)) {
+      throw StateError('Frozen build source workspace does not match request.');
+    }
     final error = WorkshopAndroidBuildSourceBoundary.validate(source);
     if (error != null) throw StateError(error);
   }
