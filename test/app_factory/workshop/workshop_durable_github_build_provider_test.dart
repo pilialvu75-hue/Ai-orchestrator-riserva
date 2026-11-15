@@ -152,6 +152,134 @@ void main() {
     expect(result.errors, isNot(contains('remote_project_build_failed')));
   });
 
+  test('processed older buildError does not trigger current attempt repair',
+      () async {
+    final request = _request('older-processed-build-error');
+    final now = DateTime.utc(2026, 10, 3, 20);
+    const projectId = 'durable-final-build:test';
+    const oldStart = 'github:durable-final-build:test:final-build:run:10:started';
+    const oldDone = 'github:durable-final-build:test:final-build:run:10:completed';
+    const currentStart = 'github:durable-final-build:test:final-build:run:20:started';
+    const currentDone = 'github:durable-final-build:test:final-build:run:20:completed';
+    final events = <WorkshopDurableExternalEvent>[
+      WorkshopDurableExternalEvent(
+        type: 'ci.started',
+        projectId: projectId,
+        taskId: 'final-build',
+        correlationId: 'test',
+        idempotencyKey: oldStart,
+        occurredAt: now,
+        success: true,
+        externalId: 'test:attempt:1',
+      ),
+      WorkshopDurableExternalEvent(
+        type: 'ci.completed',
+        projectId: projectId,
+        taskId: 'final-build',
+        correlationId: 'test',
+        idempotencyKey: oldDone,
+        occurredAt: now,
+        success: false,
+        failureClass: WorkshopDurableFailureClass.buildError,
+        externalId: '10',
+      ),
+      WorkshopDurableExternalEvent(
+        type: 'ci.started',
+        projectId: projectId,
+        taskId: 'final-build',
+        correlationId: 'test',
+        idempotencyKey: currentStart,
+        occurredAt: now,
+        success: true,
+        externalId: 'test:attempt:2',
+      ),
+      WorkshopDurableExternalEvent(
+        type: 'ci.completed',
+        projectId: projectId,
+        taskId: 'final-build',
+        correlationId: 'test',
+        idempotencyKey: currentDone,
+        occurredAt: now,
+        success: false,
+        failureClass: WorkshopDurableFailureClass.policyBlocked,
+        externalId: '20',
+      ),
+    ];
+    final failure = WorkshopBuildResult(
+      requestId: request.id,
+      target: request.target,
+      status: WorkshopBuildStatus.failed,
+      startedAt: now,
+      finishedAt: now,
+      errors: const <String>['durable_policy_blocked'],
+    );
+    final provider = WorkshopDurableGitHubBuildProvider(
+      advance: (request) async => _advance(
+        WorkshopDurableFinalBuildDisposition.failed,
+        buildResult: failure,
+        events: events,
+        attemptsStarted: 2,
+        processedKeys: const <String>{
+          oldStart, oldDone, currentStart, currentDone,
+        },
+      ),
+      toolchainDelegate: _ToolchainProvider(),
+    );
+    final result = await provider.build(request);
+    expect(result.errors, contains('durable_policy_blocked'));
+    expect(result.errors, isNot(contains('remote_project_build_failed')));
+  });
+
+  test('current processed buildError preserves automatic Reviewer repair',
+      () async {
+    final request = _request('current-build-error');
+    final now = DateTime.utc(2026, 10, 3, 20);
+    const start = 'github:durable-final-build:test:final-build:run:20:started';
+    const done = 'github:durable-final-build:test:final-build:run:20:completed';
+    final failure = WorkshopBuildResult(
+      requestId: request.id,
+      target: request.target,
+      status: WorkshopBuildStatus.failed,
+      startedAt: now,
+      finishedAt: now,
+      errors: const <String>['durable_remote_build_failed'],
+    );
+    final provider = WorkshopDurableGitHubBuildProvider(
+      advance: (request) async => _advance(
+        WorkshopDurableFinalBuildDisposition.failed,
+        buildResult: failure,
+        attemptsStarted: 2,
+        processedKeys: const <String>{start, done},
+        events: <WorkshopDurableExternalEvent>[
+          WorkshopDurableExternalEvent(
+            type: 'ci.started',
+            projectId: 'durable-final-build:test',
+            taskId: 'final-build',
+            correlationId: 'test',
+            idempotencyKey: start,
+            occurredAt: now,
+            success: true,
+            externalId: 'test:attempt:2',
+          ),
+          WorkshopDurableExternalEvent(
+            type: 'ci.completed',
+            projectId: 'durable-final-build:test',
+            taskId: 'final-build',
+            correlationId: 'test',
+            idempotencyKey: done,
+            occurredAt: now,
+            success: false,
+            failureClass: WorkshopDurableFailureClass.buildError,
+            externalId: '20',
+          ),
+        ],
+      ),
+      toolchainDelegate: _ToolchainProvider(),
+    );
+    final result = await provider.build(request);
+    expect(result.errors, <String>['remote_project_build_failed']);
+  });
+
   test('toolchain inspection is delegated without invoking durable build',
       () async {
     var advances = 0;
@@ -193,6 +321,8 @@ WorkshopDurableFinalBuildAdvance _advance(
   WorkshopDurableFinalBuildDisposition disposition, {
   WorkshopBuildResult? buildResult,
   List<WorkshopDurableExternalEvent> events = const <WorkshopDurableExternalEvent>[],
+  Set<String> processedKeys = const <String>{},
+  int attemptsStarted = 0,
 }) {
   final now = DateTime.utc(2026, 10, 3, 20);
   final state = switch (disposition) {
@@ -218,12 +348,14 @@ WorkshopDurableFinalBuildAdvance _advance(
       createdAt: now,
       updatedAt: now,
       events: events,
+      processedIdempotencyKeys: processedKeys,
       tasks: <String, WorkshopDurableTask>{
         'final-build': WorkshopDurableTask(
           taskId: 'final-build',
           capability: 'build.android',
           state: state,
           updatedAt: now,
+          attemptsStarted: attemptsStarted,
         ),
       },
     ),

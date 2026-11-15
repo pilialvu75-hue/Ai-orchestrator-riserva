@@ -133,17 +133,10 @@ final class WorkshopDurableGitHubBuildProvider implements WorkshopBuildProvider 
       return result;
     }
 
-    var remoteProjectBuildFailed = false;
-    for (final event in step.snapshot.events.reversed) {
-      if (event.type != 'ci.completed' ||
-          event.success ||
-          !step.snapshot.processedIdempotencyKeys.contains(event.idempotencyKey)) {
-        continue;
-      }
-      remoteProjectBuildFailed = event.failureClass?.name == 'buildError';
-      break;
-    }
-    if (!remoteProjectBuildFailed) return result;
+    // Processed events from *older attempts* are still in the durable journal.
+    // Automatic Reviewer repair must be based only on the accepted run for the
+    // current attempt, not a stale buildError from a previous retry.
+    if (!_currentAttemptHasBuildError(step)) return result;
 
     return WorkshopBuildResult(
       requestId: result.requestId,
@@ -162,6 +155,50 @@ final class WorkshopDurableGitHubBuildProvider implements WorkshopBuildProvider 
       warnings: result.warnings,
       errors: const <String>['remote_project_build_failed'],
     );
+  }
+
+  static bool _currentAttemptHasBuildError(
+    WorkshopDurableFinalBuildAdvance step,
+  ) {
+    final snapshot = step.snapshot;
+    const taskId = 'final-build';
+    final task = snapshot.tasks[taskId];
+    if (task == null || task.attemptsStarted <= 0) return false;
+
+    final expectedCorrelation =
+        '${snapshot.correlationId}:attempt:${task.attemptsStarted}';
+    final prefix = 'github:${snapshot.projectId}:$taskId:run:';
+    final acceptedRunIds = <String>{};
+    for (final event in snapshot.events) {
+      if (event.taskId != taskId ||
+          event.type != 'ci.started' ||
+          !event.success ||
+          event.externalId != expectedCorrelation ||
+          !snapshot.processedIdempotencyKeys.contains(event.idempotencyKey) ||
+          !event.idempotencyKey.startsWith(prefix) ||
+          !event.idempotencyKey.endsWith(':started')) {
+        continue;
+      }
+      final run = event.idempotencyKey.substring(
+        prefix.length,
+        event.idempotencyKey.length - ':started'.length,
+      );
+      if (int.tryParse(run) case final runId? when runId > 0) {
+        acceptedRunIds.add(run);
+      }
+    }
+
+    for (final event in snapshot.events.reversed) {
+      if (event.taskId != taskId ||
+          event.type != 'ci.completed' ||
+          event.success ||
+          !snapshot.processedIdempotencyKeys.contains(event.idempotencyKey) ||
+          !acceptedRunIds.contains(event.externalId)) {
+        continue;
+      }
+      return event.failureClass?.name == 'buildError';
+    }
+    return false;
   }
 
   WorkshopBuildResult _cancelledResult(
