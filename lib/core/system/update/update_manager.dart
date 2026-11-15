@@ -1013,7 +1013,7 @@ class UpdateManager {
     final eligibleWindows = _enableWindowsBetaBuildNumberComparison &&
         state.value.preferredChannel == ReleaseChannel.beta;
     // Windows package_info exposes the numeric file version, not the Dev
-    // prerelease label. Our one-off Win8.1 1.0.16 Dev lab must remain
+    // prerelease label. Our Win8.1 1.0.15 Dev lab must remain
     // updateable on the *next* authorized Dev build; never extend this
     // exception to ordinary Windows versions or non-Dev channels.
     final eligibleWin81Dev = _enableWindowsBetaBuildNumberComparison &&
@@ -1036,7 +1036,7 @@ class UpdateManager {
         candidate.channel == ReleaseChannel.dev &&
         candidate.numericSegments[0] == 1 &&
         candidate.numericSegments[1] == 0 &&
-        candidate.numericSegments[2] == 16;
+        candidate.numericSegments[2] == 15;
     if (!betaCandidate && !win81DevCandidate) {
       return conventional;
     }
