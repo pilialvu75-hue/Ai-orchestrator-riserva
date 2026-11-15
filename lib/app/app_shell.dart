@@ -241,6 +241,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       checkpointStore: PersistentWorkshopCheckpointStore(
         preferences: di.sl<PreferencesService>(),
       ),
+      modelAssignmentsProvider: () => workshopAssignments,
     );
 
     try {
