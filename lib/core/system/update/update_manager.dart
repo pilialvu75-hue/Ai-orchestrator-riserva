@@ -1012,17 +1012,32 @@ class UpdateManager {
         state.value.preferredChannel.allows(ReleaseChannel.beta);
     final eligibleWindows = _enableWindowsBetaBuildNumberComparison &&
         state.value.preferredChannel == ReleaseChannel.beta;
-    if (!eligibleAndroid && !eligibleWindows) {
+    // Windows package_info exposes the numeric file version, not the Dev
+    // prerelease label. Our one-off Win8.1 1.0.16 Dev lab must remain
+    // updateable on the *next* authorized Dev build; never extend this
+    // exception to ordinary Windows versions or non-Dev channels.
+    final eligibleWin81Dev = _enableWindowsBetaBuildNumberComparison &&
+        state.value.preferredChannel == ReleaseChannel.dev;
+    if (!eligibleAndroid && !eligibleWindows && !eligibleWin81Dev) {
       return conventional;
     }
     final candidate = _comparator.parse(candidateVersion);
     final installed = _comparator.parse(_currentVersion);
     if (candidate == null ||
         installed == null ||
-        candidate.channel != ReleaseChannel.beta ||
         installed.isPreRelease ||
         candidate.numericSegments.length != 4 ||
         installed.numericSegments.length != 4) {
+      return conventional;
+    }
+    final betaCandidate = candidate.channel == ReleaseChannel.beta &&
+        (eligibleAndroid || eligibleWindows);
+    final win81DevCandidate = eligibleWin81Dev &&
+        candidate.channel == ReleaseChannel.dev &&
+        candidate.numericSegments[0] == 1 &&
+        candidate.numericSegments[1] == 0 &&
+        candidate.numericSegments[2] == 16;
+    if (!betaCandidate && !win81DevCandidate) {
       return conventional;
     }
     for (var i = 0; i < 3; i++) {
