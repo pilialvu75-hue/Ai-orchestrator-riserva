@@ -518,6 +518,7 @@ void main() {
           calls: calls,
           results: <WorkshopInferenceResult>[
             _success(_approvedReviewJson),
+            _success(_approvedReviewJson),
             _success(_validValidationJson),
           ],
         ),
@@ -583,6 +584,7 @@ void main() {
         AppAiRole.workshopOrchestrator,
         AppAiRole.architect,
         AppAiRole.engineer,
+        AppAiRole.reviewer,
         AppAiRole.reviewer,
         AppAiRole.reviewer,
       ],
