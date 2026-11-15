@@ -1,0 +1,82 @@
+name: Aivexus Web Real Counter Journal E2E Smoke
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/web/run_counter_journal_smoke.py'
+      - 'test/airlab/web_counter_journal_e2e_test.py'
+      - '.github/workflows/web-counter-journal-e2e.yml'
+      - 'scripts/web/build_counter_smoke.py'
+      - 'scripts/web/sql/003_web_execution_journal.sql'
+      - 'scripts/web/d1_execution_journal_store.mjs'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/web/run_counter_journal_smoke.py'
+      - 'test/airlab/web_counter_journal_e2e_test.py'
+      - '.github/workflows/web-counter-journal-e2e.yml'
+      - 'scripts/web/build_counter_smoke.py'
+      - 'scripts/web/sql/003_web_execution_journal.sql'
+      - 'scripts/web/d1_execution_journal_store.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  real-counter-journal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+      - name: Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Real counter behavior and ZIP generator unit tests
+        run: node --test test/airlab/web_counter_smoke.mjs
+      - name: Real isolated SQLite journal and counter E2E scenarios
+        run: |
+          python3 -m unittest discover -s test/airlab -p 'web_execution_journal_sqlite_test.py' -v
+          python3 -m unittest discover -s test/airlab -p 'web_counter_journal_e2e_test.py' -v
+      - name: Generate, test, persist and verify downloadable counter ZIP
+        run: |
+          python3 scripts/web/run_counter_journal_smoke.py --output build/web-counter-journal
+          python3 scripts/web/run_counter_journal_smoke.py --output build/web-counter-journal --replay
+          python3 - <<'PY'
+          import hashlib, json, pathlib, sqlite3, zipfile
+          root = pathlib.Path('build/web-counter-journal')
+          receipt = json.loads((root / 'receipt.json').read_text())
+          blob = (root / receipt['artifactStorageKey']).read_bytes()
+          assert hashlib.sha256(blob).hexdigest() == receipt['artifactSha256']
+          assert len(blob) == receipt['artifactSizeBytes']
+          with zipfile.ZipFile(root / receipt['artifactStorageKey']) as archive:
+              assert set(archive.namelist()) == {
+                  'index.html', 'app.js', 'styles.css', 'manifest.json'
+              }
+          with sqlite3.connect(root / 'state.sqlite') as db:
+              assert db.execute(
+                  "SELECT status FROM web_execution_reservations"
+              ).fetchone()[0] == 'completed'
+              assert db.execute(
+                  "SELECT count(*) FROM web_execution_artifact_receipts"
+              ).fetchone()[0] == 1
+              assert db.execute(
+                  "SELECT count(*) FROM web_execution_journal_events"
+              ).fetchone()[0] == 3
+          print('Counter ZIP and durable journal receipt verified, offline.')
+          PY
+      - name: Upload synthetic counter ZIP and non-secret receipt for download
+        uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-web-real-counter-journal-${{ github.run_id }}
+          path: |
+            build/web-counter-journal/web-artifacts/**/*.zip
+            build/web-counter-journal/receipt.json
+          if-no-files-found: error
+          retention-days: 7
