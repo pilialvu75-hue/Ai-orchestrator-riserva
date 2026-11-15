@@ -34,11 +34,12 @@ void main() {
         'v1.0.16-dev+100002',
         'v1.0.16-dev+100001',
         'v1.0.15-beta+104238',
+        'v1.0.15+104018',
       ];
       final releases = versions.map((tag) => <String, Object>{
             'tag_name': tag,
             'draft': false,
-            'prerelease': true,
+            'prerelease': tag.contains('-'),
             'assets': <Map<String, Object>>[
               <String, Object>{
                 'name': 'AI-Orchestrator-Setup-x64.exe',
@@ -117,8 +118,7 @@ void main() {
       );
       await updater.checkForUpdates(allowCachedFallback: false);
       expect(updater.state.value.status, UpdateStatus.upToDate);
-      expect(updater.state.value.latestManifest?.channel,
-          channel == ReleaseChannel.beta ? ReleaseChannel.beta : isNull);
+      expect(updater.state.value.latestManifest?.channel, channel);
     });
   }
 }
