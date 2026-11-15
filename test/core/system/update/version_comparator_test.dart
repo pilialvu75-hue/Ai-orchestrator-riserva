@@ -48,6 +48,21 @@ void main() {
     );
   });
 
+  test('1.0.16 dev QA outranks 1.0.15 releases without entering beta channel', () {
+    expect(
+      comparator.compare('v1.0.16-dev+105000', 'v1.0.15-beta+200023'),
+      greaterThan(0),
+    );
+    expect(
+      comparator.compare('v1.0.16-dev+105000', 'v1.0.15+104238'),
+      greaterThan(0),
+    );
+    expect(
+      comparator.compare('v1.0.16-beta+105001', 'v1.0.16-dev+105000'),
+      greaterThan(0),
+    );
+  });
+
   test('treats malformed versions as unparsable', () {
     expect(comparator.parse(''), isNull);
     expect(comparator.parse('1.0'), isNull);

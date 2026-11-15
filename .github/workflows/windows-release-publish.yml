@@ -304,13 +304,25 @@ jobs:
           $outputDir = Join-Path $PWD 'build\windows\release-publish'
           New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
           $generatedDefines = Join-Path $PWD 'windows\installer\ci_generated.iss'
-          @(
+          # Exact owner-triggered 1.0.16 Dev QA targets Windows 8.1 only.
+          # Beta/stable releases remain unaltered and modern Windows protected.
+          $resolvedTag = '${{ steps.publish_tag.outputs.tag }}'
+          $isWin81OnlyDev = $resolvedTag -match '^v1\.0\.16-dev\+[0-9]+$'
+          if ($isWin81OnlyDev -and '${{ steps.version.outputs.version_name }}' -ne '1.0.16') {
+            throw 'Unexpected Windows 8.1-only Dev release version.'
+          }
+          $defines = @(
             "#define AivexusRecoveryHelper `"${{ steps.recovery.outputs.helper }}`"",
             "#define AppVersion `"${{ steps.version.outputs.release_version }}`"",
             "#define ReleaseDir `"$releaseDir`"",
             "#define VCRedistPath `"$($redist.FullName)`"",
             "#define OutputDir `"$outputDir`""
-          ) | Set-Content -Path $generatedDefines -Encoding ASCII
+          )
+          if ($isWin81OnlyDev) {
+            $defines += '#define AivexusWin81UnsignedQABuild 1'
+            Write-Host 'Windows 8.1-only unsigned QA with mandatory recovery.'
+          }
+          $defines | Set-Content -Path $generatedDefines -Encoding ASCII
 
           "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "output_dir=$outputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
