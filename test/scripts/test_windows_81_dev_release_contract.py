@@ -35,6 +35,9 @@ class Windows81ReleaseContractTest(unittest.TestCase):
             "tool\\patch_windows_bundle_win7.ps1",
             "AI-Orchestrator-Setup-x64.exe.sha256",
             "enabled=false", "v1.0.16-dev+", "No Android update.",
+            "Get-FileHash $setup -Algorithm SHA256",
+            "exeAsset[0].digest",
+            "gh api \"repos/$repo/releases/tags/$tag\"",
         ]:
             self.assertIn(required, w)
         self.assertIn("OnlyBelowVersion=10.0", self.inno)
