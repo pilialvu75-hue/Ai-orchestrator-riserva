@@ -476,8 +476,13 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
               exitCode == 0 && stderr.isEmpty
                   ? 'llama.cpp returned no generated text.'
                   : stderr.isEmpty
-                 ? 'llama.cpp failed with exit code $exitCode'
-                  : stderr,
+                 ? (Platform.isWindows
+                     ? WindowsLlamaRuntime.describeProcessFailure(exitCode)
+                     : 'llama.cpp failed with exit code $exitCode')
+                  : (Platform.isWindows &&
+                          (exitCode & 0xffffffff) == 0xC0E90002
+                      ? WindowsLlamaRuntime.describeProcessFailure(exitCode)
+                      : stderr),
             ),
           );
 
