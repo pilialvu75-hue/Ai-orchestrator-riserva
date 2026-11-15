@@ -14,9 +14,17 @@ abstract final class WindowsLlamaRuntime {
     final modern = path.windows.join(path.windows.dirname(appExecutable),
         'runtime-modern', 'llama-completion.exe');
     final exists = fileExists ?? (String value) => File(value).existsSync();
-    // The modern upstream package selects CPU variants at runtime, but needs
-    // Windows 10+. Never load its DLLs on the legacy Windows route.
-    if (isModernWindows(windowsVersion) && exists(modern)) return modern;
+    // An old runtime-modern directory may survive an app update. Its DLLs
+    // can be blocked by Windows Code Integrity even when the main executable
+    // exists. Never auto-select it: keep the bundled standalone helper as the
+    // production default, without deleting any previous installation files.
+    //
+    // Explicit QA may opt in on Windows 10/11; Windows 8.1 and earlier must
+    // never load the modern runtime, even with this environment override.
+    final explicitModernQa =
+        isModernWindows(windowsVersion) &&
+        environment['AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME'] == '1';
+    if (explicitModernQa && exists(modern)) return modern;
     final bundled = path.windows.join(
       path.windows.dirname(appExecutable),
       'llama-completion.exe',
