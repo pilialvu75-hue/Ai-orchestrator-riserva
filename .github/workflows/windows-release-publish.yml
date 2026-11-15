@@ -304,13 +304,112 @@ jobs:
           $outputDir = Join-Path $PWD 'build\windows\release-publish'
           New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
           $generatedDefines = Join-Path $PWD 'windows\installer\ci_generated.iss'
-          @(
+          # A one-off, owner-triggered 1.0.16-dev lab update is intentionally
+          # supported ONLY on Windows 8.1. Beta/stable Windows distributions
+          # remain on their ordinary installer code path. The existing 1.0.12.2
+          # updater can discover this tag without changes to its own binary.
+          $resolvedTag = '${{ steps.publish_tag.outputs.tag }}'
+          $isWin81OnlyDev = $resolvedTag -match '^v1\.0\.16-dev\+[0-9]+
+
+          "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "output_dir=$outputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build versioned Windows Setup.exe
+        id: installer
+        shell: pwsh
+        run: |
+          $iscc = '${{ steps.payload.outputs.iscc }}'
+          $outputDir = '${{ steps.payload.outputs.output_dir }}'
+          $script = Join-Path $PWD 'windows\installer\ai_orchestrator.iss'
+
+          & $iscc $script
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
+          }
+
+          $setupPath = Join-Path $outputDir 'AI-Orchestrator-Setup-x64.exe'
+          if (-not (Test-Path $setupPath)) {
+            throw "Expected Setup.exe was not produced: $setupPath"
+          }
+          $setupSize = (Get-Item $setupPath).Length
+          if ($setupSize -lt 1048576) {
+            throw "Generated Setup.exe is unexpectedly small: $setupSize bytes"
+          }
+
+          $hash = Get-FileHash -Path $setupPath -Algorithm SHA256
+          $hashPath = "$setupPath.sha256"
+          "$($hash.Hash.ToLowerInvariant())  AI-Orchestrator-Setup-x64.exe" | Set-Content -Path $hashPath -Encoding ASCII
+
+          "setup_path=$setupPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "hash_path=$hashPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "setup_sha256=$($hash.Hash.ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Windows release installer: $setupPath ($setupSize bytes)"
+          Write-Host "SHA256: $($hash.Hash)"
+
+      - name: Verify matching Android release exists
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $gh = Get-Command gh -ErrorAction SilentlyContinue
+          if (-not $gh) {
+            throw 'GitHub CLI is unavailable on the hosted runner.'
+          }
+          gh release view '${{ steps.publish_tag.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json tagName,publishedAt
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The matching Android GitHub Release does not exist; refusing to publish a mismatched Windows installer.'
+          }
+
+      - name: Publish Windows installer into matching GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload '${{ steps.publish_tag.outputs.tag }}' '${{ steps.installer.outputs.setup_path }}' '${{ steps.installer.outputs.hash_path }}' --clobber --repo "$env:GITHUB_REPOSITORY"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to upload Windows installer assets to the coordinated GitHub Release.'
+          }
+
+      - name: Verify published Windows release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $release = gh release view '${{ steps.publish_tag.outputs.tag }}' --repo "$env:GITHUB_REPOSITORY" --json assets | ConvertFrom-Json
+          $assetNames = @($release.assets | ForEach-Object { $_.name })
+          if ($assetNames -notcontains 'AI-Orchestrator-Setup-x64.exe') {
+            throw 'Published release is missing AI-Orchestrator-Setup-x64.exe.'
+          }
+          if ($assetNames -notcontains 'AI-Orchestrator-Setup-x64.exe.sha256') {
+            throw 'Published release is missing the Windows installer SHA-256 file.'
+          }
+          Write-Host "Windows release assets published on ${{ steps.publish_tag.outputs.tag }}"
+
+      - name: Preserve published installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-orchestrator-windows-release-${{ steps.version.outputs.release_version }}
+          path: |
+            ${{ steps.installer.outputs.setup_path }}
+            ${{ steps.installer.outputs.hash_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+          if ($isWin81OnlyDev -and '${{ steps.version.outputs.version_name }}' -ne '1.0.16') {
+            throw 'Windows 8.1 development release version mismatch.'
+          }
+          $defines = @(
             "#define AivexusRecoveryHelper `"${{ steps.recovery.outputs.helper }}`"",
             "#define AppVersion `"${{ steps.version.outputs.release_version }}`"",
             "#define ReleaseDir `"$releaseDir`"",
             "#define VCRedistPath `"$($redist.FullName)`"",
             "#define OutputDir `"$outputDir`""
-          ) | Set-Content -Path $generatedDefines -Encoding ASCII
+          )
+          if ($isWin81OnlyDev) {
+            $defines += '#define AivexusWin81UnsignedQABuild 1'
+            Write-Host "AIVEXUS Windows 8.1-only unsigned recovery QA; not for Windows 10/11."
+          }
+          $defines | Set-Content -Path $generatedDefines -Encoding ASCII
 
           "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "output_dir=$outputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
