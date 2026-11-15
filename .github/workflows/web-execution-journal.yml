@@ -1,0 +1,46 @@
+name: Aivexus Web Durable Execution Journal Contract
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/web/sql/003_web_execution_journal.sql'
+      - 'scripts/web/d1_execution_journal_store.mjs'
+      - 'test/airlab/web_execution_journal_sqlite_test.py'
+      - 'test/airlab/web_execution_journal_contract.mjs'
+      - '.github/workflows/web-execution-journal.yml'
+      - 'scripts/web/d1_approval_reservation_store.mjs'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/web/sql/003_web_execution_journal.sql'
+      - 'scripts/web/d1_execution_journal_store.mjs'
+      - 'test/airlab/web_execution_journal_sqlite_test.py'
+      - 'test/airlab/web_execution_journal_contract.mjs'
+      - '.github/workflows/web-execution-journal.yml'
+      - 'scripts/web/d1_approval_reservation_store.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  execution-journal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Worker journal contract and idempotency
+        run: node --test test/airlab/web_execution_journal_contract.mjs
+      - name: Real SQLite state transitions and immutable receipts
+        run: python3 -m unittest discover -s test/airlab -p 'web_execution_journal_sqlite_test.py' -v
+      - name: Previous Web-owned D1 reservations and approval regressions
+        run: |
+          node --test test/airlab/web_d1_approval_reservation.mjs
+          node --test test/airlab/web_d1_proposal_approval_writer.mjs
+          python3 -m unittest discover -s test/airlab -p 'web_d1_sqlite_contract_test.py' -v
+          python3 -m unittest discover -s test/airlab -p 'web_d1_proposal_approval_sqlite_test.py' -v
