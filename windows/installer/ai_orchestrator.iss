@@ -85,6 +85,7 @@ Name: "{autodesktop}\AI Orchestrator"; Filename: "{app}\{#AppExeName}"; Tasks: d
 ; The recovery utility is a signed, admin-elevating helper located outside the
 ; application directory. It works even if the upgraded Flutter app will not.
 Name: "{group}\AI Orchestrator - Recupera versione precedente"; Filename: "{commonappdata}\AI Orchestrator\Recovery\AivexusRecovery.exe"; Parameters: "--mode restore --app ""{app}"" --data ""{localappdata}\AI Orchestrator"" --roaming ""{userappdata}\com.aiorchestrator\AI Orchestrator"" --store ""{commonappdata}\AI Orchestrator\Recovery\Snapshots"""; Comment: "Ripristina la versione precedente da un backup SHA-256 verificato"
+Name: "{group}\AI Orchestrator - Conferma aggiornamento funzionante"; Filename: "{commonappdata}\AI Orchestrator\Recovery\AivexusRecovery.exe"; Parameters: "--mode accept --app ""{app}"" --data ""{localappdata}\AI Orchestrator"" --roaming ""{userappdata}\com.aiorchestrator\AI Orchestrator"" --store ""{commonappdata}\AI Orchestrator\Recovery\Snapshots"""; Comment: "Conferma la nuova versione solo dopo il collaudo; conserva lo storico del backup"
 #endif
 
 [Run]
