@@ -144,13 +144,23 @@ final class WorkshopPrivateGitHubDurableArtifactFinalizer {
 
     final expectedName = 'cantiere-android-$remoteId';
     for (final raw in artifacts) {
+      // A malformed GitHub API envelope is not evidence of a defective APK.
+      // Validate entries before deciding that an artifact is absent.
       if (raw is! Map ||
-          raw['name']?.toString() != expectedName ||
-          raw['expired'] == true) {
+          raw['name'] is! String ||
+          raw['expired'] is! bool ||
+          raw['id'] is! int ||
+          (raw['id'] as int) <= 0) {
+        throw const WorkshopDurableGitHubGatewayException(
+          'GitHub durable artifact entry observation is invalid.',
+          failureClass: WorkshopDurableFailureClass.providerUnavailable,
+          definitive: false,
+        );
+      }
+      if (raw['name'] != expectedName || raw['expired'] == true) {
         continue;
       }
-      final id = raw['id'];
-      if (id is num) return id.toInt();
+      return raw['id'] as int;
     }
     throw WorkshopDurableGitHubGatewayException(
       'Verified durable Android artifact "$expectedName" was not found.',

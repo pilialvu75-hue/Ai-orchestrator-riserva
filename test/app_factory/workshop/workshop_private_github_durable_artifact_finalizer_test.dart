@@ -252,6 +252,49 @@ void main() {
       });
     }
 
+    test('missing GitHub artifact id is a retryable observation failure',
+        () async {
+      final remoteId = _remoteId(correlation);
+      final client = MockClient((request) async {
+        final path = request.url.path;
+        if (path.endsWith('/git/ref/heads/cantiere-build/$remoteId')) {
+          return http.Response('{"object":{"sha":"$stagedCommit"}}', 200);
+        }
+        if (path.endsWith('/actions/runs/$runId/artifacts')) {
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'artifacts': <Object?>[
+                <String, Object?>{
+                  'name': 'cantiere-android-$remoteId',
+                  'expired': false,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response('unexpected request', 500);
+      });
+      await expectLater(
+        () => _finalizer(client).finalize(
+          request: _request(workspace.path),
+          correlationId: correlation,
+          runId: runId,
+        ),
+        throwsA(
+          isA<WorkshopDurableGitHubGatewayException>()
+              .having(
+                (error) => error.failureClass,
+                'failureClass',
+                WorkshopDurableFailureClass.providerUnavailable,
+              )
+              .having((error) => error.definitive, 'definitive', isFalse),
+        ),
+      );
+      expect(await _materializedApk(workspace.path, remoteId).exists(),
+          isFalse);
+    });
+
     test('invalid source SHA envelope is retryable observation failure',
         () async {
       final remoteId = _remoteId(correlation);
