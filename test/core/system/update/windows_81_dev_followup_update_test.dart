@@ -33,6 +33,7 @@ void main() {
       final versions = <String>[
         'v1.0.15-dev+100002',
         'v1.0.15-dev+100001',
+        'v1.0.15-beta+200023',
         'v1.0.15-beta+104238',
         'v1.0.15+104018',
       ];
@@ -89,6 +90,18 @@ void main() {
     expect(updater.state.value.latestManifest!.windowsArtifact!.sha256, hash);
   });
 
+  test('Win8.1 1.0.12.2 with Dev selected discovers explicit 1.0.15 Dev', () async {
+    final updater = await makeUpdater(
+      currentVersion: '1.0.12.2',
+      channel: ReleaseChannel.dev,
+    );
+    await updater.checkForUpdates(allowCachedFallback: false);
+    expect(updater.state.value.status, UpdateStatus.updateAvailable);
+    expect(updater.state.value.latestManifest!.channel, ReleaseChannel.dev);
+    expect(updater.state.value.latestManifest!.version,
+        'v1.0.15.100002-dev');
+  });
+
   test('Win8.1 Dev never reoffers the installed build', () async {
     final updater = await makeUpdater(
       currentVersion: '1.0.15+100002',
@@ -115,7 +128,7 @@ void main() {
       final updater = await makeUpdater(
         // Use a newer installed numeric build to avoid confusing a normal
         // same-channel Beta/Stable update with the special Dev exception.
-        currentVersion: '1.0.15+200000',
+        currentVersion: '1.0.15+300000',
         channel: channel,
       );
       await updater.checkForUpdates(allowCachedFallback: false);
