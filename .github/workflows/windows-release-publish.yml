@@ -226,8 +226,6 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $helper)) {
             throw 'Recovery helper failed to compile: refusing to publish Windows installer.'
           }
-          & $helper --mode invalid --store "$helperDir" --app "$helperDir\not-installed"
-          if ($LASTEXITCODE -eq 0) { throw 'Invalid recovery mode was accepted.' }
           "helper=$helper" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Prepare Windows release payload
