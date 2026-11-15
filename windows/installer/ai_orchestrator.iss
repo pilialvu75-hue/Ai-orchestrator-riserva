@@ -13,6 +13,15 @@
   #error OutputDir must be provided by CI
 #endif
 
+#ifdef AivexusWin81UnsignedQABuild
+  #ifndef AivexusRecoveryHelper
+    #error A Windows 8.1 unsigned QA installation must include a verified recovery helper
+  #endif
+  #ifdef AivexusTrustedSignedBuild
+    #error Windows 8.1 unsigned QA build may not masquerade as signed release
+  #endif
+#endif
+
 #define AppName "AI Orchestrator"
 #define AppExeName "ai_orchestrator.exe"
 
@@ -33,7 +42,14 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
+#ifdef AivexusWin81UnsignedQABuild
+; Explicit owner-only diagnostic exception. Do not use on Windows 10/11.
+; Windows 8.1 reports NT version 6.3; Windows 10/11 reports 10.0.
+MinVersion=6.3
+OnlyBelowVersion=10.0
+#else
 MinVersion=6.1sp1
+#endif
 PrivilegesRequired=admin
 #ifdef AivexusRecoveryHelper
 ; Do not forcibly terminate the old app while making a consistent snapshot.
