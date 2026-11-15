@@ -2,7 +2,7 @@ name: ai_orchestrator
 description: AI-Orchestrator — Professional offline-first project-memory manager with Clean Architecture, multi-platform support and AI API integration.
 
 publish_to: 'none'
-version: 1.0.15+15
+version: 1.0.16+16
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
