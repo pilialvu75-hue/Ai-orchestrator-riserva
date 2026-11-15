@@ -25,6 +25,17 @@ class Windows81ReleaseContractTest(unittest.TestCase):
         for forbidden in ["\n  push:", "\n  workflow_run:", "--clobber"]:
             self.assertNotIn(forbidden, w)
 
+    def test_exact_1_0_15_dev_stamping_without_downgrading_main(self):
+        w = self.workflow
+        self.assertIn('$tag = "v1.0.15-dev+$build"', w)
+        self.assertIn('"release_version=1.0.15+$build"', w)
+        self.assertIn("version_name=1.0.15", w)
+        self.assertIn("version: ${{ steps.owner.outputs.release_version }}", w)
+        self.assertIn("version:\\s*1\\.0\\.16", w)
+        self.assertIn("AIVEXUS 1.0.15 Dev - Windows 8.1 recovery QA", w)
+        self.assertNotIn("v1.0.16-dev+", w)
+        self.assertIn("OnlyBelowVersion=10.0", self.inno)
+
     def test_backup_local_inference_sha_and_exclusive_win81(self):
         w = self.workflow
         for required in [
