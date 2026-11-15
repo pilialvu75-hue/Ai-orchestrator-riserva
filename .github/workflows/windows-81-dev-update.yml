@@ -68,7 +68,7 @@ jobs:
           }
           $build = 100000 + [int]$env:GITHUB_RUN_NUMBER
           $tag = "v1.0.15-dev+$build"
-          if ($tag -notmatch '^v1\.0\.16-dev\+[0-9]+$') {
+          if ($tag -notmatch '^v1\.0\.15-dev\+[0-9]+$') {
             throw 'Unexpected legacy QA release tag.'
           }
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -237,7 +237,7 @@ jobs:
           # Exact owner-triggered 1.0.15 Dev QA targets Windows 8.1 only.
           # Beta/stable releases remain unaltered and modern Windows protected.
           $resolvedTag = '${{ steps.publish_tag.outputs.tag }}'
-          $isWin81OnlyDev = $resolvedTag -match '^v1\.0\.16-dev\+[0-9]+$'
+          $isWin81OnlyDev = $resolvedTag -match '^v1\.0\.15-dev\+[0-9]+$'
           if ($isWin81OnlyDev -and '${{ steps.version.outputs.version_name }}' -ne '1.0.15') {
             throw 'Unexpected Windows 8.1-only Dev release version.'
           }
@@ -309,7 +309,7 @@ jobs:
           $tag = '${{ steps.owner.outputs.tag }}'
           $repo = $env:GITHUB_REPOSITORY
           if ($env:GITHUB_REF -ne 'refs/heads/main' -or
-              $tag -notmatch '^v1\.0\.16-dev\+[0-9]+$') {
+              $tag -notmatch '^v1\.0\.15-dev\+[0-9]+$') {
             throw 'Refusing a non-main or non-Windows8.1 update.'
           }
           gh api "repos/$repo/git/ref/tags/$tag" 2>$null | Out-Null
