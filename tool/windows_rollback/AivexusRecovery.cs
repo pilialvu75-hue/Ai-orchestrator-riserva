@@ -59,6 +59,21 @@ internal static class AivexusRecovery
                 VerifyCurrent(store, app, data, roaming);
                 if (!File.Exists(Path.Combine(app, "ai_orchestrator.exe")))
                     throw new InvalidOperationException("Cannot accept a broken installation.");
+                if (!settings.ContainsKey("confirm"))
+                {
+                    DialogResult consent = MessageBox.Show(
+                        "Hai verificato che questa versione di AIVEXUS funziona?\n" +
+                        "Confermandola, la copia della versione precedente restera' " +
+                        "archiviata, ma non sara' piu' il punto di recupero automatico.\n" +
+                        "Solo dopo questa conferma potrai installare un'altra versione.",
+                        "AIVEXUS - Conferma aggiornamento funzionante",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                        MessageBoxDefaultButton.Button2);
+                    if (consent != DialogResult.Yes)
+                        throw new InvalidOperationException("Upgrade acceptance cancelled.");
+                }
+                else if (settings["confirm"] != "yes")
+                    throw new InvalidOperationException("Invalid acceptance confirmation.");
                 File.Delete(Path.Combine(store, Pointer));
                 Console.WriteLine("Recovery checkpoint accepted. Historic snapshot retained.");
             }
