@@ -69,15 +69,15 @@ void main() {
     expect(captures, 1);
     await expectLater(
       reopened.beginNew(_request(workspace.path, 'ui-4')),
-      throwsA(isA<TestFailure>()),
+      throwsStateError,
     );
+    expect(captures, 1);
   });
 
   test('new explicit generation after persisted terminal gets new content',
       () async {
     var text = 'void main() {}';
     final service = _service(
-      workspace: workspace,
       archive: archive,
       ledger: ledger,
       capture: (path) async => _source(path, text),
@@ -106,7 +106,6 @@ void main() {
 
   test('missing frozen source fails closed without a new generation', () async {
     final service = _service(
-      workspace: workspace,
       archive: archive,
       ledger: ledger,
       capture: (path) async => _source(path, 'void main() {}'),
@@ -128,7 +127,6 @@ void main() {
 
   test('invalid Android entrypoint prevents reservation', () async {
     final service = _service(
-      workspace: workspace,
       archive: archive,
       ledger: ledger,
       capture: (path) async => _source(path, '', relative: 'README.md'),
@@ -143,7 +141,6 @@ void main() {
 
   test('wrong owner namespace cannot restore active execution', () async {
     final first = _service(
-      workspace: workspace,
       archive: archive,
       ledger: ledger,
       capture: (path) async => _source(path, 'void main() {}'),
@@ -163,7 +160,6 @@ void main() {
 }
 
 WorkshopDurableBuildPreflight _service({
-  required Directory workspace,
   required Directory archive,
   required WorkshopDurableBuildGenerationLedger ledger,
   required WorkshopDurableSourceCapture capture,

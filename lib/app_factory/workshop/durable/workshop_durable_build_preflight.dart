@@ -49,6 +49,12 @@ final class WorkshopDurableBuildPreflight {
     WorkshopBuildRequest request,
   ) async {
     _requireAndroid(request);
+    // Reject an in-flight intent before capturing or persisting any new
+    // source files. The ledger still enforces this atomically at reserveNew().
+    final existing = await _ledger.recoverLatest(request);
+    if (existing?.state == WorkshopDurableGenerationState.active) {
+      throw StateError('A durable build is still active; recover it first.');
+    }
     final candidate = await _capture(request.projectPath);
     _validateSource(candidate);
     // Freeze and verify the exact bytes BEFORE reserving any generation.
