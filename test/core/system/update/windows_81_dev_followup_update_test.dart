@@ -113,7 +113,9 @@ void main() {
     test('Win8.1 Dev exception cannot affect the $channel update channel',
         () async {
       final updater = await makeUpdater(
-        currentVersion: '1.0.15+100001',
+        // Use a newer installed numeric build to avoid confusing a normal
+        // same-channel Beta/Stable update with the special Dev exception.
+        currentVersion: '1.0.15+200000',
         channel: channel,
       );
       await updater.checkForUpdates(allowCachedFallback: false);
