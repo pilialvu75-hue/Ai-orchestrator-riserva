@@ -325,6 +325,18 @@ jobs:
               'AI-Orchestrator-Setup-x64.exe.sha256' -notin $names) {
             throw 'Required Windows setup assets are missing; draft remains unpublished.'
           }
+          # The old updater checks GitHub's asset digest, not the companion
+          # .sha256 file. Do not publish a release it cannot verify.
+          $metadata = gh api "repos/$repo/releases/tags/$tag" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $metadata) {
+            throw 'Cannot verify staged GitHub Release metadata.'
+          }
+          $exeAsset = @($metadata.assets | Where-Object { $_.name -eq 'AI-Orchestrator-Setup-x64.exe' })
+          if ($exeAsset.Count -ne 1) { throw 'Exactly one Windows installer asset is required.' }
+          $expected = 'sha256:' + (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($exeAsset[0].digest -ne $expected -or [int64]$exeAsset[0].size -ne (Get-Item $setup).Length) {
+            throw 'Published asset digest or size does not match the locally verified installer.'
+          }
           gh release edit $tag --repo $repo --draft=false
           if ($LASTEXITCODE -ne 0) { throw 'Could not publish the verified draft.' }
           Write-Host "Win8.1-only Dev update published: $tag"
