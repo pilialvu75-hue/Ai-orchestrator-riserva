@@ -46,6 +46,20 @@ abstract final class WorkshopStructuredJson {
       // Fall through to bounded-object recovery.
     }
 
+    // Prefer bounded repair of the full top-level object before scanning
+    // nested braces. Otherwise a malformed free-text summary can cause the
+    // nested changes[] element to be mistaken for the complete proposal.
+    final repairedOuter = repairMalformedContentStrings(normalized);
+    if (repairedOuter != null) {
+      try {
+        if (jsonDecode(repairedOuter) is Map) {
+          return repairedOuter;
+        }
+      } on FormatException {
+        // Structural fields remain strict; preserve the existing fallback.
+      }
+    }
+
     for (var start = normalized.indexOf('{');
         start >= 0;
         start = normalized.indexOf('{', start + 1)) {
@@ -67,9 +81,13 @@ abstract final class WorkshopStructuredJson {
     return normalized;
   }
 
-  /// Repairs only malformed JSON escaping inside Engineer file-content values.
-  /// Every other field remains strict JSON and is validated by the normal
-  /// Workshop proposal decoder.
+  /// Repairs malformed JSON escaping only inside known free-text model fields.
+  /// Structural fields (path, type, changes, approved, valid, etc.) remain
+  /// strict JSON and are still validated by the normal Workshop decoders.
+  ///
+  /// Small/local or bounded cloud responses can occasionally emit a literal
+  /// newline or an unescaped quote in metadata such as summary/explanation.
+  /// Repairing only these known string values preserves fail-closed structure.
   static String? repairMalformedContentStrings(String responseText) {
     final normalized = responseText.trim();
     if (normalized.isEmpty || normalized.length > 65536) {
@@ -84,7 +102,7 @@ abstract final class WorkshopStructuredJson {
 
     final objectText = normalized.substring(firstBrace, lastBrace + 1);
     final budget = _WorkshopJsonRepairBudget(256);
-    return _repairContentFields(
+    return _repairKnownStringFields(
       objectText,
       searchStart: 0,
       depth: 0,
@@ -92,7 +110,7 @@ abstract final class WorkshopStructuredJson {
     );
   }
 
-  static String? _repairContentFields(
+  static String? _repairKnownStringFields(
     String text, {
     required int searchStart,
     required int depth,
@@ -104,15 +122,17 @@ abstract final class WorkshopStructuredJson {
         return text;
       }
     } on FormatException {
-      // Continue with the narrowly-scoped content repair.
+      // Continue with the narrowly-scoped free-text repair.
     }
 
-    if (depth >= 8 || !budget.consume()) {
+    if (depth >= 12 || !budget.consume()) {
       return null;
     }
 
     final searchText = text.substring(searchStart);
-    final match = RegExp(r'"content"\s*:\s*"').firstMatch(searchText);
+    final match = RegExp(
+      r'"(?:summary|explanation|analysis|content)"\s*:\s*"',
+    ).firstMatch(searchText);
     if (match == null) {
       return null;
     }
@@ -139,11 +159,17 @@ abstract final class WorkshopStructuredJson {
         return null;
       }
 
-      final escapedContent = _escapeLooseJsonString(
-        text.substring(valueStart, valueEnd),
-      );
+      final rawValue = text.substring(valueStart, valueEnd);
+      // Never reinterpret real sibling fields as a free-text value. If the
+      // candidate spans a comma followed by a quoted JSON object key, its
+      // boundary is ambiguous: fail closed instead of swallowing approvals,
+      // rejections, paths or validation fields into summary/content text.
+      if (_containsPotentialSiblingField(rawValue)) {
+        continue;
+      }
+      final escapedValue = _escapeLooseJsonString(rawValue);
       final candidate =
-          '${text.substring(0, valueStart)}$escapedContent${text.substring(valueEnd)}';
+          '${text.substring(0, valueStart)}$escapedValue${text.substring(valueEnd)}';
 
       try {
         final decoded = jsonDecode(candidate);
@@ -151,12 +177,12 @@ abstract final class WorkshopStructuredJson {
           return candidate;
         }
       } on FormatException {
-        // A later content field may need the same bounded repair.
+        // A later known free-text field may need the same bounded repair.
       }
 
-      final repaired = _repairContentFields(
+      final repaired = _repairKnownStringFields(
         candidate,
-        searchStart: valueStart + escapedContent.length + 1,
+        searchStart: valueStart + escapedValue.length + 1,
         depth: depth + 1,
         budget: budget,
       );
@@ -167,6 +193,9 @@ abstract final class WorkshopStructuredJson {
 
     return null;
   }
+
+  static bool _containsPotentialSiblingField(String raw) =>
+      RegExp(r',\s*"(?:[^"\\]|\\.)*"\s*:').hasMatch(raw);
 
   static String _escapeLooseJsonString(String raw) {
     final buffer = StringBuffer();
