@@ -86,13 +86,30 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Cache native build (CMake/Ninja objects + FetchContent)
+      - name: Determine pinned llama.cpp cache revision
+        id: native_cache_identity
+        run: |
+          set -euo pipefail
+          llama_sha="$(git -C third_party/llama.cpp rev-parse --verify HEAD)"
+          test "${#llama_sha}" -eq 40
+          echo "llama_sha=$llama_sha" >> "$GITHUB_OUTPUT"
+
+      # Native CMake state and ccache have different invalidation needs.
+      # Keep the CMake tree exact to project configuration; safely reuse
+      # compiler objects across compatible CMake revisions by content hash.
+      - name: Cache native CMake build tree
         uses: actions/cache@v5
         with:
-          path: |
-            android/app/.cxx
-            ~/.cache/ccache
-          key: native-${{ runner.os }}-${{ hashFiles('android/app/build.gradle', 'android/settings.gradle', 'android/gradle.properties', 'pubspec.lock', '.gitmodules', 'native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h', 'third_party/llama.cpp/CMakeLists.txt') }}
+          path: android/app/.cxx
+          key: native-cmake-v2-${{ runner.os }}-ndk29-${{ steps.native_cache_identity.outputs.llama_sha }}-${{ hashFiles('android/app/build.gradle', 'android/settings.gradle', 'android/gradle.properties', 'pubspec.lock', '.gitmodules', 'native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h', 'third_party/llama.cpp/CMakeLists.txt') }}
+
+      - name: Cache native compiler objects (ccache)
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache
+          key: native-ccache-v2-${{ runner.os }}-ndk29-${{ steps.native_cache_identity.outputs.llama_sha }}-${{ hashFiles('.gitmodules', 'native/android/CMakeLists.txt', 'native/android/llama_bridge.cpp', 'native/android/llama_bridge.h') }}
+          restore-keys: |
+            native-ccache-v2-${{ runner.os }}-ndk29-
 
       - name: Install Android SDK cmdline-tools 16.0
         run: |
@@ -119,7 +136,8 @@ jobs:
       - name: Install Android NDK
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+          # Keep the preinstalled NDK aligned with android/app/build.gradle.
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865"
 
       - name: Install glslc (required to compile ggml Vulkan shaders)
         run: |
@@ -134,6 +152,9 @@ jobs:
           sudo apt-get install -y glslc ccache
           glslc --version
           ccache --version
+          ccache --max-size=2G
+          ccache --set-config=compression=true
+          ccache --zero-stats
 
       # MODIFICA 2: Inizializzazione di CodeQL subito dopo l'installazione dell'NDK
       # Traccia sia il C++ che il codice Java/Kotlin di Android prima che partano le build di Flutter
@@ -450,6 +471,10 @@ jobs:
             --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="${{ steps.hybrid_gate.outputs.enabled }}" \
             2>&1 | tee release_aab_build.log
 
+      - name: Report native compiler cache statistics
+        if: always()
+        run: ccache --show-stats | tee ccache_stats.log || true
+
       # MODIFICA 3: Analisi finale eseguita subito DOPO il completamento delle build.
       # A questo punto CodeQL ha catturato la compilazione di llama.cpp e dei servizi Java.
       - name: Perform CodeQL Final Analysis
@@ -565,6 +590,7 @@ jobs:
           path: |
             release_apk_build.log
             release_aab_build.log
+            ccache_stats.log
             release_outputs.log
             keystore_decode.log
             keystore_validation.log
