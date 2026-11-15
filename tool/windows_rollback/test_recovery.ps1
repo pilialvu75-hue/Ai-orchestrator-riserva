@@ -13,7 +13,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Windows 8.1 compatible recovery helper did not
 function Invoke-Recovery {
   param([string] $Mode, [string] $App, [string] $Data, [string] $Store, [bool] $MustSucceed = $true)
   $arguments = @('--mode', $Mode, '--app', $App, '--data', $Data, '--store', $Store)
-  if ($Mode -eq 'restore') { $arguments += @('--confirm', 'yes') }
+  if ($Mode -in @('restore', 'accept')) { $arguments += @('--confirm', 'yes') }
   $arguments += @('--roaming', $script:roaming)
   & $exe @arguments
   $exit = $LASTEXITCODE
@@ -36,6 +36,17 @@ try {
   Invoke-Recovery backup $app $data $store
   Invoke-Recovery verify $app $data $store
   Invoke-Recovery backup $app $data $store $false
+
+  # An explicitly accepted, working version must let the next upgrade
+  # create a new verified checkpoint without losing the archived snapshot.
+  Invoke-Recovery accept $app $data $store
+  if (Test-Path (Join-Path $store 'latest.txt')) {
+    throw 'Accept left a pending recovery checkpoint.'
+  }
+  if (@(Get-ChildItem $store -Directory -Filter 'snapshot-*').Count -lt 1) {
+    throw 'Accept erased the archived last-known-good backup.'
+  }
+  Invoke-Recovery backup $app $data $store
 
   Set-Content (Join-Path $app 'ai_orchestrator.exe') 'new-beta-1.0.15' -NoNewline
   Set-Content (Join-Path $app 'new-feature.dll') 'new-runtime' -NoNewline
