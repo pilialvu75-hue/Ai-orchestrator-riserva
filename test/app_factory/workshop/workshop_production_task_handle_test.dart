@@ -498,7 +498,10 @@ void main() {
         AppAiRole.workshopOrchestrator: _QueueGateway(
           role: AppAiRole.workshopOrchestrator,
           calls: calls,
-          results: <WorkshopInferenceResult>[_success('{}')],
+          results: <WorkshopInferenceResult>[
+            _success(_orchestratorBriefJson),
+            _success('{}'),
+          ],
         ),
         AppAiRole.architect: architect,
         AppAiRole.engineer: engineer,
@@ -608,7 +611,10 @@ void main() {
         AppAiRole.workshopOrchestrator: _QueueGateway(
           role: AppAiRole.workshopOrchestrator,
           calls: calls,
-          results: <WorkshopInferenceResult>[_success('{}')],
+          results: <WorkshopInferenceResult>[
+            _success(_orchestratorBriefJson),
+            _success('{}'),
+          ],
         ),
         AppAiRole.architect: architect,
         AppAiRole.engineer: engineer,
@@ -701,7 +707,10 @@ void main() {
         AppAiRole.workshopOrchestrator: _QueueGateway(
           role: AppAiRole.workshopOrchestrator,
           calls: calls,
-          results: <WorkshopInferenceResult>[_success('{}')],
+          results: <WorkshopInferenceResult>[
+            _success(_orchestratorBriefJson),
+            _success('{}'),
+          ],
         ),
         AppAiRole.architect: architect,
         AppAiRole.engineer: engineer,
