@@ -460,6 +460,417 @@ void main() {
     );
   });
 
+  test(
+      'certified Library adaptation evidence reaches Architect and Engineer',
+      () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+        'pubspec.yaml': 'name: demo\n',
+      },
+    );
+    final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
+    final calls = <AppAiRole>[];
+    final architect = _QueueGateway(
+      role: AppAiRole.architect,
+      calls: calls,
+      results: <WorkshopInferenceResult>[
+        _success(_planningJson.replaceFirst(
+          '"affectedPaths":["lib/app.dart"]',
+          '"affectedPaths":["lib/app.dart","pubspec.yaml"]',
+        )),
+        _success('{}'),
+      ],
+    );
+    final engineer = _QueueGateway(
+      role: AppAiRole.engineer,
+      calls: calls,
+      results: <WorkshopInferenceResult>[_success(_proposalJsonWithDependency)],
+    );
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: _certifiedStoragePackage(
+        requirements: const <WorkshopAssemblyRequirement>[
+          WorkshopAssemblyRequirement(
+            kind: WorkshopAssemblyRequirementKind.dependency,
+            description: 'Add sqflite dependency to pubspec.yaml',
+            targetPaths: const <String>['pubspec.yaml'],
+          ),
+        ],
+      ),
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: executor,
+      roleGateways: <AppAiRole, WorkshopInferenceGateway>{
+        AppAiRole.workshopOrchestrator: _QueueGateway(
+          role: AppAiRole.workshopOrchestrator,
+          calls: calls,
+          results: <WorkshopInferenceResult>[
+            _success(_orchestratorBriefJson),
+            _success('{}'),
+          ],
+        ),
+        AppAiRole.architect: architect,
+        AppAiRole.engineer: engineer,
+        AppAiRole.reviewer: _QueueGateway(
+          role: AppAiRole.reviewer,
+          calls: calls,
+          results: <WorkshopInferenceResult>[
+            _success(_approvedReviewJson),
+            _success(_approvedReviewJson),
+            _success(_validValidationJson),
+            _success(_validValidationJson),
+            _success(_validValidationJson),
+          ],
+        ),
+      },
+      libraryReuseService: WorkshopLibraryReuseService(
+        client: libraryClient,
+      ),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+
+    final handle = await coordinator.startAndPrepare(
+      title: 'Certified adaptation test',
+      instruction:
+          'Create an Android application that stores data in a local database.',
+      requirements: const <String>[
+        'Android application',
+        'local database persistence',
+      ],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    final inference = await coordinator.runPrepared(handle: handle);
+
+    expect(inference.readyForApproval, isTrue);
+    expect(handle.session.context.request.targetFiles, contains('pubspec.yaml'));
+    expect(handle.session.workspace.snapshot['pubspec.yaml'], contains('sqflite'));
+    expect(libraryClient.loadStateCalls, 1);
+    expect(libraryClient.loadPackageCalls, 1);
+    expect(
+      handle.session.workspace.snapshot['lib/certified_storage.dart'],
+      'class CertifiedStorage {}\n',
+    );
+    expect(workspaceGateway.files.containsKey('lib/certified_storage.dart'), isFalse);
+    expect(workspaceGateway.writeCalls, 0);
+
+    expect(architect.lastPrompt, contains('CERTIFIED MODULE LIBRARY EVIDENCE'));
+    expect(architect.lastPrompt, contains('adaptationRequired'));
+    expect(
+      architect.lastPrompt,
+      contains('storage.local_db.certified@1.0.0'),
+    );
+    expect(
+      architect.lastPrompt,
+      contains('Add sqflite dependency to pubspec.yaml'),
+    );
+
+    expect(engineer.lastPrompt, contains('certifiedLibraryEvidence'));
+    expect(engineer.lastPrompt, contains('adaptationRequired'));
+    expect(
+      engineer.lastPrompt,
+      contains('storage.local_db.certified@1.0.0'),
+    );
+    expect(
+      engineer.lastPrompt,
+      contains('Add sqflite dependency to pubspec.yaml'),
+    );
+    expect(
+      calls,
+      <AppAiRole>[
+        AppAiRole.workshopOrchestrator,
+        AppAiRole.architect,
+        AppAiRole.workshopOrchestrator,
+        AppAiRole.architect,
+        AppAiRole.engineer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+        AppAiRole.reviewer,
+      ],
+    );
+  });
+
+  test('required adaptation without authorized file scope falls back', () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+        'pubspec.yaml': 'name: demo\n',
+      },
+    );
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: _certifiedStoragePackage(
+        requirements: const <WorkshopAssemblyRequirement>[
+          WorkshopAssemblyRequirement(
+            kind: WorkshopAssemblyRequirementKind.dependency,
+            description: 'Add sqflite dependency to pubspec.yaml',
+            targetPaths: <String>['pubspec.yaml'],
+          ),
+        ],
+      ),
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: WorkshopProjectExecutor(gateway: workspaceGateway),
+      roleGateways: _gateways(<AppAiRole>[]),
+      libraryReuseService: WorkshopLibraryReuseService(client: libraryClient),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    final handle = await coordinator.startAndPrepare(
+      title: 'Out-of-scope dependency fallback',
+      instruction: 'Create an Android application that stores data locally.',
+      requirements: const <String>['Android application', 'local database persistence'],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    expect(
+      handle.session.context.request.targetFiles,
+      isNot(contains('pubspec.yaml')),
+    );
+    final inference = await coordinator.runPrepared(handle: handle);
+    expect(inference.readyForApproval, isTrue);
+    expect(libraryClient.loadPackageCalls, 1);
+    expect(
+      handle.session.workspace.snapshot.containsKey('lib/certified_storage.dart'),
+      isFalse,
+    );
+    expect(workspaceGateway.writeCalls, 0);
+  });
+
+  test('required adaptation with unknown target paths fails closed', () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
+    );
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: _certifiedStoragePackage(
+        requirements: const <WorkshopAssemblyRequirement>[
+          WorkshopAssemblyRequirement(
+            kind: WorkshopAssemblyRequirementKind.dependency,
+            description: 'Dependency integration without structured target paths',
+          ),
+        ],
+      ),
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: WorkshopProjectExecutor(gateway: workspaceGateway),
+      roleGateways: _gateways(<AppAiRole>[]),
+      libraryReuseService: WorkshopLibraryReuseService(client: libraryClient),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    final handle = await coordinator.startAndPrepare(
+      title: 'Unknown adaptation scope fallback',
+      instruction: 'Create an Android application that stores data locally.',
+      requirements: const <String>['Android application', 'local database persistence'],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    final inference = await coordinator.runPrepared(handle: handle);
+    expect(inference.readyForApproval, isTrue);
+    expect(libraryClient.loadPackageCalls, 1);
+    expect(
+      handle.session.workspace.snapshot.containsKey('lib/certified_storage.dart'),
+      isFalse,
+    );
+    expect(workspaceGateway.writeCalls, 0);
+  });
+
+  test('certified Library file conflict falls back without trusted evidence',
+      () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+        'lib/certified_storage.dart': 'project-specific content',
+      },
+    );
+    final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
+    final calls = <AppAiRole>[];
+    final architect = _QueueGateway(
+      role: AppAiRole.architect,
+      calls: calls,
+      results: <WorkshopInferenceResult>[
+        _success(_planningJson),
+        _success('{}'),
+      ],
+    );
+    final engineer = _QueueGateway(
+      role: AppAiRole.engineer,
+      calls: calls,
+      results: <WorkshopInferenceResult>[_success(_proposalJson)],
+    );
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: _certifiedStoragePackage(),
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: executor,
+      roleGateways: <AppAiRole, WorkshopInferenceGateway>{
+        AppAiRole.workshopOrchestrator: _QueueGateway(
+          role: AppAiRole.workshopOrchestrator,
+          calls: calls,
+          results: <WorkshopInferenceResult>[
+            _success(_orchestratorBriefJson),
+            _success('{}'),
+          ],
+        ),
+        AppAiRole.architect: architect,
+        AppAiRole.engineer: engineer,
+        AppAiRole.reviewer: _QueueGateway(
+          role: AppAiRole.reviewer,
+          calls: calls,
+          results: <WorkshopInferenceResult>[
+            _success(_approvedReviewJson),
+            _success(_validValidationJson),
+          ],
+        ),
+      },
+      libraryReuseService: WorkshopLibraryReuseService(
+        client: libraryClient,
+      ),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+
+    final handle = await coordinator.startAndPrepare(
+      title: 'Certified conflict fallback',
+      instruction:
+          'Create an Android application that stores data in a local database.',
+      requirements: const <String>[
+        'Android application',
+        'local database persistence',
+      ],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    final inference = await coordinator.runPrepared(handle: handle);
+
+    expect(inference.readyForApproval, isTrue);
+    expect(libraryClient.loadStateCalls, 1);
+    expect(libraryClient.loadPackageCalls, 1);
+    expect(
+      handle.session.workspace.snapshot['lib/certified_storage.dart'],
+      'project-specific content',
+    );
+    expect(
+      architect.lastPrompt,
+      isNot(contains('CERTIFIED MODULE LIBRARY EVIDENCE')),
+    );
+    expect(engineer.lastPrompt, isNot(contains('certifiedLibraryEvidence')));
+    expect(workspaceGateway.writeCalls, 0);
+  });
+
+  test('unverified certified package leaves VirtualWorkspace untouched',
+      () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
+    );
+    final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
+    final calls = <AppAiRole>[];
+    final architect = _QueueGateway(
+      role: AppAiRole.architect,
+      calls: calls,
+      results: <WorkshopInferenceResult>[
+        _success(_planningJson),
+        _success('{}'),
+      ],
+    );
+    final engineer = _QueueGateway(
+      role: AppAiRole.engineer,
+      calls: calls,
+      results: <WorkshopInferenceResult>[_success(_proposalJson)],
+    );
+    final badManifestSha = List<String>.filled(64, 'e').join();
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: WorkshopReusableModulePackage(
+        assetId: 'storage.local_db.certified',
+        version: '1.0.0',
+        capabilities: const <String>['storage.local_db'],
+        contracts: const <String>['storage.local_db.v1'],
+        files: const <WorkshopReusableModuleFile>[
+          WorkshopReusableModuleFile(
+            sourcePath: 'lib/certified_storage.dart',
+            targetPath: 'lib/certified_storage.dart',
+            content: 'class CertifiedStorage {}\n',
+          ),
+        ],
+        manifestDigest: badManifestSha,
+        artifactDigest: List<String>.filled(64, 'b').join(),
+      ),
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: executor,
+      roleGateways: <AppAiRole, WorkshopInferenceGateway>{
+        AppAiRole.workshopOrchestrator: _QueueGateway(
+          role: AppAiRole.workshopOrchestrator,
+          calls: calls,
+          results: <WorkshopInferenceResult>[
+            _success(_orchestratorBriefJson),
+            _success('{}'),
+          ],
+        ),
+        AppAiRole.architect: architect,
+        AppAiRole.engineer: engineer,
+        AppAiRole.reviewer: _QueueGateway(
+          role: AppAiRole.reviewer,
+          calls: calls,
+          results: <WorkshopInferenceResult>[
+            _success(_approvedReviewJson),
+            _success(_validValidationJson),
+          ],
+        ),
+      },
+      libraryReuseService: WorkshopLibraryReuseService(
+        client: libraryClient,
+      ),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+
+    final handle = await coordinator.startAndPrepare(
+      title: 'Unverified package fallback',
+      instruction:
+          'Create an Android application that stores data in a local database.',
+      requirements: const <String>[
+        'Android application',
+        'local database persistence',
+      ],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    final inference = await coordinator.runPrepared(handle: handle);
+
+    expect(inference.readyForApproval, isTrue);
+    expect(libraryClient.loadStateCalls, 1);
+    expect(libraryClient.loadPackageCalls, 1);
+    expect(
+      handle.session.workspace.snapshot.containsKey(
+        'lib/certified_storage.dart',
+      ),
+      isFalse,
+    );
+    expect(
+      architect.lastPrompt,
+      isNot(contains('CERTIFIED MODULE LIBRARY EVIDENCE')),
+    );
+    expect(engineer.lastPrompt, isNot(contains('certifiedLibraryEvidence')));
+    expect(workspaceGateway.writeCalls, 0);
+  });
+
   test('strict offline production never touches the remote Module Library',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
@@ -617,7 +1028,10 @@ WorkshopLibraryRemoteState _certifiedLibraryState() {
   );
 }
 
-WorkshopReusableModulePackage _certifiedStoragePackage() {
+WorkshopReusableModulePackage _certifiedStoragePackage({
+  List<WorkshopAssemblyRequirement> requirements =
+      const <WorkshopAssemblyRequirement>[],
+}) {
   final manifestSha = List<String>.filled(64, 'a').join();
   final treeSha = List<String>.filled(64, 'b').join();
 
@@ -633,6 +1047,7 @@ WorkshopReusableModulePackage _certifiedStoragePackage() {
         content: 'class CertifiedStorage {}\n',
       ),
     ],
+    requirements: requirements,
     manifestDigest: manifestSha,
     artifactDigest: treeSha,
   );
@@ -691,6 +1106,14 @@ const String _planningJson =
     '"dependsOn":["initial-implementation"],'
     '"affectedPaths":["lib/app.dart"],'
     '"validationCriteria":["Requested change is verified"]}]}';
+
+const String _proposalJsonWithDependency =
+    '{"summary":"Update app and include dependency",'
+    '"explanation":"Integrate certified storage with scoped dependency",'
+    '"changes":[{"path":"lib/app.dart","type":"modification","content":"new"},'
+    '{"path":"pubspec.yaml","type":"modification",'
+    '"content":"name: demo\\ndependencies:\\n  sqflite: ^2.0.0\\n"}],'
+    '"validationNotes":[],"warnings":[]}';
 
 const String _proposalJson =
     '{"summary":"Update app","explanation":"Implement requested change",'
