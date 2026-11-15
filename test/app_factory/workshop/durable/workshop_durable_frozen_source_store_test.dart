@@ -50,6 +50,59 @@ void main() {
     expect(await file.readAsString(), 'completely different source');
   });
 
+  test('restart recovers from ledger hash without an in-memory handle',
+      () async {
+    final request = _request(project.path, 'first-id');
+    final source = _snapshot(project.path, 'frozen before app restart');
+    final store = WorkshopDurableFrozenSourceStore(root: storage);
+    final saved = await store.persist(
+      request: request,
+      source: source,
+      namespace: 'local-account',
+    );
+
+    final reconstructed =
+        WorkshopDurableFrozenSourceStore.handleFromPersistedDigest(
+      request: _request(project.path, 'second-id'),
+      sourceSha256: saved.sourceSha256,
+      namespace: 'local-account',
+    );
+    expect(reconstructed.key, saved.key);
+    final restored = await WorkshopDurableFrozenSourceStore(
+      root: storage,
+    ).recover(
+      request: _request(project.path, 'third-id'),
+      handle: reconstructed,
+      namespace: 'local-account',
+    );
+    expect(utf8.decode(restored.files.single.bytes),
+        'frozen before app restart');
+
+    await expectLater(
+      WorkshopDurableFrozenSourceStore(root: storage).recover(
+        request: request,
+        handle: WorkshopDurableFrozenSourceStore.handleFromPersistedDigest(
+          request: request,
+          sourceSha256: List<String>.filled(64, '0').join(),
+          namespace: 'local-account',
+        ),
+        namespace: 'local-account',
+      ),
+      throwsStateError,
+    );
+  });
+
+  test('invalid persisted fingerprint is rejected before I/O', () {
+    expect(
+      () => WorkshopDurableFrozenSourceStore.handleFromPersistedDigest(
+        request: _request(project.path, 'ui'),
+        sourceSha256: 'invalid',
+        namespace: 'tenant',
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('source namespace is isolated and duplicate same bytes is idempotent',
       () async {
     final request = _request(project.path, 'first');

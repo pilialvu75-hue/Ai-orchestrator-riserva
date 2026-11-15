@@ -100,27 +100,45 @@ final class WorkshopDurableFrozenSourceStore {
         return _readChecked(request, handle, _file(handle.key));
       });
 
-  static WorkshopDurableFrozenSourceHandle _handle(
-    WorkshopBuildRequest request,
-    WorkshopBuildSourceSnapshot source,
-    String namespace,
-  ) {
+  /// Reconstructs a handle after restart using only the digest persisted in
+  /// the generation ledger. No recapture of the current workspace occurs.
+  /// recover() still validates the archived source bytes against this digest.
+  static WorkshopDurableFrozenSourceHandle handleFromPersistedDigest({
+    required WorkshopBuildRequest request,
+    required String sourceSha256,
+    required String namespace,
+  }) {
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(sourceSha256)) {
+      throw ArgumentError.value(
+        sourceSha256, 'sourceSha256', 'invalid source fingerprint',
+      );
+    }
     final normalizedNamespace = namespace.trim();
     if (normalizedNamespace.isEmpty) {
       throw ArgumentError.value(namespace, 'namespace', 'is required');
     }
     final intent = WorkshopStableBuildRequestIdentity.forRequest(request);
-    final digest = WorkshopDurableBuildIdentity.sourceDigest(source);
     final keyDigest = sha256.convert(utf8.encode(
       'aivexus-frozen-source-v1:' +
-          normalizedNamespace + ':' + intent + ':' + digest,
+          normalizedNamespace + ':' + intent + ':' + sourceSha256,
     )).toString();
     return WorkshopDurableFrozenSourceHandle(
       key: 'frozen-v1-' + keyDigest.substring(0, 40),
       intentId: intent,
-      sourceSha256: digest,
+      sourceSha256: sourceSha256,
     );
   }
+
+  static WorkshopDurableFrozenSourceHandle _handle(
+    WorkshopBuildRequest request,
+    WorkshopBuildSourceSnapshot source,
+    String namespace,
+  ) =>
+      handleFromPersistedDigest(
+        request: request,
+        sourceSha256: WorkshopDurableBuildIdentity.sourceDigest(source),
+        namespace: namespace,
+      );
 
   static void _validateHandle(
     WorkshopBuildRequest request,
