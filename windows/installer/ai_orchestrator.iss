@@ -77,6 +77,16 @@ Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+; Remove only AIVEXUS-owned experimental runtime folders left behind by
+; older beta builds. Production Windows packages use the root static helper.
+; Inno processes InstallDelete before Files, so QA packages that explicitly
+; include these runtimes can reinstall fresh copies in the same transaction.
+; Never touch model downloads, account settings or Diagnostics.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\runtime-modern"
+Type: filesandordirs; Name: "{app}\runtime-vulkan"
+Type: filesandordirs; Name: "{app}\runtime-cpu-avx2"
+
 [Files]
 #ifdef AivexusRecoveryHelper
 ; Recovery helper lives outside {app}: it remains runnable when a new app

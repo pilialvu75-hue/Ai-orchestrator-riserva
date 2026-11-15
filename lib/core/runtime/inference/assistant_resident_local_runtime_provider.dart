@@ -95,9 +95,11 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   static String? _bundledServer() {
     final appDir = p.dirname(Platform.resolvedExecutable);
     if (Platform.isWindows) {
-      if (!WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion)) return null;
-      final file = p.join(appDir, 'runtime-modern', 'llama-server.exe');
-      return File(file).existsSync() ? file : null;
+      return WindowsLlamaRuntime.resolveResidentServer(
+        appExecutable: Platform.resolvedExecutable,
+        environment: Platform.environment,
+        windowsVersion: Platform.operatingSystemVersion,
+      );
     }
     if (Platform.isMacOS || Platform.isLinux) {
       final file = p.join(appDir, 'llama-server');
