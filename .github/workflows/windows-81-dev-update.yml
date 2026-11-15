@@ -1,0 +1,330 @@
+name: AIVEXUS Windows 8.1 Dev only (manual)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-81-dev-update.yml'
+      - 'test/scripts/test_windows_81_dev_release_contract.py'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Build-only QA, or publish an update visible to Dev channel'
+        type: choice
+        required: true
+        default: build_only
+        options:
+          - build_only
+          - publish_win81_dev
+      confirmation:
+        description: 'To publish, type PUBLISH_WIN81_RECOVERY_DEV (leave empty for build-only)'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: win81-dev-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 -m unittest discover -s test/scripts -p test_windows_81_dev_release_contract.py -v
+
+  owner-win81:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'pilialvu75-hue'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - name: Validate explicit owner intent before allocating build resources
+        id: owner
+        shell: pwsh
+        env:
+          LEGACY_ACTION: ${{ inputs.action }}
+          LEGACY_CONFIRM: ${{ inputs.confirmation }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:LEGACY_ACTION -notin @('build_only', 'publish_win81_dev')) {
+            throw 'Unknown legacy release action.'
+          }
+          if ($env:LEGACY_ACTION -eq 'publish_win81_dev' -and
+              $env:LEGACY_CONFIRM -cne 'PUBLISH_WIN81_RECOVERY_DEV') {
+            throw 'Explicit Windows 8.1 release confirmation is required.'
+          }
+          if ($env:LEGACY_ACTION -eq 'build_only' -and $env:LEGACY_CONFIRM) {
+            throw 'Build-only mode must not request publishing.'
+          }
+          $build = 100000 + [int]$env:GITHUB_RUN_NUMBER
+          $tag = "v1.0.16-dev+$build"
+          if ($tag -notmatch '^v1\.0\.16-dev\+[0-9]+$') {
+            throw 'Unexpected legacy QA release tag.'
+          }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version_name=1.0.16" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "release_version=1.0.16+$build" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Manual mode $($env:LEGACY_ACTION); main SHA $env:GITHUB_SHA"
+
+      - name: Checkout exact authorized main commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Stamp only 1.0.16 Dev and verify rollback with native tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $raw = Get-Content 'pubspec.yaml' -Raw
+          if ($raw -notmatch '(?m)^version:\s*1\.0\.16\+\d+\s*$') {
+            throw 'Version mismatch: this QA update applies only to 1.0.16.'
+          }
+          $updated = $raw -replace '(?m)^version:\s*.*$', 'version: ${{ steps.owner.outputs.release_version }}'
+          Set-Content 'pubspec.yaml' $updated -Encoding utf8
+          & (Join-Path $PWD 'tool\windows_rollback\test_recovery.ps1')
+          if ($LASTEXITCODE -ne 0) { throw 'Rollback test failed; refusing to publish.' }
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Resolve owner-authorized Win8.1 release version
+        id: version
+        shell: pwsh
+        run: |
+          "version_name=${{ steps.owner.outputs.version_name }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "release_version=${{ steps.owner.outputs.release_version }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Bind Windows release to this Win8.1-only Dev tag
+        id: publish_tag
+        shell: pwsh
+        run: |
+          "tag=${{ steps.owner.outputs.tag }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Explicitly disable HYBRID cloud laboratory mode
+        id: hybrid_gate
+        shell: pwsh
+        run: |
+          "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Resolve Flutter dependencies
+        shell: pwsh
+        run: flutter pub get --enforce-lockfile
+
+      - name: Build coordinated Windows release
+        shell: pwsh
+        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }}
+
+      - name: Verify bundled Windows GGUF inference
+        shell: pwsh
+        run: |
+          & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
+
+      - name: Validate Windows compatibility bundle
+        shell: pwsh
+        run: |
+          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
+
+      - name: Compile mandatory Windows rollback recovery helper
+        id: recovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path $csc)) { throw 'Cannot release Windows without a recovery helper compiler.' }
+          $source = Join-Path $PWD 'tool\windows_rollback\AivexusRecovery.cs'
+          $manifest = Join-Path $PWD 'tool\windows_rollback\recovery.manifest'
+          $helperDir = Join-Path $PWD 'build\windows\recovery'
+          New-Item -ItemType Directory -Path $helperDir -Force | Out-Null
+          $helper = Join-Path $helperDir 'AivexusRecovery.exe'
+          & $csc /nologo /target:exe /r:System.Windows.Forms.dll "/win32manifest:$manifest" "/out:$helper" "$source"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $helper)) {
+            throw 'Recovery helper failed to compile: refusing to publish Windows installer.'
+          }
+          "helper=$helper" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Prepare Windows release payload
+        id: payload
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          if (-not (Test-Path $releaseDir)) {
+            throw "Windows release directory not found: $releaseDir"
+          }
+
+          $exe = Join-Path $releaseDir 'ai_orchestrator.exe'
+          if (-not (Test-Path $exe)) {
+            throw "Windows executable not found: $exe"
+          }
+          if (-not (Test-Path (Join-Path $releaseDir 'data'))) {
+            throw 'Flutter data directory is missing from the Windows release bundle.'
+          }
+
+          $runtimeDlls = @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+          foreach ($dll in $runtimeDlls) {
+            if (Test-Path (Join-Path $releaseDir $dll)) {
+              continue
+            }
+            $candidate = $null
+            if ($env:VCToolsRedistDir) {
+              $candidate = Get-ChildItem -Path $env:VCToolsRedistDir -Filter $dll -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\x64\\' } |
+                Select-Object -First 1
+            }
+            if ($candidate) {
+              Copy-Item $candidate.FullName (Join-Path $releaseDir $dll)
+            }
+          }
+
+          $isccCandidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          )
+          $iscc = $isccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $iscc) {
+            $isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($isccCommand) {
+              $iscc = $isccCommand.Source
+            }
+          }
+          if (-not $iscc) {
+            throw 'Inno Setup compiler ISCC.exe was not found on the windows-2022 runner.'
+          }
+
+          $redist = $null
+          if ($env:VCToolsRedistDir -and (Test-Path $env:VCToolsRedistDir)) {
+            $redist = Get-ChildItem -Path $env:VCToolsRedistDir -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          }
+          if (-not $redist) {
+            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            if (Test-Path $vswhere) {
+              $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+              if ($vsInstall) {
+                $redistRoot = Join-Path $vsInstall 'VC\Redist\MSVC'
+                if (Test-Path $redistRoot) {
+                  $redist = Get-ChildItem -Path $redistRoot -Filter 'vc_redist.x64.exe' -File -Recurse -ErrorAction SilentlyContinue |
+                    Sort-Object FullName -Descending |
+                    Select-Object -First 1
+                }
+              }
+            }
+          }
+          if (-not $redist) {
+            throw 'Matching Visual Studio 2022 vc_redist.x64.exe was not found.'
+          }
+
+          $outputDir = Join-Path $PWD 'build\windows\release-publish'
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+          $generatedDefines = Join-Path $PWD 'windows\installer\ci_generated.iss'
+          # Exact owner-triggered 1.0.16 Dev QA targets Windows 8.1 only.
+          # Beta/stable releases remain unaltered and modern Windows protected.
+          $resolvedTag = '${{ steps.publish_tag.outputs.tag }}'
+          $isWin81OnlyDev = $resolvedTag -match '^v1\.0\.16-dev\+[0-9]+$'
+          if ($isWin81OnlyDev -and '${{ steps.version.outputs.version_name }}' -ne '1.0.16') {
+            throw 'Unexpected Windows 8.1-only Dev release version.'
+          }
+          $defines = @(
+            "#define AivexusRecoveryHelper `"${{ steps.recovery.outputs.helper }}`"",
+            "#define AppVersion `"${{ steps.version.outputs.release_version }}`"",
+            "#define ReleaseDir `"$releaseDir`"",
+            "#define VCRedistPath `"$($redist.FullName)`"",
+            "#define OutputDir `"$outputDir`""
+          )
+          if ($isWin81OnlyDev) {
+            $defines += '#define AivexusWin81UnsignedQABuild 1'
+            Write-Host 'Windows 8.1-only unsigned QA with mandatory recovery.'
+          }
+          $defines | Set-Content -Path $generatedDefines -Encoding ASCII
+
+          "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "output_dir=$outputDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build versioned Windows Setup.exe
+        id: installer
+        shell: pwsh
+        run: |
+          $iscc = '${{ steps.payload.outputs.iscc }}'
+          $outputDir = '${{ steps.payload.outputs.output_dir }}'
+          $script = Join-Path $PWD 'windows\installer\ai_orchestrator.iss'
+
+          & $iscc $script
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
+          }
+
+          $setupPath = Join-Path $outputDir 'AI-Orchestrator-Setup-x64.exe'
+          if (-not (Test-Path $setupPath)) {
+            throw "Expected Setup.exe was not produced: $setupPath"
+          }
+          $setupSize = (Get-Item $setupPath).Length
+          if ($setupSize -lt 1048576) {
+            throw "Generated Setup.exe is unexpectedly small: $setupSize bytes"
+          }
+
+          $hash = Get-FileHash -Path $setupPath -Algorithm SHA256
+          $hashPath = "$setupPath.sha256"
+          "$($hash.Hash.ToLowerInvariant())  AI-Orchestrator-Setup-x64.exe" | Set-Content -Path $hashPath -Encoding ASCII
+
+          "setup_path=$setupPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "hash_path=$hashPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "setup_sha256=$($hash.Hash.ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Windows release installer: $setupPath ($setupSize bytes)"
+          Write-Host "SHA256: $($hash.Hash)"
+
+      - name: Preserve unpublished Windows 8.1 installer for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-win81-recovery-dev-${{ github.run_number }}
+          path: |
+            build/windows/release-publish/AI-Orchestrator-Setup-x64.exe
+            build/windows/release-publish/AI-Orchestrator-Setup-x64.exe.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish Windows 8.1-only Dev after explicit confirmation
+        if: inputs.action == 'publish_win81_dev'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = '${{ steps.owner.outputs.tag }}'
+          $repo = $env:GITHUB_REPOSITORY
+          if ($env:GITHUB_REF -ne 'refs/heads/main' -or
+              $tag -notmatch '^v1\.0\.16-dev\+[0-9]+$') {
+            throw 'Refusing a non-main or non-Windows8.1 update.'
+          }
+          gh api "repos/$repo/git/ref/tags/$tag" 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw 'An existing release tag must never be replaced.' }
+          $setup = '${{ steps.installer.outputs.setup_path }}'
+          $shaFile = '${{ steps.installer.outputs.hash_path }}'
+          $notes = 'EXPERIMENTAL Windows 8.1 ONLY; unsigned installer with verified pre-upgrade recovery. Not installable on Windows 10/11. No Android update. Check app, local inference and data before accepting the upgrade.'
+          gh release create $tag $setup $shaFile --repo $repo --target $env:GITHUB_SHA --prerelease --draft --title 'AIVEXUS 1.0.16 Dev - Windows 8.1 recovery QA' --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Could not stage the draft release.' }
+          $result = gh release view $tag --repo $repo --json assets | ConvertFrom-Json
+          $names = @($result.assets | ForEach-Object { $_.name })
+          if ('AI-Orchestrator-Setup-x64.exe' -notin $names -or
+              'AI-Orchestrator-Setup-x64.exe.sha256' -notin $names) {
+            throw 'Required Windows setup assets are missing; draft remains unpublished.'
+          }
+          gh release edit $tag --repo $repo --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish the verified draft.' }
+          Write-Host "Win8.1-only Dev update published: $tag"
