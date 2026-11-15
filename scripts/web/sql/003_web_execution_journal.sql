@@ -86,7 +86,6 @@ WHEN NOT (
   NEW.created_at IS OLD.created_at AND
   NEW.journal_version = OLD.journal_version + 1 AND
   NEW.transition_at IS NOT NULL AND
-  NEW.transition_at IS NOT OLD.transition_at AND
   (
     (OLD.status = 'reserved' AND NEW.status = 'running' AND
       OLD.worker_token IS NULL AND NEW.worker_token IS NOT NULL AND
