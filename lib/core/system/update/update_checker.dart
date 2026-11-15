@@ -415,6 +415,32 @@ class UpdateChecker {
     UpdateManifest current,
     ReleaseChannel preferredChannel,
   ) {
+    // The Windows 8.1 owner-authorized 1.0.15 Dev release shares its base
+    // version with a previously published Windows Beta. In explicit Dev mode,
+    // prefer this narrowly scoped Dev track over that same-base Beta, while
+    // retaining normal numeric/semantic ordering across different bases.
+    if (targetPlatform == UpdateTargetPlatform.windows &&
+        preferredChannel == ReleaseChannel.dev) {
+      final a = _comparator.parse(candidate.version);
+      final b = _comparator.parse(current.version);
+      if (a != null &&
+          b != null &&
+          a.numericSegments.length == 4 &&
+          b.numericSegments.length == 4 &&
+          a.numericSegments[0] == 1 &&
+          a.numericSegments[1] == 0 &&
+          a.numericSegments[2] == 15 &&
+          b.numericSegments[0] == 1 &&
+          b.numericSegments[1] == 0 &&
+          b.numericSegments[2] == 15 &&
+          (a.channel == ReleaseChannel.dev ||
+              b.channel == ReleaseChannel.dev)) {
+        if (a.channel != b.channel) {
+          return a.channel == ReleaseChannel.dev;
+        }
+        return a.numericSegments[3] > b.numericSegments[3];
+      }
+    }
     if ((targetPlatform == UpdateTargetPlatform.android ||
             targetPlatform == UpdateTargetPlatform.windows) &&
         preferredChannel == ReleaseChannel.beta) {
