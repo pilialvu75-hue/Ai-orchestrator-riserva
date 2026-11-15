@@ -189,6 +189,44 @@ void main() {
     }
   });
 
+  test('symlink ancestor cannot redirect frozen store into workspace',
+      () async {
+    if (Platform.isWindows) return;
+    final alias = Link(p.join(temp.path, 'workspace-alias'));
+    await alias.create(project.path);
+    final redirected = Directory(p.join(alias.path, 'snapshots'));
+    final provider = WorkshopDurableFrozenSourceStore(root: redirected);
+    await expectLater(
+      provider.persist(
+        request: _request(project.path, 'ui-alias'),
+        source: _snapshot(project.path, 'PRIVATE SOURCE CONTENT'),
+        namespace: 'tenant',
+      ),
+      throwsStateError,
+    );
+    expect(await redirected.exists(), isFalse);
+    expect(await Directory(p.join(project.path, 'snapshots')).exists(),
+        isFalse);
+  });
+
+  test('symlink workspace alias cannot hide overlap with source store',
+      () async {
+    if (Platform.isWindows) return;
+    final alias = Link(p.join(temp.path, 'workspace-alias'));
+    await alias.create(project.path);
+    final provider = WorkshopDurableFrozenSourceStore(
+      root: Directory(p.join(project.path, 'snapshots')),
+    );
+    await expectLater(
+      provider.persist(
+        request: _request(alias.path, 'ui-alias'),
+        source: _snapshot(alias.path, 'PRIVATE SOURCE CONTENT'),
+        namespace: 'tenant',
+      ),
+      throwsStateError,
+    );
+  });
+
   test('two differing snapshots produce distinct immutable references',
       () async {
     final request = _request(project.path, 'ui');

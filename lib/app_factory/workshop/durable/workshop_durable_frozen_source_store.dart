@@ -162,24 +162,60 @@ final class WorkshopDurableFrozenSourceStore {
   }
 
   Future<void> _validateRoot(WorkshopBuildRequest request) async {
-    final workspace = p.normalize(p.absolute(request.projectPath));
-    final root = _root.path;
-    if (root == workspace ||
+    // Lexical containment alone is insufficient: a parent may be a symlink.
+    // Resolve the closest existing ancestor and append any missing directory
+    // suffix WITHOUT creating the destination until separation is checked.
+    final workspace = await _physicalDirectoryLocation(
+      Directory(request.projectPath),
+    );
+    final root = await _physicalDirectoryLocation(_root);
+    if (p.equals(root, workspace) ||
         p.isWithin(workspace, root) ||
         p.isWithin(root, workspace)) {
       throw StateError(
         'Frozen source storage must be outside the generated workspace.',
       );
     }
-    final existing = await FileSystemEntity.type(root, followLinks: false);
+    final existing =
+        await FileSystemEntity.type(_root.path, followLinks: false);
     if (existing == FileSystemEntityType.link) {
       throw StateError('Frozen source root cannot be a symbolic link.');
     }
     await _root.create(recursive: true);
-    if (await FileSystemEntity.type(root, followLinks: false) !=
+    if (await FileSystemEntity.type(_root.path, followLinks: false) !=
         FileSystemEntityType.directory) {
       throw StateError('Frozen source root is not a directory.');
     }
+    // Verify once again after the mkdir: a re-pointed ancestor may have
+    // changed resolution between our first observation and creation.
+    final actual = await _root.resolveSymbolicLinks();
+    if (p.equals(actual, workspace) ||
+        p.isWithin(workspace, actual) ||
+        p.isWithin(actual, workspace)) {
+      throw StateError(
+        'Frozen source storage resolves inside the generated workspace.',
+      );
+    }
+  }
+
+  static Future<String> _physicalDirectoryLocation(
+    Directory directory,
+  ) async {
+    var cursor = Directory(p.normalize(p.absolute(directory.path)));
+    final missing = <String>[];
+    while (!await cursor.exists()) {
+      final parent = cursor.parent;
+      if (p.equals(parent.path, cursor.path)) {
+        throw StateError('Cannot resolve frozen source directory location.');
+      }
+      missing.add(p.basename(cursor.path));
+      cursor = parent;
+    }
+    final resolved = await cursor.resolveSymbolicLinks();
+    return p.normalize(p.joinAll(<String>[
+      resolved,
+      ...missing.reversed,
+    ]));
   }
 
   File _file(String key) => File(p.join(_root.path, key + '.avxf'));
