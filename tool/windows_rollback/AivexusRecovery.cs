@@ -14,7 +14,7 @@ using System.Windows.Forms;
 
 internal static class AivexusRecovery
 {
-    const string Header = "AIVEXUS_ROLLBACK_V2";
+    const string Header = "AIVEXUS_ROLLBACK_V3";
     const string Pointer = "latest.txt";
     static readonly StringComparison Cmp = StringComparison.OrdinalIgnoreCase;
 
@@ -28,10 +28,12 @@ internal static class AivexusRecovery
             string app = Path.GetFullPath(Get(settings, "app")).TrimEnd('\\');
             string data = settings.ContainsKey("data") && settings["data"].Length > 0
                 ? Path.GetFullPath(settings["data"]).TrimEnd('\\') : null;
+            string roaming = settings.ContainsKey("roaming") && settings["roaming"].Length > 0
+                ? Path.GetFullPath(settings["roaming"]).TrimEnd('\\') : null;
             if (string.Equals(mode, "backup", Cmp))
-                Backup(app, data, store, true);
+                Backup(app, data, roaming, store, true);
             else if (string.Equals(mode, "verify", Cmp))
-                VerifyCurrent(store, app, data);
+                VerifyCurrent(store, app, data, roaming);
             else if (string.Equals(mode, "restore", Cmp))
             {
                 if (!settings.ContainsKey("confirm"))
@@ -49,14 +51,29 @@ internal static class AivexusRecovery
                 }
                 else if (settings["confirm"] != "yes")
                     throw new InvalidOperationException("Invalid explicit confirmation.");
-                Restore(app, data, store);
+                Restore(app, data, roaming, store);
             }
             else if (string.Equals(mode, "accept", Cmp))
             {
                 AssertNotRunning();
-                VerifyCurrent(store, app, data);
+                VerifyCurrent(store, app, data, roaming);
                 if (!File.Exists(Path.Combine(app, "ai_orchestrator.exe")))
                     throw new InvalidOperationException("Cannot accept a broken installation.");
+                if (!settings.ContainsKey("confirm"))
+                {
+                    DialogResult consent = MessageBox.Show(
+                        "Hai verificato che questa versione di AIVEXUS funziona?\n" +
+                        "Confermandola, la copia della versione precedente restera' " +
+                        "archiviata, ma non sara' piu' il punto di recupero automatico.\n" +
+                        "Solo dopo questa conferma potrai installare un'altra versione.",
+                        "AIVEXUS - Conferma aggiornamento funzionante",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                        MessageBoxDefaultButton.Button2);
+                    if (consent != DialogResult.Yes)
+                        throw new InvalidOperationException("Upgrade acceptance cancelled.");
+                }
+                else if (settings["confirm"] != "yes")
+                    throw new InvalidOperationException("Invalid acceptance confirmation.");
                 File.Delete(Path.Combine(store, Pointer));
                 Console.WriteLine("Recovery checkpoint accepted. Historic snapshot retained.");
             }
@@ -79,7 +96,7 @@ internal static class AivexusRecovery
             if (!args[i].StartsWith("--", StringComparison.Ordinal))
                 throw new ArgumentException("Unknown option: " + args[i]);
             string key = args[i].Substring(2);
-            if (!new[] { "mode", "store", "app", "data", "confirm" }.Contains(key))
+            if (!new[] { "mode", "store", "app", "data", "roaming", "confirm" }.Contains(key))
                 throw new ArgumentException("Unsupported option: " + key);
             if (result.ContainsKey(key)) throw new ArgumentException("Duplicate option: " + key);
             result.Add(key, args[i + 1]);
@@ -113,16 +130,17 @@ internal static class AivexusRecovery
         return path.StartsWith(prefix, Cmp);
     }
 
-    static void ValidatePaths(string app, string data, string store)
+    static void ValidatePaths(string app, string data, string roaming, string store)
     {
-        if (app == store || IsWithin(app, store) || IsWithin(store, app))
-            throw new InvalidOperationException("Recovery folder must be separate from app installation.");
-        if (data != null &&
-            (data == store || IsWithin(data, store) || IsWithin(store, data)))
-            throw new InvalidOperationException("Recovery folder must be separate from user data.");
-        if (data != null &&
-            (data == app || IsWithin(data, app) || IsWithin(app, data)))
-            throw new InvalidOperationException("Application and data roots must not overlap.");
+        var roots = new List<string> { app, store };
+        if (data != null) roots.Add(data);
+        if (roaming != null) roots.Add(roaming);
+        for (int i = 0; i < roots.Count; i++)
+            for (int j = i + 1; j < roots.Count; j++)
+                if (string.Equals(roots[i], roots[j], Cmp) ||
+                    IsWithin(roots[i], roots[j]) || IsWithin(roots[j], roots[i]))
+                    throw new InvalidOperationException(
+                        "Application, profile and snapshot roots must be separate.");
     }
 
     static void SecureStore(string store)
@@ -185,10 +203,10 @@ internal static class AivexusRecovery
             Guid.NewGuid().ToString("N").Substring(0, 12);
     }
 
-    static string Backup(string app, string data, string store, bool updateLatest)
+    static string Backup(string app, string data, string roaming, string store, bool updateLatest)
     {
         AssertNotRunning();
-        ValidatePaths(app, data, store);
+        ValidatePaths(app, data, roaming, store);
         if (updateLatest && !File.Exists(Path.Combine(app, "ai_orchestrator.exe")))
             throw new InvalidOperationException("No installed AI Orchestrator executable: pre-update backup refused.");
         if (updateLatest && File.Exists(Path.Combine(store, Pointer)))
@@ -197,6 +215,7 @@ internal static class AivexusRecovery
 
         RequireSafeTree(app);
         if (data != null) RequireSafeTree(data);
+        if (roaming != null) RequireSafeTree(roaming);
         SecureStore(store);
         string id = SnapshotId();
         string partial = Path.Combine(store, "." + id + ".partial");
@@ -205,7 +224,8 @@ internal static class AivexusRecovery
         try
         {
             long totalBytes = Files(app).Sum(x => x.Length) +
-                (data == null ? 0 : Files(data).Sum(x => x.Length));
+                (data == null ? 0 : Files(data).Sum(x => x.Length)) +
+                (roaming == null ? 0 : Files(roaming).Sum(x => x.Length));
             DriveInfo drive = new DriveInfo(Path.GetPathRoot(store));
             if (drive.AvailableFreeSpace < totalBytes + 100 * 1024 * 1024)
                 throw new IOException("Insufficient free disk space for verified snapshot.");
@@ -213,9 +233,12 @@ internal static class AivexusRecovery
             records.Add(Header);
             records.Add("APP\t" + Encode(app));
             records.Add("DATA\t" + Encode(data ?? ""));
+            records.Add("ROAMING\t" + Encode(roaming ?? ""));
             records.Add("TIME\t" + DateTime.UtcNow.ToString("o"));
             bool dataPresent = data != null && Directory.Exists(data);
+            bool roamingPresent = roaming != null && Directory.Exists(roaming);
             records.Add("DATA_PRESENT\t" + (dataPresent ? "1" : "0"));
+            records.Add("ROAMING_PRESENT\t" + (roamingPresent ? "1" : "0"));
             if (Directory.Exists(app))
             {
                 Directory.CreateDirectory(Path.Combine(partial, "app"));
@@ -226,8 +249,13 @@ internal static class AivexusRecovery
                 Directory.CreateDirectory(Path.Combine(partial, "data"));
                 CopyArea("data", data, partial, records);
             }
+            if (roamingPresent)
+            {
+                Directory.CreateDirectory(Path.Combine(partial, "roaming"));
+                CopyArea("roaming", roaming, partial, records);
+            }
             File.WriteAllLines(Path.Combine(partial, "manifest.tsv"), records.ToArray(), Encoding.UTF8);
-            Verify(partial, app, data, updateLatest);
+            Verify(partial, app, data, roaming, updateLatest);
             Directory.Move(partial, final);
             if (updateLatest)
             {
@@ -273,40 +301,49 @@ internal static class AivexusRecovery
         return Path.Combine(store, id);
     }
 
-    static void VerifyCurrent(string store, string app, string data)
+    static void VerifyCurrent(string store, string app, string data, string roaming)
     {
-        Verify(CurrentSnapshot(store), app, data);
+        Verify(CurrentSnapshot(store), app, data, roaming);
         Console.WriteLine("Recovery checkpoint verification: PASS.");
     }
 
-    static bool SnapshotDataPresent(string snapshot)
+    static bool SnapshotRootPresent(string snapshot, string area)
     {
         string[] rows = File.ReadAllLines(Path.Combine(snapshot, "manifest.tsv"), Encoding.UTF8);
-        if (rows.Length < 5 || rows[4] != "DATA_PRESENT\t0" && rows[4] != "DATA_PRESENT\t1")
-            throw new InvalidDataException("Snapshot missing data-root existence record.");
-        return rows[4] == "DATA_PRESENT\t1";
+        int index = area == "data" ? 5 : area == "roaming" ? 6 : -1;
+        if (index < 0 || rows.Length <= index)
+            throw new InvalidDataException("Snapshot missing profile-root existence record.");
+        string key = area == "data" ? "DATA_PRESENT\t" : "ROAMING_PRESENT\t";
+        if (rows[index] != key + "0" && rows[index] != key + "1")
+            throw new InvalidDataException("Invalid profile-root existence record.");
+        return rows[index] == key + "1";
     }
 
-    static void Verify(string snapshot, string app, string data, bool requireAppExecutable = true)
+    static void Verify(string snapshot, string app, string data, string roaming, bool requireAppExecutable = true)
     {
         string[] rows = File.ReadAllLines(Path.Combine(snapshot, "manifest.tsv"), Encoding.UTF8);
-        if (rows.Length < 5 || rows[0].Trim('\uFEFF') != Header)
+        if (rows.Length < 7 || rows[0].Trim('\uFEFF') != Header)
             throw new InvalidDataException("Recovery manifest missing or invalid.");
         string expectedApp = Decode(rows[1].Split('\t')[1]);
         string expectedData = Decode(rows[2].Split('\t')[1]);
+        string expectedRoaming = Decode(rows[3].Split('\t')[1]);
         if (!string.Equals(expectedApp, app, Cmp) ||
-            !string.Equals(expectedData, data ?? "", Cmp))
+            !string.Equals(expectedData, data ?? "", Cmp) ||
+            !string.Equals(expectedRoaming, roaming ?? "", Cmp))
             throw new InvalidDataException("Recovery snapshot targets another installation.");
-        bool dataPresent = SnapshotDataPresent(snapshot);
-        if (dataPresent && data == null ||
-            dataPresent != Directory.Exists(Path.Combine(snapshot, "data")))
-            throw new InvalidDataException("Snapshot data-root existence mismatch.");
+        bool dataPresent = SnapshotRootPresent(snapshot, "data");
+        bool roamingPresent = SnapshotRootPresent(snapshot, "roaming");
+        if ((dataPresent && data == null) ||
+            dataPresent != Directory.Exists(Path.Combine(snapshot, "data")) ||
+            (roamingPresent && roaming == null) ||
+            roamingPresent != Directory.Exists(Path.Combine(snapshot, "roaming")))
+            throw new InvalidDataException("Snapshot profile-root existence mismatch.");
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string row in rows.Skip(5))
+        foreach (string row in rows.Skip(7))
         {
             string[] fields = row.Split('\t');
             if (fields.Length != 5 || fields[0] != "FILE" ||
-                (fields[1] != "app" && fields[1] != "data"))
+                (fields[1] != "app" && fields[1] != "data" && fields[1] != "roaming"))
                 throw new InvalidDataException("Malformed snapshot record.");
             string rel = Decode(fields[2]);
             if (Path.IsPathRooted(rel) || rel == "" || rel == "." ||
@@ -328,7 +365,7 @@ internal static class AivexusRecovery
         // Reject any additional payload that was not hashed in the manifest.
         // Otherwise a modified snapshot could smuggle a native DLL into the
         // restored application even though every listed file was intact.
-        foreach (string area in new[] { "app", "data" })
+        foreach (string area in new[] { "app", "data", "roaming" })
         {
             string areaRoot = Path.Combine(snapshot, area);
             RequireSafeTree(areaRoot);
@@ -341,29 +378,35 @@ internal static class AivexusRecovery
         }
     }
 
-    static void Restore(string app, string data, string store)
+    static void Restore(string app, string data, string roaming, string store)
     {
         AssertNotRunning();
-        ValidatePaths(app, data, store);
+        ValidatePaths(app, data, roaming, store);
         string snapshot = CurrentSnapshot(store);
-        Verify(snapshot, app, data);
+        Verify(snapshot, app, data, roaming);
         // Before replacing a working installation, create a verified independent
         // safety snapshot of the current binaries and user data. Never overwrite
         // the last-known-working pointer.
-        Backup(app, data, store, false);
-        bool dataWasPresent = SnapshotDataPresent(snapshot);
+        Backup(app, data, roaming, store, false);
+        bool dataWasPresent = SnapshotRootPresent(snapshot, "data");
+        bool roamingWasPresent = SnapshotRootPresent(snapshot, "roaming");
         string suffix = ".aivexus-restore-" + Guid.NewGuid().ToString("N").Substring(0, 8);
         string stageApp = app + suffix + "-staging";
         string quarantineApp = app + suffix + "-newer";
         string stageData = data == null ? null : data + suffix + "-staging";
         string quarantineData = data == null ? null : data + suffix + "-newer";
+        string stageRoaming = roaming == null ? null : roaming + suffix + "-staging";
+        string quarantineRoaming = roaming == null ? null : roaming + suffix + "-newer";
         bool movedOldApp = false, movedNewApp = false;
         bool movedOldData = false, movedNewData = false;
+        bool movedOldRoaming = false, movedNewRoaming = false;
         try
         {
             CopyDirectory(Path.Combine(snapshot, "app"), stageApp);
             if (data != null && dataWasPresent)
                 CopyDirectory(Path.Combine(snapshot, "data"), stageData);
+            if (roaming != null && roamingWasPresent)
+                CopyDirectory(Path.Combine(snapshot, "roaming"), stageRoaming);
             if (Directory.Exists(app)) { Directory.Move(app, quarantineApp); movedOldApp = true; }
             Directory.Move(stageApp, app); movedNewApp = true;
             if (data != null)
@@ -373,14 +416,21 @@ internal static class AivexusRecovery
                 if (Directory.Exists(data)) { Directory.Move(data, quarantineData); movedOldData = true; }
                 if (dataWasPresent) { Directory.Move(stageData, data); movedNewData = true; }
             }
+            if (roaming != null)
+            {
+                if (Directory.Exists(roaming)) { Directory.Move(roaming, quarantineRoaming); movedOldRoaming = true; }
+                if (roamingWasPresent) { Directory.Move(stageRoaming, roaming); movedNewRoaming = true; }
+            }
             // A second hash validation after swap catches any incomplete copy.
-            VerifyRestoredFiles(snapshot, app, data);
+            VerifyRestoredFiles(snapshot, app, data, roaming);
             Console.WriteLine("Previous AIVEXUS binaries and captured data restored.");
             Console.WriteLine("Newer state preserved in " + quarantineApp);
             File.Delete(Path.Combine(store, Pointer));
         }
         catch
         {
+            if (movedNewRoaming && Directory.Exists(roaming)) Directory.Delete(roaming, true);
+            if (movedOldRoaming && Directory.Exists(quarantineRoaming)) Directory.Move(quarantineRoaming, roaming);
             if (movedNewData && Directory.Exists(data)) Directory.Delete(data, true);
             if (movedOldData && Directory.Exists(quarantineData)) Directory.Move(quarantineData, data);
             if (movedNewApp && Directory.Exists(app)) Directory.Delete(app, true);
@@ -391,6 +441,7 @@ internal static class AivexusRecovery
         {
             if (Directory.Exists(stageApp)) Directory.Delete(stageApp, true);
             if (stageData != null && Directory.Exists(stageData)) Directory.Delete(stageData, true);
+            if (stageRoaming != null && Directory.Exists(stageRoaming)) Directory.Delete(stageRoaming, true);
         }
     }
 
@@ -408,20 +459,23 @@ internal static class AivexusRecovery
         }
     }
 
-    static void VerifyRestoredFiles(string snapshot, string app, string data)
+    static void VerifyRestoredFiles(string snapshot, string app, string data, string roaming)
     {
         string[] rows = File.ReadAllLines(Path.Combine(snapshot, "manifest.tsv"), Encoding.UTF8);
-        foreach (string row in rows.Skip(5))
+        foreach (string row in rows.Skip(7))
         {
             string[] fields = row.Split('\t');
-            string root = fields[1] == "app" ? app : data;
+            string root = fields[1] == "app" ? app : fields[1] == "data" ? data : roaming;
             if (root == null) throw new InvalidDataException("No data root for record.");
             string path = Path.Combine(root, Decode(fields[2]));
             if (!File.Exists(path) || Digest(path) != fields[4])
                 throw new InvalidDataException("Restored file mismatch: " + path);
         }
         if (data != null &&
-            Directory.Exists(data) != SnapshotDataPresent(snapshot))
+            Directory.Exists(data) != SnapshotRootPresent(snapshot, "data"))
             throw new InvalidDataException("Restored data-root existence mismatch.");
+        if (roaming != null &&
+            Directory.Exists(roaming) != SnapshotRootPresent(snapshot, "roaming"))
+            throw new InvalidDataException("Restored roaming-root existence mismatch.");
     }
 }

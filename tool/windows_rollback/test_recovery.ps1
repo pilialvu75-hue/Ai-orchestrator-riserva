@@ -13,7 +13,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Windows 8.1 compatible recovery helper did not
 function Invoke-Recovery {
   param([string] $Mode, [string] $App, [string] $Data, [string] $Store, [bool] $MustSucceed = $true)
   $arguments = @('--mode', $Mode, '--app', $App, '--data', $Data, '--store', $Store)
-  if ($Mode -eq 'restore') { $arguments += @('--confirm', 'yes') }
+  if ($Mode -in @('restore', 'accept')) { $arguments += @('--confirm', 'yes') }
+  $arguments += @('--roaming', $script:roaming)
   & $exe @arguments
   $exit = $LASTEXITCODE
   if ($MustSucceed -and $exit -ne 0) { throw "$Mode failed: $exit" }
@@ -22,9 +23,12 @@ function Invoke-Recovery {
 try {
   $app = Join-Path $working 'installed\AI Orchestrator'
   $data = Join-Path $working 'profile\database'
+  $script:roaming = Join-Path $working 'roaming\com.aiorchestrator\AI Orchestrator'
   $store = Join-Path $working 'recovery'
   New-Item $app -ItemType Directory -Force | Out-Null
   New-Item $data -ItemType Directory -Force | Out-Null
+  New-Item $script:roaming -ItemType Directory -Force | Out-Null
+  Set-Content (Join-Path $script:roaming 'shared_preferences.json') '{"preferred_model":"original"}' -NoNewline
   Set-Content (Join-Path $app 'ai_orchestrator.exe') 'original-build-1.0.12.2' -NoNewline
   Set-Content (Join-Path $app 'flutter_windows.dll') 'original-dll' -NoNewline
   Set-Content (Join-Path $data 'ai_orchestrator.db') 'original-user-memory' -NoNewline
@@ -33,15 +37,30 @@ try {
   Invoke-Recovery verify $app $data $store
   Invoke-Recovery backup $app $data $store $false
 
+  # An explicitly accepted, working version must let the next upgrade
+  # create a new verified checkpoint without losing the archived snapshot.
+  Invoke-Recovery accept $app $data $store
+  if (Test-Path (Join-Path $store 'latest.txt')) {
+    throw 'Accept left a pending recovery checkpoint.'
+  }
+  if (@(Get-ChildItem $store -Directory -Filter 'snapshot-*').Count -lt 1) {
+    throw 'Accept erased the archived last-known-good backup.'
+  }
+  Invoke-Recovery backup $app $data $store
+
   Set-Content (Join-Path $app 'ai_orchestrator.exe') 'new-beta-1.0.15' -NoNewline
   Set-Content (Join-Path $app 'new-feature.dll') 'new-runtime' -NoNewline
   Set-Content (Join-Path $data 'ai_orchestrator.db') 'new-user-memory' -NoNewline
+  Set-Content (Join-Path $script:roaming 'shared_preferences.json') '{"preferred_model":"new"}' -NoNewline
   Invoke-Recovery restore $app $data $store
   if ((Get-Content (Join-Path $app 'ai_orchestrator.exe') -Raw) -ne 'original-build-1.0.12.2') {
     throw 'Rollback did not recover original app executable.'
   }
   if ((Get-Content (Join-Path $data 'ai_orchestrator.db') -Raw) -ne 'original-user-memory') {
     throw 'Rollback did not recover original database.'
+  }
+  if ((Get-Content (Join-Path $script:roaming 'shared_preferences.json') -Raw) -ne '{"preferred_model":"original"}') {
+    throw 'Rollback did not recover Windows Roaming Flutter preferences.'
   }
   if (Test-Path (Join-Path $app 'new-feature.dll')) {
     throw 'Rollback left an incompatible newer native DLL in the program directory.'
@@ -74,6 +93,25 @@ try {
   Invoke-Recovery restore $app $data $store
   if (-not (Test-Path $data) -or @(Get-ChildItem $data -Recurse).Count -ne 0) {
     throw 'Restore did not preserve originally empty database directory.'
+  }
+
+  # The old app had no Roaming folder: do not keep incompatible new prefs.
+  Remove-Item $script:roaming -Recurse -Force
+  Invoke-Recovery backup $app $data $store
+  New-Item $script:roaming -ItemType Directory -Force | Out-Null
+  Set-Content (Join-Path $script:roaming 'shared_preferences.json') '{"bad":"new"}' -NoNewline
+  Invoke-Recovery restore $app $data $store
+  if (Test-Path $script:roaming) {
+    throw 'Rollback did not remove newer Roaming directory absent in original snapshot.'
+  }
+
+  # The old app had an empty Roaming folder: restore emptiness.
+  New-Item $script:roaming -ItemType Directory -Force | Out-Null
+  Invoke-Recovery backup $app $data $store
+  Set-Content (Join-Path $script:roaming 'shared_preferences.json') '{"bad":"new"}' -NoNewline
+  Invoke-Recovery restore $app $data $store
+  if (-not (Test-Path $script:roaming) -or @(Get-ChildItem $script:roaming -Recurse).Count -ne 0) {
+    throw 'Rollback did not restore empty Roaming directory.'
   }
 
   Invoke-Recovery backup $app $data $store

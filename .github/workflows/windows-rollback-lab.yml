@@ -8,6 +8,8 @@ on:
       - '.github/workflows/windows-rollback-lab.yml'
       - '.github/workflows/windows-computer-use-beta.yml'
       - 'windows/installer/ai_orchestrator.iss'
+      - '.github/workflows/windows-release-publish.yml'
+      - 'test/scripts/test_windows_release_recovery_contract.py'
   workflow_dispatch:
 
 permissions:
@@ -19,6 +21,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      - name: Assert release pipelines include the recovery gate
+        shell: pwsh
+        run: python -m unittest discover -s test/scripts -p test_windows_release_recovery_contract.py -v
       - name: Compile .NET Framework recovery helper and test snapshot/restore
         shell: pwsh
         run: .\tool\windows_rollback\test_recovery.ps1
