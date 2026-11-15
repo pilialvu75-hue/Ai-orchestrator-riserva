@@ -164,6 +164,36 @@ BEGIN
   );
 END;
 
+-- Readers and auditors must never accept orphan/forged journal rows or
+-- receipts that disagree with the authoritative reservation state.
+CREATE TRIGGER IF NOT EXISTS web_execution_event_insert_guard
+BEFORE INSERT ON web_execution_journal_events
+WHEN NOT EXISTS (
+  SELECT 1 FROM web_execution_reservations AS r
+  WHERE r.idempotency_key = NEW.idempotency_key
+    AND r.execution_id = NEW.execution_id
+    AND r.attempt_id = NEW.attempt_id
+    AND r.journal_version = NEW.journal_version
+    AND r.status = NEW.to_status
+)
+BEGIN SELECT RAISE(ABORT, 'untrusted_web_execution_event'); END;
+
+CREATE TRIGGER IF NOT EXISTS web_execution_receipt_insert_guard
+BEFORE INSERT ON web_execution_artifact_receipts
+WHEN NOT EXISTS (
+  SELECT 1 FROM web_execution_reservations AS r
+  WHERE r.idempotency_key = NEW.idempotency_key
+    AND r.execution_id = NEW.execution_id
+    AND r.attempt_id = NEW.attempt_id
+    AND r.approved_spec_sha256 = NEW.approved_spec_sha256
+    AND r.status = 'completed'
+    AND r.artifact_sha256 = NEW.artifact_sha256
+    AND r.artifact_storage_key = NEW.artifact_storage_key
+    AND r.artifact_size_bytes = NEW.artifact_size_bytes
+    AND r.transition_at = NEW.recorded_at
+)
+BEGIN SELECT RAISE(ABORT, 'untrusted_web_artifact_receipt'); END;
+
 CREATE TRIGGER IF NOT EXISTS web_execution_no_delete
 BEFORE DELETE ON web_execution_reservations
 BEGIN SELECT RAISE(ABORT, 'immutable_web_execution_history'); END;
