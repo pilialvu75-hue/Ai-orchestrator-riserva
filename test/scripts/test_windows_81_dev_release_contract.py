@@ -37,7 +37,10 @@ class Windows81ReleaseContractTest(unittest.TestCase):
             "enabled=false", "v1.0.16-dev+", "No Android update.",
             "Get-FileHash $setup -Algorithm SHA256",
             "exeAsset[0].digest",
-            "gh api \"repos/$repo/releases/tags/$tag\"",
+            "gh release view $tag --repo $repo --json assets,databaseId",
+            'gh api "repos/$repo/releases/$($result.databaseId)"',
+            "metadata.tag_name -ne $tag",
+            "metadata.draft -ne $true",
         ]:
             self.assertIn(required, w)
         self.assertIn("OnlyBelowVersion=10.0", self.inno)
