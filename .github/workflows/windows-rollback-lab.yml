@@ -65,3 +65,20 @@ jobs:
             throw 'Recovery-enabled Inno package failed to compile.'
           }
           Write-Host 'PASS: recovery-enabled Inno installer compiles without public release.'
+          # The explicit unsigned legacy exception must compile only with the
+          # helper enabled; the ordinary Windows package remains unchanged.
+          $legacyOutput = Join-Path $base 'win81-only'
+          New-Item $legacyOutput -ItemType Directory -Force | Out-Null
+          @(
+            '#define AivexusWin81UnsignedQABuild 1',
+            '#define AppVersion "1.0.15.123456"',
+            "#define ReleaseDir `"$payload`"",
+            "#define VCRedistPath `"$redist`"",
+            "#define OutputDir `"$legacyOutput`"",
+            "#define AivexusRecoveryHelper `"$recovery`""
+          ) | Set-Content 'windows\installer\ci_generated.iss' -Encoding ascii
+          & $iscc (Join-Path $PWD 'windows\installer\ai_orchestrator.iss')
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $legacyOutput 'AI-Orchestrator-Setup-x64.exe'))) {
+            throw 'Windows 8.1 only recovery-enabled unsigned QA setup failed to compile.'
+          }
+          Write-Host 'PASS: Win8.1-only unsigned QA installer compiled with mandatory rollback.'
