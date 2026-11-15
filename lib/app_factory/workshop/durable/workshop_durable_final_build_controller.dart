@@ -449,13 +449,45 @@ final class WorkshopDurableFinalBuildController {
   }
 
   static int? _completedRunId(WorkshopDurableProjectSnapshot snapshot) {
+    final task = _requiredTask(snapshot);
+    if (task.attemptsStarted <= 0) return null;
+
+    // Events that fail to match the active wait are still RECEIVED in the
+    // durable journal. Only processed successful completions are trustworthy.
+    // Moreover, bind the run ID to the START event for the current attempt,
+    // never an accepted completion belonging to an earlier retry.
+    final currentCorrelation =
+        _attemptCorrelation(snapshot.correlationId, task.attemptsStarted);
+    final runPrefix = 'github:${snapshot.projectId}:$_taskId:run:';
+    final currentAttemptRunIds = <int>{};
+    for (final event in snapshot.events) {
+      if (event.taskId != _taskId ||
+          event.type != WorkshopDurableEventTypes.ciStarted ||
+          !event.success ||
+          event.externalId != currentCorrelation ||
+          !snapshot.processedIdempotencyKeys.contains(event.idempotencyKey) ||
+          !event.idempotencyKey.startsWith(runPrefix) ||
+          !event.idempotencyKey.endsWith(':started')) {
+        continue;
+      }
+      final runId = int.tryParse(event.idempotencyKey.substring(
+        runPrefix.length,
+        event.idempotencyKey.length - ':started'.length,
+      ));
+      if (runId != null && runId > 0) currentAttemptRunIds.add(runId);
+    }
+
     for (final event in snapshot.events.reversed) {
       if (event.taskId != _taskId ||
-          event.type != WorkshopDurableEventTypes.ciCompleted) {
+          event.type != WorkshopDurableEventTypes.ciCompleted ||
+          !event.success ||
+          !snapshot.processedIdempotencyKeys.contains(event.idempotencyKey)) {
         continue;
       }
       final runId = int.tryParse(event.externalId ?? '');
-      if (runId != null && runId > 0) return runId;
+      if (runId != null && currentAttemptRunIds.contains(runId)) {
+        return runId;
+      }
     }
     return null;
   }

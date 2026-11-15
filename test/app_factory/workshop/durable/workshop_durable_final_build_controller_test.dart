@@ -240,6 +240,74 @@ void main() {
     expect(gateway.dispatchCalls, 1);
   });
 
+  test('late unmatched completion does not override accepted current run',
+      () async {
+    final checkpoints = InMemoryWorkshopCheckpointStore();
+    final gateway = _FakeGateway();
+    int? finalizedRunId;
+    final controller = _controller(
+      checkpoints: checkpoints,
+      gateway: gateway,
+      finalize: ({required request, required correlationId, required runId}) async {
+        finalizedRunId = runId;
+        return _success(request, '/tmp/verified-app.apk');
+      },
+    );
+    await controller.advance(_request('ui-1'));
+    gateway.discoveredRun = _run(
+      id: 52,
+      status: WorkshopGitHubRunStatus.inProgress,
+    );
+    await controller.advance(_request('ui-2'));
+    gateway.observedRun = _run(
+      id: 52,
+      status: WorkshopGitHubRunStatus.completed,
+      conclusion: WorkshopGitHubRunConclusion.success,
+    );
+    final validating = await controller.advance(_request('ui-3'));
+    expect(validating.disposition, WorkshopDurableFinalBuildDisposition.finalizing);
+    expect(finalizedRunId, isNull);
+
+    final store = WorkshopCheckpointDurableOrchestrationStore(
+      checkpointStore: checkpoints,
+    );
+    final projectId = validating.snapshot.projectId;
+    final stale = WorkshopDurableExternalEvent(
+      type: WorkshopDurableEventTypes.ciCompleted,
+      projectId: projectId,
+      taskId: 'final-build',
+      correlationId: validating.snapshot.correlationId,
+      idempotencyKey: '$projectId:late:run:10',
+      occurredAt: DateTime.utc(2026, 10, 3, 20, 2),
+      success: true,
+      externalId: '10',
+    );
+    final orchestrator = WorkshopDurableOrchestrator(
+      store: store,
+      clock: () => DateTime.utc(2026, 10, 3, 20, 3),
+    );
+    final observed = await orchestrator.handleExternalEvent(stale);
+    expect(observed.matchedTask, isFalse);
+    expect(observed.snapshot.events.last.externalId, '10');
+    expect(
+      observed.snapshot.processedIdempotencyKeys.contains(stale.idempotencyKey),
+      isFalse,
+    );
+
+    final resumed = _controller(
+      checkpoints: checkpoints,
+      gateway: gateway,
+      finalize: ({required request, required correlationId, required runId}) async {
+        finalizedRunId = runId;
+        return _success(request, '/tmp/verified-app.apk');
+      },
+    );
+    final finished = await resumed.advance(_request('ui-4'));
+    expect(finished.disposition, WorkshopDurableFinalBuildDisposition.completed);
+    expect(finalizedRunId, 52);
+    expect(gateway.dispatchCalls, 1);
+  });
+
   test('a new generation dispatches after a terminal rejection', () async {
     final checkpoints = InMemoryWorkshopCheckpointStore();
     final gateway = _FakeGateway()
