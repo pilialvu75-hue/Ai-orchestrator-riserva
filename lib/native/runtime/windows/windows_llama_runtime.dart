@@ -42,6 +42,22 @@ abstract final class WindowsLlamaRuntime {
         caseSensitive: false,
       ).hasMatch(version);
 
+  /// Windows may report blocked executable/DLL loading as a signed NTSTATUS.
+  /// Preserve both representations so the user can correlate an error with
+  /// CodeIntegrity/Operational without sharing any personal filesystem paths.
+  static String describeProcessFailure(int exitCode) {
+    final hex = (exitCode & 0xffffffff).toRadixString(16).padLeft(8, '0').toUpperCase();
+    if (hex == 'C0E90002') {
+      return 'llama.cpp non avviato (codice $exitCode / 0x$hex). '
+          'Possibile blocco di Windows Smart App Control / App Control. '
+          'Controlla Visualizzatore eventi > Microsoft > Windows > '
+          'CodeIntegrity > Operational (evento 3077). '
+          'Non disattivare le protezioni: il modello GGUF non risulta '
+          'necessariamente danneggiato.';
+    }
+    return 'llama.cpp failed with exit code $exitCode (0x$hex)';
+  }
+
   static List<String> arguments({required int processors}) => <String>[
         '--no-conversation',
         '--simple-io',
