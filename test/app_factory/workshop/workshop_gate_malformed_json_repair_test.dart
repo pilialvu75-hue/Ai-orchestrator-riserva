@@ -91,6 +91,46 @@ void main() {
     expect(session.status, WorkspaceSessionStatus.review);
     expect(gateway.writeCalls, 0);
   });
+  test('Reviewer rejects repair that could swallow a later rejection', () async {
+    final gateway = _RecordingGateway(
+      files: <String, String>{'lib/main.dart': 'old'},
+    );
+    final session = await _reviewSession(gateway);
+
+    expect(
+      () => const WorkshopProposalReviewGate().evaluate(
+        session: session,
+        responseText:
+            r'{"approved":true,"summary":"ok","approved":false,"warnings":"bad\q"}',
+      ),
+      throwsFormatException,
+    );
+    expect(session.status, WorkspaceSessionStatus.review);
+    expect(session.isApplyApproved, isFalse);
+    expect(gateway.writeCalls, 0);
+  });
+
+  test('Validation rejects repair that could swallow a later invalid verdict',
+      () async {
+    final gateway = _RecordingGateway(
+      files: <String, String>{'lib/main.dart': 'old'},
+    );
+    final session = await _reviewSession(gateway);
+    session.beginValidation();
+
+    expect(
+      () => const WorkshopProposalValidationGate().evaluate(
+        session: session,
+        responseText:
+            r'{"valid":true,"summary":"ok","valid":false,"warnings":"bad\q"}',
+      ),
+      throwsFormatException,
+    );
+    expect(session.status, WorkspaceSessionStatus.validation);
+    expect(session.isApplyApproved, isFalse);
+    expect(gateway.writeCalls, 0);
+  });
+
 }
 
 Future<WorkspaceSession> _reviewSession(_RecordingGateway gateway) async {

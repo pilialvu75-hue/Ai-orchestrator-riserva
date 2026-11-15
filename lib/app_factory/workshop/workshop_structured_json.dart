@@ -159,9 +159,15 @@ abstract final class WorkshopStructuredJson {
         return null;
       }
 
-      final escapedValue = _escapeLooseJsonString(
-        text.substring(valueStart, valueEnd),
-      );
+      final rawValue = text.substring(valueStart, valueEnd);
+      // Never reinterpret real sibling fields as a free-text value. If the
+      // candidate spans a comma followed by a quoted JSON object key, its
+      // boundary is ambiguous: fail closed instead of swallowing approvals,
+      // rejections, paths or validation fields into summary/content text.
+      if (_containsPotentialSiblingField(rawValue)) {
+        continue;
+      }
+      final escapedValue = _escapeLooseJsonString(rawValue);
       final candidate =
           '${text.substring(0, valueStart)}$escapedValue${text.substring(valueEnd)}';
 
@@ -187,6 +193,9 @@ abstract final class WorkshopStructuredJson {
 
     return null;
   }
+
+  static bool _containsPotentialSiblingField(String raw) =>
+      RegExp(r',\s*"(?:[^"\\]|\\.)*"\s*:').hasMatch(raw);
 
   static String _escapeLooseJsonString(String raw) {
     final buffer = StringBuffer();
