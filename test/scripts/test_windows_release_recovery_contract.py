@@ -40,6 +40,8 @@ class WindowsReleaseRecoveryContractTest(unittest.TestCase):
         self.assertLess(first_executable, backup_hook)
         self.assertLess(backup_hook, other_binaries)
         self.assertIn("Recupera versione precedente", text)
+        self.assertIn("Conferma aggiornamento funzionante", text)
+        self.assertIn('--roaming', text)
 
 if __name__ == "__main__":
     unittest.main()
