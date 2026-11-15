@@ -332,10 +332,7 @@ final class WorkshopDurableFinalBuildController {
       final completed = await _orchestrator.validationPassed(
         projectId: snapshot.projectId,
         taskId: _taskId,
-        artifactIds: <String>[
-          if (artifactPath != null && artifactPath.isNotEmpty)
-            'local-apk:$artifactPath',
-        ],
+        artifactIds: <String>['local-apk:$artifactPath'],
       );
       return WorkshopDurableFinalBuildAdvance(
         snapshot: completed,
@@ -507,8 +504,7 @@ final class WorkshopDurableFinalBuildController {
 
   static String _verifiedBuildId(String value) {
     final trimmed = value.trim();
-    if (!RegExp(r'^durable-v2-[a-f0-9]{40}
-).hasMatch(trimmed)) {
+    if (!RegExp(r'^durable-v2-[a-f0-9]{40}$').hasMatch(trimmed)) {
       throw ArgumentError.value(
         value,
         'logicalBuildId',
