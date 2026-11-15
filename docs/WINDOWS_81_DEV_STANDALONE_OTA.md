@@ -20,7 +20,7 @@ Aprire **Actions → AIVEXUS Windows 8.1 Dev only (manual)**.
 3. Solo dopo decisione esplicita del proprietario, eseguire di nuovo
    il workflow scegliendo **publish_win81_dev** e scrivendo esattamente
    `PUBLISH_WIN81_RECOVERY_DEV` nel campo `confirmation`. La pipeline
-   produce una nuova versione `v1.0.16-dev+<build>` dalla stessa
+   produce una nuova versione `v1.0.15-dev+<build>` dalla stessa
    applicazione AIVEXUS in `main`, carica setup e SHA in una *draft*
    release, verifica i due asset e poi rende pubblica la release.
 4. La `v1.0.12.2` sul Lenovo può individuare tale release se
@@ -45,7 +45,7 @@ Aprire **Actions → AIVEXUS Windows 8.1 Dev only (manual)**.
 - Il Flutter 3.47.5 impiegato nella CI non supporta ufficialmente
   Windows 8.1. Un risultato PASS su Windows 2022 non equivale alla
   prova reale di avvio o inferenza LOCAL su Lenovo.
-- La release Dev, una volta pubblicata, è **pubblicamente visibile
+- La build usa intenzionalmente la versione Windows 1.0.15+<build> soltanto nel job Win8.1, senza abbassare la versione 1.0.16 del sorgente su main.\n- La release Dev, una volta pubblicata, è **pubblicamente visibile
   agli utenti che selezionano Dev**, benché l'installer sia limitato
   a Windows 8.1. Non è un canale privato a un singolo tester.
 - Il codice e gli artefatti restano parte dell'**unica AIVEXUS**.
