@@ -165,10 +165,36 @@ final class WorkshopLibraryPackageReader {
       if (required is! bool) {
         throw const FormatException('Library package requirement flag is invalid.');
       }
+      // Package prose cannot grant file permissions. Only explicit, safe
+      // target paths can be compared with the approved task's file scope.
+      final rawTargetPaths = raw['target_paths'];
+      final targetPaths = <String>[];
+      if (rawTargetPaths != null) {
+        if (rawTargetPaths is! List) {
+          throw const FormatException(
+            'Library requirement target_paths must be an array.',
+          );
+        }
+        for (final path in rawTargetPaths) {
+          if (path is! String || !_isSafePath(path.trim())) {
+            throw const FormatException(
+              'Library requirement contains an unsafe target path.',
+            );
+          }
+          targetPaths.add(path.trim());
+        }
+        if (targetPaths.toSet().length != targetPaths.length) {
+          throw const FormatException(
+            'Library requirement contains duplicate target paths.',
+          );
+        }
+        targetPaths.sort();
+      }
       final requirement = WorkshopAssemblyRequirement(
         kind: kind,
         description: description,
         required: required,
+        targetPaths: List<String>.unmodifiable(targetPaths),
       );
       if (!seenRequirements.add(requirement.stableKey)) {
         throw const FormatException('Library package contains duplicate requirements.');

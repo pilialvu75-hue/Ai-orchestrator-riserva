@@ -467,6 +467,7 @@ void main() {
       files: <String, String>{
         'lib/main.dart': 'void main() {}',
         'lib/app.dart': 'old',
+        'pubspec.yaml': 'name: demo\n',
       },
     );
     final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
@@ -475,14 +476,17 @@ void main() {
       role: AppAiRole.architect,
       calls: calls,
       results: <WorkshopInferenceResult>[
-        _success(_planningJson),
+        _success(_planningJson.replaceFirst(
+          '"affectedPaths":["lib/app.dart"]',
+          '"affectedPaths":["lib/app.dart","pubspec.yaml"]',
+        )),
         _success('{}'),
       ],
     );
     final engineer = _QueueGateway(
       role: AppAiRole.engineer,
       calls: calls,
-      results: <WorkshopInferenceResult>[_success(_proposalJson)],
+      results: <WorkshopInferenceResult>[_success(_proposalJsonWithDependency)],
     );
     final libraryClient = _FakeLibraryReadClient(
       state: _certifiedLibraryState(),
@@ -491,6 +495,7 @@ void main() {
           WorkshopAssemblyRequirement(
             kind: WorkshopAssemblyRequirementKind.dependency,
             description: 'Add sqflite dependency to pubspec.yaml',
+            targetPaths: const <String>['pubspec.yaml'],
           ),
         ],
       ),
@@ -538,6 +543,8 @@ void main() {
     final inference = await coordinator.runPrepared(handle: handle);
 
     expect(inference.readyForApproval, isTrue);
+    expect(handle.session.context.request.targetFiles, contains('pubspec.yaml'));
+    expect(handle.session.workspace.snapshot['pubspec.yaml'], contains('sqflite'));
     expect(libraryClient.loadStateCalls, 1);
     expect(libraryClient.loadPackageCalls, 1);
     expect(
@@ -580,6 +587,96 @@ void main() {
         AppAiRole.reviewer,
       ],
     );
+  });
+
+  test('required adaptation without authorized file scope falls back', () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+        'pubspec.yaml': 'name: demo\n',
+      },
+    );
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: _certifiedStoragePackage(
+        requirements: const <WorkshopAssemblyRequirement>[
+          WorkshopAssemblyRequirement(
+            kind: WorkshopAssemblyRequirementKind.dependency,
+            description: 'Add sqflite dependency to pubspec.yaml',
+            targetPaths: <String>['pubspec.yaml'],
+          ),
+        ],
+      ),
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: WorkshopProjectExecutor(gateway: workspaceGateway),
+      roleGateways: _gateways(<AppAiRole>[]),
+      libraryReuseService: WorkshopLibraryReuseService(client: libraryClient),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    final handle = await coordinator.startAndPrepare(
+      title: 'Out-of-scope dependency fallback',
+      instruction: 'Create an Android application that stores data locally.',
+      requirements: const <String>['Android application', 'local database persistence'],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    expect(
+      handle.session.context.request.targetFiles,
+      isNot(contains('pubspec.yaml')),
+    );
+    final inference = await coordinator.runPrepared(handle: handle);
+    expect(inference.readyForApproval, isTrue);
+    expect(libraryClient.loadPackageCalls, 1);
+    expect(
+      handle.session.workspace.snapshot.containsKey('lib/certified_storage.dart'),
+      isFalse,
+    );
+    expect(workspaceGateway.writeCalls, 0);
+  });
+
+  test('required adaptation with unknown target paths fails closed', () async {
+    final workspaceGateway = _RecordingWorkspaceGateway(
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
+    );
+    final libraryClient = _FakeLibraryReadClient(
+      state: _certifiedLibraryState(),
+      package: _certifiedStoragePackage(
+        requirements: const <WorkshopAssemblyRequirement>[
+          WorkshopAssemblyRequirement(
+            kind: WorkshopAssemblyRequirementKind.dependency,
+            description: 'Dependency integration without structured target paths',
+          ),
+        ],
+      ),
+    );
+    final bundle = WorkshopProductionLifecycleBundleFactory.create(
+      projectExecutor: WorkshopProjectExecutor(gateway: workspaceGateway),
+      roleGateways: _gateways(<AppAiRole>[]),
+      libraryReuseService: WorkshopLibraryReuseService(client: libraryClient),
+    );
+    final coordinator = WorkshopProductionTaskCoordinator(bundle: bundle);
+    final handle = await coordinator.startAndPrepare(
+      title: 'Unknown adaptation scope fallback',
+      instruction: 'Create an Android application that stores data locally.',
+      requirements: const <String>['Android application', 'local database persistence'],
+      technologies: const <String>['Android'],
+    );
+    bundle.dashboardController.approveCurrentProject();
+
+    final inference = await coordinator.runPrepared(handle: handle);
+    expect(inference.readyForApproval, isTrue);
+    expect(libraryClient.loadPackageCalls, 1);
+    expect(
+      handle.session.workspace.snapshot.containsKey('lib/certified_storage.dart'),
+      isFalse,
+    );
+    expect(workspaceGateway.writeCalls, 0);
   });
 
   test('certified Library file conflict falls back without trusted evidence',
@@ -1003,6 +1100,14 @@ const String _planningJson =
     '"dependsOn":["initial-implementation"],'
     '"affectedPaths":["lib/app.dart"],'
     '"validationCriteria":["Requested change is verified"]}]}';
+
+const String _proposalJsonWithDependency =
+    '{"summary":"Update app and include dependency",'
+    '"explanation":"Integrate certified storage with scoped dependency",'
+    '"changes":[{"path":"lib/app.dart","type":"modification","content":"new"},'
+    '{"path":"pubspec.yaml","type":"modification",'
+    '"content":"name: demo\\ndependencies:\\n  sqflite: ^2.0.0\\n"}],'
+    '"validationNotes":[],"warnings":[]}';
 
 const String _proposalJson =
     '{"summary":"Update app","explanation":"Implement requested change",'

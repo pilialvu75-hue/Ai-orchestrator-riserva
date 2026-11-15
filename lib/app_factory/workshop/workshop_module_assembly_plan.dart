@@ -49,18 +49,25 @@ final class WorkshopAssemblyRequirement {
     required this.kind,
     required this.description,
     this.required = true,
+    this.targetPaths = const <String>[],
   });
 
   final WorkshopAssemblyRequirementKind kind;
   final String description;
   final bool required;
 
-  String get stableKey => '${kind.name}|$required|${description.trim()}';
+  /// Exact project-relative files that required adaptation may modify.
+  /// An empty list never authorizes a model to widen the prepared task scope.
+  final List<String> targetPaths;
+
+  String get stableKey =>
+      '${kind.name}|$required|${description.trim()}|${targetPaths.join(',')}';
 
   Map<String, Object?> toJson() => <String, Object?>{
         'kind': kind.name,
         'description': description,
         'required': required,
+        'targetPaths': targetPaths,
       };
 }
 

@@ -149,6 +149,29 @@ final class WorkshopLibraryReuseService {
         );
       }
 
+      // Certified provenance is not authorization. Free-text requirements
+      // cannot expand the prepared task's explicit file scope. A required
+      // adaptation with unknown or unauthorized paths falls back before any
+      // certified file is staged or local reuse is suppressed.
+      final authorizedTaskPaths = session.context.request.targetFiles
+          .map((path) => path.trim())
+          .where((path) => path.isNotEmpty)
+          .toSet();
+      for (final requirement in assembly.requirements) {
+        if (!requirement.required) continue;
+        if (requirement.targetPaths.isEmpty ||
+            requirement.targetPaths.any(
+              (path) => !authorizedTaskPaths.contains(path),
+            )) {
+          return WorkshopLibraryReuseResult(
+            attempted: true,
+            reusedPins: List<String>.unmodifiable(assembly.pins),
+            stagedPaths: const <String>[],
+            reason: 'required-adaptation-outside-authorized-task-scope',
+          );
+        }
+      }
+
       // Validate every change before staging any certified file. An
       // adaptation may add files, but never modify existing project files here.
       final staged = <String>[];
