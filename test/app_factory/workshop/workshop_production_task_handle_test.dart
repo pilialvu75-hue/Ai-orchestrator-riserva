@@ -464,7 +464,10 @@ void main() {
       'certified Library adaptation evidence reaches Architect and Engineer',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
-      files: <String, String>{'lib/app.dart': 'old'},
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
     );
     final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
     final calls = <AppAiRole>[];
@@ -583,6 +586,7 @@ void main() {
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
       files: <String, String>{
+        'lib/main.dart': 'void main() {}',
         'lib/app.dart': 'old',
         'lib/certified_storage.dart': 'project-specific content',
       },
@@ -666,7 +670,10 @@ void main() {
   test('unverified certified package leaves VirtualWorkspace untouched',
       () async {
     final workspaceGateway = _RecordingWorkspaceGateway(
-      files: <String, String>{'lib/app.dart': 'old'},
+      files: <String, String>{
+        'lib/main.dart': 'void main() {}',
+        'lib/app.dart': 'old',
+      },
     );
     final executor = WorkshopProjectExecutor(gateway: workspaceGateway);
     final calls = <AppAiRole>[];
