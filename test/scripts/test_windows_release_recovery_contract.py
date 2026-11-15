@@ -31,7 +31,7 @@ class WindowsReleaseRecoveryContractTest(unittest.TestCase):
     def test_dev_1_0_16_is_windows_81_only_with_recovery(self):
         source = NORMAL.read_text(encoding="utf-8")
         inno = INNO.read_text(encoding="utf-8")
-        self.assertIn("1.0.16-dev", source)
+        self.assertIn("1.0.16 Dev QA", source)
         self.assertIn("isWin81OnlyDev", source)
         self.assertIn("#define AivexusWin81UnsignedQABuild 1", source)
         self.assertIn("#define AivexusRecoveryHelper", source)
