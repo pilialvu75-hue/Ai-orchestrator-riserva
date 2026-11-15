@@ -31,8 +31,8 @@ void main() {
         return http.Response('not found', 404);
       }
       final versions = <String>[
-        'v1.0.16-dev+100002',
-        'v1.0.16-dev+100001',
+        'v1.0.15-dev+100002',
+        'v1.0.15-dev+100001',
         'v1.0.15-beta+104238',
         'v1.0.15+104018',
       ];
@@ -77,21 +77,21 @@ void main() {
   test('Win8.1 Dev installed without prerelease label can receive next Dev build',
       () async {
     final updater = await makeUpdater(
-      currentVersion: '1.0.16+100001',
+      currentVersion: '1.0.15+100001',
       channel: ReleaseChannel.dev,
     );
     await updater.checkForUpdates(allowCachedFallback: false);
     expect(updater.state.value.status, UpdateStatus.updateAvailable);
     expect(updater.state.value.latestManifest!.channel, ReleaseChannel.dev);
     expect(updater.state.value.latestManifest!.version,
-        'v1.0.16.100002-dev');
+        'v1.0.15.100002-dev');
     expect(updater.hasDetectedNewerVersion(updater.state.value), isTrue);
     expect(updater.state.value.latestManifest!.windowsArtifact!.sha256, hash);
   });
 
   test('Win8.1 Dev never reoffers the installed build', () async {
     final updater = await makeUpdater(
-      currentVersion: '1.0.16+100002',
+      currentVersion: '1.0.15+100002',
       channel: ReleaseChannel.dev,
     );
     await updater.checkForUpdates(allowCachedFallback: false);
@@ -101,7 +101,7 @@ void main() {
 
   test('Win8.1 Dev never downgrades a newer numeric build', () async {
     final updater = await makeUpdater(
-      currentVersion: '1.0.16+100003',
+      currentVersion: '1.0.15+100003',
       channel: ReleaseChannel.dev,
     );
     await updater.checkForUpdates(allowCachedFallback: false);
@@ -113,7 +113,7 @@ void main() {
     test('Win8.1 Dev exception cannot affect the $channel update channel',
         () async {
       final updater = await makeUpdater(
-        currentVersion: '1.0.16+100001',
+        currentVersion: '1.0.15+100001',
         channel: channel,
       );
       await updater.checkForUpdates(allowCachedFallback: false);
