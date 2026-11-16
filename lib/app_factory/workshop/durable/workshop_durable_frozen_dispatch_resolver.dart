@@ -64,10 +64,24 @@ final class WorkshopDurableFrozenDispatchResolver {
       sourceSha256: reservation.sourceSha256,
       namespace: _namespace,
     );
-    return _frozenStore.recover(
+    final frozen = await _frozenStore.recover(
       request: request,
       handle: handle,
       namespace: _namespace,
     );
+    // Disk recovery is asynchronous. A terminal checkpoint or a new
+    // generation may be persisted while these bytes are being loaded.
+    // Do not return a snapshot for a reservation that is no longer active.
+    final latest = await _ledger.recoverLatest(request);
+    if (latest == null ||
+        latest.state != WorkshopDurableGenerationState.active ||
+        latest.buildId != reservation.buildId ||
+        latest.sourceSha256 != reservation.sourceSha256 ||
+        latest.intentId != reservation.intentId) {
+      throw StateError(
+        'Durable build generation changed during frozen source recovery.',
+      );
+    }
+    return frozen;
   }
 }
