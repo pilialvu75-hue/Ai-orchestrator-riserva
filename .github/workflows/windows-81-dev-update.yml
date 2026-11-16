@@ -319,7 +319,7 @@ jobs:
           $notes = 'EXPERIMENTAL Windows 8.1 ONLY; unsigned installer with verified pre-upgrade recovery. Not installable on Windows 10/11. No Android update. Check app, local inference and data before accepting the upgrade.'
           gh release create $tag $setup $shaFile --repo $repo --target $env:GITHUB_SHA --prerelease --draft --title 'AIVEXUS 1.0.16 Dev - Windows 8.1 recovery QA' --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'Could not stage the draft release.' }
-          $result = gh release view $tag --repo $repo --json assets | ConvertFrom-Json
+          $result = gh release view $tag --repo $repo --json assets,databaseId | ConvertFrom-Json
           $names = @($result.assets | ForEach-Object { $_.name })
           if ('AI-Orchestrator-Setup-x64.exe' -notin $names -or
               'AI-Orchestrator-Setup-x64.exe.sha256' -notin $names) {
@@ -327,9 +327,17 @@ jobs:
           }
           # The old updater checks GitHub's asset digest, not the companion
           # .sha256 file. Do not publish a release it cannot verify.
-          $metadata = gh api "repos/$repo/releases/tags/$tag" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or -not $metadata) {
-            throw 'Cannot verify staged GitHub Release metadata.'
+          # GitHub's GET /releases/tags/{tag} returns HTTP 404 for DRAFT releases.
+          # The gh release view command resolves the draft by tag for the owner;
+          # fetch the exact release by its immutable database ID instead.
+          if (-not $result.databaseId -or [int64]$result.databaseId -le 0) {
+            throw 'Cannot resolve the staged draft release ID.'
+          }
+          $metadata = gh api "repos/$repo/releases/$($result.databaseId)" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $metadata -or
+              $metadata.id -ne $result.databaseId -or
+              $metadata.tag_name -ne $tag -or $metadata.draft -ne $true) {
+            throw 'Cannot verify exact staged draft GitHub Release metadata.'
           }
           $exeAsset = @($metadata.assets | Where-Object { $_.name -eq 'AI-Orchestrator-Setup-x64.exe' })
           if ($exeAsset.Count -ne 1) { throw 'Exactly one Windows installer asset is required.' }

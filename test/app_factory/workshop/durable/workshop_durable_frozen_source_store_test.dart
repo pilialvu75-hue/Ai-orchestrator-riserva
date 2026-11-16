@@ -103,6 +103,52 @@ void main() {
     );
   });
 
+  test('oversize bytes are rejected before hashing despite false totalBytes',
+      () async {
+    final request = _request(project.path, 'ui-big');
+    final source = WorkshopBuildSourceSnapshot(
+      rootPath: project.path,
+      files: <WorkshopBuildSourceFile>[
+        WorkshopBuildSourceFile(
+          relativePath: 'lib/main.dart',
+          bytes: Uint8List(WorkshopDurableFrozenSourceStore.maxFileBytes + 1),
+        ),
+      ],
+      totalBytes: 0, // adversarial and deliberately misleading metadata
+    );
+    final store = WorkshopDurableFrozenSourceStore(root: storage);
+    await expectLater(
+      store.persist(request: request, source: source, namespace: 'tenant'),
+      throwsStateError,
+    );
+    expect(await storage.list().isEmpty, isTrue);
+  });
+
+  test('too many files are rejected before any source digest allocation',
+      () async {
+    final request = _request(project.path, 'ui-many-files');
+    final files = <WorkshopBuildSourceFile>[
+      for (var i = 0; i <= WorkshopDurableFrozenSourceStore.maxFiles; i++)
+        WorkshopBuildSourceFile(
+          relativePath: 'lib/generated_$i.dart',
+          bytes: Uint8List(0),
+        ),
+    ];
+    final store = WorkshopDurableFrozenSourceStore(root: storage);
+    await expectLater(
+      store.persist(
+        request: request,
+        source: WorkshopBuildSourceSnapshot(
+          rootPath: project.path,
+          files: files,
+          totalBytes: 0,
+        ),
+        namespace: 'tenant',
+      ),
+      throwsStateError,
+    );
+  });
+
   test('source namespace is isolated and duplicate same bytes is idempotent',
       () async {
     final request = _request(project.path, 'first');

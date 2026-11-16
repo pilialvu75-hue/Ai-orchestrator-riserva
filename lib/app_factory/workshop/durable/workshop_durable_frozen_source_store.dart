@@ -60,6 +60,7 @@ final class WorkshopDurableFrozenSourceStore {
   }) =>
       _serialize(() async {
         await _validateRoot(request);
+        _validateSourceLimits(source); // before sourceDigest() copies any bytes
         final handle = _handle(request, source, namespace);
         final file = _file(handle.key);
         if (await _existsWithoutSymlink(file)) {
@@ -226,6 +227,28 @@ final class WorkshopDurableFrozenSourceStore {
       throw StateError('Frozen Cantiere snapshot must not be a symlink.');
     }
     return type == FileSystemEntityType.file;
+  }
+
+  /// Validate the ACTUAL byte lengths, not snapshot.totalBytes, before
+  /// sourceDigest aggregates file bytes into its SHA-256 input buffer.
+  static void _validateSourceLimits(WorkshopBuildSourceSnapshot snapshot) {
+    if (snapshot.files.isEmpty || snapshot.files.length > maxFiles) {
+      throw StateError('Invalid frozen Cantiere source file count.');
+    }
+    var total = 0;
+    for (final file in snapshot.files) {
+      final relative = file.relativePath;
+      // Avoid allocating an unbounded UTF-8 path buffer.
+      if (relative.isEmpty || relative.length > _maxPathBytes ||
+          utf8.encode(relative).length > _maxPathBytes) {
+        throw StateError('Frozen Cantiere relative path exceeds limit.');
+      }
+      final actual = file.bytes.lengthInBytes;
+      if (actual > maxFileBytes || total + actual > maxSourceBytes) {
+        throw StateError('Frozen Cantiere source exceeds bounded limits.');
+      }
+      total += actual;
+    }
   }
 
   static Uint8List _encode(WorkshopBuildSourceSnapshot snapshot) {

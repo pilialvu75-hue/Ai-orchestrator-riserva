@@ -6,9 +6,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'package:ai_orchestrator/app_factory/workshop/durable/workshop_durable_build_generation_ledger.dart';
+import 'package:ai_orchestrator/app_factory/workshop/durable/workshop_durable_frozen_dispatch_resolver.dart';
+import 'package:ai_orchestrator/app_factory/workshop/durable/workshop_durable_frozen_source_store.dart';
 import 'package:ai_orchestrator/app_factory/workshop/durable/workshop_durable_github_actions_coordinator.dart';
 import 'package:ai_orchestrator/app_factory/workshop/durable/workshop_durable_orchestrator.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_build_lab.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_build_source_snapshot.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_github_build_monitor.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_private_github_build_provider.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_private_github_durable_gateway.dart';
@@ -91,6 +95,164 @@ void main() {
       expect(blobCalls, 2);
       expect(dispatchCalls, 1);
       expect(runListCalls, 0);
+    });
+
+    test('durable dispatch stages frozen bytes after workspace mutation',
+        () async {
+      final request = _request(workspace.path);
+      final privateRoot =
+          await Directory.systemTemp.createTemp('cantiere-private-frozen-');
+      addTearDown(() async {
+        if (await privateRoot.exists()) await privateRoot.delete(recursive: true);
+      });
+      final frozen = WorkshopDurableFrozenSourceStore(root: privateRoot);
+      final ledgerStorage = _MemoryGenerationStorage();
+      final ledger =
+          WorkshopDurableBuildGenerationLedger(storage: ledgerStorage);
+      final source =
+          await const WorkshopBuildSourceSnapshotter().capture(workspace.path);
+      await frozen.persist(
+        request: request, source: source, namespace: 'account-one',
+      );
+      final ticket = await ledger.reserveNew(
+        request: request, source: source,
+      );
+
+      // The original project may change while an already-selected build waits.
+      final original = utf8.decode(source.files.single.bytes);
+      expect(original, 'void main() {}\n');
+      await File('${workspace.path}/lib/main.dart').writeAsString(
+        'void main() { print("MUTATED AFTER RESERVATION"); }',
+      );
+
+      var blobCalls = 0;
+      var dispatchCalls = 0;
+      final client = MockClient((http.Request call) async {
+        final path = call.url.path;
+        if (call.method == 'GET' && _isRepositoryRoot(path)) {
+          return http.Response('{"private":true}', 200);
+        }
+        if (call.method == 'GET' && path.endsWith('/git/ref/heads/main')) {
+          return http.Response('{"object":{"sha":"$baseCommit"}}', 200);
+        }
+        if (call.method == 'GET' &&
+            path.endsWith('/git/commits/$baseCommit')) {
+          return http.Response('{"tree":{"sha":"$baseTree"}}', 200);
+        }
+        if (call.method == 'POST' && path.endsWith('/git/blobs')) {
+          blobCalls++;
+          final payload = jsonDecode(call.body) as Map<String, dynamic>;
+          if (blobCalls == 1) {
+            final restored = utf8.decode(
+              base64Decode(payload['content'] as String),
+            );
+            expect(restored, original);
+            expect(restored, isNot(contains('MUTATED AFTER RESERVATION')));
+          }
+          return http.Response(
+            '{"sha":"${blobCalls == 1 ? sourceBlob : manifestBlob}"}',
+            201,
+          );
+        }
+        if (call.method == 'POST' && path.endsWith('/git/trees')) {
+          return http.Response('{"sha":"$stagedTree"}', 201);
+        }
+        if (call.method == 'POST' && path.endsWith('/git/commits')) {
+          return http.Response('{"sha":"$stagedCommit"}', 201);
+        }
+        if (call.method == 'POST' && path.endsWith('/git/refs')) {
+          return http.Response('{"ref":"refs/heads/test"}', 201);
+        }
+        if (call.method == 'POST' && path.endsWith('/dispatches')) {
+          dispatchCalls++;
+          return http.Response('', 204);
+        }
+        return http.Response('unexpected $path', 500);
+      });
+      final resolver = WorkshopDurableFrozenDispatchResolver(
+        ledger: ledger, frozenStore: frozen, namespace: 'account-one',
+      );
+      final result = await _gateway(
+        client, sourceResolver: resolver.resolve,
+      ).dispatch(
+        request: _request(workspace.path),
+        correlationId: '${ticket.buildId}:attempt:1',
+      );
+      expect(result.disposition,
+          WorkshopDurableGitHubDispatchDisposition.accepted);
+      expect(blobCalls, 2);
+      expect(dispatchCalls, 1);
+    });
+
+    test('missing generation fails before any source or dispatch staging',
+        () async {
+      final client = MockClient((call) async {
+        if (_isRepositoryRoot(call.url.path)) {
+          return http.Response('{"private":true}', 200);
+        }
+        fail('No GitHub staging or workflow dispatch permitted: ${call.url}');
+      });
+      final privateRoot =
+          await Directory.systemTemp.createTemp('cantiere-private-missing-');
+      addTearDown(() async {
+        if (await privateRoot.exists()) await privateRoot.delete(recursive: true);
+      });
+      final resolver = WorkshopDurableFrozenDispatchResolver(
+        ledger: WorkshopDurableBuildGenerationLedger(
+          storage: _MemoryGenerationStorage(),
+        ),
+        frozenStore: WorkshopDurableFrozenSourceStore(root: privateRoot),
+        namespace: 'account-one',
+      );
+      await expectLater(
+        _gateway(client, sourceResolver: resolver.resolve).dispatch(
+          request: _request(workspace.path),
+          correlationId: 'durable-v2-0000000000000000000000000000000000000000:attempt:1',
+        ),
+        throwsA(isA<WorkshopDurableGitHubGatewayException>()),
+      );
+    });
+
+    test('resolver rejects wrong generation, malformed attempt and lost archive',
+        () async {
+      final req = _request(workspace.path);
+      final privateRoot =
+          await Directory.systemTemp.createTemp('cantiere-private-recover-');
+      addTearDown(() async {
+        if (await privateRoot.exists()) await privateRoot.delete(recursive: true);
+      });
+      final frozen = WorkshopDurableFrozenSourceStore(root: privateRoot);
+      final source =
+          await const WorkshopBuildSourceSnapshotter().capture(workspace.path);
+      final handle = await frozen.persist(
+        request: req, source: source, namespace: 'account-one',
+      );
+      final ledger = WorkshopDurableBuildGenerationLedger(
+        storage: _MemoryGenerationStorage(),
+      );
+      final ticket = await ledger.reserveNew(request: req, source: source);
+      final resolver = WorkshopDurableFrozenDispatchResolver(
+        ledger: ledger, frozenStore: frozen, namespace: 'account-one',
+      );
+      for (final correlation in <String>[
+        'durable-v2-0000000000000000000000000000000000000000:attempt:1',
+        '${ticket.buildId}:attempt:0',
+        '${ticket.buildId}:attempt:01',
+        '${ticket.buildId}:attempt:garbage',
+      ]) {
+        await expectLater(
+          resolver.resolve(request: req, correlationId: correlation),
+          throwsStateError,
+        );
+      }
+      final archived = File('${privateRoot.path}/${handle.key}.avxf');
+      await archived.delete();
+      await expectLater(
+        resolver.resolve(
+          request: req, correlationId: '${ticket.buildId}:attempt:1',
+        ),
+        throwsStateError,
+      );
     });
 
     test('server failure after dispatch request is treated as ambiguous',
@@ -303,7 +465,10 @@ void main() {
   });
 }
 
-WorkshopPrivateGitHubDurableGateway _gateway(http.Client client) {
+WorkshopPrivateGitHubDurableGateway _gateway(
+  http.Client client, {
+  WorkshopDurableSourceResolve? sourceResolver,
+}) {
   return WorkshopPrivateGitHubDurableGateway(
     configuration: const WorkshopPrivateGitHubBuildConfiguration(
       repository: 'pilialvu75-hue/AI-Orchestrator-Module-Library',
@@ -313,6 +478,13 @@ WorkshopPrivateGitHubDurableGateway _gateway(http.Client client) {
     ),
     accessTokenProvider: () async => 'token',
     client: client,
+    // Only the historical gateway tests use an explicitly provided, mutable
+    // source resolver. There is NO live-snapshot fallback in production.
+    sourceResolver: sourceResolver ??
+        ({required request, required correlationId}) =>
+            const WorkshopBuildSourceSnapshotter().capture(
+              request.projectPath,
+            ),
   );
 }
 
@@ -356,4 +528,17 @@ Map<String, Object?> _runJson({
     'created_at': '2026-10-03T18:00:00Z',
     'updated_at': '2026-10-03T18:01:00Z',
   };
+}
+
+final class _MemoryGenerationStorage implements WorkshopDurableGenerationStorage {
+  String? _record;
+
+  @override
+  Future<String?> read() async => _record;
+
+  @override
+  Future<bool> write(String value) async {
+    _record = value;
+    return true;
+  }
 }
