@@ -64,10 +64,21 @@ final class WorkshopDurableFrozenDispatchResolver {
       sourceSha256: reservation.sourceSha256,
       namespace: _namespace,
     );
-    return _frozenStore.recover(
+    final frozen = await _frozenStore.recover(
       request: request,
       handle: handle,
       namespace: _namespace,
     );
+    // A terminal checkpoint or a newer generation may be persisted while
+    // this bounded disk read is in progress. Do not return a stale source
+    // to the GitHub staging gateway after that state transition.
+    final current = await _ledger.recoverLatest(request);
+    if (current == null ||
+        current.state != WorkshopDurableGenerationState.active ||
+        current.buildId != reservation.buildId ||
+        current.sourceSha256 != reservation.sourceSha256) {
+      throw StateError('Durable generation changed during frozen source read.');
+    }
+    return frozen;
   }
 }
