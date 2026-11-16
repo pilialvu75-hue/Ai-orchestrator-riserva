@@ -131,6 +131,17 @@ final class WorkshopDurableBuildPreflight {
       namespace: _namespace,
     );
     _validateSource(frozen, request);
+    // The terminal checkpoint may have been persisted while file I/O
+    // was in progress. Never hand source to dispatch after that transition.
+    final current = await _ledger.recoverLatest(request);
+    if (current == null ||
+        current.state != WorkshopDurableGenerationState.active ||
+        current.buildId != active.buildId ||
+        current.sourceSha256 != prepared.sourceHandle.sourceSha256) {
+      throw StateError(
+        'Durable build completed or changed during source recovery.',
+      );
+    }
     return frozen;
   }
 

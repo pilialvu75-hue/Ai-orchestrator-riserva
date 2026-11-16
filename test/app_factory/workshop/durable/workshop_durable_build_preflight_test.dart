@@ -104,6 +104,46 @@ void main() {
     );
   });
 
+  test('identical source still gets a fresh generation after terminal',
+      () async {
+    var captures = 0;
+    final service = _service(
+      archive: archive,
+      ledger: ledger,
+      capture: (path) async {
+        captures++;
+        return _source(path, 'void main() {}');
+      },
+    );
+    final request = _request(workspace.path, 'build-1');
+    final first = await service.beginNew(request);
+    await ledger.markTerminal(
+      request: request,
+      expectedBuildId: first.reservation.buildId,
+      succeeded: true,
+    );
+
+    final second = await service.beginNew(
+      _request(workspace.path, 'build-2'),
+    );
+    expect(second.reservation.generation, 2);
+    expect(second.reservation.buildId, isNot(first.reservation.buildId));
+    expect(second.sourceHandle.key, first.sourceHandle.key);
+    expect(captures, 2);
+    await expectLater(
+      service.loadFrozenForDispatch(
+        request: _request(workspace.path, 'build-3'),
+        prepared: first,
+      ),
+      throwsStateError,
+    );
+    final frozen = await service.loadFrozenForDispatch(
+      request: _request(workspace.path, 'build-4'),
+      prepared: second,
+    );
+    expect(utf8.decode(frozen.files.single.bytes), 'void main() {}');
+  });
+
   test('missing frozen source fails closed without a new generation', () async {
     final service = _service(
       archive: archive,
