@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/durable/workshop_durable_github_actions_coordinator.dart';
@@ -122,6 +124,76 @@ void main() {
         duplicate.disposition,
         WorkshopDurableGitHubReconcileDisposition.waitingForRunDiscovery,
       );
+    });
+
+    test('concurrent callers with the same key dispatch only once',
+        () async {
+      await createReadyProject();
+      final firstEntered = Completer<void>();
+      final finishDispatch = Completer<void>();
+      gateway.onDispatch = () async {
+        if (!firstEntered.isCompleted) firstEntered.complete();
+        await finishDispatch.future;
+      };
+      // Two independent coordinator objects use the same serialized
+      // orchestrator and durable checkpoint. Both can observe READY before
+      // either has saved WAITING_EXTERNAL.
+      final other = WorkshopDurableGitHubActionsCoordinator(
+        orchestrator: orchestrator,
+        gateway: gateway,
+        clock: () => now,
+      );
+      final first = coordinator.dispatchAndPark(
+        projectId: 'project-1',
+        taskId: 'build-android',
+        operationIdempotencyKey: 'github-build:one-generation',
+        dispatchCorrelationId: 'remote-one-generation',
+        request: request('first-ui'),
+      );
+      final duplicate = other.dispatchAndPark(
+        projectId: 'project-1',
+        taskId: 'build-android',
+        operationIdempotencyKey: 'github-build:one-generation',
+        dispatchCorrelationId: 'remote-one-generation',
+        request: request('second-ui'),
+      );
+      await firstEntered.future;
+      final parkedDuplicate = await duplicate;
+      expect(gateway.dispatchCalls, 1);
+      expect(
+        parkedDuplicate.disposition,
+        WorkshopDurableGitHubReconcileDisposition.waitingForRunDiscovery,
+      );
+      final state = await orchestrator.loadProject('project-1');
+      expect(state!.tasks['build-android']!.attemptsStarted, 1);
+      finishDispatch.complete();
+      final firstResult = await first;
+      expect(
+        firstResult.disposition,
+        WorkshopDurableGitHubReconcileDisposition.parkedForRunDiscovery,
+      );
+    });
+
+    test('a competing operation key cannot dispatch a second workflow',
+        () async {
+      await createReadyProject();
+      final first = coordinator.dispatchAndPark(
+        projectId: 'project-1',
+        taskId: 'build-android',
+        operationIdempotencyKey: 'github-build:accepted',
+        dispatchCorrelationId: 'remote-accepted',
+        request: request('first-ui'),
+      );
+      final second = coordinator.dispatchAndPark(
+        projectId: 'project-1',
+        taskId: 'build-android',
+        operationIdempotencyKey: 'github-build:wrong-key',
+        dispatchCorrelationId: 'remote-accepted',
+        request: request('second-ui'),
+      );
+      await first;
+      await expectLater(second, throwsStateError);
+      expect(gateway.dispatchCalls, 1);
     });
 
     test('parked execution rejects mismatched resume identity', () async {

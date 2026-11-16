@@ -160,7 +160,7 @@ final class WorkshopDurableGitHubActionsCoordinator {
     }
 
     final now = _clock().toUtc();
-    snapshot = await _orchestrator.startTaskAndWaitForExternal(
+    final claim = await _orchestrator.claimTaskAndWaitForExternal(
       projectId: projectId,
       taskId: taskId,
       operationIdempotencyKey: operationIdempotencyKey,
@@ -177,6 +177,21 @@ final class WorkshopDurableGitHubActionsCoordinator {
       startReason: WorkshopDurableEventTypes.taskStarted,
       waitReason: 'github.dispatch.persisted_before_side_effect',
     );
+    snapshot = claim.snapshot;
+    if (!claim.newlyClaimed) {
+      // Another caller already committed the wait. The API may return
+      // idempotently on replay, but ONLY the fresh claimer may dispatch.
+      final existingWait = _requiredTask(snapshot, taskId).externalWait;
+      if (existingWait?.eventType != WorkshopDurableEventTypes.ciStarted ||
+          existingWait?.externalId != dispatchCorrelationId) {
+        throw StateError('Concurrent durable dispatch has an invalid wait.');
+      }
+      return WorkshopDurableGitHubReconcileResult(
+        snapshot: snapshot,
+        disposition:
+            WorkshopDurableGitHubReconcileDisposition.waitingForRunDiscovery,
+      );
+    }
 
     try {
       final outcome = await _gateway.dispatch(
