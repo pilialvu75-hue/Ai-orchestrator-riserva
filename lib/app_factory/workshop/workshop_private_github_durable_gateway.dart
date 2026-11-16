@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 import 'durable/workshop_durable_github_actions_coordinator.dart';
+import 'durable/workshop_durable_frozen_dispatch_resolver.dart';
 import 'durable/workshop_durable_orchestrator.dart';
 import 'workshop_build_lab.dart';
 import 'workshop_build_source_snapshot.dart';
@@ -27,19 +28,18 @@ final class WorkshopPrivateGitHubDurableGateway
     required WorkshopPrivateGitHubBuildConfiguration configuration,
     required WorkshopBuildAccessTokenProvider accessTokenProvider,
     http.Client? client,
-    WorkshopBuildSourceSnapshotter snapshotter =
-        const WorkshopBuildSourceSnapshotter(),
+    required WorkshopDurableSourceResolve sourceResolver,
   })  : _configuration = configuration,
         _accessTokenProvider = accessTokenProvider,
         _client = client ?? http.Client(),
-        _snapshotter = snapshotter {
+        _sourceResolver = sourceResolver {
     _validateConfiguration(configuration);
   }
 
   final WorkshopPrivateGitHubBuildConfiguration _configuration;
   final WorkshopBuildAccessTokenProvider _accessTokenProvider;
   final http.Client _client;
-  final WorkshopBuildSourceSnapshotter _snapshotter;
+  final WorkshopDurableSourceResolve _sourceResolver;
 
   @override
   Future<WorkshopDurableGitHubDispatchOutcome> dispatch({
@@ -67,7 +67,12 @@ final class WorkshopPrivateGitHubDurableGateway
     try {
       token = await _token();
       await _requirePrivateRepository(token);
-      final snapshot = await _snapshotter.capture(request.projectPath);
+      // NEVER capture the live project on dispatch. A restarted process must
+      // send exactly the frozen bytes selected for the persisted generation.
+      final snapshot = await _sourceResolver(
+        request: request,
+        correlationId: correlationId,
+      );
       final sourceBoundaryError =
           WorkshopAndroidBuildSourceBoundary.validate(snapshot);
       if (sourceBoundaryError != null) {
