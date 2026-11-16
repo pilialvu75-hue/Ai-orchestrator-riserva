@@ -25,6 +25,22 @@ class Windows81ReleaseContractTest(unittest.TestCase):
         for forbidden in ["\n  push:", "\n  workflow_run:", "--clobber"]:
             self.assertNotIn(forbidden, w)
 
+    def test_beta_alias_only_for_owner_exact_verified_binary(self):
+        w = self.workflow
+        for required in [
+            "publish_win81_beta", "PUBLISH_WIN81_RECOVERY_BETA",
+            "inputs.action == 'publish_win81_beta'",
+            "inputs.action != 'publish_win81_beta'",
+            "v1.0.16-beta+100012", "v1.0.16-dev+100012",
+            "sha256sum -c", "44005820",
+            "0faac3e1d623af2afd672749dac02b718434c756bc039d5208a9cceb653022be",
+            "gh release download", "gh release create",
+            "gh release edit", "--draft=false",
+            "github.actor == 'pilialvu75-hue'",
+            "github.ref == 'refs/heads/main'",
+        ]:
+            self.assertIn(required, w)
+
     def test_backup_local_inference_sha_and_exclusive_win81(self):
         w = self.workflow
         for required in [
