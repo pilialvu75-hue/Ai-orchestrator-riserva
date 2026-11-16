@@ -158,19 +158,28 @@ void main() {
         request: request('second-ui'),
       );
       await firstEntered.future;
-      final parkedDuplicate = await duplicate;
+      // The two callers race by design: either may win the atomic claim.
+      // Never await a particular caller before unblocking the remote request.
       expect(gateway.dispatchCalls, 1);
-      expect(
-        parkedDuplicate.disposition,
-        WorkshopDurableGitHubReconcileDisposition.waitingForRunDiscovery,
-      );
       final state = await orchestrator.loadProject('project-1');
       expect(state!.tasks['build-android']!.attemptsStarted, 1);
       finishDispatch.complete();
-      final firstResult = await first;
+      final results = await Future.wait(<Future<WorkshopDurableGitHubReconcileResult>>[
+        first,
+        duplicate,
+      ]);
+      expect(gateway.dispatchCalls, 1);
       expect(
-        firstResult.disposition,
-        WorkshopDurableGitHubReconcileDisposition.parkedForRunDiscovery,
+        results.where((result) =>
+            result.disposition ==
+            WorkshopDurableGitHubReconcileDisposition.parkedForRunDiscovery),
+        hasLength(1),
+      );
+      expect(
+        results.where((result) =>
+            result.disposition ==
+            WorkshopDurableGitHubReconcileDisposition.waitingForRunDiscovery),
+        hasLength(1),
       );
     });
 
