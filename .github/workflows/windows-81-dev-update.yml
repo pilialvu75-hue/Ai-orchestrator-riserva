@@ -9,15 +9,16 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Build-only QA, or publish an update visible to Dev channel'
+        description: 'Build QA, publish Dev, or publish verified Win8.1 installer in Beta'
         type: choice
         required: true
         default: build_only
         options:
           - build_only
           - publish_win81_dev
+          - publish_win81_beta
       confirmation:
-        description: 'To publish, type PUBLISH_WIN81_RECOVERY_DEV (leave empty for build-only)'
+        description: 'Dev: PUBLISH_WIN81_RECOVERY_DEV; Beta: PUBLISH_WIN81_RECOVERY_BETA'
         type: string
         required: false
         default: ''
@@ -42,7 +43,8 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'pilialvu75-hue'
+      github.actor == 'pilialvu75-hue' &&
+      inputs.action != 'publish_win81_beta'
     runs-on: windows-2022
     timeout-minutes: 90
     permissions:
@@ -348,3 +350,72 @@ jobs:
           gh release edit $tag --repo $repo --draft=false
           if ($LASTEXITCODE -ne 0) { throw 'Could not publish the verified draft.' }
           Write-Host "Win8.1-only Dev update published: $tag"
+
+  # A beta alias reuses the *identical* already-published, SHA256-verified
+  # 1.0.16 Dev Win8.1 installer. It never compiles a second binary or Android.
+  owner-win81-beta:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'pilialvu75-hue' &&
+      inputs.action == 'publish_win81_beta'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Publish exact verified Win8.1 installer to Beta channel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEGACY_CONFIRM: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$LEGACY_CONFIRM" = 'PUBLISH_WIN81_RECOVERY_BETA' || {
+            echo 'ERROR: explicit Beta owner confirmation required'; exit 1;
+          }
+          repo="$GITHUB_REPOSITORY"
+          source_tag="v1.0.16-dev+100012"
+          beta_tag="v1.0.16-beta+100012"
+          test "$GITHUB_REF" = 'refs/heads/main'
+          # Never replace an existing release/tag or overwrite its files.
+          if gh api "repos/$repo/git/ref/tags/$beta_tag" >/dev/null 2>&1; then
+            echo 'ERROR: beta tag already exists'; exit 1
+          fi
+          if gh release view "$beta_tag" --repo "$repo" >/dev/null 2>&1; then
+            echo 'ERROR: beta release already exists'; exit 1
+          fi
+          gh api "repos/$repo/releases/tags/$source_tag" > source.json
+          python3 - <<'PY'
+          import json,re
+          r=json.load(open('source.json'))
+          assert r['tag_name']=='v1.0.16-dev+100012' and not r['draft']
+          assets={a['name']:a for a in r['assets']}
+          assert {'AI-Orchestrator-Setup-x64.exe','AI-Orchestrator-Setup-x64.exe.sha256'}<=assets.keys()
+          a=assets['AI-Orchestrator-Setup-x64.exe']
+          assert a['size']==44005820
+          assert a['digest']=='sha256:0faac3e1d623af2afd672749dac02b718434c756bc039d5208a9cceb653022be'
+          PY
+          mkdir -p beta-assets
+          gh release download "$source_tag" --repo "$repo" --dir beta-assets --pattern 'AI-Orchestrator-Setup-x64.exe*'
+          (
+            cd beta-assets
+            sha256sum -c AI-Orchestrator-Setup-x64.exe.sha256
+            echo "0faac3e1d623af2afd672749dac02b718434c756bc039d5208a9cceb653022be  AI-Orchestrator-Setup-x64.exe" | sha256sum -c -
+            test "$(stat -c %s AI-Orchestrator-Setup-x64.exe)" = '44005820'
+          )
+          notes='WINDOWS 8.1 ONLY beta alias of verified AIVEXUS 1.0.16 Dev+100012. SAME installer SHA256 0faac3e1d623af2afd672749dac02b718434c756bc039d5208a9cceb653022be. Includes mandatory pre-upgrade recovery; unsigned, experimental, no Android asset; Windows 10/11 setup blocked. Test with caution.'
+          gh release create "$beta_tag" beta-assets/AI-Orchestrator-Setup-x64.exe beta-assets/AI-Orchestrator-Setup-x64.exe.sha256 --repo "$repo" --target 15b4ba6091d16531da2f64c5decb267b90c8a7e0 --prerelease --draft --title 'AIVEXUS 1.0.16 Beta - Windows 8.1 recovery QA' --notes "$notes"
+          result="$(gh release view "$beta_tag" --repo "$repo" --json databaseId --jq '.databaseId')"
+          test "$result" -gt 0
+          gh api "repos/$repo/releases/$result" > staged.json
+          python3 - <<'PY'
+          import json
+          r=json.load(open('staged.json'))
+          assert r['tag_name']=='v1.0.16-beta+100012' and r['draft'] is True
+          a={x['name']:x for x in r['assets']}
+          assert len(a)==2 and a['AI-Orchestrator-Setup-x64.exe']['size']==44005820
+          assert a['AI-Orchestrator-Setup-x64.exe']['digest']=='sha256:0faac3e1d623af2afd672749dac02b718434c756bc039d5208a9cceb653022be'
+          PY
+          gh release edit "$beta_tag" --repo "$repo" --draft=false
+          echo "PUBLISHED $beta_tag (same verified Win8.1 binary, beta channel)"
