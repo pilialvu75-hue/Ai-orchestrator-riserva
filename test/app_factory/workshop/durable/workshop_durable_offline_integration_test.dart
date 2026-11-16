@@ -208,7 +208,7 @@ void main() {
       gateway: gateway,
       buildId: prepared.reservation.buildId,
     ).advance(request('ui-after-missing-archive'));
-    expect(result.disposition, WorkshopDurableFinalBuildDisposition.dispatched);
+    expect(result.disposition, WorkshopDurableFinalBuildDisposition.retrying);
     expect(gateway.remoteCalls, 0);
     expect(gateway.sourceSeen, isNull);
     expect(
@@ -283,10 +283,21 @@ final class _OfflineBoundaryGateway
       throw StateError('Remote dispatch without durable wait checkpoint.');
     }
 
-    final frozen = await resolver.resolve(
-      request: request,
-      correlationId: correlationId,
-    );
+    late final WorkshopBuildSourceSnapshot frozen;
+    try {
+      frozen = await resolver.resolve(
+        request: request,
+        correlationId: correlationId,
+      );
+    } on StateError {
+      // Mirror the real gateway's definitive source-resolution exception;
+      // never present an unclassified exception as an ambiguous dispatch.
+      throw const WorkshopDurableGitHubGatewayException(
+        'Frozen source is missing or invalid.',
+        failureClass: WorkshopDurableFailureClass.providerUnavailable,
+        definitive: true,
+      );
+    }
     sourceSeen = utf8.decode(frozen.files.single.bytes);
     correlationSeen = correlationId;
     remoteCalls++;
