@@ -120,7 +120,7 @@ void main() {
 
       // The original project may change while an already-selected build waits.
       final original = utf8.decode(source.files.single.bytes);
-      expect(original, 'void main() {}\\n');
+      expect(original, 'void main() {}\n');
       await File('${workspace.path}/lib/main.dart').writeAsString(
         'void main() { print("MUTATED AFTER RESERVATION"); }',
       );
