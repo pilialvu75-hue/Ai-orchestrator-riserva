@@ -665,6 +665,20 @@ final class WorkshopDurableWatchdogFinding {
   final String reason;
 }
 
+/// Result of the *persisted* atomic claim for an external operation.
+///
+/// Only the caller that inserted the operation key may perform the remote
+/// side effect. A replay/concurrent claimant must reconcile the saved wait.
+final class WorkshopDurableExternalStartClaim {
+  const WorkshopDurableExternalStartClaim({
+    required this.snapshot,
+    required this.newlyClaimed,
+  });
+
+  final WorkshopDurableProjectSnapshot snapshot;
+  final bool newlyClaimed;
+}
+
 final class WorkshopDurableOrchestrator {
   WorkshopDurableOrchestrator({
     required WorkshopDurableOrchestrationStore store,
@@ -836,26 +850,34 @@ final class WorkshopDurableOrchestrator {
   /// This closes the crash window between "task started" and
   /// "WAITING_EXTERNAL persisted". The operation idempotency key is committed
   /// in the same store mutation.
-  Future<WorkshopDurableProjectSnapshot> startTaskAndWaitForExternal({
+  /// Returns whether this caller acquired the operation key when it was
+  /// committed with WAITING_EXTERNAL. This gate prevents two simultaneous
+  /// reconcilers from dispatching the same GitHub Actions workflow.
+  ///
+  /// A single scheduler/store authority is still required across isolates or
+  /// processes. The checkpoint store is not a cross-process transaction.
+  Future<WorkshopDurableExternalStartClaim> claimTaskAndWaitForExternal({
     required String projectId,
     required String taskId,
     required String operationIdempotencyKey,
     required WorkshopDurableExternalWait wait,
     String startReason = WorkshopDurableEventTypes.taskStarted,
     String waitReason = 'external.wait.persisted_before_side_effect',
-  }) {
-    return _mutate(projectId, (snapshot, now) {
+  }) async {
+    var newlyClaimed = false;
+    final saved = await _mutate(projectId, (snapshot, now) {
       final operationKey =
           _identity(operationIdempotencyKey, 'operationIdempotencyKey');
       final task = _requiredTask(snapshot, taskId);
 
       if (snapshot.claimedOperationKeys.contains(operationKey)) {
         if (task.state == WorkshopDurableState.waitingExternal &&
-            task.externalWait != null) {
+            task.externalWait?.eventType == wait.eventType &&
+            task.externalWait?.externalId == wait.externalId) {
           return snapshot;
         }
         throw StateError(
-          'Durable operation key is already claimed without an external wait.',
+          'Durable operation key is already claimed with an incompatible wait.',
         );
       }
 
@@ -908,8 +930,34 @@ final class WorkshopDurableOrchestrator {
         now,
       );
 
+      newlyClaimed = true;
       return _recomputeProjectState(next, now, waitReason);
     });
+    return WorkshopDurableExternalStartClaim(
+      snapshot: saved,
+      newlyClaimed: newlyClaimed,
+    );
+  }
+
+  /// Backward-compatible API for callers interested only in the checkpoint.
+  /// Use claimTaskAndWaitForExternal for any remote side effect.
+  Future<WorkshopDurableProjectSnapshot> startTaskAndWaitForExternal({
+    required String projectId,
+    required String taskId,
+    required String operationIdempotencyKey,
+    required WorkshopDurableExternalWait wait,
+    String startReason = WorkshopDurableEventTypes.taskStarted,
+    String waitReason = 'external.wait.persisted_before_side_effect',
+  }) async {
+    final claim = await claimTaskAndWaitForExternal(
+      projectId: projectId,
+      taskId: taskId,
+      operationIdempotencyKey: operationIdempotencyKey,
+      wait: wait,
+      startReason: startReason,
+      waitReason: waitReason,
+    );
+    return claim.snapshot;
   }
 
   Future<WorkshopDurableProjectSnapshot> completeTask({
