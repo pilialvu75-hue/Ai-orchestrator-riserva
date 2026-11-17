@@ -53,6 +53,14 @@ jobs:
         shell: pwsh
         run: flutter test test/core/diagnostics/chatgpt_bridge/
 
+      - name: Check opt-in tunnel launcher PowerShell syntax (no execution)
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/chatgpt_bridge/aivexus_tunnel_start.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { throw ('Tunnel launcher syntax errors: ' + $errors.Count) }
+
       - name: Compile experimental Windows QA binary only
         shell: pwsh
         run: flutter build windows --release --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=true
@@ -80,6 +88,8 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $staging 'mcp-tools') -Force | Out-Null
           Copy-Item scripts\chatgpt_bridge\aivexus_mcp.ps1 (Join-Path $staging 'mcp-tools\aivexus_mcp.ps1')
           Copy-Item docs\CHATGPT_LOCAL_TEST_BRIDGE.md (Join-Path $staging 'mcp-tools\README.md')
+          Copy-Item scripts\chatgpt_bridge\aivexus_tunnel_start.ps1 (Join-Path $staging 'mcp-tools\aivexus_tunnel_start.ps1')
+          Copy-Item docs\CHATGPT_LOCAL_TEST_TUNNEL.md (Join-Path $staging 'mcp-tools\TUNNEL-SETUP.md')
           # Bundle an opt-in local plugin prototype. This does not install it.
           New-Item -ItemType Directory -Path (Join-Path $staging 'plugins') -Force | Out-Null
           Copy-Item plugins\aivexus-local-test (Join-Path $staging 'plugins\aivexus-local-test') -Recurse -Force
