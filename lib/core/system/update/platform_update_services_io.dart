@@ -42,6 +42,9 @@ Future<void> configurePlatformUpdateServices(
       githubOwner: AppConstants.updateGitHubOwner,
       githubRepo: AppConstants.updateGitHubRepo,
       targetPlatform: targetPlatform,
+      windowsOperatingSystemVersion: Platform.isWindows
+          ? Platform.operatingSystemVersion
+          : null,
     ),
   );
 
