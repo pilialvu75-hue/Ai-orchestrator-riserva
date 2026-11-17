@@ -127,6 +127,14 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   @override
   String get lifecycleRuntimeStateName => _delegate.lifecycleRuntimeStateName;
 
+  static bool _needsQwen25CliRecovery(String? modelId) {
+    final id = modelId?.trim().toLowerCase() ?? '';
+    return id == 'qwen2_5_3b_instruct' ||
+        id == 'qwen2.5-3b-instruct' ||
+        id.startsWith('qwen2.5-3b-instruct-') ||
+        id.startsWith('qwen2_5_3b_instruct-');
+  }
+
   Future<void> dispose() async {
     _lifecycle?.dispose();
     _lifecycle = null;
@@ -136,15 +144,16 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   @override
   TokenStream streamInference({required InferenceRequest request,
       required CancellationToken cancellationToken}) async* {
-    // The Self-Test uses the canonical CLI. On modern Windows the resident
-    // server path has been measured for a small explicit set of models only.
-    // Do not send unmeasured models (e.g. Qwen2.5 3B) into an unverified
-    // resident CPU server when the packaged CLI path is already supported.
+    // The current ASUS regression is specific to Qwen2.5 3B: Settings
+    // verifies it using the CLI, while Assistant can hang in the resident
+    // server. Route just that model to the known CLI path. Do not widen this
+    // into a blanket policy for other models: the real resident TinyLlama
+    // smoke test (cache, cancellation and token cap) must remain intact.
     if (_isWindowsHost() &&
-        !AssistantWindowsGpuPolicy.supports(request.modelId ?? '')) {
+        _needsQwen25CliRecovery(request.modelId)) {
       RuntimeEventLog.instance.emit(
         '[ASSISTANT_LOCAL_ROUTE] backend=process_cli '
-        'reason=unmeasured_windows_resident_profile '
+        'reason=qwen25_windows_chat_recovery '
         'model_id=${request.modelId ?? 'none'}',
       );
       yield* _delegate.streamInference(
