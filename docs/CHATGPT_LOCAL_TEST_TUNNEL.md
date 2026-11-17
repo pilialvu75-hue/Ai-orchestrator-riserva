@@ -108,9 +108,17 @@ The tunnel client and its spawned local MCP subprocess may inherit these
 process environment values, so **run only reviewed trusted binaries**.
 AIVEXUS bridge key should never be pasted into ChatGPT, GitHub or screenshots.
 
-## Activate in normal ChatGPT Chat (not Work)
+## Activation in normal ChatGPT Web: workspace entitlement required
 
-Only when the tunnel client reports *ready and polling*:
+**Do not treat this procedure as available on ChatGPT Plus.** OpenAI's
+current support policy grants custom MCP server connections to Business
+and Enterprise/Edu ChatGPT Web workspaces, with read/fetch limitations
+for Pro. The user's Plus account does **not** currently expose the
+required `Connection > Tunnel` form. The successful private tunnel runtime
+does not override account entitlements.
+
+For an **eligible** future ChatGPT Web workspace only, when the tunnel
+client reports *ready and polling*:
 
 1. In ChatGPT on the web, open **Plugins** → **Add custom MCP server**.
 2. Under **Connection**, choose **Tunnel**, select the exact tunnel associated
@@ -147,10 +155,12 @@ Only when the tunnel client reports *ready and polling*:
   Run with `--mcp.stdio-failure-policy=exit` so an unexpected child exit stops
   the tunnel instead of looping. Explicitly pause for the user to copy the
   AIVEXUS bridge key into the clipboard, preventing command-copy collisions.
-- **Still unverified**: the repaired script on the real ASUS and the final
-  custom ChatGPT plugin call. Only start one tunnel-client per tunnel ID.
-  Do not treat a green `doctor` as proof the stdio child is healthy.
-  Inspect `http://127.0.0.1:8080/readyz` and avoid sharing raw secrets.
+- **Later verified on the real ASUS**: with the quoted-path fix below,
+  the local tunnel UI reported `Health: live`, `Ready: ready`, the
+  `main` stdio channel enabled, and successful control-plane polling.
+  The actual ordinary-ChatGPT `instance_info` invocation remains
+  **unverified**. Only start one tunnel-client per tunnel ID. Do not
+  treat a green `doctor` as proof of a remote tool invocation.
 
 ### Confirmed parser defect from the second ASUS run
 
@@ -212,6 +222,52 @@ real `plugin_asdk_app...` ID, or verify actual entitlement to the
 activation blocked by ChatGPT surface/permissions, not by AIVEXUS runtime.
 A local tunnel can be stopped with Ctrl+C until a compatible consumer exists.
 
+## Final entitlement finding and zero-cost next steps (ChatGPT Plus)
+
+The `aivexus_local_test` entry observed under ChatGPT Desktop **Plugins >
+MCP** is a local `powershell.exe` + STDIO configuration with an
+`AIVEXUS_BRIDGE_TOKEN` environment variable. Its edit dialog shows
+command, arguments, env, passthrough, and working directory, but no
+registered app ID. The user temporarily replaced the token value with
+`a` for a screenshot; if saved rather than just masked for the screenshot,
+the original valid token must be restored before any local MCP test.
+Do **not** paste the token into ChatGPT, shell history, or GitHub.
+
+The `plugin_asdk_app_...` identifier described in the official packaging
+guide is associated with a **registered ChatGPT MCP app connection**, not
+the human-readable local server name. Plugin Creator refused to infer
+that ID, and no ChatGPT plugin was created. Do not fabricate one:
+https://developers.openai.com/plugins/build/plugins
+
+The user is on **ChatGPT Plus**. OpenAI's Help Center says custom MCP
+web connections and full support are available to Business/Enterprise/Edu,
+and that Pro has limited read/fetch support. Plus is not listed:
+https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt
+The Desktop add-MCP screen the user actually sees exposes STDIO and
+HTTP only; it cannot be used as proof of web tunnel integration.
+
+**Supported alternative without requiring a plan upgrade:** official
+documentation states that ChatGPT Desktop can run a *desktop-only plugin
+containing a local MCP server*. This is distinct from referencing a
+registered app in `.app.json`. The portable plugin can declare an MCP
+server in `mcp.json`, but that starts/configures an MCP child for the
+plugin; it is **not a verified reuse of the already configured
+`aivexus_local_test` connection**. Creating that alternate binding
+requires a separate user decision because the original request explicitly
+forbade duplicate connectors.
+https://help.openai.com/en/articles/20001256-plugins-in-chatgpt
+https://developers.openai.com/plugins/build/plugins
+
+**Current no-change action:** retain the existing enabled
+`aivexus_local_test` local MCP configuration and the validated private
+tunnel setup. Stop the tunnel process with Ctrl+C while not testing to
+avoid unnecessary use. Do not request API credits, payment methods,
+new credentials, an additional tunnel, or a second STDIO registration.
+The next technical milestone is either (a) a genuinely eligible ChatGPT
+workspace with `Connection: Tunnel`, or (b) approval for a *separate
+desktop-only local plugin binding* that reuses the same AIVEXUS loopback
+endpoint and can expose just `instance_info`.
+
 ## Security and limits
 
 - The tunnel transports requests to a local MCP subprocess, which itself
@@ -228,7 +284,10 @@ A local tunnel can be stopped with Ctrl+C until a compatible consumer exists.
 - Official tunnel support allows testing privately but does not satisfy
   requirements for submitting a public plugin.
 
-**Completion criterion:** an ordinary ChatGPT chat calls
-`aivexus_local_test.instance_info` through the approved private tunnel and
-receives live data from the running ASUS instance. Until observed, state is
-**prepared, not connected**.
+**Completion criterion:** an ordinary ChatGPT chat actually invokes
+`instance_info` from a correctly authorized AIVEXUS MCP integration and
+receives live version/model/runtime information from the ASUS.
+`Ready` on the tunnel dashboard or enabled on the Desktop MCP list is
+not sufficient. Until that call is observed, state is
+**transport prepared; ChatGPT tool connection blocked by registration/
+entitlement**.
