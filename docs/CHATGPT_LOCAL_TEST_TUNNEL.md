@@ -176,6 +176,42 @@ A green `doctor` does not prove that the spawned MCP subprocess is usable.
 **Not yet proven:** a real local ASUS run of this quoted-path fix, the
 `/readyz` status, and a real instance_info call from ordinary ChatGPT.
 
+## ChatGPT plugin registration: confirmed separate from local MCP (2026-11-17)
+
+**New actual observation:** On ASUS, the tunnel-client administration UI reports
+`Health: live`, `Ready: ready`, `Logs: connected`, an enabled `main` stdio
+channel, successful control-plane polling, and no poll errors. This proves the
+private tunnel daemon is running and reaching OpenAI, **not** that a ChatGPT
+conversation can invoke AIVEXUS `instance_info`.
+
+The user's ChatGPT Desktop Plugins > MCP screen lists
+`aivexus_local_test` as an enabled **local STDIO server**. The
+**Add MCP Server** dialog accepts STDIO commands or HTTP; it does not offer
+`Connection: Tunnel`. The **Create plugin** menu opens Plugin Creator,
+which reports that an existing *registered app connection* must be referenced
+by its exact `plugin_asdk_app_...` ID in `.app.json`; it cannot map the
+local server alias to that ID. No plugin was created.
+
+Official packaging docs distinguish these:
+https://developers.openai.com/plugins/build/plugins#package-with-plugin-creator
+First register an MCP connection via **Add custom MCP server** and copy the
+`plugin_asdk_app...` ID from the resulting browser URL, then reference it
+in `.app.json`. A local STDIO alias does not prove such registration exists.
+Official help lists custom MCP web registration for Business/Enterprise/Edu
+and some read/fetch restrictions for Pro; availability must be checked
+against the actual user account/workspace before assuming the tunnel can
+be added to ordinary ChatGPT Chat:
+https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt
+
+**Safe current outcome:** Preserve the working local MCP server and tunnel
+configuration. Do not register a second STDIO adapter, buy API credits,
+upgrade the plan, or create a misleading plugin. The next distinct action
+is to inspect any existing registered ChatGPT MCP connection detail for a
+real `plugin_asdk_app...` ID, or verify actual entitlement to the
+`Connection: Tunnel` creation flow. If neither exists, mark cloud-chat
+activation blocked by ChatGPT surface/permissions, not by AIVEXUS runtime.
+A local tunnel can be stopped with Ctrl+C until a compatible consumer exists.
+
 ## Security and limits
 
 - The tunnel transports requests to a local MCP subprocess, which itself
