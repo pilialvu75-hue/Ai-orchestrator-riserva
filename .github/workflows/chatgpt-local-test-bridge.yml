@@ -33,6 +33,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check Windows PowerShell 5.1 JSON-RPC handshake with no policy bypass
         shell: powershell
+        env:
+          AIVEXUS_MCP_TEST_MODE: '1'
         run: |
           $messages = @(
             '{"jsonrpc":"2.0","id":1,"method":"initialize"}',
