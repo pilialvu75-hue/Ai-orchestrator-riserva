@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - 'lib/**'
+      - 'test/app_factory/workshop/durable/**'
       - 'linux/**'
       - 'native/linux/**'
       - 'native/llama_cpp/**'
