@@ -8,6 +8,7 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.net.VpnService;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.Color;
@@ -139,7 +140,11 @@ public final class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         IntentFilter filter = new IntentFilter(AdsVpnService.STATUS);
-        registerReceiver(updates, filter, Context.RECEIVER_NOT_EXPORTED);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(updates, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(updates, filter);
+        }
         handler.post(periodicUpdate);
     }
 

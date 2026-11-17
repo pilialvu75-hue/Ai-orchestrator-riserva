@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.VpnService;
+import android.system.OsConstants;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
@@ -63,7 +64,8 @@ public final class AdsVpnService extends VpnService {
                 .setMtu(4096)
                 .addAddress("10.88.0.1", 32)
                 .addRoute("10.88.0.2", 32)
-                .addDnsServer("10.88.0.2");
+                .addDnsServer("10.88.0.2")
+                .allowFamily(OsConstants.AF_INET6);
             builder.setBlocking(true);
             tun = builder.establish();
             if (tun == null) throw new IOException("VPN authorization not granted");
