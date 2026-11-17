@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'lib/core/system/update/update_checker.dart'
+      - 'lib/core/system/update/platform_update_services_io.dart'
       - 'test/core/system/update/windows_release_os_compatibility_test.dart'
       - '.github/workflows/windows-release-os-compatibility.yml'
   workflow_dispatch:
@@ -37,4 +38,5 @@ jobs:
       - name: Analyze changed Dart files
         run: |
           dart analyze lib/core/system/update/update_checker.dart
+          dart analyze lib/core/system/update/platform_update_services_io.dart
           dart analyze test/core/system/update/windows_release_os_compatibility_test.dart
