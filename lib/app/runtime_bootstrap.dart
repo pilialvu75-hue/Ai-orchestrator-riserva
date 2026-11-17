@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:ai_orchestrator/app/integrations/assistant_workshop_public_web_reader.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
+import 'package:ai_orchestrator/core/diagnostics/chatgpt_bridge/aivexus_test_bridge_server.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
 import 'package:ai_orchestrator/core/diagnostics/diagnostics_telemetry_bridge.dart';
 import 'package:ai_orchestrator/core/app_health/contracts/abstract_telemetry_service.dart';
 import 'package:ai_orchestrator/core/orchestrator/orchestrator.dart';
@@ -23,6 +27,12 @@ class RuntimeBootstrap {
   const RuntimeBootstrap();
 
   static Future<void>? _servicesInitialization;
+  static AivexusTestBridgeServer? _localTestBridge;
+
+  // Only explicit internal Windows builds can expose the loopback bridge.
+  // No normal release or OTA activates it by default.
+  static const bool localTestBridgeEnabled =
+      bool.fromEnvironment('AIVEXUS_LOCAL_TEST_BRIDGE', defaultValue: false);
 
   /// Opt-in for an explicitly compiled INTERNAL HYBRID QA binary only.
   /// Ordinary OTA/release workflows do not set this build-time define.
@@ -50,7 +60,40 @@ class RuntimeBootstrap {
     }
 
     await _runWarmupChecks();
+    await _startLocalTestBridge();
     debugPrint('[BOOT] init complete');
+  }
+
+  Future<void> _startLocalTestBridge() async {
+    if (!localTestBridgeEnabled || !Platform.isWindows ||
+        _localTestBridge?.isRunning == true) return;
+    // Read at process runtime, NOT from a dart-define compiled into the app.
+    final secret = Platform.environment['AIVEXUS_BRIDGE_TOKEN'];
+    if (secret == null || secret.length < 32) {
+      RuntimeEventLog.instance.emit(
+        '[TEST_BRIDGE] unavailable reason=missing_runtime_secret',
+      );
+      return;
+    }
+    try {
+      final bridge = AivexusTestBridgeServer(
+        token: secret,
+        appVersion: await _resolveAppVersion(),
+        runtimeSelfTest: di.sl<RuntimeSelfTestService>(),
+        runtimeDiagnostics: di.sl<LocalRuntimeDiagnosticsService>(),
+        localModels: di.sl<LocalAiRepository>(),
+      );
+      await bridge.start();
+      _localTestBridge = bridge;
+      RuntimeEventLog.instance.emit(
+        '[TEST_BRIDGE] ready transport=loopback scope=synthetic_runtime_test',
+      );
+    } catch (_) {
+      // Diagnostics must not crash or prevent the ordinary app startup.
+      RuntimeEventLog.instance.emit(
+        '[TEST_BRIDGE] unavailable reason=start_failure',
+      );
+    }
   }
 
   Future<void> _initializeServices() async {
