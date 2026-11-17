@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -145,6 +146,53 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
                 self.assertIn(command, contract)
         self.assertLess(dispatcher.index('Published Android APK asset missing'),
                         dispatcher.index('gh workflow run linux-release-publish.yml'))
+
+    def test_windows_coordinated_beta_preserves_manual_computer_use_lab(self):
+        workflow = source(".github/workflows/windows-release-publish.yml")
+        settings = source("lib/features/settings/presentation/pages/settings_page.dart")
+        policy = source("lib/features/computer_use/computer_use_build_policy.dart")
+
+        self.assertIn("Computer Use — Laboratorio", settings)
+        self.assertIn("ComputerUseLabBuildPolicy.enabled", settings)
+        self.assertIn("AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA", policy)
+        self.assertIn("defaultValue: false", policy)
+
+        gate_start = workflow.index("name: Resolve Windows Computer Use beta laboratory profile")
+        gate_end = workflow.index("name: Resolve Flutter dependencies", gate_start)
+        gate = workflow[gate_start:gate_end]
+        self.assertIn("steps.publish_tag.outputs.tag", gate)
+        self.assertIn("id: computer_use_lab", gate)
+        self.assertIn("enabled=$enabled", gate)
+        self.assertIn("'false'", gate)
+        match = re.search(r"\$releaseTag -match '([^']+)'", gate)
+        self.assertIsNotNone(match, "Must gate only the explicit beta release tag")
+        pattern = match.group(1)
+        for tag, enabled in (
+            ("v1.0.16-beta+104671", True),
+            ("v1.0.17-beta+104672", True),
+            ("v1.0.16+104671", False),
+            ("v1.0.16-nightly+104671", False),
+            ("v1.0.16-dev+104671", False),
+            ("v1.0.16-beta+104671-malformed", False),
+        ):
+            with self.subTest(tag=tag):
+                self.assertEqual(re.fullmatch(pattern, tag) is not None, enabled)
+        self.assertIn(
+            "--dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA="
+            "${{ steps.computer_use_lab.outputs.enabled }}", workflow
+        )
+        self.assertIn(
+            "--dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED="
+            "${{ steps.computer_use_lab.outputs.enabled }}", workflow
+        )
+        self.assertLess(
+            workflow.index("name: Verify Computer Use beta profile before packaging"),
+            workflow.index("name: Build coordinated Windows release"),
+        )
+        self.assertIn(
+            "--dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="
+            "${{ steps.hybrid_gate.outputs.enabled }}", workflow
+        )
 
     def test_desktop_publishers_verify_issued_manifest_before_build(self):
         for platform in ("windows", "macos", "linux"):
