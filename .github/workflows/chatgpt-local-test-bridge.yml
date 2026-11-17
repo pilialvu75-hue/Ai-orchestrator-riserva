@@ -39,15 +39,19 @@ jobs:
           $messages = @(
             '{"jsonrpc":"2.0","id":1,"method":"initialize"}',
             '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
-            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"../invalid","kind":"runtime"}}}'
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"../invalid","kind":"runtime"}}}',
+            '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"synthetic-123","kind":"runtime"}}}'
           )
           $raw = $messages | & powershell.exe -NoProfile -File scripts/chatgpt_bridge/aivexus_mcp.ps1
-          if (@($raw).Count -ne 3) { throw "Expected three protocol responses" }
+          if (@($raw).Count -ne 4) { throw "Expected four protocol responses" }
           # Only synthetic handshake messages are used here; safe to show on CI.
           Write-Output ($raw -join " | ")
           $hello = $raw[0] | ConvertFrom-Json
           $list = $raw[1] | ConvertFrom-Json
           $invalid = $raw[2] | ConvertFrom-Json
+          $valid = $raw[3] | ConvertFrom-Json
           if ($hello.result.serverInfo.name -ne 'aivexus-local-test-bridge') { throw "Incorrect handshake" }
           if (@($list.result.tools).Count -ne 6) { throw "Wrong tool allow-list" }
           if (-not $invalid.result.isError) { throw "Invalid request was not rejected" }
+          $body = $valid.result.content[0].text | ConvertFrom-Json
+          if ($body.error -ne "bridge_token_missing") { throw "Valid test command did not reach the credential gate" }
