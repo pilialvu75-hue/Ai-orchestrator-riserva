@@ -164,7 +164,7 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
         self.assertIn("id: computer_use_lab", gate)
         self.assertIn("enabled=$enabled", gate)
         self.assertIn("'false'", gate)
-        match = re.search(r"\\$releaseTag -match '([^']+)'", gate)
+        match = re.search(r"\$releaseTag -match '([^']+)'", gate)
         self.assertIsNotNone(match, "Must gate only the explicit beta release tag")
         pattern = match.group(1)
         for tag, enabled in (
