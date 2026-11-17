@@ -9,6 +9,8 @@ on:
       - 'lib/features/settings/presentation/pages/settings_page.dart'
       - 'lib/features/settings/presentation/pages/modules/chatgpt_bridge_settings_page.dart'
       - 'scripts/chatgpt_bridge/**'
+      - 'plugins/aivexus-local-test/**'
+      - '.agents/plugins/marketplace.json'
       - 'test/core/diagnostics/chatgpt_bridge/**'
       - '.github/workflows/chatgpt-bridge-windows-qa.yml'
   workflow_dispatch:
@@ -78,6 +80,11 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $staging 'mcp-tools') -Force | Out-Null
           Copy-Item scripts\chatgpt_bridge\aivexus_mcp.ps1 (Join-Path $staging 'mcp-tools\aivexus_mcp.ps1')
           Copy-Item docs\CHATGPT_LOCAL_TEST_BRIDGE.md (Join-Path $staging 'mcp-tools\README.md')
+          # Bundle an opt-in local plugin prototype. This does not install it.
+          New-Item -ItemType Directory -Path (Join-Path $staging 'plugins') -Force | Out-Null
+          Copy-Item plugins\aivexus-local-test (Join-Path $staging 'plugins\aivexus-local-test') -Recurse -Force
+          New-Item -ItemType Directory -Path (Join-Path $staging '.agents\plugins') -Force | Out-Null
+          Copy-Item .agents\plugins\marketplace.json (Join-Path $staging '.agents\plugins\marketplace.json')
           @(
             'AIVEXUS private QA build — NOT installed, signed or published'
             'Commit: ${{ github.sha }}'
