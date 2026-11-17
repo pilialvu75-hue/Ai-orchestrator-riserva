@@ -226,7 +226,7 @@ void main() {
       // while the first save is blocked, then permit the first claim to commit.
       await Future<void>.delayed(Duration.zero);
       pausedStore.releaseFirstExternalWaitSave.complete();
-      final results = await Future.wait(<WorkshopDurableGitHubReconcileResult>[
+      final results = await Future.wait(<Future<WorkshopDurableGitHubReconcileResult>>[
         first,
         second,
       ]);
