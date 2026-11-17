@@ -159,6 +159,9 @@ function Write-McpResponse($Value) {
 }
 
 while ($null -ne ($line = [Console]::In.ReadLine())) {
+    # Windows PowerShell piping may prefix the FIRST stdin line with a UTF-8 BOM.
+    # Strip only that byte-order marker; later JSON lines are unchanged.
+    $line = $line.TrimStart([char]0xFEFF)
     try {
         $message = ConvertFrom-Json -InputObject $line
         if ($message.jsonrpc -ne '2.0') { continue }
