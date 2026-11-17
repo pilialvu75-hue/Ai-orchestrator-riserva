@@ -29,13 +29,18 @@ import 'package:ai_orchestrator/native/runtime/windows/windows_gpu_probe_cache.d
 /// canonical provider. Unsupported platforms and startup failures use the CLI.
 final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   AssistantResidentLocalRuntimeProvider({required LocalRuntimeProvider delegate,
-      ResidentCompletionRuntime? runtime, String? Function()? executable})
+      ResidentCompletionRuntime? runtime, String? Function()? executable,
+      bool Function()? isWindowsHost})
       : _delegate = delegate, _runtime = runtime ?? ResidentCompletionRuntime(),
-        _executable = executable ?? _bundledServer;
+        _executable = executable ?? _bundledServer,
+        _isWindowsHost = isWindowsHost ?? _platformIsWindows;
+
+  static bool _platformIsWindows() => Platform.isWindows;
 
   final LocalRuntimeProvider _delegate;
   final ResidentCompletionRuntime _runtime;
   final String? Function() _executable;
+  final bool Function() _isWindowsHost;
   AppLifecycleListener? _lifecycle;
   bool _unavailable = false;
   bool _gpuUnavailable = false;
@@ -131,6 +136,23 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   @override
   TokenStream streamInference({required InferenceRequest request,
       required CancellationToken cancellationToken}) async* {
+    // The Self-Test uses the canonical CLI. On modern Windows the resident
+    // server path has been measured for a small explicit set of models only.
+    // Do not send unmeasured models (e.g. Qwen2.5 3B) into an unverified
+    // resident CPU server when the packaged CLI path is already supported.
+    if (_isWindowsHost() &&
+        !AssistantWindowsGpuPolicy.supports(request.modelId ?? '')) {
+      RuntimeEventLog.instance.emit(
+        '[ASSISTANT_LOCAL_ROUTE] backend=process_cli '
+        'reason=unmeasured_windows_resident_profile '
+        'model_id=${request.modelId ?? 'none'}',
+      );
+      yield* _delegate.streamInference(
+        request: request,
+        cancellationToken: cancellationToken,
+      );
+      return;
+    }
     final executable = _unavailable ? null : _executable();
     if (executable == null) {
       yield* _delegate.streamInference(request: request, cancellationToken: cancellationToken);
