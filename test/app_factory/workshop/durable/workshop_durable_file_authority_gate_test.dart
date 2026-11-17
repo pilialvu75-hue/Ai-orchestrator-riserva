@@ -59,20 +59,19 @@ void main() {
     });
     await entered.future;
 
-    final rootPath = privateRoot.path;
-    final result = await Isolate.run(() async {
-      final otherIsolate = WorkshopDurableFileAuthorityGate(
-        privateRoot: Directory(rootPath),
-        schedulerScope: 'workshop-owner',
-      );
-      try {
-        await otherIsolate.run(() async => 1);
-        return 'incorrectly-acquired';
-      } on StateError {
-        return 'blocked';
-      }
-    });
-    expect(result, 'blocked');
+    // Isolate.spawn transfers only a string and a SendPort. A closure
+    // declared in this test may capture the unsendable Completers above.
+    final response = ReceivePort();
+    final isolate = await Isolate.spawn<List<Object>>(
+      _probeOtherIsolate,
+      <Object>[privateRoot.path, response.sendPort],
+    );
+    try {
+      expect(await response.first, 'blocked');
+    } finally {
+      isolate.kill(priority: Isolate.immediate);
+      response.close();
+    }
 
     release.complete();
     await first;
@@ -150,4 +149,24 @@ void main() {
       throwsArgumentError,
     );
   });
+}
+
+
+// Top-level entry point: the spawned isolate must not capture the test-zone
+// closure or its Completers, which are not transferable via SendPort.
+void _probeOtherIsolate(List<Object> message) async {
+  final root = message[0] as String;
+  final reply = message[1] as SendPort;
+  final other = WorkshopDurableFileAuthorityGate(
+    privateRoot: Directory(root),
+    schedulerScope: 'workshop-owner',
+  );
+  try {
+    await other.run(() async => 1);
+    reply.send('incorrectly-acquired');
+  } on StateError {
+    reply.send('blocked');
+  } catch (error) {
+    reply.send('unexpected-${error.runtimeType}');
+  }
 }
