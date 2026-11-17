@@ -100,8 +100,12 @@ class AivexusBridgeController {
     if (!allowed) return;
     final old = _host;
     _host = null;
-    await old?.stop();
-    await _secretStore.delete();
+    try {
+      await old?.stop();
+    } finally {
+      // Revocation must still erase credentials if shutdown reports an error.
+      await _secretStore.delete();
+    }
   }
 
   /// Generate a new key on explicit user request: invalidates old MCP config.
