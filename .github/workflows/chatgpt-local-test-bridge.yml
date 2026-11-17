@@ -74,3 +74,22 @@ jobs:
           if (-not $invalid.result.isError) { throw "Invalid request was not rejected" }
           $body = $valid.result.content[0].text | ConvertFrom-Json
           if ($body.error -ne "bridge_token_missing") { throw "Valid test command did not reach the credential gate" }
+      - name: Enforce instance_info-only mode without changing default MCP tools
+        shell: powershell
+        env:
+          AIVEXUS_MCP_INSTANCE_ONLY: '1'
+          AIVEXUS_MCP_TEST_MODE: '1'
+        run: |
+          $messages = @(
+            '{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"synthetic-123","kind":"runtime"}}}'
+          )
+          $raw = $messages | & powershell.exe -NoProfile -File scripts/chatgpt_bridge/aivexus_mcp.ps1
+          if (@($raw).Count -ne 2) { throw 'Expected two read-only test responses' }
+          $list = $raw[0] | ConvertFrom-Json
+          $blocked = $raw[1] | ConvertFrom-Json
+          if (@($list.result.tools).Count -ne 1) { throw 'Instance-only profile leaked additional tools' }
+          if ($list.result.tools[0].name -ne 'instance_info') { throw 'Wrong tool exposed' }
+          if (-not $blocked.result.isError) { throw 'Non-read tool call was not blocked' }
+          $body = $blocked.result.content[0].text | ConvertFrom-Json
+          if ($body.error -ne 'tool_disabled_by_read_only_profile') { throw 'Wrong readonly denial' }
