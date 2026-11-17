@@ -1,145 +1,90 @@
-# AIVEXUS Local Test -> ChatGPT normal chats via OpenAI Secure MCP Tunnel.
-# Opt-in only. Does not install software, configure Windows policy, open ports,
-# register a ChatGPT plugin, or create/reveal Platform credentials.
-# Windows PowerShell 5.1+. Follow docs/CHATGPT_LOCAL_TEST_BRIDGE.md.
+# AIVEXUS -> ordinary ChatGPT Chat via OpenAI Secure MCP Tunnel.
+# Private QA launcher, opt-in only. No Windows security policy is changed.
+# Supports built-in Windows PowerShell 5.1 and later.
 [CmdletBinding()]
 param(
     [string]$TunnelId,
-
     [string]$TunnelClientExe,
-
     [string]$McpScriptPath,
-
     [switch]$CheckOnly
 )
 
 $ErrorActionPreference = 'Stop'
 $profileName = 'aivexus-local-test'
 
-# One-time ASUS default paths; any location may still be supplied explicitly.
+# Optional default: the previously verified ASUS Windows download location.
 if ([string]::IsNullOrWhiteSpace($TunnelClientExe)) {
     $TunnelClientExe = Join-Path $env:USERPROFILE 'Downloads\AIVEXUS-Tunnel-Client\tunnel-client.exe'
 }
+
+# The local adapter is a trusted copy in the private Windows QA package.
+# Multiple copies are ambiguous: never choose one silently.
 if ([string]::IsNullOrWhiteSpace($McpScriptPath)) {
-    $candidates = @(Get-ChildItem (Join-Path $env:USERPROFILE 'Downloads') -Filter 'aivexus_mcp.ps1' -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -match '[\\/]mcp-tools[\\/]aivexus_mcp\.ps1 {
-    throw 'tunnel-client.exe not found. Obtain the approved Windows build from official OpenAI Platform tunnel settings.'
-}
-if ((Split-Path -Leaf $TunnelClientExe) -ne 'tunnel-client.exe') {
-    throw 'The client must be the official tunnel-client.exe executable.'
-}
-if (!(Test-Path -LiteralPath $McpScriptPath -PathType Leaf)) {
-    throw 'The AIVEXUS MCP adapter path does not exist.'
-}
-if ((Split-Path -Leaf $McpScriptPath) -ne 'aivexus_mcp.ps1') {
-    throw 'Only the AIVEXUS MCP adapter aivexus_mcp.ps1 is supported.'
-}
-$scriptFullPath = (Resolve-Path -LiteralPath $McpScriptPath).Path
-if ($scriptFullPath.Contains('"')) {
-    throw 'Unsupported double-quote in MCP script path.'
-}
-if ($CheckOnly) {
-    Write-Host 'Paths and tunnel ID syntax validated. No secrets read; no network requests or processes started.'
-    return
-}
-
-Write-Host 'Copy the *existing* local bridge key using AIVEXUS > Copy connection key.'
-Write-Host 'The key will be read from the clipboard, not echoed or written to disk.'
-$bridgeToken = ([string](Get-Clipboard -Raw)).Trim()
-if ($bridgeToken.Length -lt 32) {
-    throw 'Clipboard does not contain a valid AIVEXUS bridge key. No tunnel started.'
-}
-
-# Read an independently scoped Platform runtime key through a concealed prompt.
-# The Platform key needs Tunnels Read + Use, not Tunnels Manage.
-$runtimeSecret = Read-Host 'Platform tunnel runtime API key (hidden input)' -AsSecureString
-if ($null -eq $runtimeSecret -or $runtimeSecret.Length -lt 10) {
-    throw 'Missing tunnel runtime key. No tunnel started.'
-}
-$bstr = [IntPtr]::Zero
-$previousBridgeToken = [Environment]::GetEnvironmentVariable('AIVEXUS_BRIDGE_TOKEN','Process')
-$previousControlPlaneKey = [Environment]::GetEnvironmentVariable('CONTROL_PLANE_API_KEY','Process')
-try {
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($runtimeSecret)
-    $runtimeKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    $env:AIVEXUS_BRIDGE_TOKEN = $bridgeToken
-    $env:CONTROL_PLANE_API_KEY = $runtimeKey
-    $runtimeKey = $null
-    $bridgeToken = $null
-
-    # The tunnel client inherits the two process-local environment variables;
-    # the spawned MCP PowerShell child inherits only the local bridge token.
-    # No secret is passed via command-line arguments or written to YAML.
-    $mcpCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "' + $scriptFullPath + '"'
-    Write-Host 'Initializing a local STDIO profile. No public listener is opened.'
-    & $TunnelClientExe init --sample sample_mcp_stdio_local --profile $profileName --tunnel-id $TunnelId --mcp-command $mcpCommand
-    if ($LASTEXITCODE -ne 0) { throw 'tunnel-client init failed' }
-    Write-Host 'Checking tunnel readiness. This can require an authorized Platform tunnel association.'
-    & $TunnelClientExe doctor --profile $profileName --explain
-    if ($LASTEXITCODE -ne 0) { throw 'tunnel-client doctor reported an error' }
-    Write-Host 'Running private tunnel. Keep AIVEXUS and this window open; Ctrl+C stops the tunnel.'
-    & $TunnelClientExe run --profile $profileName
-    if ($LASTEXITCODE -ne 0) { throw 'tunnel-client terminated with an error' }
-}
-finally {
-    [Environment]::SetEnvironmentVariable('AIVEXUS_BRIDGE_TOKEN',$previousBridgeToken,'Process')
-    [Environment]::SetEnvironmentVariable('CONTROL_PLANE_API_KEY',$previousControlPlaneKey,'Process')
-    if ($bstr -ne [IntPtr]::Zero) {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
-    if ($null -ne $runtimeSecret) { $runtimeSecret.Dispose() }
-}
- })
+    $downloads = Join-Path $env:USERPROFILE 'Downloads'
+    $candidates = @(
+        Get-ChildItem -LiteralPath $downloads -Filter 'aivexus_mcp.ps1' -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '[\\/]mcp-tools[\\/]aivexus_mcp\.ps1$' }
+    )
     if ($candidates.Count -ne 1) {
-        throw 'Could not select a unique aivexus_mcp.ps1 in Downloads. Use -McpScriptPath with the exact trusted QA path.'
+        throw 'Could not identify one trusted QA MCP adapter. Specify -McpScriptPath explicitly.'
     }
     $McpScriptPath = $candidates[0].FullName
 }
+
 if ([string]::IsNullOrWhiteSpace($TunnelId)) {
     if ($CheckOnly) {
-        Write-Host 'Tunnel ID not supplied. In live mode the user will be prompted for the Platform tunnel ID.'
+        Write-Host 'Tunnel ID not specified: it will be requested at activation.'
     } else {
-        Write-Host 'Open OpenAI Platform > Tunnels and copy the ID of the existing AIVEXUS tunnel.'
-        $TunnelId = ([string](Read-Host 'Paste tunnel ID')).Trim()
+        $TunnelId = ([string](Read-Host 'Paste existing OpenAI Platform tunnel ID')).Trim()
     }
 }
-if ($TunnelId -and $TunnelId -cnotmatch '^tunnel_[a-z0-9]{32} {
-    throw 'tunnel-client.exe not found. Obtain the approved Windows build from official OpenAI Platform tunnel settings.'
+if (-not [string]::IsNullOrWhiteSpace($TunnelId)) {
+    if ($TunnelId -cnotmatch '^tunnel_[a-z0-9]{32}$') {
+        throw 'Invalid tunnel ID format; verify the value on OpenAI Platform.'
+    }
 }
-if ((Split-Path -Leaf $TunnelClientExe) -ne 'tunnel-client.exe') {
-    throw 'The client must be the official tunnel-client.exe executable.'
+
+if (-not (Test-Path -LiteralPath $TunnelClientExe -PathType Leaf)) {
+    throw 'tunnel-client.exe not found at the expected local path.'
 }
-if (!(Test-Path -LiteralPath $McpScriptPath -PathType Leaf)) {
-    throw 'The AIVEXUS MCP adapter path does not exist.'
+if ((Split-Path -Path $TunnelClientExe -Leaf) -ne 'tunnel-client.exe') {
+    throw 'Expected official executable named tunnel-client.exe.'
 }
-if ((Split-Path -Leaf $McpScriptPath) -ne 'aivexus_mcp.ps1') {
-    throw 'Only the AIVEXUS MCP adapter aivexus_mcp.ps1 is supported.'
+if (-not (Test-Path -LiteralPath $McpScriptPath -PathType Leaf)) {
+    throw 'AIVEXUS adapter aivexus_mcp.ps1 not found.'
 }
+if ((Split-Path -Path $McpScriptPath -Leaf) -ne 'aivexus_mcp.ps1') {
+    throw 'Expected trusted adapter named aivexus_mcp.ps1.'
+}
+$clientPath = (Resolve-Path -LiteralPath $TunnelClientExe).Path
 $scriptFullPath = (Resolve-Path -LiteralPath $McpScriptPath).Path
 if ($scriptFullPath.Contains('"')) {
-    throw 'Unsupported double-quote in MCP script path.'
+    throw 'Unsupported quote character in MCP adapter file path.'
 }
+
 if ($CheckOnly) {
-    Write-Host 'Paths and tunnel ID syntax validated. No secrets read; no network requests or processes started.'
+    Write-Host 'PRECHECK PASS: tunnel-client.exe and aivexus_mcp.ps1 exist.'
+    Write-Host 'No keys read, no network requests, no tunnel started.'
     return
 }
 
-Write-Host 'Copy the *existing* local bridge key using AIVEXUS > Copy connection key.'
-Write-Host 'The key will be read from the clipboard, not echoed or written to disk.'
+# The existing local AIVEXUS token is copied inside AIVEXUS, not ChatGPT.
+Write-Host 'In AIVEXUS, press Copy connection key; then return to this window.'
 $bridgeToken = ([string](Get-Clipboard -Raw)).Trim()
 if ($bridgeToken.Length -lt 32) {
-    throw 'Clipboard does not contain a valid AIVEXUS bridge key. No tunnel started.'
+    throw 'Missing AIVEXUS local bridge key in clipboard. No tunnel started.'
 }
 
-# Read an independently scoped Platform runtime key through a concealed prompt.
-# The Platform key needs Tunnels Read + Use, not Tunnels Manage.
-$runtimeSecret = Read-Host 'Platform tunnel runtime API key (hidden input)' -AsSecureString
+# Use the separate restricted Platform runtime key (Tunnels Read + Use).
+# Read-Host -AsSecureString does not print the key.
+$runtimeSecret = Read-Host 'OpenAI Platform tunnel runtime API key (hidden)' -AsSecureString
 if ($null -eq $runtimeSecret -or $runtimeSecret.Length -lt 10) {
-    throw 'Missing tunnel runtime key. No tunnel started.'
+    throw 'Missing Platform tunnel runtime API key. No tunnel started.'
 }
+
+$previousBridgeToken = [Environment]::GetEnvironmentVariable('AIVEXUS_BRIDGE_TOKEN', 'Process')
+$previousControlKey = [Environment]::GetEnvironmentVariable('CONTROL_PLANE_API_KEY', 'Process')
 $bstr = [IntPtr]::Zero
-$previousBridgeToken = [Environment]::GetEnvironmentVariable('AIVEXUS_BRIDGE_TOKEN','Process')
-$previousControlPlaneKey = [Environment]::GetEnvironmentVariable('CONTROL_PLANE_API_KEY','Process')
 try {
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($runtimeSecret)
     $runtimeKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
@@ -148,94 +93,22 @@ try {
     $runtimeKey = $null
     $bridgeToken = $null
 
-    # The tunnel client inherits the two process-local environment variables;
-    # the spawned MCP PowerShell child inherits only the local bridge token.
-    # No secret is passed via command-line arguments or written to YAML.
     $mcpCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "' + $scriptFullPath + '"'
-    Write-Host 'Initializing a local STDIO profile. No public listener is opened.'
-    & $TunnelClientExe init --sample sample_mcp_stdio_local --profile $profileName --tunnel-id $TunnelId --mcp-command $mcpCommand
-    if ($LASTEXITCODE -ne 0) { throw 'tunnel-client init failed' }
-    Write-Host 'Checking tunnel readiness. This can require an authorized Platform tunnel association.'
-    & $TunnelClientExe doctor --profile $profileName --explain
-    if ($LASTEXITCODE -ne 0) { throw 'tunnel-client doctor reported an error' }
-    Write-Host 'Running private tunnel. Keep AIVEXUS and this window open; Ctrl+C stops the tunnel.'
-    & $TunnelClientExe run --profile $profileName
-    if ($LASTEXITCODE -ne 0) { throw 'tunnel-client terminated with an error' }
+    Write-Host 'Creating a private local STDIO tunnel profile.'
+    & $clientPath init --sample sample_mcp_stdio_local --profile $profileName --tunnel-id $TunnelId --mcp-command $mcpCommand
+    if ($LASTEXITCODE -ne 0) { throw 'Tunnel profile initialization failed.' }
+
+    Write-Host 'Checking private tunnel readiness.'
+    & $clientPath doctor --profile $profileName --explain
+    if ($LASTEXITCODE -ne 0) { throw 'Tunnel readiness check failed.' }
+
+    Write-Host 'Starting private tunnel. Press Ctrl+C to stop.'
+    & $clientPath run --profile $profileName
+    if ($LASTEXITCODE -ne 0) { throw 'Tunnel client stopped with an error.' }
 }
 finally {
-    [Environment]::SetEnvironmentVariable('AIVEXUS_BRIDGE_TOKEN',$previousBridgeToken,'Process')
-    [Environment]::SetEnvironmentVariable('CONTROL_PLANE_API_KEY',$previousControlPlaneKey,'Process')
-    if ($bstr -ne [IntPtr]::Zero) {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
-    if ($null -ne $runtimeSecret) { $runtimeSecret.Dispose() }
-}
-) {
-    throw 'Invalid tunnel ID format. Paste the complete tunnel_... value from OpenAI Platform.'
-}
-
-if (!(Test-Path -LiteralPath $TunnelClientExe -PathType Leaf)) {
-    throw 'tunnel-client.exe not found. Obtain the approved Windows build from official OpenAI Platform tunnel settings.'
-}
-if ((Split-Path -Leaf $TunnelClientExe) -ne 'tunnel-client.exe') {
-    throw 'The client must be the official tunnel-client.exe executable.'
-}
-if (!(Test-Path -LiteralPath $McpScriptPath -PathType Leaf)) {
-    throw 'The AIVEXUS MCP adapter path does not exist.'
-}
-if ((Split-Path -Leaf $McpScriptPath) -ne 'aivexus_mcp.ps1') {
-    throw 'Only the AIVEXUS MCP adapter aivexus_mcp.ps1 is supported.'
-}
-$scriptFullPath = (Resolve-Path -LiteralPath $McpScriptPath).Path
-if ($scriptFullPath.Contains('"')) {
-    throw 'Unsupported double-quote in MCP script path.'
-}
-if ($CheckOnly) {
-    Write-Host 'Paths and tunnel ID syntax validated. No secrets read; no network requests or processes started.'
-    return
-}
-
-Write-Host 'Copy the *existing* local bridge key using AIVEXUS > Copy connection key.'
-Write-Host 'The key will be read from the clipboard, not echoed or written to disk.'
-$bridgeToken = ([string](Get-Clipboard -Raw)).Trim()
-if ($bridgeToken.Length -lt 32) {
-    throw 'Clipboard does not contain a valid AIVEXUS bridge key. No tunnel started.'
-}
-
-# Read an independently scoped Platform runtime key through a concealed prompt.
-# The Platform key needs Tunnels Read + Use, not Tunnels Manage.
-$runtimeSecret = Read-Host 'Platform tunnel runtime API key (hidden input)' -AsSecureString
-if ($null -eq $runtimeSecret -or $runtimeSecret.Length -lt 10) {
-    throw 'Missing tunnel runtime key. No tunnel started.'
-}
-$bstr = [IntPtr]::Zero
-$previousBridgeToken = [Environment]::GetEnvironmentVariable('AIVEXUS_BRIDGE_TOKEN','Process')
-$previousControlPlaneKey = [Environment]::GetEnvironmentVariable('CONTROL_PLANE_API_KEY','Process')
-try {
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($runtimeSecret)
-    $runtimeKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    $env:AIVEXUS_BRIDGE_TOKEN = $bridgeToken
-    $env:CONTROL_PLANE_API_KEY = $runtimeKey
-    $runtimeKey = $null
-    $bridgeToken = $null
-
-    # The tunnel client inherits the two process-local environment variables;
-    # the spawned MCP PowerShell child inherits only the local bridge token.
-    # No secret is passed via command-line arguments or written to YAML.
-    $mcpCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "' + $scriptFullPath + '"'
-    Write-Host 'Initializing a local STDIO profile. No public listener is opened.'
-    & $TunnelClientExe init --sample sample_mcp_stdio_local --profile $profileName --tunnel-id $TunnelId --mcp-command $mcpCommand
-    if ($LASTEXITCODE -ne 0) { throw 'tunnel-client init failed' }
-    Write-Host 'Checking tunnel readiness. This can require an authorized Platform tunnel association.'
-    & $TunnelClientExe doctor --profile $profileName --explain
-    if ($LASTEXITCODE -ne 0) { throw 'tunnel-client doctor reported an error' }
-    Write-Host 'Running private tunnel. Keep AIVEXUS and this window open; Ctrl+C stops the tunnel.'
-    & $TunnelClientExe run --profile $profileName
-    if ($LASTEXITCODE -ne 0) { throw 'tunnel-client terminated with an error' }
-}
-finally {
-    [Environment]::SetEnvironmentVariable('AIVEXUS_BRIDGE_TOKEN',$previousBridgeToken,'Process')
-    [Environment]::SetEnvironmentVariable('CONTROL_PLANE_API_KEY',$previousControlPlaneKey,'Process')
+    [Environment]::SetEnvironmentVariable('AIVEXUS_BRIDGE_TOKEN', $previousBridgeToken, 'Process')
+    [Environment]::SetEnvironmentVariable('CONTROL_PLANE_API_KEY', $previousControlKey, 'Process')
     if ($bstr -ne [IntPtr]::Zero) {
         [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
     }
