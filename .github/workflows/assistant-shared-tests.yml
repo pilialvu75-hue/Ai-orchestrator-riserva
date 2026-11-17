@@ -91,6 +91,7 @@ jobs:
           test/core/runtime/inference/directive_aware_inference_service_test.dart
           test/core/runtime/inference/assistant_web_continuation_local_runtime_provider_test.dart
           test/core/runtime/inference/completion_output_test.dart
+          test/core/system/update/windows_release_os_compatibility_test.dart
           test/native/runtime/windows/windows_vulkan_device_test.dart
           test/native/runtime/windows/windows_gpu_probe_cache_test.dart
           test/core/runtime/inference/nemotron_prompt_template_test.dart
