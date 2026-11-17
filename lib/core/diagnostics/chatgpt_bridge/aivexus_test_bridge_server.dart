@@ -266,7 +266,6 @@ class AivexusTestBridgeServer {
     Map<String, Object?> body,
   ) async {
     final response = request.response;
-    if (response.headersSent) return;
     response.statusCode = status;
     response.headers.contentType = ContentType.json;
     response.headers.set('Cache-Control', 'no-store');
