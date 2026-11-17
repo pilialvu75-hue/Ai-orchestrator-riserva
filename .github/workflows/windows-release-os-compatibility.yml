@@ -35,7 +35,6 @@ jobs:
           flutter test
           test/core/system/update/windows_release_os_compatibility_test.dart
       - name: Analyze changed Dart files
-        run: >-
-          dart analyze
-          lib/core/system/update/update_checker.dart
-          test/core/system/update/windows_release_os_compatibility_test.dart
+        run: |
+          dart analyze lib/core/system/update/update_checker.dart
+          dart analyze test/core/system/update/windows_release_os_compatibility_test.dart
