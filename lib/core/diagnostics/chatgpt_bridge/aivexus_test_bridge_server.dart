@@ -120,7 +120,7 @@ class AivexusTestBridgeServer {
         final id = request.uri.queryParameters['request_id'];
         await _send(request, HttpStatus.ok, <String, Object?>{
           'instance_id': instanceId,
-          'runtime_status': runtimeDiagnostics.monitor.state.status.name,
+          'runtime_status': _runtimeStatus(),
           'test': _lookup(id),
           // No raw logs: they may contain file paths or sensitive content.
           'raw_logs_exposed': false,
@@ -202,17 +202,32 @@ class AivexusTestBridgeServer {
     }
   }
 
+  String _runtimeStatus() {
+    try {
+      return runtimeDiagnostics.monitor.state.status.name;
+    } catch (_) {
+      return 'unavailable';
+    }
+  }
+
   Future<Map<String, Object?>> _instance() async {
-    final result = await localModels.getSelectedModel();
-    final selected = result.fold((_) => null, (model) => model);
+    String? selectedModelId;
+    try {
+      final result = await localModels.getSelectedModel();
+      selectedModelId = result.fold(
+        (_) => null, (model) => model?.effectiveRuntimeModelId,
+      );
+    } catch (_) {
+      // Status remains useful even if model metadata is unavailable.
+    }
     return <String, Object?>{
       'instance_id': instanceId,
       'app_version': appVersion,
       'platform': Platform.operatingSystem,
       'engine_adapter': 'app_local_runtime_provider',
       'engine_version': null, // Do not invent a llama.cpp build identifier.
-      'model': selected?.effectiveRuntimeModelId,
-      'runtime_status': runtimeDiagnostics.monitor.state.status.name,
+      'model': selectedModelId,
+      'runtime_status': _runtimeStatus(),
       'transport': 'authenticated_loopback',
       'test_capabilities': <String>['runtime'],
       'app_pipeline_test_available': false,
