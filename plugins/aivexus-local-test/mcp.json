@@ -1,0 +1,17 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "aivexus_local_test": {
+      "type": "stdio",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "RemoteSigned",
+        "-File",
+        "${PLUGIN_ROOT}/mcp-tools/aivexus_mcp.ps1"
+      ],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}
