@@ -1,0 +1,20 @@
+{
+  "name": "aivexus-lab",
+  "interface": {
+    "displayName": "AIVEXUS Local Laboratory"
+  },
+  "plugins": [
+    {
+      "name": "aivexus-local-test",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aivexus-local-test"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
