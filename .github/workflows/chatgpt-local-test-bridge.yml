@@ -1,0 +1,27 @@
+name: ChatGPT Local Test Bridge Protocol
+on:
+  pull_request:
+    paths:
+      - 'scripts/chatgpt_bridge/**'
+      - '.github/workflows/chatgpt-local-test-bridge.yml'
+  push:
+    branches:
+      - 'feature/chatgpt-local-test-bridge-*'
+    paths:
+      - 'scripts/chatgpt_bridge/**'
+      - '.github/workflows/chatgpt-local-test-bridge.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  python-mcp-stdio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run synthetic MCP protocol tests without dependencies or secrets
+        run: python -m unittest discover -s scripts/chatgpt_bridge -p 'test_*.py' -v
