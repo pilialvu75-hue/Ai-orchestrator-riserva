@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:ai_orchestrator/core/diagnostics/chatgpt_bridge/aivexus_bridge_controller.dart';
+
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_diagnostics_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
@@ -13,7 +15,7 @@ import 'package:uuid/uuid.dart';
 ///
 /// This is NOT the existing CRDT sync server, a remote administration API,
 /// a generic command runner, or a second inference engine.
-class AivexusTestBridgeServer {
+class AivexusTestBridgeServer implements BridgeControlHost {
   AivexusTestBridgeServer({
     required this.token,
     required this.appVersion,
@@ -43,9 +45,11 @@ class AivexusTestBridgeServer {
   final Map<String, Map<String, Object?>> _savedResults =
       <String, Map<String, Object?>>{};
 
+  @override
   bool get isRunning => _server != null;
   int? get boundPort => _server?.port;
 
+  @override
   Future<void> start() async {
     if (_server != null) return;
     if (token.length < 32) {
@@ -77,6 +81,7 @@ class AivexusTestBridgeServer {
     });
   }
 
+  @override
   Future<void> stop() async {
     await _server?.close(force: true);
     _server = null;
