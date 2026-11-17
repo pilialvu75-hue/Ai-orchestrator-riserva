@@ -25,3 +25,25 @@ jobs:
           python-version: '3.12'
       - name: Run synthetic MCP protocol tests without dependencies or secrets
         run: python -m unittest discover -s scripts/chatgpt_bridge -p 'test_*.py' -v
+
+  powershell-mcp-stdio:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Windows PowerShell 5.1 JSON-RPC handshake with no policy bypass
+        shell: powershell
+        run: |
+          $messages = @(
+            '{"jsonrpc":"2.0","id":1,"method":"initialize"}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"../invalid","kind":"runtime"}}}'
+          )
+          $raw = $messages | & powershell.exe -NoProfile -File scripts/chatgpt_bridge/aivexus_mcp.ps1
+          if (@($raw).Count -ne 3) { throw "Expected three protocol responses" }
+          $hello = $raw[0] | ConvertFrom-Json
+          $list = $raw[1] | ConvertFrom-Json
+          $invalid = $raw[2] | ConvertFrom-Json
+          if ($hello.result.serverInfo.name -ne 'aivexus-local-test-bridge') { throw "Incorrect handshake" }
+          if (@($list.result.tools).Count -ne 6) { throw "Wrong tool allow-list" }
+          if (-not $invalid.result.isError) { throw "Invalid request was not rejected" }
