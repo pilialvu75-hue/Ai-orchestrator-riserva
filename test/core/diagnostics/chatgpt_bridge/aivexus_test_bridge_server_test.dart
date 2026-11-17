@@ -15,8 +15,15 @@ class _MockSelfTest extends Mock implements RuntimeSelfTestService {}
 class _MockDiagnostics extends Mock implements LocalRuntimeDiagnosticsService {}
 class _MockModels extends Mock implements LocalAiRepository {}
 
+// Flutter's ordinary test binding intercepts HttpClient, including 127.0.0.1.
+// This suite intentionally tests a real synthetic loopback HTTP boundary.
+class _RealBridgeBinding extends AutomatedTestWidgetsFlutterBinding {
+  @override
+  bool get overrideHttpClient => false;
+}
+
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  _RealBridgeBinding();
   setUpAll(() => registerFallbackValue(CancellationToken()));
 
   late AivexusTestBridgeServer server;
