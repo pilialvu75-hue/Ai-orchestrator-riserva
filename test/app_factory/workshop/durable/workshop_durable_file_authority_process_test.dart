@@ -109,7 +109,9 @@ String _dartCommand() {
       binary,
     ));
   }
-  final path = Platform.environment['PATH'] ?? '';
+  final path = Platform.environment['PATH'] ??
+      Platform.environment['Path'] ??
+      '';
   for (final dir in path.split(Platform.isWindows ? ';' : ':')) {
     if (dir.trim().isEmpty) continue;
     candidates.add(p.join(dir, 'cache', 'dart-sdk', 'bin', binary));
