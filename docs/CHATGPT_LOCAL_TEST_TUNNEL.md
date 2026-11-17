@@ -268,6 +268,27 @@ workspace with `Connection: Tunnel`, or (b) approval for a *separate
 desktop-only local plugin binding* that reuses the same AIVEXUS loopback
 endpoint and can expose just `instance_info`.
 
+## Optional instance_info-only MCP profile (implemented in branch)
+
+The bridge adapter now checks `AIVEXUS_MCP_INSTANCE_ONLY=1` when it starts.
+With that **opt-in** environment variable, `tools/list` returns exactly one
+schema: `instance_info`. `tools/call` also enforces the same restriction
+at dispatch: any other method returns
+`tool_disabled_by_read_only_profile` without reaching AIVEXUS.
+
+With the variable unset, the existing `aivexus_local_test` setup continues
+exposing its six historical tools. No installed Desktop connection or
+Windows environment was changed by this repository patch. Windows CI
+exercises both the default six-tool mode and the restricted one-tool mode,
+including a direct attempt to call blocked `test_start`. No secret or real
+AIVEXUS instance is required for these protocol-level tests.
+
+This is preparatory work for a future Desktop-only plugin. It is NOT a
+registered ChatGPT `plugin_asdk_app` connection, nor evidence that normal
+ChatGPT web can call the Desktop MCP server on Plus. A local plugin using
+this filtered adapter would still require an explicit separate binding
+decision. Do not install or launch a duplicate MCP server automatically.
+
 ## Security and limits
 
 - The tunnel transports requests to a local MCP subprocess, which itself
