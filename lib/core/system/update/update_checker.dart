@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -6,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_orchestrator/core/system/update/release_channel.dart';
 import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
 import 'package:ai_orchestrator/core/system/update/version_comparator.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dart';
 
 class UpdateCheckResult {
   const UpdateCheckResult({
@@ -42,9 +44,12 @@ class UpdateChecker {
     required this.githubOwner,
     required this.githubRepo,
     this.targetPlatform = UpdateTargetPlatform.android,
+    String? windowsOperatingSystemVersion,
   })  : _httpClient = httpClient,
         _preferences = preferences,
-        _comparator = comparator;
+        _comparator = comparator,
+        _windowsOperatingSystemVersion =
+            windowsOperatingSystemVersion ?? Platform.operatingSystemVersion;
 
   final http.Client _httpClient;
   final SharedPreferences _preferences;
@@ -54,6 +59,7 @@ class UpdateChecker {
   final String githubOwner;
   final String githubRepo;
   final UpdateTargetPlatform targetPlatform;
+  final String _windowsOperatingSystemVersion;
 
   static const String _cachedManifestLegacyKey = 'system.update.cached_manifest';
   static const String _cachedManifestKeyPrefix = 'system.update.cached_manifest.v2';
@@ -317,6 +323,19 @@ class UpdateChecker {
         continue;
       }
       _logVersionRemote('tag=$tagName normalized=$version');
+
+      // Legacy recovery releases use the same installer filename as modern
+      // Windows, so checking .exe/SHA-256 alone is not an OS compatibility gate.
+      // The published Win8.1 QA releases explicitly say "WINDOWS 8.1 ONLY".
+      // Keep them discoverable on Win8.1, never on Windows 10/11.
+      if (_isModernWindowsBlockedByWin81Only(
+        '${release['name'] ?? ''}\n${release['body'] ?? ''}',
+      )) {
+        _logArtifactInvalid(
+          'tag=$tagName target=windows reason=win81_only_on_modern_windows',
+        );
+        continue;
+      }
 
       final apkAsset = _extractApkAsset(release);
       if (apkAsset == null && targetPlatform == UpdateTargetPlatform.android) continue;
@@ -616,8 +635,29 @@ class UpdateChecker {
     return RegExp(r'^[0-9a-f]{64}$').hasMatch(value) ? value : null;
   }
 
-  bool _supportsTarget(UpdateManifest manifest) =>
-      manifest.artifactFor(targetPlatform) != null;
+  bool _supportsTarget(UpdateManifest manifest) {
+    if (manifest.artifactFor(targetPlatform) == null) return false;
+    // Apply the same gate to version.json and cached manifests. Otherwise a
+    // stale Win8.1-only Beta can reappear after an offline/cache fallback.
+    if (_isModernWindowsBlockedByWin81Only(manifest.changelog)) {
+      _logArtifactInvalid(
+        'target=windows version=${manifest.version} '
+        'reason=win81_only_on_modern_windows',
+      );
+      return false;
+    }
+    return true;
+  }
+
+  bool _isModernWindowsBlockedByWin81Only(String releaseDescription) {
+    if (targetPlatform != UpdateTargetPlatform.windows ||
+        !WindowsLlamaRuntime.isModernWindows(_windowsOperatingSystemVersion)) {
+      return false;
+    }
+    // Explicit release-scope declaration, not any incidental mention of 8.1.
+    return RegExp(r'\bWindows\s+8\.1\s+ONLY\b', caseSensitive: false)
+        .hasMatch(releaseDescription);
+  }
 
   String _cacheKeyForChannel(ReleaseChannel channel) =>
       '$_cachedManifestKeyPrefix.${channel.storageValue}';
