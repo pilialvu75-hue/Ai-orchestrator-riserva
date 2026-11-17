@@ -41,6 +41,8 @@ jobs:
           )
           $raw = $messages | & powershell.exe -NoProfile -File scripts/chatgpt_bridge/aivexus_mcp.ps1
           if (@($raw).Count -ne 3) { throw "Expected three protocol responses" }
+          # Only synthetic handshake messages are used here; safe to show on CI.
+          Write-Output ($raw -join " | ")
           $hello = $raw[0] | ConvertFrom-Json
           $list = $raw[1] | ConvertFrom-Json
           $invalid = $raw[2] | ConvertFrom-Json
