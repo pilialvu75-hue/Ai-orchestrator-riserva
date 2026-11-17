@@ -31,9 +31,14 @@ the *AIVEXUS execution host* in the first experiment.
   Both adapters use only fixed `127.0.0.1:47941` endpoints.
 - `lib/core/diagnostics/chatgpt_bridge/aivexus_test_bridge_server.dart`:
   authenticated loopback listener inside the existing AIVEXUS app.
-- `lib/app/runtime_bootstrap.dart`: starts the listener **only** on Windows
-  with the explicit internal compile-time switch enabled AND a sufficiently
-  long runtime secret. Neither ordinary release nor usual OTA enables it.
+- `lib/core/diagnostics/chatgpt_bridge/aivexus_bridge_controller.dart`:
+  on-device opt-in using OS-protected secret storage, rotation and revocation.
+- `lib/features/settings/presentation/pages/modules/chatgpt_bridge_settings_page.dart`:
+  guided activation from inside the existing AIVEXUS Settings page.
+- `lib/app/runtime_bootstrap.dart`: exposes the bridge **only** on Windows
+  with the explicit internal compile-time switch. It starts only after the
+  first user opt-in; a previously enabled pairing is restored on restart.
+  Ordinary releases are disabled.
 - `RuntimeSelfTestService.run(cancellationToken: ...)`: supports cooperative
   cancellation without changing existing callers.
 
@@ -62,59 +67,52 @@ process, authenticated with a secret known only to the local pair. This is
 stronger than a standalone Python llama.cpp call, but not an attestation
 against malicious software running under the same Windows account.
 
-## Device-side prerequisites (NOT performed automatically)
+## ASUS activation — no PowerShell commands or manual key generation
 
-1. Use the already installed Windows PowerShell. A historical ASUS audit
-   reported the Python launcher unavailable, so Python is **not required**.
-   Check `powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion'`
-   without changing execution policy. If script execution is forbidden by
-   corporate/device policy, stop; do not bypass or disable protection.
-2. Obtain an internal AIVEXUS Windows build compiled explicitly with
-   `--dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=true`. Standard shipped builds
-   leave the bridge disabled. Do not turn off Smart App Control.
-3. Generate a cryptographically random secret locally **on the ASUS**.
-   Do not put it in GitHub, chats, screenshots, diagnostic releases, or logs.
-   Use PowerShell (compatible with Windows PowerShell 5.1):
+**First use only**, after a reviewed internal QA build is available and the
+user has separately approved trying it on the ASUS:
 
-   ```powershell
-   $bytes = New-Object byte[] 48
-   $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-   $rng.GetBytes($bytes)
-   $rng.Dispose()
-   $secret = [Convert]::ToBase64String($bytes)
-   ```
+1. Open **AIVEXUS → Impostazioni → Collegamento ChatGPT (test)** and press
+   **Attiva collegamento**. A random secret is generated in OS-protected storage
+   and the localhost listener starts in the REAL running AIVEXUS application.
+   No console, manual command or environment-variable setup before launch.
+2. Open **ChatGPT Desktop → Impostazioni → Plugin → MCP → Aggiungi →
+   MCP personalizzato → STDIO** and set:
+   - **Name**: `AIVEXUS Local Test`
+   - **Command**: `powershell.exe`
+   - **Arguments**: `-NoProfile`, `-File`, and the path copied from the
+     **Copia percorso del componente MCP** button in AIVEXUS. These are three
+     separate arguments in the ChatGPT configuration UI.
+   - **Environment variable**: name `AIVEXUS_BRIDGE_TOKEN`; value pasted from
+     **Copia chiave di collegamento** in AIVEXUS. **Never send this value
+     as a chat message or put it in screenshots, code, GitHub or Diagnostics.**
+3. Save MCP configuration once. Ask ChatGPT to use
+   `instance_info` from **AIVEXUS Local Test**. Verify the real process
+   version and selected model. Then run one synthetic runtime test.
+4. **Disattiva e revoca** inside AIVEXUS stops the server and deletes its
+   secret. **Rigenera chiave** invalidates previous credentials immediately.
+   After rotation update the token in the local ChatGPT MCP settings.
 
-4. Launch the approved internal AIVEXUS build from an environment where
-   `AIVEXUS_BRIDGE_TOKEN` equals this secret. The application must be running
-   in that same session; the bridge cannot wake or launch it. The exact
-   executable path is device-specific and must be verified, not guessed.
-5. In **ChatGPT Desktop → Impostazioni → Plugin → MCP → Aggiungi → MCP
-   personalizzato**, select **STDIO**:
-   - Name: `AIVEXUS Local Test`
-   - Command: `powershell.exe`
-   - Arguments: `-NoProfile`, `-File`, then the **actual absolute path** to
-     `scripts/chatgpt_bridge/aivexus_mcp.ps1`
-   - Optional alternative only if Python 3 is already installed:
-     Command `py`, arguments `-3` and the absolute path to
-     `scripts/chatgpt_bridge/aivexus_mcp.py`
-   - Environment variable: `AIVEXUS_BRIDGE_TOKEN` = same local secret.
-   Never post the value or screenshot the populated field.
-6. Ask in ChatGPT: "Use `instance_info` of AIVEXUS Local Test".
-   Expected: AIVEXUS process instance ID, installed app version, host Windows,
-   selected model and runtime status. The app's active version is read from
-   actual runtime package metadata, not copied from this document.
-7. Start one synthetic `runtime` test with a unique stable `request_id`;
-   poll `test_status` using that *same ID*. Record PASS/FAIL and elapsed time.
-   Repeat with AIVEXUS closed: `aivexus_not_reachable` is expected.
+The UI supplies the script path so the user never needs to find it manually.
+If the adapter is missing from the package, the Copy Path button is disabled
+and the screen explains the missing component. Pairing requires AIVEXUS
+and ChatGPT Desktop to run on the *same ASUS*. The script uses built-in Windows
+PowerShell, tested in CI; Python installation is not needed.
 
-**No user action is required for this prototype until the internal build is
-reviewed and explicitly approved. Do not install or publish from this document.**
+**Important:** ChatGPT currently has no documented, verified API for
+automatically registering a custom MCP from inside AIVEXUS. The initial MCP
+entry in ChatGPT Desktop remains manual. This is a limitation, not a missing
+AIVEXUS permission. If PowerShell script execution is blocked by OS/device
+policy, stop rather than changing policy or Smart App Control.
+
+**No installation, signing or updater publication is performed by this PR.**
 
 ## Security and reliability
 
 - HTTP listener binds **only** to `127.0.0.1`, not `0.0.0.0` / LAN.
-- A 32+ character bearer token is mandatory and provided at process runtime,
-  never compiled into the binary. A missing secret keeps the listener disabled.
+- A 32+ character bearer token is generated with `Random.secure()` on first
+  user opt-in and persisted only in FlutterSecureStorage (OS-protected).
+  No secret is compiled into the binary, printed in logs, or returned to MCP.
 - Strict allow-list of methods, paths, kind, and request ID syntax; POST body
   bounded to 4096 bytes. Browser Origin requests rejected. No CORS.
 - MCP adapter connects to one fixed host/port only and does not follow redirects.
@@ -125,9 +123,9 @@ reviewed and explicitly approved. Do not install or publish from this document.*
   512 IDs are retained; do not claim permanent exactly-once execution.
 - One runtime test at a time. Cancellation is cooperative; an OS/native hang
   requires separate diagnosis. No process termination or firewall changes.
-- To revoke access: close AIVEXUS, remove the custom MCP in ChatGPT and
-  invalidate the shared secret; a new app launch without the secret remains
-  disabled. Removing MCP alone does not stop an already enabled app listener.
+- Revocation is available as **Disattiva e revoca** inside AIVEXUS (stop +
+  remove secret). Removing an MCP in ChatGPT alone does not stop the listener;
+  use the AIVEXUS switch to actually revoke access.
 
 ## Platform expansion
 
@@ -147,7 +145,8 @@ MCP server or signed production build is introduced by this first increment.
 
 1. Python synthetic protocol tests: `python -m unittest discover -s scripts/chatgpt_bridge -p 'test_*.py'` (CI only; does not require Python on ASUS).
    Native Windows PowerShell 5.1 JSON-RPC handshake test via GitHub Actions.
-2. Flutter: `flutter test test/core/diagnostics/chatgpt_bridge/aivexus_test_bridge_server_test.dart`.
+2. Flutter: `flutter test test/core/diagnostics/chatgpt_bridge/` (both server
+   and one-tap pairing-controller tests).
 3. Flutter static analysis / native Windows CI build (internal flag OFF by
    default). Fix CI failures before merging.
 4. On ASUS, verify legitimate AIVEXUS binary and model; no Smart App Control
