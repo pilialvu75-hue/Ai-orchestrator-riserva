@@ -14,6 +14,8 @@ on:
     paths:
       - '.github/workflows/windows-release-publish.yml'
       - 'windows/installer/**'
+      - 'tool/windows_trusted_signing.ps1'
+      - 'test/scripts/test_windows_signing_safety.ps1'
   workflow_run:
     workflows:
       - Build & Release APK
@@ -51,6 +53,15 @@ jobs:
           grep -Eq '^version:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?[[:space:]]*$' pubspec.yaml
           python3 scripts/check_android_release_gate.py .github/workflows/build.yml .github/workflows/macos-release-publish.yml .github/workflows/linux-release-publish.yml .github/workflows/windows-release-publish.yml
           echo 'Windows release publisher contract is valid.'
+
+  signing-safety:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - shell: pwsh
+        run: ./test/scripts/test_windows_signing_safety.ps1
 
   publish-windows:
     if: >-
@@ -192,6 +203,15 @@ jobs:
           "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Protected HYBRID consent Windows build: $enabled"
 
+      - name: Require trusted signing for modern Windows releases
+        if: ${{ !startsWith(steps.publish_tag.outputs.tag, 'v1.0.16-dev+') }}
+        shell: pwsh
+        env:
+          AIVEXUS_WINDOWS_SIGNING_PFX_B64: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_B64 }}
+          AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          & (Join-Path $PWD 'tool\windows_trusted_signing.ps1') -Mode Prepare
+
       - name: Resolve Flutter dependencies
         shell: pwsh
         run: flutter pub get --enforce-lockfile
@@ -231,6 +251,9 @@ jobs:
       - name: Prepare Windows release payload
         id: payload
         shell: pwsh
+        env:
+          AIVEXUS_WINDOWS_SIGNING_PFX_B64: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_B64 }}
+          AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD }}
         run: |
           $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
           if (-not (Test-Path $releaseDir)) {
@@ -322,6 +345,14 @@ jobs:
             $defines += '#define AivexusWin81UnsignedQABuild 1'
             Write-Host 'Windows 8.1-only unsigned QA with mandatory recovery.'
           }
+          if (-not $isWin81OnlyDev) {
+            $signer = Join-Path $PWD 'tool\windows_trusted_signing.ps1'
+            # Runtime DLLs have now been copied: sign the FINAL payload.
+            & $signer -Mode Bundle -ReleaseDir $releaseDir
+            & $signer -Mode Sign -FilePath '${{ steps.recovery.outputs.helper }}'
+            & $signer -Mode VerifyMicrosoft -FilePath $redist.FullName
+            $defines += '#define AivexusTrustedSignedBuild 1'
+          }
           $defines | Set-Content -Path $generatedDefines -Encoding ASCII
 
           "iscc=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -330,12 +361,22 @@ jobs:
       - name: Build versioned Windows Setup.exe
         id: installer
         shell: pwsh
+        env:
+          AIVEXUS_WINDOWS_SIGNING_PFX_B64: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_B64 }}
+          AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AIVEXUS_WINDOWS_SIGNING_PFX_PASSWORD }}
         run: |
           $iscc = '${{ steps.payload.outputs.iscc }}'
           $outputDir = '${{ steps.payload.outputs.output_dir }}'
           $script = Join-Path $PWD 'windows\installer\ai_orchestrator.iss'
 
-          & $iscc $script
+          $isWin81OnlyDev = '${{ steps.publish_tag.outputs.tag }}' -match '^v1\.0\.16-dev\+[0-9]+$'
+          if ($isWin81OnlyDev) {
+            & $iscc $script
+          } else {
+            $signerScript = Join-Path $PWD 'tool\windows_trusted_signing.ps1'
+            $innoSignTool = '/Saivexus_ci=pwsh.exe -NoProfile -File $q' + $signerScript + '$q -Mode Sign -FilePath $f'
+            & $iscc $innoSignTool $script
+          }
           if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
           }
@@ -349,6 +390,9 @@ jobs:
             throw "Generated Setup.exe is unexpectedly small: $setupSize bytes"
           }
 
+          if (-not $isWin81OnlyDev) {
+            & (Join-Path $PWD 'tool\windows_trusted_signing.ps1') -Mode Verify -FilePath $setupPath
+          }
           $hash = Get-FileHash -Path $setupPath -Algorithm SHA256
           $hashPath = "$setupPath.sha256"
           "$($hash.Hash.ToLowerInvariant())  AI-Orchestrator-Setup-x64.exe" | Set-Content -Path $hashPath -Encoding ASCII
@@ -407,3 +451,12 @@ jobs:
             ${{ steps.installer.outputs.hash_path }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Erase ephemeral signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:AIVEXUS_WINDOWS_SIGNING_PFX_PATH -and
+              (Test-Path -LiteralPath $env:AIVEXUS_WINDOWS_SIGNING_PFX_PATH)) {
+            Remove-Item -LiteralPath $env:AIVEXUS_WINDOWS_SIGNING_PFX_PATH -Force
+          }

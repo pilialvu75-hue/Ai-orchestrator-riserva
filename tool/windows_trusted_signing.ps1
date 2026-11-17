@@ -4,7 +4,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory)]
-  [ValidateSet('Prepare', 'Sign', 'Bundle', 'Verify')]
+  [ValidateSet('Prepare', 'Sign', 'Bundle', 'Verify', 'VerifyMicrosoft')]
   [string] $Mode,
   [string] $FilePath,
   [string] $ReleaseDir
@@ -54,6 +54,17 @@ function Assert-ValidSignature([string] $Path, [bool] $RequireOurSigner) {
 }
 
 switch ($Mode) {
+  'VerifyMicrosoft' {
+    if (-not $FilePath -or -not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+      throw 'Microsoft redistributable is missing.'
+    }
+    Assert-ValidSignature $FilePath $false
+    $sig = Get-AuthenticodeSignature -LiteralPath $FilePath
+    if ($sig.SignerCertificate.Subject -notmatch '(?:^|,\s*)O=Microsoft Corporation(?:,|$)') {
+      throw 'Redistributable is not signed by Microsoft Corporation.'
+    }
+    Write-Host 'Microsoft redistributable Authenticode validated.'
+  }
   'Prepare' {
     Assert-SecretEnvironment
     $pfxPath = Join-Path $env:RUNNER_TEMP 'aivexus-windows-signing.pfx'
