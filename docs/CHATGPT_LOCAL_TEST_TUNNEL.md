@@ -71,18 +71,29 @@ Official references:
 
 The QA package includes `mcp-tools/aivexus_tunnel_start.ps1`. It validates
 paths and tunnel ID, securely prompts for a separate Platform runtime key,
-reads the existing **AIVEXUS bridge key** only from clipboard, and invokes:
+reads the existing **AIVEXUS bridge key** only from clipboard, and invokes
+the verified local adapter.
 
-```
-# Illustrative syntax, not a ready-to-execute command. Replace the placeholders.
-& powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File <launcher_path> \
-  -TunnelId <tunnel_32_lowercase_hex_or_digits> \
-  -TunnelClientExe <verified_tunnel_client_exe_path> \
-  -McpScriptPath <aivexus_mcp_ps1_path>
+For the verified ASUS layout the client defaults to
+`%USERPROFILE%\\Downloads\\AIVEXUS-Tunnel-Client\\tunnel-client.exe` and
+the launcher locates a unique `mcp-tools\\aivexus_mcp.ps1` beneath
+`%USERPROFILE%\\Downloads`. If a second matching QA copy exists, stop and
+supply the exact `-McpScriptPath` rather than choosing arbitrarily. The
+launcher prompts for the already-created tunnel ID at runtime; the tunnel
+ID is not secret. No key is entered in the PowerShell command line.
+
+```powershell
+# One-time, read-only ASUS preflight, using a locally reviewed copy of
+# aivexus_tunnel_start.ps1 from this branch (not the web download ZIP):
+& powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "$env:USERPROFILE\\Downloads\\AIVEXUS-Tunnel-Client\\aivexus_tunnel_start.ps1" -CheckOnly
 ```
 
-Run `-CheckOnly` first to validate paths and ID syntax **without** reading
-secrets, invoking the binary, contacting OpenAI, or changing Windows settings.
+This first check validates paths **without** reading secrets, invoking the
+tunnel binary, contacting OpenAI, or changing Windows settings. The later
+interactive run uses the same command without `-CheckOnly`; it asks for
+tunnel ID, clipboard bridge key and a hidden Platform runtime key, then
+checks `doctor` before starting `run`. Ensure the launcher is the trusted
+reviewed repository file, and do not disable Windows protections.
 The script does NOT create a tunnel or API key and does not install software,
 open inbound ports, or register a ChatGPT plugin. Once invoked for real it
 creates a local tunnel profile, runs `doctor --explain`, and leaves the
