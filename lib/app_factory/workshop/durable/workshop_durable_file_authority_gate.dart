@@ -13,8 +13,15 @@ import 'package:path/path.dart' as p;
 /// automatic orphan cleanup, or production wiring.
 ///
 /// Use a pre-existing, application-private LOCAL directory that is not shared
-/// over a network filesystem. Every actor touching the same durable stores
-/// must use the same directory and scope, and must await all side effects
+/// over a network filesystem. This gate assumes COOPERATING actors: it is not
+/// a security boundary against actors able to unlink, rename or replace files
+/// in that directory. In particular, owner-token check + path deletion is NOT
+/// an atomic filesystem operation, so external replacement during cleanup is
+/// outside this contract. Enforce directory access and scheduler ownership
+/// separately before production wiring.
+///
+/// Every actor touching the same durable stores must use the same directory
+/// and scope, and must await all side effects
 /// before returning from [run]. Cross-process crash/restart acceptance tests
 /// and a single authoritative scheduler are still required for production.
 final class WorkshopDurableFileAuthorityGate {
