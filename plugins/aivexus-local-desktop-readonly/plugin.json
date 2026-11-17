@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "aivexus-local-desktop-readonly",
+  "version": "0.1.0",
+  "description": "Private, Windows desktop-only read-only status bridge for the running local AIVEXUS instance.",
+  "author": {
+    "name": "AIVEXUS"
+  },
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "AIVEXUS Local Desktop",
+        "shortDescription": "Read AIVEXUS local status",
+        "longDescription": "Read only the version, selected model, and runtime status of an AIVEXUS instance running on the same Windows PC. Uses a private local loopback connection, no tunnel, no cloud model API, and exposes one tool.",
+        "developerName": "AIVEXUS",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": "Usa solo instance_info per mostrare versione AIVEXUS, modello selezionato e stato del runtime. Non avviare test."
+      }
+    }
+  }
+}
