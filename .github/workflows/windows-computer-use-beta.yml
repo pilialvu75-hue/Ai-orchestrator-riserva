@@ -9,6 +9,8 @@ on:
     paths:
       - '.github/workflows/windows-computer-use-beta.yml'
       - 'test/scripts/test_computer_use_windows_beta.py'
+      - 'tool/windows_trusted_signing.ps1'
+      - 'windows/installer/**'
 
 permissions:
   contents: read
@@ -214,6 +216,7 @@ jobs:
             }
           }
           if (-not $redist) { throw 'Missing verified VC++ 2022 redistributable.' }
+          & (Join-Path $PWD 'tool\windows_trusted_signing.ps1') -Mode VerifyMicrosoft -FilePath $redist.FullName
           $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
           $outDir = Join-Path $PWD 'build\windows\computer-use-beta'
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
