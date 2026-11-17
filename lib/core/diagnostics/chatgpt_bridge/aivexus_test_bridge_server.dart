@@ -24,6 +24,7 @@ class AivexusTestBridgeServer {
   }) : instanceId = const Uuid().v4();
 
   static const _seenKey = 'chatgpt_bridge_seen_request_ids_v1';
+  static const _resultsKey = 'chatgpt_bridge_results_v1';
   static const _maxRememberedIds = 512;
   static const _maxRequestBytes = 4096;
 
@@ -39,8 +40,11 @@ class AivexusTestBridgeServer {
   SharedPreferences? _prefs;
   final Map<String, _BridgeTest> _tests = <String, _BridgeTest>{};
   final List<String> _seen = <String>[];
+  final Map<String, Map<String, Object?>> _savedResults =
+      <String, Map<String, Object?>>{};
 
   bool get isRunning => _server != null;
+  int? get boundPort => _server?.port;
 
   Future<void> start() async {
     if (_server != null) return;
@@ -51,6 +55,21 @@ class AivexusTestBridgeServer {
     _seen
       ..clear()
       ..addAll(_prefs!.getStringList(_seenKey) ?? const <String>[]);
+    _savedResults.clear();
+    for (final encoded in _prefs!.getStringList(_resultsKey) ??
+        const <String>[]) {
+      try {
+        final decoded = jsonDecode(encoded);
+        if (decoded is Map<String, dynamic> &&
+            decoded['request_id'] is String &&
+            _seen.contains(decoded['request_id'])) {
+          _savedResults[decoded['request_id'] as String] =
+              Map<String, Object?>.from(decoded);
+        }
+      } catch (_) {
+        // Corrupt non-sensitive test metadata must not block app startup.
+      }
+    }
     // Binding to a specific loopback address prevents exposure on the LAN.
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
     _server!.listen((request) {
@@ -201,7 +220,7 @@ class AivexusTestBridgeServer {
     final test = _tests[id];
     if (test != null) return test.snapshot();
     if (_seen.contains(id)) {
-      return <String, Object?>{
+      return _savedResults[id] ?? <String, Object?>{
         'request_id': id,
         'status': 'interrupted_after_restart',
         'restarted': false,
@@ -239,6 +258,19 @@ class AivexusTestBridgeServer {
     } finally {
       watch.stop();
       test.elapsedMs = watch.elapsedMilliseconds;
+      _savedResults[test.requestId] = test.snapshot();
+      // Only synthetic test metadata is persisted, never prompts, model paths,
+      // bearer tokens, user chats, stack traces or raw diagnostics.
+      try {
+        final remaining = _seen.toSet();
+        _savedResults.removeWhere((id, _) => !remaining.contains(id));
+        await _prefs?.setStringList(
+          _resultsKey,
+          _savedResults.values.map(jsonEncode).toList(),
+        );
+      } catch (_) {
+        // App operation still completes even if metadata persistence fails.
+      }
     }
   }
 
