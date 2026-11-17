@@ -91,7 +91,18 @@ $Tools = @(
     } @('first_request_id', 'second_request_id'))
 )
 
+# Opt-in, read-only discovery profile for a future Desktop-only plugin.
+# Default behavior and the existing six-tool MCP configuration are unchanged.
+# The filter applies both to tools/list and actual tool invocation.
+$OnlyInstanceInfo = ($env:AIVEXUS_MCP_INSTANCE_ONLY -ceq '1')
+if ($OnlyInstanceInfo) {
+    $Tools = @($Tools | Where-Object { $_.name -ceq 'instance_info' })
+}
+
 function Invoke-BridgeTool([string]$Name, $Arguments) {
+    if ($OnlyInstanceInfo -and $Name -cne 'instance_info') {
+        return @{ error = 'tool_disabled_by_read_only_profile' }
+    }
     if ($null -eq $Arguments) { $Arguments = [pscustomobject]@{} }
     switch ($Name) {
         'instance_info' {
