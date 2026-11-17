@@ -82,6 +82,7 @@ Write-Host 'Prepared stable MCP adapter path (without spaces).'
 
 # The existing local AIVEXUS token is copied inside AIVEXUS, not ChatGPT.
 Write-Host 'In AIVEXUS, press Copy connection key; then return to this window.'
+Read-Host 'Press Enter ONLY AFTER you have copied the local AIVEXUS key' | Out-Null
 $bridgeToken = ([string](Get-Clipboard -Raw)).Trim()
 if ($bridgeToken.Length -lt 32) {
     throw 'Missing AIVEXUS local bridge key in clipboard. No tunnel started.'
