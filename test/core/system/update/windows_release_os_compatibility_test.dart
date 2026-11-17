@@ -57,7 +57,9 @@ void main() {
     http.Client? client,
     bool allowCachedFallback = false,
   }) async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
+    if (preferences == null) {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+    }
     final prefs = preferences ?? await SharedPreferences.getInstance();
     final httpClient = client ??
         MockClient((request) async {
