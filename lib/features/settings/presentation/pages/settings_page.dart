@@ -27,6 +27,8 @@ import 'package:ai_orchestrator/features/settings/presentation/pages/modules/per
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/token_configurator_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/system_prompt_page.dart';
 import 'package:ai_orchestrator/features/settings/presentation/pages/modules/update_settings_page.dart';
+import 'package:ai_orchestrator/app/runtime_bootstrap.dart';
+import 'package:ai_orchestrator/features/settings/presentation/pages/modules/chatgpt_bridge_settings_page.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
 
 class SettingsPage extends StatefulWidget {
@@ -246,6 +248,23 @@ class _SettingsPageState extends State<SettingsPage> {
                     );
                   },
                 ),
+
+                if (RuntimeBootstrap.localTestBridgeEnabled &&
+                    !kIsWeb &&
+                    defaultTargetPlatform == TargetPlatform.windows) ...[
+                  const SizedBox(height: 12),
+                  _ModuleCard(
+                    icon: Icons.link_outlined,
+                    title: 'Collegamento ChatGPT (test)',
+                    subtitle: 'Attiva, collega e revoca senza usare PowerShell',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ChatGptBridgeSettingsPage(),
+                      ),
+                    ),
+                  ),
+                ],
 
                 if (ComputerUseLabBuildPolicy.enabled &&
                     !kIsWeb &&
