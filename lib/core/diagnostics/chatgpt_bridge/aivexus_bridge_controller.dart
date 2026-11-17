@@ -76,7 +76,7 @@ class AivexusBridgeController {
     if (isEnabled) return;
     final prior = await _secretStore.read();
     final fresh = prior == null || prior.length < 32;
-    final token = fresh ? _makeToken() : prior;
+    final token = fresh ? _makeToken() : prior!;
     if (fresh) await _secretStore.write(token);
     try {
       final host = buildHost(token);
