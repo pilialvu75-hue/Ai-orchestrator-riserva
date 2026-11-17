@@ -263,14 +263,14 @@ class AivexusTestBridgeServer {
         test.status = result.success ? 'completed' : 'failed';
       }
       test.success = result.success && !test.cancellation.isCancelled;
-      if (test.success && result.generatedText != null) {
+      if (test.success == true && result.generatedText != null) {
         // Only a short output from the fixed synthetic prompt is allowed out.
         test.generatedText = String.fromCharCodes(
           result.generatedText!.runes.take(256),
         );
       }
       // The self-test summary contains local file paths. Do not return it.
-      if (!test.success && test.status != 'cancelled') {
+      if (test.success != true && test.status != 'cancelled') {
         final summary = result.summary.toLowerCase();
         test.errorCode = summary.contains('model') && summary.contains('missing')
             ? 'model_unavailable'
