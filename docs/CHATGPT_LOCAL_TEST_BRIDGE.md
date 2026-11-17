@@ -1,9 +1,13 @@
 # AIVEXUS ↔ ChatGPT Desktop local test bridge (experimental)
 
-**State (2026-11-17): implementation prepared on feature branch; NOT released or
-verified against the running ASUS AIVEXUS process.** Python protocol tests use a
-synthetic HTTP stub. No MCP should be declared working with the app until a
-device-side authenticated probe returns the actual AIVEXUS instance ID.
+**State (2026-11-17): the internal Windows QA build was tested on the actual ASUS.**
+A device-side PowerShell MCP `instance_info` call returned a real AIVEXUS
+v1.0.16.16 process, and an authenticated runtime self-test completed with
+`success: true` (`generated_text: OK`, `elapsed_ms: 11464`). The local
+AIVEXUS ↔ MCP connection is **verified**. The MCP tools were **not** exposed
+to an ordinary ChatGPT Desktop chat; end-to-end ChatGPT-chat invocation is
+**not yet verified**. This remains a feature-branch internal QA experiment,
+not a general release. CI protocol tests additionally use synthetic stubs.
 
 ## Purpose and non-goals
 
@@ -82,7 +86,14 @@ user has separately approved trying it on the ASUS:
    - **Command**: `powershell.exe`
    - **Arguments**: `-NoProfile`, `-File`, and the path copied from the
      **Copia percorso del componente MCP** button in AIVEXUS. These are three
-     separate arguments in the ChatGPT configuration UI.
+     separate arguments in the ChatGPT configuration UI. On the ASUS,
+     Windows PowerShell's script execution policy initially prevented
+     starting the `.ps1`. After independently verifying the file and
+     unblocking that specific trusted QA script, the user successfully
+     invoked it with `-NoProfile -ExecutionPolicy RemoteSigned -File
+     <absolute-path-to-aivexus_mcp.ps1>` (five separate arguments). This
+     affects only the launched PowerShell process, not the machine-wide
+     execution policy. Do not disable Windows security protection.
    - **Environment variable**: name `AIVEXUS_BRIDGE_TOKEN`; value pasted from
      **Copia chiave di collegamento** in AIVEXUS. **Never send this value
      as a chat message or put it in screenshots, code, GitHub or Diagnostics.**
@@ -106,6 +117,42 @@ AIVEXUS permission. If PowerShell script execution is blocked by OS/device
 policy, stop rather than changing policy or Smart App Control.
 
 **No installation, signing or updater publication is performed by this PR.**
+
+## Actual ASUS validation and desktop tool visibility (2026-11-17)
+
+On the user's ASUS, direct STDIO invocation demonstrated all six tools via
+`tools/list`. Authenticated `tools/call(instance_info)` returned the real
+Windows AIVEXUS app version `v1.0.16.16`, selected model
+`qwen2_5_3b_instruct`, and runtime state `runtimeUnavailable` at that
+moment. A subsequent fixed synthetic runtime test completed successfully
+with `generated_text=OK` in 11,464 ms. This DOES NOT establish that the
+normal chat/inference pipeline works; its separate investigation remains
+out of scope here.
+
+A manually launched PowerShell process does **not** inherit environment
+variables entered only in the ChatGPT Desktop MCP settings. A missing token
+in that manual process produces `bridge_token_missing` and does not by
+itself indicate a server outage. The authenticated control probe was run
+using a temporary process-local `AIVEXUS_BRIDGE_TOKEN`; no secret or actual
+instance ID is saved in this document.
+
+Despite a configured and enabled `aivexus_local_test` STDIO server, the
+ordinary ChatGPT Desktop chat did not expose `instance_info` or the other
+MCP tools. Do not treat that as an AIVEXUS app failure. First try selecting
+an installed plugin explicitly with `@` in the Desktop chat (if offered).
+Some independent reports describe a Windows Desktop Chat tool-exposure issue
+where the same local MCP works in Work, although other reports show Work
+can also be affected. A Desktop Work task or local Codex session is a
+possible diagnostic alternative, **not** a guarantee; it must independently
+show an actual `tools/call` from the target session. The hosted ChatGPT web
+surface does not automatically inherit a Windows STDIO MCP configuration.
+
+Related documentation and issue reports:
+- https://learn.chatgpt.com/docs/extend/mcp
+- https://github.com/openai/codex/issues/38162
+
+Until a ChatGPT-hosted `tools/call` is observed, report the state precisely:
+**MCP adapter ↔ AIVEXUS verified; ChatGPT chat → MCP not yet verified.**
 
 ## Security and reliability
 
