@@ -107,7 +107,8 @@ try {
 
     $mcpCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File ' + $stagedAdapter
     Write-Host 'Creating a private local STDIO tunnel profile.'
-    & $clientPath init --sample sample_mcp_stdio_local --profile $profileName --tunnel-id $TunnelId --mcp-command $mcpCommand
+    # Reconfigure our own already-created QA profile when repairing its MCP target.
+    & $clientPath init --force --sample sample_mcp_stdio_local --profile $profileName --tunnel-id $TunnelId --mcp-command $mcpCommand
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel profile initialization failed.' }
 
     Write-Host 'Checking private tunnel readiness.'
