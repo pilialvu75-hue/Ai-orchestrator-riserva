@@ -106,7 +106,14 @@ try {
     $runtimeKey = $null
     $bridgeToken = $null
 
-    $mcpCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File ' + $stagedAdapter
+    # tunnel-client v0.0.21 parseCommandArgv treats unquoted Windows
+    # backslashes as escape characters. SINGLE quotes retain literal
+    # backslashes and protect spaces as well; the parser strips the quotes
+    # before calling exec.Command, so this is not shell quoting.
+    if ($stagedAdapter.Contains([char]39)) {
+        throw 'Unsupported apostrophe in MCP adapter file path.'
+    }
+    $mcpCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File ' + [char]39 + $stagedAdapter + [char]39
     Write-Host 'Creating a private local STDIO tunnel profile.'
     # Reconfigure our own already-created QA profile when repairing its MCP target.
     & $clientPath init --force --sample sample_mcp_stdio_local --profile $profileName --tunnel-id $TunnelId --mcp-command $mcpCommand
