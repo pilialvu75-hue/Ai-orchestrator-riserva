@@ -148,6 +148,68 @@ void main() {
     }
   });
 
+  test('Windows TinyLlama still exercises the resident server', () async {
+    final temp = await Directory.systemTemp.createTemp('aivexus-tiny-resident-');
+    final model = File('${temp.path}${Platform.pathSeparator}model.gguf');
+    await model.writeAsBytes(<int>[71, 71, 85, 70], flush: true);
+    final cli = _RecordingCli();
+    final resident = _RecordingResident();
+    final provider = AssistantResidentLocalRuntimeProvider(
+      delegate: cli,
+      runtime: resident,
+      executable: () => 'fake-llama-server',
+      isWindowsHost: () => true,
+    );
+    try {
+      final responses = await provider.streamInference(
+        request: InferenceRequest(
+          sessionId: 'tinyllama-smoke',
+          prompt: 'Reply OK',
+          modelId: 'tinyllama',
+          modelPath: model.path,
+          maxTokens: 16,
+        ),
+        cancellationToken: CancellationToken(),
+      ).toList();
+      expect(cli.calls, 0);
+      expect(resident.calls, 1);
+      expect(responses.last.isFinal, isTrue);
+      expect(responses.last.text, 'RESIDENT');
+    } finally {
+      await provider.dispose();
+      await temp.delete(recursive: true);
+    }
+  });
+
+  test('Windows imported Qwen2.5 GGUF name also uses CLI', () async {
+    final cli = _RecordingCli();
+    final resident = _RecordingResident();
+    final provider = AssistantResidentLocalRuntimeProvider(
+      delegate: cli,
+      runtime: resident,
+      executable: () => 'fake-llama-server',
+      isWindowsHost: () => true,
+    );
+    try {
+      final responses = await provider.streamInference(
+        request: const InferenceRequest(
+          sessionId: 'windows-qwen-import',
+          prompt: 'ciao',
+          modelId: 'qwen2.5-3b-instruct-q4_k_m.gguf',
+          modelPath: 'canonical-cli-only.gguf',
+          maxTokens: 16,
+        ),
+        cancellationToken: CancellationToken(),
+      ).toList();
+      expect(cli.calls, 1);
+      expect(resident.calls, 0);
+      expect(responses.last.isFinal, isTrue);
+      expect(responses.last.text, 'CLI');
+    } finally {
+      await provider.dispose();
+    }
+  });
+
   test('non-Windows Qwen retains the previous resident route', () async {
     final temp = await Directory.systemTemp.createTemp('aivexus-resident-');
     final model = File('${temp.path}${Platform.pathSeparator}model.gguf');
