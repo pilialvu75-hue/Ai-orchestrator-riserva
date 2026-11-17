@@ -15,10 +15,13 @@ class RuntimeSelfTestResult {
   const RuntimeSelfTestResult({
     required this.success,
     required this.summary,
+    this.generatedText,
   });
 
   final bool success;
   final String summary;
+  /// Only the short result of the fixed synthetic test prompt; no user input.
+  final String? generatedText;
 }
 
 class RuntimeSelfTestService {
@@ -265,6 +268,7 @@ class RuntimeSelfTestService {
         success: pass,
         summary:
             '${notes.join('\n')}\nCommunication self-test result: PASS\nGenerated text:\n$finalText',
+        generatedText: finalText,
       );
     } catch (error) {
       _log('[COMM_TEST_FAIL] reason=exception error=$error');
