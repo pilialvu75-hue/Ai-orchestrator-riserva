@@ -1,9 +1,7 @@
 name: AIVEXUS ChatGPT Bridge Windows QA (unpublished)
 
 on:
-  push:
-    branches:
-      - feature/chatgpt-local-test-bridge-20261117
+  pull_request:
     paths:
       - 'lib/core/diagnostics/chatgpt_bridge/**'
       - 'lib/core/runtime/inference/runtime_self_test_service.dart'
