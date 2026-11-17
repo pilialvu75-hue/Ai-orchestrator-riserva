@@ -1,0 +1,107 @@
+name: AIVEXUS ChatGPT Bridge Windows QA (unpublished)
+
+on:
+  push:
+    branches:
+      - feature/chatgpt-local-test-bridge-20261117
+    paths:
+      - 'lib/core/diagnostics/chatgpt_bridge/**'
+      - 'lib/core/runtime/inference/runtime_self_test_service.dart'
+      - 'lib/app/runtime_bootstrap.dart'
+      - 'scripts/chatgpt_bridge/**'
+      - 'test/core/diagnostics/chatgpt_bridge/**'
+      - '.github/workflows/chatgpt-bridge-windows-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chatgpt-bridge-win-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-private-qa:
+    # IMPORTANT: This is an unsigned, unpublished, manually opt-in laboratory
+    # artifact; it must NEVER run a deployment/release/update-channel job.
+    runs-on: windows-2022
+    timeout-minutes: 65
+    steps:
+      - name: Checkout exact experimental branch
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Resolve locked dependencies
+        shell: pwsh
+        run: flutter pub get --enforce-lockfile
+
+      - name: Validate Dart source before building
+        shell: pwsh
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Test authenticated loopback bridge
+        shell: pwsh
+        run: flutter test test/core/diagnostics/chatgpt_bridge/aivexus_test_bridge_server_test.dart
+
+      - name: Compile experimental Windows QA binary only
+        shell: pwsh
+        run: flutter build windows --release --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=true
+
+      - name: Verify existing native GGUF bundle gate
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $releaseDir
+          if ($LASTEXITCODE -ne 0) { throw 'Native inference bundle verification failed' }
+
+      - name: Package unpublished QA preview, MCP adapter, and provenance
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          if (-not (Test-Path (Join-Path $releaseDir 'ai_orchestrator.exe'))) {
+            throw 'Missing AIVEXUS Windows binary'
+          }
+          if (-not (Test-Path (Join-Path $releaseDir 'data'))) {
+            throw 'Missing Flutter application data'
+          }
+          $staging = Join-Path $PWD 'build\bridge-qa-package'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item (Join-Path $releaseDir '*') $staging -Recurse -Force
+          New-Item -ItemType Directory -Path (Join-Path $staging 'mcp-tools') -Force | Out-Null
+          Copy-Item scripts\chatgpt_bridge\aivexus_mcp.ps1 (Join-Path $staging 'mcp-tools\aivexus_mcp.ps1')
+          Copy-Item docs\CHATGPT_LOCAL_TEST_BRIDGE.md (Join-Path $staging 'mcp-tools\README.md')
+          @(
+            'AIVEXUS private QA build — NOT installed, signed or published'
+            'Commit: ${{ github.sha }}'
+            'Source branch: ${{ github.ref_name }}'
+            'OS target: Windows x64 (ASUS Win11 first; Win8.1 NOT certified)'
+            'Dart flag: AIVEXUS_LOCAL_TEST_BRIDGE=true'
+            'Default runtime state: disabled unless local secret is present'
+            'HTTP bind: 127.0.0.1:47941 only'
+            'Distribution: GitHub Actions temporary artifact only, NOT OTA'
+            'Do NOT disable Smart App Control. No auto-install or release.'
+          ) | Set-Content (Join-Path $staging 'QA-PROVENANCE.txt') -Encoding UTF8
+          $zip = Join-Path $PWD 'AIVEXUS-ChatGPT-Bridge-Windows-QA.zip'
+          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip -CompressionLevel Optimal -Force
+          $hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AIVEXUS-ChatGPT-Bridge-Windows-QA.zip" |
+            Set-Content -Path (Join-Path $PWD 'AIVEXUS-ChatGPT-Bridge-Windows-QA.zip.sha256') -Encoding ASCII
+          if ((Get-Item $zip).Length -lt 1048576) { throw 'Unusually small QA artifact' }
+
+      - name: Upload QA artifact only (no publishing or updater channel)
+        uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-chatgpt-bridge-windows-qa
+          path: |
+            AIVEXUS-ChatGPT-Bridge-Windows-QA.zip
+            AIVEXUS-ChatGPT-Bridge-Windows-QA.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
