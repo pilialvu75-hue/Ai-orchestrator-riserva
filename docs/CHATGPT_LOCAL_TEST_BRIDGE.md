@@ -23,8 +23,12 @@ the *AIVEXUS execution host* in the first experiment.
 
 ## Components
 
-- `scripts/chatgpt_bridge/aivexus_mcp.py`: stdio MCP adapter using only
-  Python 3's standard library. Only fixed `127.0.0.1:47941` endpoints.
+- `scripts/chatgpt_bridge/aivexus_mcp.ps1`: preferred stdio MCP adapter
+  using native Windows PowerShell (no Python installation). It does not
+  modify PowerShell execution policy or Windows security protections.
+- `scripts/chatgpt_bridge/aivexus_mcp.py`: alternative stdio MCP adapter
+  using Python 3's standard library; also used by synthetic CI tests.
+  Both adapters use only fixed `127.0.0.1:47941` endpoints.
 - `lib/core/diagnostics/chatgpt_bridge/aivexus_test_bridge_server.dart`:
   authenticated loopback listener inside the existing AIVEXUS app.
 - `lib/app/runtime_bootstrap.dart`: starts the listener **only** on Windows
@@ -60,8 +64,11 @@ against malicious software running under the same Windows account.
 
 ## Device-side prerequisites (NOT performed automatically)
 
-1. Validate on ASUS that Python 3 is already installed, e.g. `py -3 --version`.
-   If absent, stop and request approval before installing anything.
+1. Use the already installed Windows PowerShell. A historical ASUS audit
+   reported the Python launcher unavailable, so Python is **not required**.
+   Check `powershell.exe -NoProfile -Command '$PSVersionTable.PSVersion'`
+   without changing execution policy. If script execution is forbidden by
+   corporate/device policy, stop; do not bypass or disable protection.
 2. Obtain an internal AIVEXUS Windows build compiled explicitly with
    `--dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=true`. Standard shipped builds
    leave the bridge disabled. Do not turn off Smart App Control.
@@ -84,8 +91,11 @@ against malicious software running under the same Windows account.
 5. In **ChatGPT Desktop → Impostazioni → Plugin → MCP → Aggiungi → MCP
    personalizzato**, select **STDIO**:
    - Name: `AIVEXUS Local Test`
-   - Command: `py`
-   - Arguments: `-3` then the **actual absolute path** to
+   - Command: `powershell.exe`
+   - Arguments: `-NoProfile`, `-File`, then the **actual absolute path** to
+     `scripts/chatgpt_bridge/aivexus_mcp.ps1`
+   - Optional alternative only if Python 3 is already installed:
+     Command `py`, arguments `-3` and the absolute path to
      `scripts/chatgpt_bridge/aivexus_mcp.py`
    - Environment variable: `AIVEXUS_BRIDGE_TOKEN` = same local secret.
    Never post the value or screenshot the populated field.
@@ -135,7 +145,8 @@ MCP server or signed production build is introduced by this first increment.
 
 ## Validation gates before making this operational
 
-1. Python: `python -m unittest discover -s scripts/chatgpt_bridge -p 'test_*.py'`.
+1. Python synthetic protocol tests: `python -m unittest discover -s scripts/chatgpt_bridge -p 'test_*.py'` (CI only; does not require Python on ASUS).
+   Native Windows PowerShell 5.1 JSON-RPC handshake test via GitHub Actions.
 2. Flutter: `flutter test test/core/diagnostics/chatgpt_bridge/aivexus_test_bridge_server_test.dart`.
 3. Flutter static analysis / native Windows CI build (internal flag OFF by
    default). Fix CI failures before merging.
