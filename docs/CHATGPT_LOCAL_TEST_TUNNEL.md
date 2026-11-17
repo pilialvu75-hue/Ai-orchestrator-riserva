@@ -152,6 +152,30 @@ Only when the tunnel client reports *ready and polling*:
   Do not treat a green `doctor` as proof the stdio child is healthy.
   Inspect `http://127.0.0.1:8080/readyz` and avoid sharing raw secrets.
 
+### Confirmed parser defect from the second ASUS run
+
+The repaired no-space path was `C:\\Users\\vivob\\Downloads\\AIVEXUS-Tunnel-Client\\aivexus_mcp.ps1`,
+but the child still exited with Windows PowerShell code `0xfffd0000`
+within 74 ms. Inspection of the *actual v0.0.21* upstream function
+`parseCommandArgv` in `pkg/runtimeconfig/config.go` identified why:
+**unquoted Windows backslashes are treated as escaping the next byte**.
+A seemingly correct `-File C:\\Users\\...` is passed to the subprocess with
+backslashes stripped, so Windows PowerShell cannot locate the script.
+
+**Fix:** construct `--mcp-command` with the full adapter path enclosed
+in literal single-quote characters. The official parser recognizes single
+quotes and preserves literal backslashes within them. These quotes are
+removed by the parser before `exec.Command` receives arguments. We
+retain the shorter staged path and `--mcp.stdio-failure-policy=exit`.
+A Python no-network regression test models the official lexer and proves
+that unquoted and quoted paths behave differently. Official reference:
+https://github.com/openai/tunnel-client/blob/v0.0.21/pkg/runtimeconfig/config.go
+
+The first ASUS diagnosis of a whitespace-only failure was incomplete.
+A green `doctor` does not prove that the spawned MCP subprocess is usable.
+**Not yet proven:** a real local ASUS run of this quoted-path fix, the
+`/readyz` status, and a real instance_info call from ordinary ChatGPT.
+
 ## Security and limits
 
 - The tunnel transports requests to a local MCP subprocess, which itself
