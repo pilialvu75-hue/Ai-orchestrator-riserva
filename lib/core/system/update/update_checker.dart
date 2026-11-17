@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -7,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_orchestrator/core/system/update/release_channel.dart';
 import 'package:ai_orchestrator/core/system/update/update_manifest.dart';
 import 'package:ai_orchestrator/core/system/update/version_comparator.dart';
-import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dart';
 
 class UpdateCheckResult {
   const UpdateCheckResult({
@@ -48,8 +46,7 @@ class UpdateChecker {
   })  : _httpClient = httpClient,
         _preferences = preferences,
         _comparator = comparator,
-        _windowsOperatingSystemVersion =
-            windowsOperatingSystemVersion ?? Platform.operatingSystemVersion;
+        _windowsOperatingSystemVersion = windowsOperatingSystemVersion ?? '';
 
   final http.Client _httpClient;
   final SharedPreferences _preferences;
@@ -651,7 +648,8 @@ class UpdateChecker {
 
   bool _isModernWindowsBlockedByWin81Only(String releaseDescription) {
     if (targetPlatform != UpdateTargetPlatform.windows ||
-        !WindowsLlamaRuntime.isModernWindows(_windowsOperatingSystemVersion)) {
+        !RegExp(r'(?:\bWindows\s+(?:10|11)\b|\b10\.0\b)',
+            caseSensitive: false).hasMatch(_windowsOperatingSystemVersion)) {
       return false;
     }
     // Explicit release-scope declaration, not any incidental mention of 8.1.
