@@ -55,7 +55,14 @@ Official references:
    installs a binary. Some published Windows builds have triggered Smart App
    Control; **do not disable Defender, Smart App Control or other protections**.
    If the binary is blocked, stop. Existing AIVEXUS QA and desktop MCP remain
-   unchanged.
+   unchanged. **Known blocker:** OpenAI confirmed on 2026-09-15 that it did
+   not plan to sign the prebuilt Windows tunnel-client executables; earlier
+   official Windows builds were blocked by Smart App Control. Building the
+   binary from source was suggested upstream, but a locally rebuilt unsigned
+   executable does not itself guarantee acceptance by Smart App Control. Do
+   not assume any current release is signed without verifying its signature
+   and successful normal launch. Evidence:
+   https://github.com/openai/tunnel-client/issues/68
 4. Keep the existing Windows QA AIVEXUS running with the local bridge enabled.
    Keep `aivexus_mcp.ps1` on the ASUS. No new AIVEXUS build is required for
    the tunnel architecture.
