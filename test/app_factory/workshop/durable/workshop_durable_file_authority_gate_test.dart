@@ -92,8 +92,10 @@ void main() {
       throwsStateError,
     );
     expect(called, isFalse);
-    expect(await File(owner.lockPath).readAsString(),
-        'unknown or crashed owner');
+    expect(
+      await File(owner.lockPath).readAsString(),
+      'unknown or crashed owner',
+    );
   });
 
   test('action failure releases a verifiably owned gate', () async {
@@ -131,7 +133,7 @@ void main() {
     expect(await first, 1);
   });
 
-  test('missing or symlinked private root cannot be used', () async {
+  test('missing private root cannot be used', () async {
     final missing = WorkshopDurableFileAuthorityGate(
       privateRoot: Directory('${privateRoot.path}/absent'),
       schedulerScope: 'scope',
