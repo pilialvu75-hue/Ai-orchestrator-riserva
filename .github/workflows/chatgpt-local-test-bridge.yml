@@ -31,6 +31,25 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - name: Parse and smoke-test tunnel launcher without credentials or networking
+        shell: powershell
+        run: |
+          $launcher = Join-Path $PWD 'scripts/chatgpt_bridge/aivexus_tunnel_start.ps1'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($launcher, [ref]$tokens, [ref]$errors) | Out-Null
+          if (@($errors).Count -ne 0) {
+            throw ('PowerShell tunnel launcher parse failures: ' + @($errors).Count)
+          }
+          $staging = Join-Path $env:RUNNER_TEMP 'aivexus-tunnel-precheck'
+          New-Item -Path $staging -ItemType Directory -Force | Out-Null
+          $fakeClient = Join-Path $staging 'tunnel-client.exe'
+          $fakeAdapter = Join-Path $staging 'aivexus_mcp.ps1'
+          New-Item -Path $fakeClient -ItemType File -Force | Out-Null
+          New-Item -Path $fakeAdapter -ItemType File -Force | Out-Null
+          $output = & powershell.exe -NoProfile -File $launcher -CheckOnly -TunnelId 'tunnel_00000000000000000000000000000000' -TunnelClientExe $fakeClient -McpScriptPath $fakeAdapter
+          if ($LASTEXITCODE -ne 0) { throw 'Tunnel precheck failed' }
+          if (-not (@($output) -match 'PRECHECK PASS')) { throw 'Expected no-network precheck success marker' }
       - name: Check Windows PowerShell 5.1 JSON-RPC handshake with no policy bypass
         shell: powershell
         env:
