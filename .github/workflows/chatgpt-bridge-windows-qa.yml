@@ -6,6 +6,8 @@ on:
       - 'lib/core/diagnostics/chatgpt_bridge/**'
       - 'lib/core/runtime/inference/runtime_self_test_service.dart'
       - 'lib/app/runtime_bootstrap.dart'
+      - 'lib/features/settings/presentation/pages/settings_page.dart'
+      - 'lib/features/settings/presentation/pages/modules/chatgpt_bridge_settings_page.dart'
       - 'scripts/chatgpt_bridge/**'
       - 'test/core/diagnostics/chatgpt_bridge/**'
       - '.github/workflows/chatgpt-bridge-windows-qa.yml'
@@ -47,7 +49,7 @@ jobs:
 
       - name: Test authenticated loopback bridge
         shell: pwsh
-        run: flutter test test/core/diagnostics/chatgpt_bridge/aivexus_test_bridge_server_test.dart
+        run: flutter test test/core/diagnostics/chatgpt_bridge/
 
       - name: Compile experimental Windows QA binary only
         shell: pwsh
@@ -82,7 +84,7 @@ jobs:
             'Source branch: ${{ github.ref_name }}'
             'OS target: Windows x64 (ASUS Win11 first; Win8.1 NOT certified)'
             'Dart flag: AIVEXUS_LOCAL_TEST_BRIDGE=true'
-            'Default runtime state: disabled unless local secret is present'
+            'Default runtime state: off; user activates in AIVEXUS Settings'
             'HTTP bind: 127.0.0.1:47941 only'
             'Distribution: GitHub Actions temporary artifact only, NOT OTA'
             'Do NOT disable Smart App Control. No auto-install or release.'
