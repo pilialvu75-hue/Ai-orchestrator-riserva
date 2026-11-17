@@ -93,9 +93,10 @@ String _probeScript() => p.join(
       'durable_authority_process_probe.dart',
     );
 
+// Resolve the actual VM executable (never a shell script, shebang wrapper or
+// symlink left pointing to one). The test intentionally fails closed when no
+// real VM is available; it must not claim crash safety after killing a shim.
 String _dartCommand() {
-  // Kill tests must target the REAL Dart VM process, never a cmd.exe/bash
-  // wrapper that might survive as a detached child after its shell is killed.
   final binary = Platform.isWindows ? 'dart.exe' : 'dart';
   final candidates = <String>[];
   final flutterRoot = Platform.environment['FLUTTER_ROOT'];
@@ -117,16 +118,47 @@ String _dartCommand() {
     candidates.add(p.join(dir, 'cache', 'dart-sdk', 'bin', binary));
     candidates.add(p.join(dir, binary));
   }
-  if (p.basename(Platform.resolvedExecutable).toLowerCase() == binary) {
-    candidates.add(Platform.resolvedExecutable);
-  }
+  candidates.add(Platform.resolvedExecutable);
   for (final candidate in candidates) {
-    final file = File(candidate);
-    if (file.existsSync()) return file.absolute.path;
+    try {
+      final actual = File(candidate).resolveSymbolicLinksSync();
+      // A wrapper in PATH might use the same filename and start a child.
+      // A native executable's binary signature is required after resolving
+      // symlinks; the actual process PID can then be killed reliably.
+      if (p.basename(actual).toLowerCase() != binary) continue;
+      final handle = File(actual).openSync();
+      late final List<int> signature;
+      try {
+        signature = handle.readSync(4);
+      } finally {
+        handle.closeSync();
+      }
+      if (_isNativeExecutable(signature)) return actual;
+    } on FileSystemException {
+      // Inaccessible, missing or invalid candidate. Try the next one.
+    }
   }
   throw StateError(
-    'A direct Dart SDK executable is required for OS-process kill tests.',
+    'A direct native Dart VM executable is required for OS-process kill tests.',
   );
+}
+
+bool _isNativeExecutable(List<int> bytes) {
+  if (bytes.length < 4) return false;
+  // Linux ELF, Windows PE/MZ and macOS Mach-O / universal (fat) binaries.
+  if (bytes[0] == 0x7f &&
+      bytes[1] == 0x45 &&
+      bytes[2] == 0x4c &&
+      bytes[3] == 0x46) return true;
+  if (bytes[0] == 0x4d && bytes[1] == 0x5a) return true;
+  final magic = (bytes[0] << 24) |
+      (bytes[1] << 16) |
+      (bytes[2] << 8) |
+      bytes[3];
+  return const <int>{
+    0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe,
+    0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca,
+  }.contains(magic);
 }
 
 Future<ProcessResult> _probe(String privateRoot, String scope) async {
