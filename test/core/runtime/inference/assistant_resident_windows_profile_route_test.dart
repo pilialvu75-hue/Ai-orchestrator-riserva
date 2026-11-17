@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:ai_orchestrator/core/runtime/inference/assistant_resident_local_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/assistant_web_continuation_local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
@@ -82,6 +83,35 @@ void main() {
     } finally {
       await provider.dispose();
     }
+  });
+
+  test('Assistant chat decorator preserves the Qwen CLI final response',
+      () async {
+    final cli = _RecordingCli();
+    final resident = _RecordingResident();
+    final assistant = AssistantWebContinuationLocalRuntimeProvider(
+      delegate: AssistantResidentLocalRuntimeProvider(
+        delegate: cli,
+        runtime: resident,
+        executable: () => 'fake-llama-server',
+        isWindowsHost: () => true,
+      ),
+    );
+    final responses = await assistant.streamInference(
+      request: const InferenceRequest(
+        sessionId: 'chat-route',
+        prompt: 'ciao',
+        modelId: 'qwen2_5_3b_instruct',
+        modelPath: 'canonical-cli-only.gguf',
+        maxTokens: 16,
+      ),
+      cancellationToken: CancellationToken(),
+    ).toList();
+    expect(cli.calls, 1);
+    expect(resident.calls, 0);
+    expect(responses.last.isFinal, isTrue);
+    expect(responses.last.isError, isFalse);
+    expect(responses.last.text, 'CLI');
   });
 
   test('Windows measured resident model retains its existing path', () async {
