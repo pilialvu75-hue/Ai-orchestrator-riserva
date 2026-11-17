@@ -61,12 +61,24 @@ $scriptFullPath = (Resolve-Path -LiteralPath $McpScriptPath).Path
 if ($scriptFullPath.Contains('"')) {
     throw 'Unsupported quote character in MCP adapter file path.'
 }
+# The tunnel-client command parser can truncate a quoted -File path containing
+# spaces (for example the ASUS QA ZIP folder with ' (1)' in its name).
+# Stage this vetted adapter beside the verified tunnel-client binary instead.
+$stagedAdapter = Join-Path (Split-Path -Path $clientPath -Parent) 'aivexus_mcp.ps1'
+if ($stagedAdapter -match '\s') {
+    throw 'The tunnel-client folder contains spaces; choose -TunnelClientExe in a path without spaces.'
+}
 
 if ($CheckOnly) {
     Write-Host 'PRECHECK PASS: tunnel-client.exe and aivexus_mcp.ps1 exist.'
     Write-Host 'No keys read, no network requests, no tunnel started.'
     return
 }
+
+# Copy only the trusted local adapter script, never credentials. No inbound
+# listener, registry, Windows policy, or AIVEXUS runtime is changed.
+Copy-Item -LiteralPath $scriptFullPath -Destination $stagedAdapter -Force
+Write-Host 'Prepared stable MCP adapter path (without spaces).'
 
 # The existing local AIVEXUS token is copied inside AIVEXUS, not ChatGPT.
 Write-Host 'In AIVEXUS, press Copy connection key; then return to this window.'
@@ -93,7 +105,7 @@ try {
     $runtimeKey = $null
     $bridgeToken = $null
 
-    $mcpCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "' + $scriptFullPath + '"'
+    $mcpCommand = 'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File ' + $stagedAdapter
     Write-Host 'Creating a private local STDIO tunnel profile.'
     & $clientPath init --sample sample_mcp_stdio_local --profile $profileName --tunnel-id $TunnelId --mcp-command $mcpCommand
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel profile initialization failed.' }
@@ -103,7 +115,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel readiness check failed.' }
 
     Write-Host 'Starting private tunnel. Press Ctrl+C to stop.'
-    & $clientPath run --profile $profileName
+    # Stop on any child-process failure rather than repeatedly restarting it.
+    & $clientPath run --profile $profileName --mcp.stdio-failure-policy=exit
     if ($LASTEXITCODE -ne 0) { throw 'Tunnel client stopped with an error.' }
 }
 finally {
