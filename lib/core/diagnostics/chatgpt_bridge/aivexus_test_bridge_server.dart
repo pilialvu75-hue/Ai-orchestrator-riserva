@@ -159,7 +159,13 @@ class AivexusTestBridgeServer {
               <String, Object?>{'error': 'idempotency_storage_unavailable'});
           return;
         }
-        final test = _BridgeTest(id);
+        final metadata = await _instance();
+        final test = _BridgeTest(
+          id,
+          instanceId: instanceId,
+          appVersion: appVersion,
+          model: metadata['model'] as String?,
+        );
         _tests[id] = test;
         unawaited(_runTest(test));
         await _send(request, HttpStatus.accepted, test.snapshot());
@@ -242,6 +248,12 @@ class AivexusTestBridgeServer {
         test.status = result.success ? 'completed' : 'failed';
       }
       test.success = result.success && !test.cancellation.isCancelled;
+      if (test.success && result.generatedText != null) {
+        // Only a short output from the fixed synthetic prompt is allowed out.
+        test.generatedText = String.fromCharCodes(
+          result.generatedText!.runes.take(256),
+        );
+      }
       // The self-test summary contains local file paths. Do not return it.
       if (!test.success && test.status != 'cancelled') {
         final summary = result.summary.toLowerCase();
@@ -307,17 +319,31 @@ class AivexusTestBridgeServer {
 }
 
 class _BridgeTest {
-  _BridgeTest(this.requestId);
+  _BridgeTest(this.requestId, {
+    required this.instanceId,
+    required this.appVersion,
+    required this.model,
+  });
   final String requestId;
+  final String instanceId;
+  final String appVersion;
+  final String? model;
   final CancellationToken cancellation = CancellationToken();
   final DateTime createdAt = DateTime.now().toUtc();
   String status = 'queued';
   bool? success;
   int? elapsedMs;
   String? errorCode;
+  String? generatedText;
 
   Map<String, Object?> snapshot() => <String, Object?>{
         'request_id': requestId,
+        'instance_id': instanceId,
+        'app_version': appVersion,
+        'engine_adapter': 'app_local_runtime_provider',
+        'engine_version': null,
+        'model': model,
+        'generated_text': generatedText,
         'kind': 'runtime',
         'status': status,
         'success': success,
