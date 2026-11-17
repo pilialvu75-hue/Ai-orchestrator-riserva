@@ -129,6 +129,29 @@ Only when the tunnel client reports *ready and polling*:
    and the local /ui readiness screen. Never upload secrets, raw diagnostics,
    or access tokens. Stop/revoke the tunnel when not actively testing.
 
+## ASUS live tunnel smoke-test finding (2026-11-17)
+
+- **PASS**: the restricted Platform runtime key authenticated with OpenAI.
+  `init` created the private profile, `doctor --explain` reported `RESULT ok`,
+  the tunnel metadata was fetched, and the localhost health UI started.
+- **FAIL**: the initial `run` repeatedly restarted the local stdio child.
+  Its startup summary showed the configured `mcp_target_value` stopping at
+  `...\\Downloads\\aivexus-chatgpt-bridge-windows-qa` before the ` (1)`
+  directory suffix; the MCP script path had been truncated at whitespace.
+  This did **not** prove end-to-end ChatGPT connectivity.
+- **Mitigation now implemented**: stage a copy of the already-approved
+  `aivexus_mcp.ps1` beside the verified `tunnel-client.exe` in the no-space
+  `AIVEXUS-Tunnel-Client` download folder; use that exact path when generating
+  the stdio profile. Reconfigure the script-owned `aivexus-local-test` profile
+  with `init --force` (officially supported for an existing profile).
+  Run with `--mcp.stdio-failure-policy=exit` so an unexpected child exit stops
+  the tunnel instead of looping. Explicitly pause for the user to copy the
+  AIVEXUS bridge key into the clipboard, preventing command-copy collisions.
+- **Still unverified**: the repaired script on the real ASUS and the final
+  custom ChatGPT plugin call. Only start one tunnel-client per tunnel ID.
+  Do not treat a green `doctor` as proof the stdio child is healthy.
+  Inspect `http://127.0.0.1:8080/readyz` and avoid sharing raw secrets.
+
 ## Security and limits
 
 - The tunnel transports requests to a local MCP subprocess, which itself
