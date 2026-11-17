@@ -688,7 +688,10 @@ final class WorkshopDurableOrchestrator {
 
   final WorkshopDurableOrchestrationStore _store;
   final DateTime Function() _clock;
-  Future<void> _mutationTail = Future<void>.value();
+  // Serialize mutations across all orchestrators in the same Dart isolate,
+  // including instances recreated during a foreground/app recovery. The
+  // production scheduler must still exclude other isolates/processes.
+  static Future<void> _mutationTail = Future<void>.value();
 
   Future<WorkshopDurableProjectSnapshot> createProject({
     required String projectId,

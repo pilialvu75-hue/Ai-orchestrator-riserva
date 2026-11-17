@@ -183,6 +183,73 @@ void main() {
       );
     });
 
+    test('independent orchestrators share the same-isolate dispatch claim',
+        () async {
+      await createReadyProject();
+      // Pause the first checkpoint write before it becomes observable. Without
+      // serialization between orchestrator instances, both callers can load
+      // READY and independently commit the same GitHub side effect.
+      final pausedStore = _PausingFirstExternalWaitStore(
+        WorkshopCheckpointDurableOrchestrationStore(
+          checkpointStore: checkpointStore,
+        ),
+      );
+      WorkshopDurableGitHubActionsCoordinator newCoordinator() {
+        return WorkshopDurableGitHubActionsCoordinator(
+          orchestrator: WorkshopDurableOrchestrator(
+            store: pausedStore,
+            clock: () => now,
+          ),
+          gateway: gateway,
+          clock: () => now,
+        );
+      }
+
+      final firstCoordinator = newCoordinator();
+      final secondCoordinator = newCoordinator();
+      final first = firstCoordinator.dispatchAndPark(
+        projectId: 'project-1',
+        taskId: 'build-android',
+        operationIdempotencyKey: 'github-build:same-generation',
+        dispatchCorrelationId: 'remote-same-generation',
+        request: request('first-ui'),
+      );
+      await pausedStore.firstExternalWaitSaveReached.future;
+      final second = secondCoordinator.dispatchAndPark(
+        projectId: 'project-1',
+        taskId: 'build-android',
+        operationIdempotencyKey: 'github-build:same-generation',
+        dispatchCorrelationId: 'remote-same-generation',
+        request: request('second-ui'),
+      );
+      // Allow the independent coordinator to observe the old READY snapshot
+      // while the first save is blocked, then permit the first claim to commit.
+      await Future<void>.delayed(Duration.zero);
+      pausedStore.releaseFirstExternalWaitSave.complete();
+      final results = await Future.wait(<WorkshopDurableGitHubReconcileResult>[
+        first,
+        second,
+      ]);
+      expect(gateway.dispatchCalls, 1);
+      expect(
+        results.where((result) =>
+            result.disposition ==
+            WorkshopDurableGitHubReconcileDisposition.parkedForRunDiscovery),
+        hasLength(1),
+      );
+      expect(
+        results.where((result) =>
+            result.disposition ==
+            WorkshopDurableGitHubReconcileDisposition.waitingForRunDiscovery),
+        hasLength(1),
+      );
+      final saved = await firstCoordinator
+          .reconcile(projectId: 'project-1', taskId: 'build-android', request: request('inspect'));
+      expect(saved.snapshot.tasks['build-android']!.attemptsStarted, 1);
+      expect(saved.snapshot.tasks['build-android']!.state,
+          WorkshopDurableState.waitingExternal);
+    });
+
     test('a competing operation key cannot dispatch a second workflow',
         () async {
       await createReadyProject();
@@ -581,6 +648,39 @@ WorkshopGitHubRun _run({
     createdAt: DateTime.utc(2026, 9, 22, 20),
     updatedAt: DateTime.utc(2026, 9, 22, 20),
   );
+}
+
+/// Forces the second orchestrator to race with an uncommitted first claim.
+final class _PausingFirstExternalWaitStore
+    implements WorkshopDurableOrchestrationStore {
+  _PausingFirstExternalWaitStore(this.delegate);
+
+  final WorkshopDurableOrchestrationStore delegate;
+  final Completer<void> firstExternalWaitSaveReached = Completer<void>();
+  final Completer<void> releaseFirstExternalWaitSave = Completer<void>();
+  bool _paused = false;
+
+  @override
+  Future<void> save(WorkshopDurableProjectSnapshot snapshot) async {
+    if (!_paused && snapshot.tasks.values.any((task) =>
+        task.state == WorkshopDurableState.waitingExternal)) {
+      _paused = true;
+      firstExternalWaitSaveReached.complete();
+      await releaseFirstExternalWaitSave.future;
+    }
+    await delegate.save(snapshot);
+  }
+
+  @override
+  Future<WorkshopDurableProjectSnapshot?> load(String projectId) =>
+      delegate.load(projectId);
+
+  @override
+  Future<List<WorkshopDurableProjectSnapshot>> loadAll() =>
+      delegate.loadAll();
+
+  @override
+  Future<void> remove(String projectId) => delegate.remove(projectId);
 }
 
 final class _FakeGitHubGateway
