@@ -48,28 +48,27 @@ final class WorkshopDurableTerminalGenerationReconciler {
       throw StateError('Missing or incompatible durable terminal checkpoint.');
     }
     final task = checkpoint.tasks['final-build']!;
-    bool? succeeded;
-    switch (task.state) {
-      case WorkshopDurableState.completed:
-        if (checkpoint.state != WorkshopDurableState.completed ||
+    final succeeded = switch (task.state) {
+      WorkshopDurableState.completed => true,
+      WorkshopDurableState.failed || WorkshopDurableState.cancelled => false,
+      _ => null,
+    };
+    if (succeeded == null) {
+      if (reservation.state != WorkshopDurableGenerationState.active) {
+        throw StateError('Terminal ledger contradicts a pending checkpoint.');
+      }
+      return null;
+    }
+    if (succeeded &&
+        (checkpoint.state != WorkshopDurableState.completed ||
             !task.artifactIds.any(
               (id) => id.startsWith('local-apk:') &&
                   id.substring('local-apk:'.length).trim().isNotEmpty,
-            )) {
-          throw StateError('Completed checkpoint lacks verified APK evidence.');
-        }
-        succeeded = true;
-      case WorkshopDurableState.failed:
-      case WorkshopDurableState.cancelled:
-        if (checkpoint.state != task.state) {
-          throw StateError('Durable terminal task/project state mismatch.');
-        }
-        succeeded = false;
-      default:
-        if (reservation.state != WorkshopDurableGenerationState.active) {
-          throw StateError('Terminal ledger contradicts a pending checkpoint.');
-        }
-        return null;
+            ))) {
+      throw StateError('Completed checkpoint lacks verified APK evidence.');
+    }
+    if (!succeeded && checkpoint.state != task.state) {
+      throw StateError('Durable terminal task/project state mismatch.');
     }
 
     final expectedState = succeeded
