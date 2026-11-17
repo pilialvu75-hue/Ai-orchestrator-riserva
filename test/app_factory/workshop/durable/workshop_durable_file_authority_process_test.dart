@@ -54,7 +54,7 @@ void main() {
       _dartCommand(),
       <String>[_probeScript(), 'hold', root.path, scope],
       workingDirectory: Directory.current.path,
-      runInShell: Platform.isWindows,
+      runInShell: false,
     );
     // Drain stderr as soon as process starts to avoid a blocked pipe.
     final childStderr = child.stderr.transform(utf8.decoder).join();
@@ -94,20 +94,37 @@ String _probeScript() => p.join(
     );
 
 String _dartCommand() {
+  // Kill tests must target the REAL Dart VM process, never a cmd.exe/bash
+  // wrapper that might survive as a detached child after its shell is killed.
+  final binary = Platform.isWindows ? 'dart.exe' : 'dart';
+  final candidates = <String>[];
   final flutterRoot = Platform.environment['FLUTTER_ROOT'];
   if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
-    final installed = File(p.join(
+    candidates.add(p.join(
       flutterRoot,
       'bin',
       'cache',
       'dart-sdk',
       'bin',
-      Platform.isWindows ? 'dart.exe' : 'dart',
+      binary,
     ));
-    if (installed.existsSync()) return installed.path;
   }
-  // Flutter's ordinary development setup puts the Dart wrapper in PATH.
-  return 'dart';
+  final path = Platform.environment['PATH'] ?? '';
+  for (final dir in path.split(Platform.isWindows ? ';' : ':')) {
+    if (dir.trim().isEmpty) continue;
+    candidates.add(p.join(dir, 'cache', 'dart-sdk', 'bin', binary));
+    candidates.add(p.join(dir, binary));
+  }
+  if (p.basename(Platform.resolvedExecutable).toLowerCase() == binary) {
+    candidates.add(Platform.resolvedExecutable);
+  }
+  for (final candidate in candidates) {
+    final file = File(candidate);
+    if (file.existsSync()) return file.absolute.path;
+  }
+  throw StateError(
+    'A direct Dart SDK executable is required for OS-process kill tests.',
+  );
 }
 
 Future<ProcessResult> _probe(String privateRoot, String scope) async {
@@ -115,7 +132,7 @@ Future<ProcessResult> _probe(String privateRoot, String scope) async {
     _dartCommand(),
     <String>[_probeScript(), 'probe', privateRoot, scope],
     workingDirectory: Directory.current.path,
-    runInShell: Platform.isWindows,
+    runInShell: false,
   );
   final output = child.stdout.transform(utf8.decoder).join();
   final errors = child.stderr.transform(utf8.decoder).join();
