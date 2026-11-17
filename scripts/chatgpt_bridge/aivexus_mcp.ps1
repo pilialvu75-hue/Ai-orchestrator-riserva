@@ -195,6 +195,11 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         Write-McpResponse @{ jsonrpc = '2.0'; id = $id; result = $result }
     }
     catch {
+        # CI-only diagnostics: ID and line number, never exception text or secrets.
+        if ($env:AIVEXUS_MCP_TEST_MODE -eq '1') {
+            [Console]::Error.WriteLine('MCP_TEST_ERROR=' + $_.FullyQualifiedErrorId +
+                ';line=' + $_.InvocationInfo.ScriptLineNumber)
+        }
         # A malformed message cannot reveal OS paths or stack traces.
         Write-McpResponse @{
             jsonrpc = '2.0'; id = $null
