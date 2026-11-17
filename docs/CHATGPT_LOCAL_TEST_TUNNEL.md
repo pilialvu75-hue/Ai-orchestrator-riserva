@@ -289,6 +289,41 @@ ChatGPT web can call the Desktop MCP server on Plus. A local plugin using
 this filtered adapter would still require an explicit separate binding
 decision. Do not install or launch a duplicate MCP server automatically.
 
+## Authorized separate Desktop-only plugin (private, v0.1.0)
+
+User explicitly authorized a **second** local MCP binding while preserving
+`aivexus_local_test`. The repository now includes the complete self-contained
+source package under `plugins/aivexus-local-desktop-readonly/`:
+
+- `plugin.json` (portable Agent Plugins 1.0 + Desktop-only metadata).
+- `mcp.json` (one `powershell.exe` stdio entry with bundled scripts).
+- `server/aivexus_mcp.ps1` (copies the approved adapter with the opt-in
+  `instance_info`-only filter).
+- `server/aivexus_desktop_readonly.ps1` (forces that filter at runtime,
+  obtains local AIVEXUS token from an encrypted, per-Windows-user DPAPI file,
+  then runs the bundled MCP adapter without extra stdout).
+- `setup-token.ps1` (asks user to copy the AIVEXUS local bridge key, stores
+  DPAPI-protected material under `%LOCALAPPDATA%` and clears the clipboard).
+- `skills/aivexus-runtime-check/SKILL.md` and `README.md`.
+
+Windows GitHub Actions now parses all three PowerShell scripts and exercises
+the **bundled** wrapper without credentials: tools/list advertises exactly
+`instance_info`, direct `test_start` is denied, and absence of a token
+returns `bridge_token_missing`. Python MCP tests also pass.
+
+Plugin Creator successfully saved one **private USER-scoped** package
+`aivexus-local-desktop-readonly` version `0.1.0` and exposed portable and
+compatibility manifests. This does **not** mean it is installed on ASUS or
+callable from ordinary Chat: the user must install it via ChatGPT Desktop,
+complete the local DPAPI setup and verify a real `instance_info` result.
+No work mode, new tunnel, OpenAI API credit, higher subscription, app change,
+or Windows machine-wide security change is required by the package.
+
+User's previous tunnel remains available but unnecessary for this
+Desktop-only path; it can be stopped with Ctrl+C. If the private-plugin
+installer on the current ChatGPT Chat surface does not make local tools
+available, report this access constraint rather than inventing a success.
+
 ## Security and limits
 
 - The tunnel transports requests to a local MCP subprocess, which itself
