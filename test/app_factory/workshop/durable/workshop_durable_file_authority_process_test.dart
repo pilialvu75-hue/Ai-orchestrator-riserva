@@ -110,10 +110,20 @@ String _dartCommand() {
   return 'dart';
 }
 
-Future<ProcessResult> _probe(String privateRoot, String scope) =>
-    Process.run(
-      _dartCommand(),
-      <String>[_probeScript(), 'probe', privateRoot, scope],
-      workingDirectory: Directory.current.path,
-      runInShell: Platform.isWindows,
-    ).timeout(const Duration(seconds: 45));
+Future<ProcessResult> _probe(String privateRoot, String scope) async {
+  final child = await Process.start(
+    _dartCommand(),
+    <String>[_probeScript(), 'probe', privateRoot, scope],
+    workingDirectory: Directory.current.path,
+    runInShell: Platform.isWindows,
+  );
+  final output = child.stdout.transform(utf8.decoder).join();
+  final errors = child.stderr.transform(utf8.decoder).join();
+  try {
+    final code = await child.exitCode.timeout(const Duration(seconds: 45));
+    return ProcessResult(child.pid, code, await output, await errors);
+  } finally {
+    // Process.run(...).timeout would leave a hung child alive after timeout.
+    child.kill();
+  }
+}
