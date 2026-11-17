@@ -1,0 +1,41 @@
+name: Windows Release OS Compatibility
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/core/system/update/update_checker.dart'
+      - 'test/core/system/update/windows_release_os_compatibility_test.dart'
+      - '.github/workflows/windows-release-os-compatibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  release-os-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Resolve pinned dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Verify Windows release OS gates
+        run: >-
+          flutter test
+          test/core/system/update/windows_release_os_compatibility_test.dart
+      - name: Analyze changed Dart files
+        run: >-
+          dart analyze
+          lib/core/system/update/update_checker.dart
+          test/core/system/update/windows_release_os_compatibility_test.dart
