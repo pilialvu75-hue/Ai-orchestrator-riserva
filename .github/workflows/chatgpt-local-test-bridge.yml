@@ -3,12 +3,14 @@ on:
   pull_request:
     paths:
       - 'scripts/chatgpt_bridge/**'
+      - 'plugins/aivexus-local-desktop-readonly/**'
       - '.github/workflows/chatgpt-local-test-bridge.yml'
   push:
     branches:
       - 'feature/chatgpt-local-test-bridge-*'
     paths:
       - 'scripts/chatgpt_bridge/**'
+      - 'plugins/aivexus-local-desktop-readonly/**'
       - '.github/workflows/chatgpt-local-test-bridge.yml'
 
 permissions:
@@ -93,3 +95,43 @@ jobs:
           if (-not $blocked.result.isError) { throw 'Non-read tool call was not blocked' }
           $body = $blocked.result.content[0].text | ConvertFrom-Json
           if ($body.error -ne 'tool_disabled_by_read_only_profile') { throw 'Wrong readonly denial' }
+      - name: Verify bundled Desktop-only MCP restricts tools on Windows
+        shell: powershell
+        run: |
+          $base = Join-Path $PWD 'plugins/aivexus-local-desktop-readonly'
+          foreach ($name in @('server/aivexus_mcp.ps1','server/aivexus_desktop_readonly.ps1','setup-token.ps1')) {
+            $p = Join-Path $base $name
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors) | Out-Null
+            if (@($errors).Count -ne 0) { throw ('Script parse failure: ' + $name) }
+          }
+          $mcp = Get-Content -LiteralPath (Join-Path $base 'mcp.json') -Raw | ConvertFrom-Json
+          $plugin = Get-Content -LiteralPath (Join-Path $base 'plugin.json') -Raw | ConvertFrom-Json
+          if ($mcp.mcpServers.'aivexus-desktop-info'.type -ne 'stdio') { throw 'Expected local stdio transport' }
+          if ($mcp.mcpServers.'aivexus-desktop-info'.env.AIVEXUS_MCP_INSTANCE_ONLY -ne '1') { throw 'Read-only mode not declared' }
+          if (-not $plugin.extensions.'com.openai'.requires_local_executor) { throw 'Missing Desktop-only marker' }
+          $messages = @(
+            '{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"synthetic-123","kind":"runtime"}}}',
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"instance_info","arguments":{}}}'
+          )
+          $oldToken = $env:AIVEXUS_BRIDGE_TOKEN
+          $env:AIVEXUS_BRIDGE_TOKEN = $null
+          try {
+            $raw = $messages | & powershell.exe -NoProfile -File (Join-Path $base 'server/aivexus_desktop_readonly.ps1')
+          } finally {
+            $env:AIVEXUS_BRIDGE_TOKEN = $oldToken
+          }
+          if (@($raw).Count -ne 3) { throw 'Wrong Desktop MCP frame count' }
+          $list = $raw[0] | ConvertFrom-Json
+          $blocked = $raw[1] | ConvertFrom-Json
+          $info = $raw[2] | ConvertFrom-Json
+          if (@($list.result.tools).Count -ne 1 -or $list.result.tools[0].name -ne 'instance_info') {
+            throw 'Desktop plugin did not expose exactly instance_info'
+          }
+          if (-not $blocked.result.isError) { throw 'Bundled adapter allowed blocked test_start' }
+          $blockedBody = $blocked.result.content[0].text | ConvertFrom-Json
+          if ($blockedBody.error -ne 'tool_disabled_by_read_only_profile') { throw 'Wrong denied call response' }
+          $infoBody = $info.result.content[0].text | ConvertFrom-Json
+          if ($infoBody.error -ne 'bridge_token_missing') { throw 'Missing key not handled cleanly' }
