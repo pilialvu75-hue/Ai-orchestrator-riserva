@@ -66,3 +66,15 @@ Priority next: fix device findings, add signed-beta update path, per-app control
 
 - The in-app **Blocca ora** action also clears a remembered auto-allow policy, matching the floating stop control. This prevents an immediate 60-second re-allow on the next DNS lookup.
 - Version code 4. Unsigned ephemeral debug-key continuity remains unavailable; only dedicated persistent signing enables Android in-place updates.
+
+
+## Android 0.1.3 beta 1 — All apps, language, theme, next-ad blocking
+
+- Previously WeWard-only, now an **opt-in foreground-application heuristic for any app/game**. The VPN can see DNS to a blocked ad domain but **cannot prove which app sent it**, nor that the ad is rewarded. Usage access helps approximate which app was foreground at that moment, with occasional false positives. Do not present this as proven ad classification.
+- The 7-second optional prompt includes "Remember for this app"; answers are saved per Android package name on-device. Clear all remembered choices in Settings. The main protection stays OFF until the user explicitly activates the VPN.
+- During an allow window, floating **Blocca per la prossima volta / Block next time** marks the current/last permitted app as BLOCK for future heuristic allowances, while **allowing the current ad to finish**. Separate **Termina pausa ora / End allowance now** cancels the temporary DNS allowance immediately, but still cannot terminate ad video already loaded.
+- All 4 languages: **Italian, French, English and Spanish** with a system-language mode and manual override. UI theme is **Light / Dark / Follow system**. The design has a home dashboard and dedicated settings.
+- For future confirmed rewarded playback, Settings stores **black screen default ON** and **mute default ON** preferences. **Neither preference has an effect in this beta**. We cannot know video progress, audio source or completion through DNS, and obscuring rewarded ads may prevent the reward or violate third-party ad requirements. No automatic obscuring or media-volume changes are attempted.
+- The floating allowance strip shows **elapsed time since an allowance** with an indeterminate progress indicator, NEVER a fabricated percentage or claim that the ad finished. Future accurate progress/end events require a trustworthy integration (first-party SDK callbacks for cooperating apps, permitted metadata sources, or opt-in device-local observation under platform rules). Such callbacks cannot ordinarily be obtained from another app.
+- User-initiated GitHub update check still only offers an APK signed with a **persistent dedicated Ads Kill key** and digest, verified before Android's confirmation. If the dedicated ADS_KILL_* secrets are absent, the beta release contains an ephemeral debug APK only, so **reinstallation is still necessary**.
+- Keep existing Android beta tests for WeWard, then test Car Jam Solver and 2 more apps to spot false prompts, unwanted exemptions and foreground detection errors.
