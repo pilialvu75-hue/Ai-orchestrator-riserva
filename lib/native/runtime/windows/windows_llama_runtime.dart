@@ -1,3 +1,4 @@
+import 'dart:ffi';
 import 'dart:io';
 import 'package:ai_orchestrator/core/runtime/inference/completion_output.dart';
 
@@ -10,6 +11,7 @@ abstract final class WindowsLlamaRuntime {
     required Map<String, String> environment,
     String windowsVersion = '',
     bool Function(String)? fileExists,
+    bool avx2Available = false,
   }) {
     final modern = path.windows.join(path.windows.dirname(appExecutable),
         'runtime-modern', 'llama-completion.exe');
@@ -25,6 +27,9 @@ abstract final class WindowsLlamaRuntime {
         isModernWindows(windowsVersion) &&
         environment['AI_ORCHESTRATOR_WINDOWS_MODERN_RUNTIME'] == '1';
     if (explicitModernQa && exists(modern)) return modern;
+    final accelerated = path.windows.join(path.windows.dirname(appExecutable),
+        'runtime-cpu-avx2', 'llama-completion.exe');
+    if (avx2Available && exists(accelerated)) return accelerated;
     final bundled = path.windows.join(
       path.windows.dirname(appExecutable),
       'llama-completion.exe',
@@ -35,6 +40,18 @@ abstract final class WindowsLlamaRuntime {
     }
     final override = environment['LLAMA_CPP_EXECUTABLE']?.trim();
     return override != null && override.isNotEmpty ? override : 'llama-cli';
+  }
+
+  /// Windows verifies both CPU instructions and OS context support.
+  static bool supportsAvx2() {
+    if (!Platform.isWindows) return false;
+    try {
+      final check = DynamicLibrary.open('kernel32.dll').lookupFunction<
+          Int32 Function(Uint32), int Function(int)>('IsProcessorFeaturePresent');
+      return check(40) != 0; // PF_AVX2_INSTRUCTIONS_AVAILABLE
+    } catch (_) {
+      return false;
+    }
   }
 
   static bool isModernWindows(String version) => RegExp(

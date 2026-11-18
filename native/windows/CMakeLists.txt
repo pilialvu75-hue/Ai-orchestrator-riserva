@@ -13,6 +13,11 @@ foreach(feature SSE42 AVX AVX2 AVX_VNNI AVX512 FMA F16C OPENMP BLAS CUDA VULKAN 
   set(GGML_${feature} OFF CACHE BOOL "" FORCE)
 endforeach()
 set(GGML_CPU ON CACHE BOOL "" FORCE)
+# The normal Flutter build retains the portable baseline. A separate build
+# directory produces the capability-gated AVX2 helper from the same sources.
+if(AI_ORCHESTRATOR_CPU_AVX2)
+  set(GGML_AVX2 ON CACHE BOOL "" FORCE)
+endif()
 set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS ON CACHE BOOL "" FORCE)
 foreach(feature TESTS EXAMPLES SERVER WEBUI)

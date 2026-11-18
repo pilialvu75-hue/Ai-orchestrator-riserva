@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+project(aivexus_cpu_avx2 LANGUAGES C CXX)
+set(AI_ORCHESTRATOR_CPU_AVX2 ON)
+add_subdirectory(".." "runtime")
+install(TARGETS llama-completion RUNTIME DESTINATION ".")
