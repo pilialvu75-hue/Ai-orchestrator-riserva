@@ -58,16 +58,8 @@ class AivexusBridgeController {
     return base64UrlEncode(bytes).replaceAll('=', '');
   }
 
-  /// A previous explicit activation may be resumed on restart. Never creates
-  /// a token or enables the service without the user's first opt-in.
-  Future<void> restore() async {
-    if (!allowed || isEnabled) return;
-    final token = await _secretStore.read();
-    if (token == null || token.length < 32) return;
-    final host = buildHost(token);
-    await host.start();
-    _host = host;
-  }
+  /// Startup never resumes access. The user enables the bridge each session.
+  Future<void> restore() async {}
 
   /// One tap: create OS-protected pairing token and start the existing app's
   /// loopback server. When starting fails, remove a newly created token.
