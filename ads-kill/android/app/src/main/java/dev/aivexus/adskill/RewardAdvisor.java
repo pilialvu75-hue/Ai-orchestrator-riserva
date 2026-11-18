@@ -5,6 +5,9 @@ import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
@@ -20,80 +23,153 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Experimental, opt-in popup for WeWard only. A DNS domain cannot identify
- * whether the ad is rewarded. Remembered "allow" is a heuristic and grants a
- * GLOBAL 60-second DNS exemption, not a per-app firewall permission.
+ * All-app Smart Reward v0.1.3: foreground-app heuristic only.
+ * DNS alone cannot prove a reward or attribute a DNS request to its origin.
+ * Never falsifies ad playback, reward delivery or completion percentages.
  */
 final class RewardAdvisor {
     static final String PREF_KEY = "smart_reward";
-    static final String CHOICE_KEY = "reward_choice_weward";
     static final String ASK = "ask";
     static final String ALLOW = "allow";
     static final String BLOCK = "block";
-    static final String WATCHED_PACKAGE = "com.weward";
+    static final String PREF_PREFIX = "choice_app_";
+    private static final String OLD_WEWARD_KEY = "reward_choice_weward";
+    private static final String OLD_WEWARD_PACKAGE = "com.weward";
     private static final long COOLDOWN_MS = 180_000L;
     private static final long POPUP_MS = 7_000L;
-    private static final String PREFS = "ads_kill";
 
     private final AdsVpnService service;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AtomicBoolean inspecting = new AtomicBoolean(false);
-    private final AtomicLong lastSuggestionAt = new AtomicLong(0L);
-    private WindowManager windows;
+    private final Map<String, Long> cooldownByApp = new ConcurrentHashMap<>();
+
+    private volatile String lastAllowedApp = null;
+    private volatile long lastAllowedTime = 0L;
+    private volatile String cachedForeground = null;
+    private volatile long cacheTime = 0L;
+
+    private WindowManager wm;
     private View suggestion;
-    private View stopControl;
-    private Runnable scheduledDismiss;
-    private Runnable scheduledStopDismiss;
+    private View allowanceStrip;
+    private Runnable closeSuggestion;
+    private Runnable refreshAllowance;
 
     RewardAdvisor(AdsVpnService service) { this.service = service; }
 
     static boolean hasUsageAccess(Context context) {
         AppOpsManager ops = context.getSystemService(AppOpsManager.class);
-        return ops != null && ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
-            Process.myUid(), context.getPackageName()) == AppOpsManager.MODE_ALLOWED;
+        return ops != null && ops.checkOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(),
+            context.getPackageName()) == AppOpsManager.MODE_ALLOWED;
     }
 
     static boolean hasOverlayAccess(Context context) {
         return Settings.canDrawOverlays(context);
     }
 
-    private SharedPreferences prefs() {
-        return service.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    private SharedPreferences prefs() { return UiPrefs.preferences(service); }
+    private String t(String key) { return UiPrefs.text(service, key); }
+
+    private String choice(String packageName) {
+        if (packageName == null) return ASK;
+        SharedPreferences p = prefs();
+        String value = p.getString(PREF_PREFIX + packageName, null);
+        if (value == null && OLD_WEWARD_PACKAGE.equals(packageName)) {
+            value = p.getString(OLD_WEWARD_KEY, ASK);
+        }
+        return ALLOW.equals(value) || BLOCK.equals(value) ? value : ASK;
     }
 
-    static String readChoice(SharedPreferences prefs) {
-        String value = prefs.getString(CHOICE_KEY, ASK);
-        if (ALLOW.equals(value) || BLOCK.equals(value)) return value;
-        return ASK;
+    private void saveChoice(String packageName, String value) {
+        if (packageName == null || packageName.isEmpty()) return;
+        prefs().edit().putString(PREF_PREFIX + packageName, value).apply();
     }
 
-    private void remember(String choice, boolean enabled) {
-        if (!enabled) return;
-        prefs().edit().putString(CHOICE_KEY, choice).apply();
+    static void clearAllChoices(Context context) {
+        SharedPreferences p = UiPrefs.preferences(context);
+        SharedPreferences.Editor edit = p.edit().remove(OLD_WEWARD_KEY);
+        for (String key : p.getAll().keySet()) {
+            if (key.startsWith(PREF_PREFIX)) edit.remove(key);
+        }
+        edit.apply();
+    }
+
+    static int rememberedCount(Context context) {
+        int n = 0;
+        for (String key : UiPrefs.preferences(context).getAll().keySet()) {
+            if (key.startsWith(PREF_PREFIX)) n++;
+        }
+        return n;
     }
 
     /**
-     * Called before deciding to block an ad-domain DNS request.
-     * For a remembered allow, start a time-limited global exemption.
-     * A newly detected candidate can be a normal ad, not a reward.
+     * Usage events reveal only the foreground package. Apps may make requests
+     * from their background processes; so attribution is an approximation.
      */
+    private String foregroundPackage() {
+        if (!hasUsageAccess(service)) return null;
+        long nowMonotonic = SystemClock.elapsedRealtime();
+        if (nowMonotonic - cacheTime < 1500L) return cachedForeground;
+        UsageStatsManager stats = service.getSystemService(UsageStatsManager.class);
+        if (stats == null) return null;
+        UsageEvents events = stats.queryEvents(
+            System.currentTimeMillis() - 180_000L, System.currentTimeMillis());
+        if (events == null) return null;
+        UsageEvents.Event e = new UsageEvents.Event();
+        String foreground = null;
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e);
+            if (e.getEventType() == UsageEvents.Event.ACTIVITY_RESUMED) {
+                foreground = e.getPackageName();
+            } else if (e.getEventType() == UsageEvents.Event.ACTIVITY_PAUSED
+                && foreground != null && foreground.equals(e.getPackageName())) {
+                foreground = null;
+            }
+        }
+        if (foreground != null && (foreground.equals(service.getPackageName())
+            || foreground.equals("android")
+            || foreground.startsWith("com.android.systemui")
+            || foreground.startsWith("com.google.android.permissioncontroller"))) {
+            foreground = null;
+        }
+        cachedForeground = foreground;
+        cacheTime = nowMonotonic;
+        return foreground;
+    }
+
+    private String appLabel(String pkg) {
+        if (pkg == null) return "?";
+        try {
+            PackageManager manager = service.getPackageManager();
+            ApplicationInfo info = manager.getApplicationInfo(pkg, 0);
+            return manager.getApplicationLabel(info).toString();
+        } catch (Exception ignored) {
+            return pkg;
+        }
+    }
+
+    /** Only called on a candidate ad-domain DNS request. */
     boolean autoAllowIfRemembered() {
         if (!service.isFilteringActive() || !prefs().getBoolean(PREF_KEY, false)
-            || !ALLOW.equals(readChoice(prefs()))
             || !hasOverlayAccess(service) || !hasUsageAccess(service)) return false;
         if (!inspecting.compareAndSet(false, true)) return false;
         try {
-            if (!isWeWardForeground()) return false;
+            String pkg = foregroundPackage();
+            if (pkg == null || !ALLOW.equals(choice(pkg))) return false;
+            lastAllowedApp = pkg;
+            lastAllowedTime = SystemClock.elapsedRealtime();
             service.allowAdsFor60Seconds();
             return true;
-        } catch (RuntimeException e) {
-            Log.w("AdsKill", "Smart Reward automatic choice unavailable", e);
+        } catch (RuntimeException ex) {
+            Log.w("AdsKill", "Could not assess remembered choice", ex);
             return false;
         } finally {
             inspecting.set(false);
@@ -101,210 +177,207 @@ final class RewardAdvisor {
     }
 
     void onBlockedAdvertisingDomain() {
-        SharedPreferences prefs = prefs();
-        if (!prefs.getBoolean(PREF_KEY, false)
-            || !ASK.equals(readChoice(prefs))) return;
-        long now = SystemClock.elapsedRealtime();
-        long last = lastSuggestionAt.get();
-        if (last != 0 && now - last < COOLDOWN_MS) return;
-        if (!hasOverlayAccess(service) || !hasUsageAccess(service)) return;
+        if (!prefs().getBoolean(PREF_KEY, false)
+            || !hasOverlayAccess(service) || !hasUsageAccess(service)) return;
         if (!inspecting.compareAndSet(false, true)) return;
         try {
-            if (!isWeWardForeground()) return;
-            now = SystemClock.elapsedRealtime();
-            last = lastSuggestionAt.get();
-            if (last != 0 && now - last < COOLDOWN_MS) return;
-            if (lastSuggestionAt.compareAndSet(last, now)) main.post(this::showSuggestion);
-        } catch (RuntimeException e) {
-            Log.w("AdsKill", "Smart Reward foreground detection failed", e);
+            String pkg = foregroundPackage();
+            if (pkg == null || !ASK.equals(choice(pkg))) return;
+            long now = SystemClock.elapsedRealtime();
+            long last = cooldownByApp.getOrDefault(pkg, 0L);
+            if (last != 0L && now - last < COOLDOWN_MS) return;
+            cooldownByApp.put(pkg, now);
+            main.post(() -> showSuggestion(pkg));
+        } catch (RuntimeException ex) {
+            Log.w("AdsKill", "Foreground heuristic unavailable", ex);
         } finally {
             inspecting.set(false);
         }
     }
 
-    private boolean isWeWardForeground() {
-        UsageStatsManager stats = service.getSystemService(UsageStatsManager.class);
-        if (stats == null) return false;
-        long now = System.currentTimeMillis();
-        UsageEvents events = stats.queryEvents(now - 5 * 60_000L, now);
-        if (events == null) return false;
-        UsageEvents.Event event = new UsageEvents.Event();
-        String foreground = null;
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event);
-            int kind = event.getEventType();
-            if (kind == UsageEvents.Event.ACTIVITY_RESUMED) {
-                foreground = event.getPackageName();
-            } else if (kind == UsageEvents.Event.ACTIVITY_PAUSED
-                && event.getPackageName().equals(foreground)) {
-                foreground = null;
-            }
+    /** Remembered block applies on future requests and does NOT interrupt current video. */
+    boolean blockNextTime() {
+        String pkg = lastAllowedApp;
+        if (pkg == null || SystemClock.elapsedRealtime() - lastAllowedTime > 120_000L) {
+            pkg = foregroundPackage();
         }
-        return WATCHED_PACKAGE.equals(foreground);
+        if (pkg == null) return false;
+        saveChoice(pkg, BLOCK);
+        main.post(this::dismissAllowance);
+        return true;
     }
 
-    private int dp(int value) {
-        return Math.round(value * service.getResources().getDisplayMetrics().density);
+    private int dp(int n) { return Math.round(n * service.getResources().getDisplayMetrics().density); }
+
+    private GradientDrawable panelBackground() {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(UiPrefs.card(service));
+        shape.setCornerRadius(dp(20));
+        shape.setStroke(dp(1), UiPrefs.dark(service) ? 0xff526178 : 0xffd7e4e9);
+        return shape;
     }
 
-    private static GradientDrawable rounded(int color, int border) {
-        GradientDrawable result = new GradientDrawable();
-        result.setColor(color);
-        result.setCornerRadius(22f);
-        result.setStroke(2, border);
+    private TextView label(String txt, int size, boolean bold) {
+        TextView view = new TextView(service);
+        view.setText(txt);
+        view.setTextSize(size);
+        view.setTextColor(UiPrefs.textColor(service));
+        if (bold) view.setTypeface(null, android.graphics.Typeface.BOLD);
+        return view;
+    }
+
+    private WindowManager.LayoutParams params(int width, int height, int gravity, int y) {
+        WindowManager.LayoutParams result = new WindowManager.LayoutParams(
+            dp(width), height, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT);
+        result.gravity = gravity;
+        result.y = dp(y);
         return result;
     }
 
-    private void showSuggestion() {
+    private void showSuggestion(String pkg) {
         if (!service.isFilteringActive() || !hasOverlayAccess(service)
             || !hasUsageAccess(service) || suggestion != null
-            || !prefs().getBoolean(PREF_KEY, false)
-            || !ASK.equals(readChoice(prefs()))) return;
+            || !prefs().getBoolean(PREF_KEY, false) || !ASK.equals(choice(pkg))) return;
         try {
-            windows = service.getSystemService(WindowManager.class);
-            if (windows == null) return;
-            LinearLayout surface = new LinearLayout(service);
-            surface.setOrientation(LinearLayout.VERTICAL);
-            surface.setPadding(dp(14), dp(11), dp(14), dp(11));
-            surface.setBackground(rounded(Color.WHITE, Color.rgb(216, 226, 235)));
-            surface.setElevation(dp(9));
-
-            TextView title = new TextView(service);
-            title.setText("Ads Kill · possibile video premio");
-            title.setTextColor(Color.rgb(16, 42, 67));
-            title.setTypeface(null, android.graphics.Typeface.BOLD);
-            title.setTextSize(16);
-            surface.addView(title);
-            TextView detail = new TextView(service);
-            detail.setText("WeWard sta contattando un dominio pubblicitario. Non posso sapere se dà un premio.");
-            detail.setTextSize(13);
-            detail.setTextColor(Color.DKGRAY);
-            surface.addView(detail);
-
+            wm = service.getSystemService(WindowManager.class);
+            if (wm == null) return;
+            LinearLayout view = new LinearLayout(service);
+            view.setOrientation(LinearLayout.VERTICAL);
+            view.setPadding(dp(13), dp(11), dp(13), dp(11));
+            view.setElevation(dp(10));
+            view.setBackground(panelBackground());
+            TextView heading = label(t("overlay_title"), 16, true);
+            view.addView(heading);
+            TextView detail = label(UiPrefs.format(service, "overlay_body", appLabel(pkg)), 13, false);
+            detail.setPadding(0, dp(7), 0, dp(4));
+            view.addView(detail);
             CheckBox remember = new CheckBox(service);
-            remember.setText("Ricorda questa scelta per WeWard");
+            remember.setText(t("overlay_remember"));
+            remember.setTextColor(UiPrefs.textColor(service));
             remember.setTextSize(13);
-            surface.addView(remember);
-            TextView warning = new TextView(service);
-            warning.setText("Se ricordi Consenti, verranno consentite anche possibili pubblicità normali.");
-            warning.setTextColor(Color.DKGRAY);
-            warning.setTextSize(11);
-            surface.addView(warning);
-
+            view.addView(remember);
+            TextView warning = label(t("overlay_warning"), 11, false);
+            warning.setPadding(0, 0, 0, dp(8));
+            view.addView(warning);
             LinearLayout buttons = new LinearLayout(service);
             buttons.setOrientation(LinearLayout.HORIZONTAL);
-            Button deny = new Button(service);
+            Button deny = new Button(service), allow = new Button(service);
+            deny.setText(t("overlay_deny"));
             deny.setAllCaps(false);
-            deny.setText("Continua blocco");
-            Button allow = new Button(service);
+            allow.setText(t("overlay_allow"));
             allow.setAllCaps(false);
-            allow.setText("Consenti 60 s");
-            buttons.addView(deny, new LinearLayout.LayoutParams(0, dp(47), 1));
-            buttons.addView(allow, new LinearLayout.LayoutParams(0, dp(47), 1));
-            surface.addView(buttons);
+            buttons.addView(deny, new LinearLayout.LayoutParams(0, dp(48), 1));
+            buttons.addView(allow, new LinearLayout.LayoutParams(0, dp(48), 1));
+            view.addView(buttons);
 
             deny.setOnClickListener(v -> {
-                remember(BLOCK, remember.isChecked());
+                if (remember.isChecked()) saveChoice(pkg, BLOCK);
                 dismissSuggestion();
             });
             allow.setOnClickListener(v -> {
-                remember(ALLOW, remember.isChecked());
+                if (remember.isChecked()) saveChoice(pkg, ALLOW);
+                lastAllowedApp = pkg;
+                lastAllowedTime = SystemClock.elapsedRealtime();
                 dismissSuggestion();
                 service.allowAdsFor60Seconds();
             });
-
-            WindowManager.LayoutParams layout = new WindowManager.LayoutParams(
-                dp(342), WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT);
-            layout.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-            layout.y = dp(46);
-            windows.addView(surface, layout);
-            suggestion = surface;
-            scheduledDismiss = this::dismissSuggestion;
-            main.postDelayed(scheduledDismiss, POPUP_MS);
+            wm.addView(view, params(340, WindowManager.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL, 35));
+            suggestion = view;
+            closeSuggestion = this::dismissSuggestion;
+            main.postDelayed(closeSuggestion, POPUP_MS);
         } catch (RuntimeException e) {
-            Log.w("AdsKill", "Unable to show reward suggestion", e);
+            Log.w("AdsKill", "Popup unavailable", e);
             dismissSuggestion();
         }
     }
 
-    /** Called after any manually or automatically permitted 60-second window. */
+    /** The strip shows elapsed allowance time, NOT an invented ad-completion percentage. */
     void showStopControl() {
         main.post(() -> {
             if (!service.isFilteringActive() || !hasOverlayAccess(service)) return;
-            dismissStopControl();
+            dismissAllowance();
             try {
-                windows = service.getSystemService(WindowManager.class);
-                if (windows == null) return;
-                Button stop = new Button(service);
-                stop.setText("Blocca ora");
-                stop.setAllCaps(false);
-                stop.setTextColor(Color.WHITE);
-                stop.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
-                    Color.rgb(150, 43, 48)));
-                stop.setOnClickListener(v -> {
-                    // If an automatic remembered allowance was in effect, revoke it.
-                    // Otherwise the next blocked DNS request would immediately re-allow.
-                    if (ALLOW.equals(readChoice(prefs()))) {
-                        prefs().edit().putString(CHOICE_KEY, BLOCK).apply();
-                    }
-                    service.blockAdsNow();
-                    dismissStopControl();
+                wm = service.getSystemService(WindowManager.class);
+                if (wm == null) return;
+                LinearLayout view = new LinearLayout(service);
+                view.setOrientation(LinearLayout.VERTICAL);
+                view.setPadding(dp(12), dp(7), dp(12), dp(8));
+                view.setBackground(panelBackground());
+                TextView elapsed = label("", 13, true);
+                view.addView(elapsed);
+                ProgressBar uncertain = new ProgressBar(service, null,
+                    android.R.attr.progressBarStyleHorizontal);
+                uncertain.setIndeterminate(true);
+                uncertain.setIndeterminateTintList(ColorStateList.valueOf(UiPrefs.accent(service)));
+                view.addView(uncertain, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(5)));
+                TextView note = label(t("overlay_timer"), 10, false);
+                note.setPadding(0, dp(3), 0, 0);
+                view.addView(note);
+                Button blockNext = new Button(service);
+                blockNext.setAllCaps(false);
+                blockNext.setText(t("overlay_stop_next"));
+                blockNext.setOnClickListener(v -> {
+                    blockNextTime(); // does not terminate the current allowance
+                    dismissAllowance();
                 });
-                WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                    dp(156), dp(54), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                    PixelFormat.TRANSLUCENT);
-                params.gravity = Gravity.BOTTOM | Gravity.END;
-                params.x = dp(12);
-                params.y = dp(52);
-                windows.addView(stop, params);
-                stopControl = stop;
-                scheduledStopDismiss = this::dismissStopControl;
-                main.postDelayed(scheduledStopDismiss, 60_500L);
+                view.addView(blockNext);
+                wm.addView(view, params(330, WindowManager.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 48));
+                allowanceStrip = view;
+                final long start = SystemClock.elapsedRealtime();
+                refreshAllowance = new Runnable() {
+                    @Override public void run() {
+                        if (allowanceStrip != view || !service.isFilteringActive()) return;
+                        long remaining = service.remainingAllowanceSeconds();
+                        if (remaining <= 0) { dismissAllowance(); return; }
+                        elapsed.setText(UiPrefs.format(service, "overlay_elapsed",
+                            (int)Math.min(60, (SystemClock.elapsedRealtime() - start) / 1000L)));
+                        main.postDelayed(this, 1000L);
+                    }
+                };
+                main.post(refreshAllowance);
             } catch (RuntimeException e) {
-                Log.w("AdsKill", "Could not show Stop control", e);
-                dismissStopControl();
+                Log.w("AdsKill", "Allowance strip unavailable", e);
+                dismissAllowance();
             }
         });
     }
 
-    void hideStopControl() { main.post(this::dismissStopControl); }
+    void hideStopControl() { main.post(this::dismissAllowance); }
 
     private void dismissSuggestion() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            main.post(this::dismissSuggestion);
-            return;
+            main.post(this::dismissSuggestion); return;
         }
-        if (scheduledDismiss != null) main.removeCallbacks(scheduledDismiss);
-        scheduledDismiss = null;
-        if (suggestion != null && windows != null) {
-            try { windows.removeView(suggestion); } catch (RuntimeException ignored) {}
+        if (closeSuggestion != null) main.removeCallbacks(closeSuggestion);
+        closeSuggestion = null;
+        if (suggestion != null && wm != null) {
+            try { wm.removeView(suggestion); } catch (RuntimeException ignored) {}
         }
         suggestion = null;
     }
 
-    private void dismissStopControl() {
+    private void dismissAllowance() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            main.post(this::dismissStopControl);
-            return;
+            main.post(this::dismissAllowance); return;
         }
-        if (scheduledStopDismiss != null) main.removeCallbacks(scheduledStopDismiss);
-        scheduledStopDismiss = null;
-        if (stopControl != null && windows != null) {
-            try { windows.removeView(stopControl); } catch (RuntimeException ignored) {}
+        if (refreshAllowance != null) main.removeCallbacks(refreshAllowance);
+        refreshAllowance = null;
+        if (allowanceStrip != null && wm != null) {
+            try { wm.removeView(allowanceStrip); } catch (RuntimeException ignored) {}
         }
-        stopControl = null;
+        allowanceStrip = null;
     }
 
     void dismiss() {
         main.post(() -> {
             dismissSuggestion();
-            dismissStopControl();
+            dismissAllowance();
         });
     }
 }
