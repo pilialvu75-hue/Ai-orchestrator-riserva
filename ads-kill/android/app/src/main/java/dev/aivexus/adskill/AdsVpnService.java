@@ -68,6 +68,9 @@ public final class AdsVpnService extends VpnService {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         SharedPreferences.Editor edit = prefs.edit().putLong("allow_until", 0L);
         edit.apply();
+        // Explicitly terminate the current allowance and revoke any automatic
+        // permission for the app that triggered it, so it cannot restart instantly.
+        if (rewardAdvisor != null) rewardAdvisor.blockNextTime();
         if (rewardAdvisor != null) rewardAdvisor.hideStopControl();
         notifyStatus();
     }
