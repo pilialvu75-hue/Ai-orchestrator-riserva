@@ -33,6 +33,7 @@ public final class AdsVpnService extends VpnService {
     public static final String ACTION_STOP = "dev.aivexus.adskill.STOP";
     public static final String ACTION_ALLOW_60 = "dev.aivexus.adskill.ALLOW_60";
     public static final String ACTION_BLOCK_NOW = "dev.aivexus.adskill.BLOCK_NOW";
+    public static final String ACTION_BLOCK_NEXT = "dev.aivexus.adskill.BLOCK_NEXT";
     public static final String STATUS = "dev.aivexus.adskill.STATUS";
     public static volatile boolean active = false;
 
@@ -50,6 +51,11 @@ public final class AdsVpnService extends VpnService {
     }
 
     boolean isFilteringActive() { return running.get() && tun != null; }
+    long remainingAllowanceSeconds() {
+        long ms = getSharedPreferences(PREFS, MODE_PRIVATE)
+            .getLong("allow_until", 0L) - System.currentTimeMillis();
+        return Math.max(0L, (ms + 999L) / 1000L);
+    }
 
     void allowAdsFor60Seconds() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
@@ -61,11 +67,6 @@ public final class AdsVpnService extends VpnService {
     void blockAdsNow() {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         SharedPreferences.Editor edit = prefs.edit().putLong("allow_until", 0L);
-        // Also revoke remembered automatic approval: otherwise a new DNS request
-        // immediately starts another 60-second allowance.
-        if (RewardAdvisor.ALLOW.equals(RewardAdvisor.readChoice(prefs))) {
-            edit.putString(RewardAdvisor.CHOICE_KEY, RewardAdvisor.BLOCK);
-        }
         edit.apply();
         if (rewardAdvisor != null) rewardAdvisor.hideStopControl();
         notifyStatus();
@@ -83,6 +84,10 @@ public final class AdsVpnService extends VpnService {
         }
         if (ACTION_BLOCK_NOW.equals(action)) {
             blockAdsNow();
+            return START_STICKY;
+        }
+        if (ACTION_BLOCK_NEXT.equals(action)) {
+            if (rewardAdvisor != null) rewardAdvisor.blockNextTime();
             return START_STICKY;
         }
         if (!running.compareAndSet(false, true)) return START_STICKY;
@@ -199,8 +204,8 @@ public final class AdsVpnService extends VpnService {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentTitle("Ads Kill - protezione DNS")
-            .setContentText("Filtro locale attivo · DNS upstream Cloudflare")
+            .setContentTitle("Ads Kill")
+            .setContentText(UiPrefs.text(this, "status_on") + " · DNS Cloudflare")
             .setOngoing(true)
             .setContentIntent(pending)
             .build();
