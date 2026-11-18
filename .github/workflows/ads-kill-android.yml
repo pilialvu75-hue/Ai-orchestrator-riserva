@@ -2,7 +2,7 @@ name: Ads Kill - Android beta
 on:
   push:
     branches:
-      - ads-kill/prototype-android
+      - ads-kill/android-smart-reward
     paths:
       - 'ads-kill/**'
       - '.github/workflows/ads-kill-android.yml'
@@ -35,21 +35,21 @@ jobs:
         working-directory: ads-kill/android
         run: gradle --no-daemon --stacktrace assembleDebug
       - name: Rename APK
-        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.0-beta1-debug.apk
+        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.1-beta1-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Ads-Kill-Android-0.1.0-beta1
-          path: ads-kill-v0.1.0-beta1-debug.apk
+          name: Ads-Kill-Android-0.1.1-beta1
+          path: ads-kill-v0.1.1-beta1-debug.apk
           retention-days: 30
       - name: Publish first test prerelease
-        if: github.ref == 'refs/heads/ads-kill/prototype-android'
+        if: github.ref == 'refs/heads/ads-kill/android-smart-reward'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=ads-kill-v0.1.0-beta1
+          TAG=ads-kill-v0.1.1-beta1
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" ads-kill-v0.1.0-beta1-debug.apk \
+            gh release create "$TAG" ads-kill-v0.1.1-beta1-debug.apk \
               --target "$GITHUB_SHA" --prerelease \
-              --title "Ads Kill Android 0.1.0 beta1 (test)" \
-              --notes "Prototype for personal device testing only. Android DNS-only VPN; upstream Cloudflare DNS. Only 19 starter block rules. Not a general YouTube ad blocker. Debug signing key is ephemeral: future update may require uninstall."
+              --title "Ads Kill Android 0.1.1 beta1 (test)" \
+              --notes "Experimental WeWard Smart Reward popup (opt-in overlay and usage access permissions). DNS-only VPN, 19 starter block rules, Cloudflare resolver; does NOT reliably identify rewarded ads or block YouTube in-stream ads. Debug APK signed with ephemeral CI key: uninstall previous debug version before installing."
           fi

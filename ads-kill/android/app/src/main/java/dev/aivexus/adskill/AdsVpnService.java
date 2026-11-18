@@ -41,6 +41,18 @@ public final class AdsVpnService extends VpnService {
     private ExecutorService workers;
     private ParcelFileDescriptor tun;
     private FileOutputStream out;
+    private RewardAdvisor rewardAdvisor;
+
+    @Override public void onCreate() {
+        super.onCreate();
+        rewardAdvisor = new RewardAdvisor(this);
+    }
+
+    void allowAdsFor60Seconds() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putLong("allow_until", System.currentTimeMillis() + 60000L).apply();
+        notifyStatus();
+    }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_START : intent.getAction();
@@ -49,9 +61,7 @@ public final class AdsVpnService extends VpnService {
             return START_NOT_STICKY;
         }
         if (ACTION_ALLOW_60.equals(action)) {
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putLong("allow_until", System.currentTimeMillis() + 60000L).apply();
-            notifyStatus();
+            allowAdsFor60Seconds();
             return START_NOT_STICKY;
         }
         if (!running.compareAndSet(false, true)) return START_STICKY;
@@ -124,6 +134,7 @@ public final class AdsVpnService extends VpnService {
             .putLong("blocked", prefs.getLong("blocked", 0) + (block ? 1 : 0))
             .apply();
         notifyStatus();
+        if (block && rewardAdvisor != null) rewardAdvisor.onBlockedAdvertisingDomain();
     }
 
     private byte[] forwardDns(byte[] query) {
@@ -176,6 +187,7 @@ public final class AdsVpnService extends VpnService {
 
     @Override public void onRevoke() { stopSelf(); }
     @Override public void onDestroy() {
+        if (rewardAdvisor != null) rewardAdvisor.dismiss();
         running.set(false);
         active = false;
         if (workers != null) workers.shutdownNow();

@@ -38,3 +38,14 @@ Requires JDK 17, Android SDK API 35, Gradle 8.10.2. The CI workflow installs the
 The first prototype is intentionally small. No ad-evasion promises: YouTube video-stream ads cannot generally be removed by DNS-only filtering. No Windows implementation is included yet. Test startup, DNS resolution, foreground operation, data connection changes, restart/revoke behavior and 60-second unblocking on a **real device** before treating it as stable.
 
 Priority next: fix device findings, add signed-beta update path, per-app controls, Windows DNS filtering service, optional filter-list updates with trustworthy provenance, richer diagnostics without leaking queries, IPv6 / Private DNS handling.
+
+## Android 0.1.1 beta 1 — Smart Reward experimental
+
+- A new optional setting suggests an ad allowance only when **WeWard** (package `com.weward`) appears to be the foreground application and a known ad DNS domain is blocked.
+- First enable **Suggerisci la pausa con un popup**, then separately grant "Display over other apps" and "Usage access" in Android settings using the two buttons in Ads Kill. Nothing is collected or transmitted; Ads Kill only compares the foreground package to WeWard locally.
+- When triggered, a small overlay appears for about 7 seconds, with **Continua blocco** or **Consenti 60 s**. Suggestions are rate-limited to one every 3 minutes.
+- The signal is **heuristic**, not proof of a rewarded ad; a normal ad or analytics request can trigger it, and some rewarded ads may be missed entirely (DNS caching, DoH, foreground detection).
+- The allowance remains **global** and time-limited. After approving an allowance, tap the reward ad in WeWard again; the app may need to retry DNS.
+- This beta still **cannot block YouTube native-app preroll ads**, which are typically delivered from shared content infrastructure.
+- This build is signed using a different ephemeral GitHub Actions debug keystore than the previous beta. If Android says package conflicts, **uninstall the previous Ads Kill beta first**; this resets counters and VPN/permission settings, but does not affect WeWard.
+- If no popup appears, check permissions and Smart Reward switch. If internet breaks, disable the VPN.

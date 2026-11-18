@@ -7,6 +7,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.net.VpnService;
+import android.net.Uri;
+import android.provider.Settings;
+import android.widget.CheckBox;
 import android.os.Bundle;
 import android.os.Build;
 import android.os.Handler;
@@ -25,6 +28,8 @@ public final class MainActivity extends Activity {
     private TextView pauseStatus;
     private Button toggle;
     private Button pause;
+    private CheckBox smartReward;
+    private TextView smartStatus;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private final Runnable periodicUpdate = new Runnable() {
@@ -48,7 +53,7 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
 
         addText(root, "Ads Kill", 32, Color.rgb(20, 39, 64), true);
-        addText(root, "Beta Android 0.1.0 · filtro pubblicità DNS", 14, Color.DKGRAY, false);
+        addText(root, "Beta Android 0.1.1 · Smart Reward sperimentale", 14, Color.DKGRAY, false);
         status = addText(root, "", 23, Color.rgb(24, 99, 64), true);
         toggle = addButton(root, "Avvia protezione", v -> toggle());
         pause = addButton(root, "Consenti pubblicità per 60 secondi", v -> {
@@ -59,6 +64,38 @@ public final class MainActivity extends Activity {
         });
         pauseStatus = addText(root, "", 15, Color.rgb(128, 69, 13), false);
         counters = addText(root, "", 19, Color.rgb(20, 39, 64), true);
+
+        addText(root, "SMART REWARD · WeWard", 16, Color.rgb(20, 39, 64), true);
+        smartReward = new CheckBox(this);
+        smartReward.setText("Suggerisci la pausa con un popup (solo WeWard)");
+        smartReward.setTextSize(15);
+        smartReward.setChecked(getSharedPreferences("ads_kill", MODE_PRIVATE)
+            .getBoolean(RewardAdvisor.PREF_KEY, false));
+        smartReward.setOnCheckedChangeListener((button, checked) -> {
+            getSharedPreferences("ads_kill", MODE_PRIVATE).edit()
+                .putBoolean(RewardAdvisor.PREF_KEY, checked).apply();
+            if (checked && (!RewardAdvisor.hasOverlayAccess(this)
+                || !RewardAdvisor.hasUsageAccess(this))) {
+                Toast.makeText(this, "Concedi le due autorizzazioni qui sotto per i popup",
+                    Toast.LENGTH_LONG).show();
+            }
+            refresh();
+        });
+        root.addView(smartReward);
+        addButton(root, "1. Autorizza popup sopra altre app", v -> {
+            Intent permission = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + getPackageName()));
+            startActivity(permission);
+        });
+        addButton(root, "2. Autorizza accesso app in primo piano", v ->
+            startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
+        smartStatus = addText(root, "", 14, Color.DKGRAY, false);
+        addText(root,
+            "Avviso opzionale di 7 secondi, non più di una volta ogni 3 minuti. "
+          + "Non legge lo schermo o i tuoi dati: considera solo l'app in primo piano "
+          + "e i domini DNS bloccati. Un annuncio normale può sembrare ricompensato. "
+          + "Dopo aver premuto Consenti, riprova il video premio in WeWard.",
+            14, Color.DKGRAY, false);
 
         addText(root, "COME FUNZIONA", 16, Color.rgb(20, 39, 64), true);
         addText(root,
@@ -132,6 +169,14 @@ public final class MainActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences("ads_kill", MODE_PRIVATE);
         counters.setText("Richieste DNS: " + prefs.getLong("queries", 0)
             + "\nPubblicità bloccate: " + prefs.getLong("blocked", 0));
+        if (smartStatus != null) {
+            boolean overlay = RewardAdvisor.hasOverlayAccess(this);
+            boolean usage = RewardAdvisor.hasUsageAccess(this);
+            smartStatus.setText("Popup: " + (overlay ? "OK" : "non autorizzati")
+                + " · Accesso app in primo piano: " + (usage ? "OK" : "non autorizzato")
+                + " · Smart Reward: "
+                + (prefs.getBoolean(RewardAdvisor.PREF_KEY, false) ? "richiesto" : "spento"));
+        }
         long left = Math.max(0, (prefs.getLong("allow_until", 0) - System.currentTimeMillis() + 999) / 1000);
         pauseStatus.setText(left > 0 && on ? "Pubblicità temporaneamente consentita: " + left + " s"
             : "La sospensione si riattiva automaticamente dopo 60 secondi.");
