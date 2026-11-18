@@ -31,7 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * All-app Smart Reward v0.1.3: foreground-app heuristic only.
+ * All-app Smart Reward: conservative, foreground-correlated DNS hints only.
  * DNS alone cannot prove a reward or attribute a DNS request to its origin.
  * Never falsifies ad playback, reward delivery or completion percentages.
  */
@@ -45,6 +45,13 @@ final class RewardAdvisor {
     private static final String OLD_WEWARD_PACKAGE = "com.weward";
     private static final long COOLDOWN_MS = 180_000L;
     private static final long POPUP_MS = 7_000L;
+    // An advertising DNS hit is not evidence of a rewarded video.
+    // Hold notifications until the foreground app has settled and several
+    // independent hits have been observed over time.
+    private static final long FOREGROUND_SETTLE_MS = 12_000L;
+    private static final long EVIDENCE_WINDOW_MS = 20_000L;
+    private static final long EVIDENCE_SPREAD_MS = 2_000L;
+    private static final int MIN_EVIDENCE_HITS = 3;
 
     private final AdsVpnService service;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -58,6 +65,15 @@ final class RewardAdvisor {
     private boolean revealVideoForSession = false;
     private volatile String cachedForeground = null;
     private volatile long cacheTime = 0L;
+
+    // Used only inside inspecting's mutually exclusive candidate section.
+    private String observedForeground;
+    private long foregroundSeenAt;
+    private String candidateApp;
+    private String firstCandidateHost;
+    private long firstCandidateAt;
+    private int candidateHits;
+    private boolean multipleCandidateHosts;
 
     private WindowManager wm;
     private View suggestion;
@@ -180,19 +196,55 @@ final class RewardAdvisor {
         }
     }
 
-    void onBlockedAdvertisingDomain() {
-        if (!prefs().getBoolean(PREF_KEY, false)
+    void onBlockedAdvertisingDomain(String domain) {
+        if (!service.isFilteringActive() || domain == null || domain.isEmpty()
+            || !prefs().getBoolean(PREF_KEY, false)
             || !hasOverlayAccess(service) || !hasUsageAccess(service)) return;
         if (!inspecting.compareAndSet(false, true)) return;
         try {
             String pkg = foregroundPackage();
-            if (pkg == null) return;
-            recentCandidateApp = pkg;
-            recentCandidateAt = SystemClock.elapsedRealtime();
-            if (!ASK.equals(choice(pkg))) return;
             long now = SystemClock.elapsedRealtime();
+            if (pkg == null) {
+                observedForeground = null;
+                candidateApp = null;
+                return;
+            }
+
+            // A foreground switch often coincides with analytics and preload
+            // requests made by other processes. Never prompt just on launch.
+            if (!pkg.equals(observedForeground)) {
+                observedForeground = pkg;
+                foregroundSeenAt = now;
+                candidateApp = null;
+                return;
+            }
+            if (now - foregroundSeenAt < FOREGROUND_SETTLE_MS
+                || !ASK.equals(choice(pkg))) return;
+
             long last = cooldownByApp.getOrDefault(pkg, 0L);
             if (last != 0L && now - last < COOLDOWN_MS) return;
+
+            if (!pkg.equals(candidateApp)
+                || now - firstCandidateAt > EVIDENCE_WINDOW_MS) {
+                candidateApp = pkg;
+                firstCandidateHost = domain;
+                firstCandidateAt = now;
+                candidateHits = 1;
+                multipleCandidateHosts = false;
+                return;
+            }
+            candidateHits++;
+            if (!domain.equalsIgnoreCase(firstCandidateHost)) {
+                multipleCandidateHosts = true;
+            }
+            if (candidateHits < MIN_EVIDENCE_HITS
+                || !multipleCandidateHosts
+                || now - firstCandidateAt < EVIDENCE_SPREAD_MS) return;
+
+            // Still only a DNS hypothesis, NOT proof of rewarded playback.
+            candidateApp = null;
+            recentCandidateApp = pkg;
+            recentCandidateAt = now;
             cooldownByApp.put(pkg, now);
             main.post(() -> showSuggestion(pkg));
         } catch (RuntimeException ex) {
