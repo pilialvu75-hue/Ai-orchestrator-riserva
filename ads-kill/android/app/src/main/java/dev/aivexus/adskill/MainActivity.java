@@ -179,6 +179,12 @@ public final class MainActivity extends Activity {
         power = actionButton(t("start"), true);
         power.setOnClickListener(v -> toggleVpn());
         protection.addView(power);
+        // Remains available even when the cached VPN state is incorrect.
+        Button emergency = actionButton(t("emergency_stop"), false);
+        emergency.setOnClickListener(v -> stopVpnDirectly());
+        protection.addView(emergency);
+        protection.addView(label(t("emergency_info"), 11, false,
+            UiPrefs.secondary(this)));
         home.addView(protection);
 
         LinearLayout numbers = new LinearLayout(this);
@@ -398,10 +404,26 @@ public final class MainActivity extends Activity {
         refresh();
     }
 
+    /**
+     * stopService() stops the existing foreground VPN directly. Using
+     * startService(ACTION_STOP) here previously relied on another command
+     * reaching the service, which could leave the tunnel active.
+     */
+    private void stopVpnDirectly() {
+        try {
+            boolean found = stopService(new Intent(this, AdsVpnService.class));
+            // If Android has already destroyed the service, discard stale UI state.
+            if (!found) AdsVpnService.active = false;
+            handler.postDelayed(this::refresh, 200L);
+            handler.postDelayed(this::refresh, 1000L);
+        } catch (RuntimeException ex) {
+            Toast.makeText(this, t("stop_failed"), Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void toggleVpn() {
         if (AdsVpnService.active) {
-            startService(new Intent(this, AdsVpnService.class)
-                .setAction(AdsVpnService.ACTION_STOP));
+            stopVpnDirectly();
         } else {
             Intent approval = VpnService.prepare(this);
             if (approval != null) startActivityForResult(approval, 121);
