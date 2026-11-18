@@ -59,7 +59,14 @@ public final class AdsVpnService extends VpnService {
     }
 
     void blockAdsNow() {
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putLong("allow_until", 0L).apply();
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        SharedPreferences.Editor edit = prefs.edit().putLong("allow_until", 0L);
+        // Also revoke remembered automatic approval: otherwise a new DNS request
+        // immediately starts another 60-second allowance.
+        if (RewardAdvisor.ALLOW.equals(RewardAdvisor.readChoice(prefs))) {
+            edit.putString(RewardAdvisor.CHOICE_KEY, RewardAdvisor.BLOCK);
+        }
+        edit.apply();
         if (rewardAdvisor != null) rewardAdvisor.hideStopControl();
         notifyStatus();
     }

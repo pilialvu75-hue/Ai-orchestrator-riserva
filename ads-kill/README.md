@@ -61,3 +61,8 @@ Priority next: fix device findings, add signed-beta update path, per-app control
 - Android verifies the new APK certificate matches the existing package. A **one-time uninstall** of the existing ephemeral debug beta is required to migrate to the first persistently signed Ads Kill release. Afterward the same key must be used for all upgrades. This setup is not completed automatically, and the updater may correctly report no signed release yet.
 - The update APK is stored in private cache and exposed read-only to Android's installer through a non-exported, temporary-URI-permission provider. User may have to authorize installations from Ads Kill in Android settings.
 - All update checks are user-initiated. No background analytics, telemetry or auto-download. GitHub distribution only; review Play Store REQUEST_INSTALL_PACKAGES rules before any Play Store submission.
+
+### 0.1.2 beta2 patch
+
+- The in-app **Blocca ora** action also clears a remembered auto-allow policy, matching the floating stop control. This prevents an immediate 60-second re-allow on the next DNS lookup.
+- Version code 4. Unsigned ephemeral debug-key continuity remains unavailable; only dedicated persistent signing enables Android in-place updates.
