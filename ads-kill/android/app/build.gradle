@@ -13,6 +13,28 @@ android {
         versionName '0.1.2-beta1'
     }
 
+    // Dedicated Ads Kill key supplied through GitHub repository secrets.
+    // Never commit signing material or use the AIVEXUS product key.
+    signingConfigs {
+        adsKillRelease {
+            def keyPath = System.getenv('ADS_KILL_KEYSTORE_PATH')
+            if (keyPath) {
+                storeFile file(keyPath)
+                storePassword System.getenv('ADS_KILL_STORE_PASSWORD')
+                keyAlias System.getenv('ADS_KILL_KEY_ALIAS')
+                keyPassword System.getenv('ADS_KILL_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (System.getenv('ADS_KILL_KEYSTORE_PATH')) {
+                signingConfig signingConfigs.adsKillRelease
+            }
+            minifyEnabled false
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17

@@ -34,22 +34,54 @@ jobs:
       - name: Build debug APK
         working-directory: ads-kill/android
         run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Build persistently signed release when dedicated Ads Kill key is configured
+        id: signing
+        working-directory: ads-kill/android
+        shell: bash
+        env:
+          ADS_KILL_KEYSTORE_BASE64: ${{ secrets.ADS_KILL_KEYSTORE_BASE64 }}
+          ADS_KILL_STORE_PASSWORD: ${{ secrets.ADS_KILL_STORE_PASSWORD }}
+          ADS_KILL_KEY_ALIAS: ${{ secrets.ADS_KILL_KEY_ALIAS }}
+          ADS_KILL_KEY_PASSWORD: ${{ secrets.ADS_KILL_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$ADS_KILL_KEYSTORE_BASE64" || -z "$ADS_KILL_STORE_PASSWORD" || -z "$ADS_KILL_KEY_ALIAS" || -z "$ADS_KILL_KEY_PASSWORD" ]]; then
+            echo 'No dedicated signing secrets configured; publish debug-only beta.'
+            echo 'signed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          export ADS_KILL_KEYSTORE_PATH="$RUNNER_TEMP/ads-kill-signing.jks"
+          umask 077
+          printf '%s' "$ADS_KILL_KEYSTORE_BASE64" | base64 --decode > "$ADS_KILL_KEYSTORE_PATH"
+          gradle --no-daemon --stacktrace assembleRelease
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk ../../ads-kill-v0.1.2-beta1-signed.apk
+          echo 'signed=true' >> "$GITHUB_OUTPUT"
       - name: Rename APK
-        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.1-beta1-debug.apk
+        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.2-beta1-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Ads-Kill-Android-0.1.1-beta1
-          path: ads-kill-v0.1.1-beta1-debug.apk
+          name: Ads-Kill-Android-0.1.2-beta1
+          path: |
+            ads-kill-v0.1.2-beta1-debug.apk
+            ads-kill-v0.1.2-beta1-signed.apk
+          if-no-files-found: warn
           retention-days: 30
       - name: Publish first test prerelease
         if: github.ref == 'refs/heads/ads-kill/android-smart-reward'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=ads-kill-v0.1.1-beta1
+          TAG=ads-kill-v0.1.2-beta1
+          assets=(ads-kill-v0.1.2-beta1-debug.apk)
+          if [[ -f ads-kill-v0.1.2-beta1-signed.apk ]]; then
+            assets+=(ads-kill-v0.1.2-beta1-signed.apk)
+          fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" ads-kill-v0.1.1-beta1-debug.apk \
+            gh release create "$TAG" "${assets[@]}" \
               --target "$GITHUB_SHA" --prerelease \
-              --title "Ads Kill Android 0.1.1 beta1 (test)" \
-              --notes "Experimental WeWard Smart Reward popup (opt-in overlay and usage access permissions). DNS-only VPN, 19 starter block rules, Cloudflare resolver; does NOT reliably identify rewarded ads or block YouTube in-stream ads. Debug APK signed with ephemeral CI key: uninstall previous debug version before installing."
+              --title "Ads Kill Android 0.1.2 beta1 (remember, stop, updater)" \
+              --notes "Smart Reward remembered choice (WeWard), stop future ad DNS lookups now, manual GitHub update checker (only persistently signed APKs). DNS only; existing ad video may continue. Debug APK requires uninstall due to ephemeral key. Stable in-place updates require dedicated ADS_KILL_* signing secrets."
+          else
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          fi
           fi

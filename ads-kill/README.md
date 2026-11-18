@@ -49,3 +49,15 @@ Priority next: fix device findings, add signed-beta update path, per-app control
 - This beta still **cannot block YouTube native-app preroll ads**, which are typically delivered from shared content infrastructure.
 - This build is signed using a different ephemeral GitHub Actions debug keystore than the previous beta. If Android says package conflicts, **uninstall the previous Ads Kill beta first**; this resets counters and VPN/permission settings, but does not affect WeWard.
 - If no popup appears, check permissions and Smart Reward switch. If internet breaks, disable the VPN.
+
+
+## Android 0.1.2 beta 1 — remember, block now, signed-only updater
+
+- WeWard popup includes **Ricorda questa scelta per WeWard** (default unchecked). Remembering **Continua blocco** suppresses future suggestions; remembering **Consenti 60 s** allows the next suspected ad window automatically when WeWard is foreground. Because DNS traffic has no reliable requesting-app identity and does not identify rewarded ads, automatic allowances can unintentionally allow regular ads and other apps' ad lookups during the 60-second GLOBAL window.
+- A small floating **Blocca ora** button is available during the allowance, as well as a button inside Ads Kill. It cancels the DNS allow window immediately and revokes a remembered automatic allow. **It cannot terminate an ad video already downloaded or an active HTTPS stream.**
+- **Dimentica la scelta per WeWard** resets the rule to Ask.
+- **Controlla aggiornamenti beta** checks GitHub tags/releases manually. It only offers assets ending `-signed.apk` with SHA256 digest, checks integrity after download, then opens Android's OS installer with explicit user confirmation. No silent updates.
+- The GitHub workflow publishes a stable signed APK **only when all four dedicated GitHub repository secrets are configured**: `ADS_KILL_KEYSTORE_BASE64`, `ADS_KILL_STORE_PASSWORD`, `ADS_KILL_KEY_ALIAS`, `ADS_KILL_KEY_PASSWORD`. Never reuse the AIVEXUS production signing key; never commit a private key. Otherwise it emits only an ephemeral debug APK, which **cannot in-place update prior debug builds**.
+- Android verifies the new APK certificate matches the existing package. A **one-time uninstall** of the existing ephemeral debug beta is required to migrate to the first persistently signed Ads Kill release. Afterward the same key must be used for all upgrades. This setup is not completed automatically, and the updater may correctly report no signed release yet.
+- The update APK is stored in private cache and exposed read-only to Android's installer through a non-exported, temporary-URI-permission provider. User may have to authorize installations from Ads Kill in Android settings.
+- All update checks are user-initiated. No background analytics, telemetry or auto-download. GitHub distribution only; review Play Store REQUEST_INSTALL_PACKAGES rules before any Play Store submission.
