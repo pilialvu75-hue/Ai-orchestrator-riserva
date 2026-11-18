@@ -28,6 +28,9 @@ public final class MainActivity extends Activity {
     private TextView pauseStatus;
     private Button toggle;
     private Button pause;
+    private Button blockNow;
+    private Button updateButton;
+    private TextView updateStatus;
     private CheckBox smartReward;
     private TextView smartStatus;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -53,13 +56,20 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
 
         addText(root, "Ads Kill", 32, Color.rgb(20, 39, 64), true);
-        addText(root, "Beta Android 0.1.1 · Smart Reward sperimentale", 14, Color.DKGRAY, false);
+        addText(root, "Beta Android 0.1.2 · Ricorda + Blocca ora + Aggiornamenti", 14, Color.DKGRAY, false);
         status = addText(root, "", 23, Color.rgb(24, 99, 64), true);
         toggle = addButton(root, "Avvia protezione", v -> toggle());
         pause = addButton(root, "Consenti pubblicità per 60 secondi", v -> {
             startService(new Intent(this, AdsVpnService.class)
                 .setAction(AdsVpnService.ACTION_ALLOW_60));
             Toast.makeText(this, "Blocco sospeso per 60 secondi", Toast.LENGTH_SHORT).show();
+            refresh();
+        });
+        blockNow = addButton(root, "Blocca ora · termina pausa", v -> {
+            startService(new Intent(this, AdsVpnService.class)
+                .setAction(AdsVpnService.ACTION_BLOCK_NOW));
+            Toast.makeText(this, "Blocco DNS ripristinato. Un video già caricato può continuare.",
+                Toast.LENGTH_LONG).show();
             refresh();
         });
         pauseStatus = addText(root, "", 15, Color.rgb(128, 69, 13), false);
@@ -90,13 +100,26 @@ public final class MainActivity extends Activity {
         addButton(root, "2. Autorizza accesso app in primo piano", v ->
             startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
         smartStatus = addText(root, "", 14, Color.DKGRAY, false);
+        addButton(root, "Dimentica la scelta per WeWard", v -> {
+            getSharedPreferences("ads_kill", MODE_PRIVATE).edit()
+                .remove(RewardAdvisor.CHOICE_KEY).apply();
+            Toast.makeText(this, "WeWard: chiederò di nuovo", Toast.LENGTH_SHORT).show();
+            refresh();
+        });
         addText(root,
             "Avviso opzionale di 7 secondi, non più di una volta ogni 3 minuti. "
           + "Non legge lo schermo o i tuoi dati: considera solo l'app in primo piano "
           + "e i domini DNS bloccati. Un annuncio normale può sembrare ricompensato. "
-          + "Dopo aver premuto Consenti, riprova il video premio in WeWard.",
+          + "Nel popup puoi selezionare Ricorda questa scelta per WeWard. "
+          + "Ricorda Consenti può consentire anche annunci normali; puoi premere Blocca ora "
+          + "e azzerare la scelta. Un video già scaricato potrebbe continuare.",
             14, Color.DKGRAY, false);
 
+        addText(root, "AGGIORNAMENTI", 16, Color.rgb(20, 39, 64), true);
+        updateButton = addButton(root, "Controlla aggiornamenti beta", v -> checkUpdates());
+        updateStatus = addText(root,
+            "Aggiornamenti verificati via GitHub. Solo APK con firma stabile e SHA-256.",
+            14, Color.DKGRAY, false);
         addText(root, "COME FUNZIONA", 16, Color.rgb(20, 39, 64), true);
         addText(root,
             "La VPN locale intercetta soltanto le richieste DNS dirette al resolver configurato. "
@@ -175,11 +198,65 @@ public final class MainActivity extends Activity {
             smartStatus.setText("Popup: " + (overlay ? "OK" : "non autorizzati")
                 + " · Accesso app in primo piano: " + (usage ? "OK" : "non autorizzato")
                 + " · Smart Reward: "
-                + (prefs.getBoolean(RewardAdvisor.PREF_KEY, false) ? "richiesto" : "spento"));
+                + (prefs.getBoolean(RewardAdvisor.PREF_KEY, false) ? "richiesto" : "spento")
+                + " · Scelta WeWard: " + RewardAdvisor.readChoice(prefs));
         }
         long left = Math.max(0, (prefs.getLong("allow_until", 0) - System.currentTimeMillis() + 999) / 1000);
         pauseStatus.setText(left > 0 && on ? "Pubblicità temporaneamente consentita: " + left + " s"
             : "La sospensione si riattiva automaticamente dopo 60 secondi.");
+        if (blockNow != null) blockNow.setEnabled(on && left > 0);
+    }
+
+
+    private void checkUpdates() {
+        updateButton.setEnabled(false);
+        updateStatus.setText("Controllo release ufficiali GitHub...");
+        UpdateClient.check(this, new UpdateClient.Result() {
+            @Override public void ready(UpdateClient.Release release) {
+                updateButton.setEnabled(true);
+                if (release == null) {
+                    updateStatus.setText("Nessun aggiornamento firmato più recente disponibile.");
+                    return;
+                }
+                updateStatus.setText("Nuova beta firmata: " + release.version());
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                    .setTitle("Aggiorna Ads Kill")
+                    .setMessage("Versione " + release.version()
+                        + " · APK verificato con SHA-256. Android chiederà conferma. "
+                        + "La firma deve coincidere con quella installata.")
+                    .setPositiveButton("Scarica", (dialog, which) -> downloadUpdate(release))
+                    .setNegativeButton("Annulla", null).show();
+            }
+
+            @Override public void error(String message) {
+                updateButton.setEnabled(true);
+                updateStatus.setText(message);
+            }
+        });
+    }
+
+    private void downloadUpdate(UpdateClient.Release release) {
+        updateButton.setEnabled(false);
+        updateStatus.setText("Scaricamento APK e verifica SHA-256...");
+        UpdateClient.download(this, release, new UpdateClient.DownloadResult() {
+            @Override public void ready() {
+                updateButton.setEnabled(true);
+                updateStatus.setText("APK verificato. Android controlla la firma prima dell'installazione.");
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                    .setTitle("APK pronto")
+                    .setMessage("Avvio installatore Android. Se la firma della vecchia beta non "
+                        + "coincide, Android rifiuterà l'aggiornamento: servirà l'ultima "
+                        + "migrazione a una chiave di firma stabile.")
+                    .setPositiveButton("Installa", (dialog, which) ->
+                        UpdateClient.requestInstall(MainActivity.this))
+                    .setNegativeButton("Annulla", null).show();
+            }
+
+            @Override public void error(String message) {
+                updateButton.setEnabled(true);
+                updateStatus.setText(message);
+            }
+        });
     }
 
     @Override protected void onResume() {

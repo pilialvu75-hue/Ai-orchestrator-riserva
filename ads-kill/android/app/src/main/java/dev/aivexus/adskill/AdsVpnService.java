@@ -32,6 +32,7 @@ public final class AdsVpnService extends VpnService {
     public static final String ACTION_START = "dev.aivexus.adskill.START";
     public static final String ACTION_STOP = "dev.aivexus.adskill.STOP";
     public static final String ACTION_ALLOW_60 = "dev.aivexus.adskill.ALLOW_60";
+    public static final String ACTION_BLOCK_NOW = "dev.aivexus.adskill.BLOCK_NOW";
     public static final String STATUS = "dev.aivexus.adskill.STATUS";
     public static volatile boolean active = false;
 
@@ -48,9 +49,18 @@ public final class AdsVpnService extends VpnService {
         rewardAdvisor = new RewardAdvisor(this);
     }
 
+    boolean isFilteringActive() { return running.get() && tun != null; }
+
     void allowAdsFor60Seconds() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
             .putLong("allow_until", System.currentTimeMillis() + 60000L).apply();
+        notifyStatus();
+        if (rewardAdvisor != null) rewardAdvisor.showStopControl();
+    }
+
+    void blockAdsNow() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putLong("allow_until", 0L).apply();
+        if (rewardAdvisor != null) rewardAdvisor.hideStopControl();
         notifyStatus();
     }
 
@@ -62,7 +72,11 @@ public final class AdsVpnService extends VpnService {
         }
         if (ACTION_ALLOW_60.equals(action)) {
             allowAdsFor60Seconds();
-            return START_NOT_STICKY;
+            return START_STICKY;
+        }
+        if (ACTION_BLOCK_NOW.equals(action)) {
+            blockAdsNow();
+            return START_STICKY;
         }
         if (!running.compareAndSet(false, true)) return START_STICKY;
         active = true;
@@ -114,8 +128,12 @@ public final class AdsVpnService extends VpnService {
     private void respond(DnsPackets p) {
         if (!running.get()) return;
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        boolean adDomain = BlockRules.shouldBlock(p.domain);
         boolean allow = System.currentTimeMillis() < prefs.getLong("allow_until", 0L);
-        boolean block = !allow && BlockRules.shouldBlock(p.domain);
+        if (!allow && adDomain && rewardAdvisor != null) {
+            allow = rewardAdvisor.autoAllowIfRemembered();
+        }
+        boolean block = !allow && adDomain;
         byte[] response = block ? p.blockedResponse() : forwardDns(p.query);
         if (response != null && response.length >= 12) {
             byte[] reply = p.packetForResponse(response);

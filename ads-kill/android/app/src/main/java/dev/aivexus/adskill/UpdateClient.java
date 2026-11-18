@@ -36,7 +36,22 @@ final class UpdateClient {
     interface Result { void ready(Release release); void error(String message); }
     interface DownloadResult { void ready(); void error(String message); }
 
-    record Release(String version, String url, String sha256, long size) {}
+    static final class Release {
+        private final String version;
+        private final String url;
+        private final String sha256;
+        private final long size;
+        Release(String version, String url, String sha256, long size) {
+            this.version = version;
+            this.url = url;
+            this.sha256 = sha256;
+            this.size = size;
+        }
+        String version() { return version; }
+        String url() { return url; }
+        String sha256() { return sha256; }
+        long size() { return size; }
+    }
 
     private static final String BASE = "https://api.github.com/repos/pilialvu75-hue/Ai-orchestrator-riserva";
     private static final String TAG_PREFIX = "ads-kill-v";
