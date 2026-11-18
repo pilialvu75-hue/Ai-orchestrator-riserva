@@ -83,24 +83,29 @@ public final class AdsVpnService extends VpnService {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        String action = intent == null ? ACTION_START : intent.getAction();
+        // A killed VPN must never resurrect without a new explicit user action.
+        String action = intent == null ? ACTION_STOP : intent.getAction();
         if (ACTION_STOP.equals(action)) {
+            shutdownVpn();
             stopSelf();
             return START_NOT_STICKY;
         }
-        if (ACTION_ALLOW_60.equals(action)) {
-            allowAdsFor60Seconds();
-            return START_STICKY;
+        if (ACTION_ALLOW_60.equals(action)
+            || ACTION_BLOCK_NOW.equals(action) || ACTION_BLOCK_NEXT.equals(action)) {
+            if (!isFilteringActive()) {
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+            if (ACTION_ALLOW_60.equals(action)) allowAdsFor60Seconds();
+            else if (ACTION_BLOCK_NOW.equals(action)) blockAdsNow();
+            else if (rewardAdvisor != null) rewardAdvisor.blockNextTime();
+            return START_NOT_STICKY;
         }
-        if (ACTION_BLOCK_NOW.equals(action)) {
-            blockAdsNow();
-            return START_STICKY;
+        if (!ACTION_START.equals(action)) {
+            stopSelf();
+            return START_NOT_STICKY;
         }
-        if (ACTION_BLOCK_NEXT.equals(action)) {
-            if (rewardAdvisor != null) rewardAdvisor.blockNextTime();
-            return START_STICKY;
-        }
-        if (!running.compareAndSet(false, true)) return START_STICKY;
+        if (!running.compareAndSet(false, true)) return START_NOT_STICKY;
         active = true;
         try {
             createChannel();
@@ -121,11 +126,10 @@ public final class AdsVpnService extends VpnService {
             notifyStatus();
         } catch (Exception e) {
             Log.e("AdsKill", "Could not start DNS VPN", e);
-            running.set(false);
-            active = false;
+            shutdownVpn();
             stopSelf();
         }
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     private void serve() {
@@ -212,12 +216,17 @@ public final class AdsVpnService extends VpnService {
         Intent open = new Intent(this, MainActivity.class);
         PendingIntent pending = PendingIntent.getActivity(this, 0, open,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Intent stop = new Intent(this, AdsVpnService.class).setAction(ACTION_STOP);
+        PendingIntent stopPending = PendingIntent.getService(this, 17, stop,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentTitle("Ads Kill")
             .setContentText(UiPrefs.text(this, "status_on") + " · DNS Cloudflare")
             .setOngoing(true)
             .setContentIntent(pending)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel,
+                UiPrefs.text(this, "stop"), stopPending)
             .build();
     }
 
@@ -225,19 +234,45 @@ public final class AdsVpnService extends VpnService {
         sendBroadcast(new Intent(STATUS).setPackage(getPackageName()));
     }
 
-    @Override public void onRevoke() { stopSelf(); }
-    @Override public void onDestroy() {
-        if (sessionAudio != null) sessionAudio.restore();
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putLong("allow_until", 0L).apply();
-        if (rewardAdvisor != null) rewardAdvisor.dismiss();
+    /**
+     * Shut down the actual VPN interface immediately, not merely its command
+     * queue. Safe to call repeatedly from UI, notification, revoke or destroy.
+     */
+    private void shutdownVpn() {
         running.set(false);
         active = false;
-        if (workers != null) workers.shutdownNow();
-        try { if (tun != null) tun.close(); } catch (IOException ignored) {}
-        try { if (out != null) out.close(); } catch (IOException ignored) {}
-        out = null;
+        // Close the TUN first so Android releases the VPN and the reader unblocks.
+        ParcelFileDescriptor oldTun = tun;
         tun = null;
+        try { if (oldTun != null) oldTun.close(); } catch (IOException ignored) {}
+        FileOutputStream oldOut = out;
+        out = null;
+        try { if (oldOut != null) oldOut.close(); } catch (IOException ignored) {}
+        ExecutorService oldWorkers = workers;
+        workers = null;
+        if (oldWorkers != null) oldWorkers.shutdownNow();
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putLong("allow_until", 0L).apply();
+        if (sessionAudio != null) sessionAudio.restore();
+        if (rewardAdvisor != null) rewardAdvisor.dismiss();
+        stopForeground(STOP_FOREGROUND_REMOVE);
         notifyStatus();
+    }
+
+    /** Exposed only to the app's own in-process emergency overlay. */
+    void stopFromOverlay() {
+        shutdownVpn();
+        stopSelf();
+    }
+
+    @Override public void onRevoke() {
+        shutdownVpn();
+        stopSelf();
+        super.onRevoke();
+    }
+
+    @Override public void onDestroy() {
+        shutdownVpn();
         super.onDestroy();
     }
 
