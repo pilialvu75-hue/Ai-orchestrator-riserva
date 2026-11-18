@@ -65,6 +65,7 @@ final class RewardAdvisor {
     private boolean revealVideoForSession = false;
     private volatile String cachedForeground = null;
     private volatile long cacheTime = 0L;
+    private volatile long foregroundResumedAtWallClock = 0L;
 
     // Used only inside inspecting's mutually exclusive candidate section.
     private String observedForeground;
@@ -144,13 +145,16 @@ final class RewardAdvisor {
         if (events == null) return null;
         UsageEvents.Event e = new UsageEvents.Event();
         String foreground = null;
+        long resumedAt = 0L;
         while (events.hasNextEvent()) {
             events.getNextEvent(e);
             if (e.getEventType() == UsageEvents.Event.ACTIVITY_RESUMED) {
                 foreground = e.getPackageName();
+                resumedAt = e.getTimeStamp();
             } else if (e.getEventType() == UsageEvents.Event.ACTIVITY_PAUSED
                 && foreground != null && foreground.equals(e.getPackageName())) {
                 foreground = null;
+                resumedAt = 0L;
             }
         }
         if (foreground != null && (foreground.equals(service.getPackageName())
@@ -160,6 +164,7 @@ final class RewardAdvisor {
             foreground = null;
         }
         cachedForeground = foreground;
+        foregroundResumedAtWallClock = foreground == null ? 0L : resumedAt;
         cacheTime = nowMonotonic;
         return foreground;
     }
@@ -218,7 +223,11 @@ final class RewardAdvisor {
                 candidateApp = null;
                 return;
             }
+            // The UsageStats resume time also covers A -> B -> A switches
+            // when no blocked DNS event was seen while B was foreground.
+            long resumeAt = foregroundResumedAtWallClock;
             if (now - foregroundSeenAt < FOREGROUND_SETTLE_MS
+                || (resumeAt > 0L && System.currentTimeMillis() - resumeAt < FOREGROUND_SETTLE_MS)
                 || !ASK.equals(choice(pkg))) return;
 
             long last = cooldownByApp.getOrDefault(pkg, 0L);
@@ -304,7 +313,8 @@ final class RewardAdvisor {
     private void showSuggestion(String pkg) {
         if (!service.isFilteringActive() || !hasOverlayAccess(service)
             || !hasUsageAccess(service) || suggestion != null
-            || !prefs().getBoolean(PREF_KEY, false) || !ASK.equals(choice(pkg))) return;
+            || !prefs().getBoolean(PREF_KEY, false) || !ASK.equals(choice(pkg))
+            || !pkg.equals(foregroundPackage())) return;
         try {
             wm = service.getSystemService(WindowManager.class);
             if (wm == null) return;
