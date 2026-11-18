@@ -360,6 +360,14 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
         var estimatedTokenCount = 0;
 
+        // On Windows the Qwen recovery route is a one-shot CPU-only CLI.
+        // Record numeric timings only: no prompt, completion or model paths.
+        // This separates process launch, first visible text and final exit
+        // without changing inference behavior or the CLI fallback.
+        final Stopwatch? windowsCliTiming =
+            Platform.isWindows ? (Stopwatch()..start()) : null;
+        var firstVisibleOutputMs = -1;
+
         try {
           process = await startRuntimeProcess(
             executable,
@@ -379,6 +387,14 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           return;
         }
 
+        if (windowsCliTiming != null) {
+          RuntimeEventLog.instance.emit(
+            '[GENERATION_START] backend=process_cli '
+            'model_id=$modelId gpu_layers=0 '
+            'process_launch_ms=${windowsCliTiming.elapsedMilliseconds}',
+          );
+        }
+
         cancellationToken.onCancel(() {
           process?.kill(ProcessSignal.sigterm);
         });
@@ -390,6 +406,14 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
             final visibleChunk = chunk;
             if (visibleChunk.isEmpty) return;
+
+            if (windowsCliTiming != null && firstVisibleOutputMs < 0) {
+              firstVisibleOutputMs = windowsCliTiming.elapsedMilliseconds;
+              RuntimeEventLog.instance.emit(
+                '[FIRST_TOKEN] backend=process_cli '
+                'first_visible_output_ms=$firstVisibleOutputMs',
+              );
+            }
 
             fullText.write(visibleChunk);
 
@@ -441,6 +465,17 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
         await stdoutSub.cancel();
         await stderrSub.cancel();
+
+        if (windowsCliTiming != null) {
+          windowsCliTiming.stop();
+          RuntimeEventLog.instance.emit(
+            '[GENERATION_END] backend=process_cli '
+            'total_ms=${windowsCliTiming.elapsedMilliseconds} '
+            'first_visible_output_ms=$firstVisibleOutputMs '
+            'output_chars=${fullText.length} '
+            'exit_code=$exitCode cancelled=${cancellationToken.isCancelled}',
+          );
+        }
 
         debugPrint(
           '[$_localProviderTag] process exitCode=$exitCode',
