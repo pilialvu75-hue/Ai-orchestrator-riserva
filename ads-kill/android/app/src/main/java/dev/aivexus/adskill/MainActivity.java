@@ -29,6 +29,10 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 /** Standalone, offline-first Android UI with user-selectable language and theme. */
 public final class MainActivity extends Activity {
@@ -37,6 +41,7 @@ public final class MainActivity extends Activity {
     private TextView state, queries, blocked, timer, permissions, savedCount, updateStatus;
     private Button power, pause, blockNext, endAllowance, checkUpdates;
     private CheckBox smart;
+    private LinearLayout savedChoicesContainer;
     private boolean preferencesVisible = false;
     private boolean receiverActive = false;
 
@@ -109,6 +114,7 @@ public final class MainActivity extends Activity {
         buildHome();
         buildSettings();
         setTab(false);
+        renderSavedChoices();
         refresh();
     }
 
@@ -295,11 +301,14 @@ public final class MainActivity extends Activity {
         policyCard.addView(label(t("choice_intro"), 13, false, UiPrefs.secondary(this)));
         savedCount = label("", 13, false, UiPrefs.textColor(this));
         policyCard.addView(savedCount);
+        savedChoicesContainer = column();
+        policyCard.addView(savedChoicesContainer);
         Button reset = actionButton(t("reset_choices"), false);
         reset.setOnClickListener(v -> {
             RewardAdvisor.clearAllChoices(this);
             Toast.makeText(this, t("reset_done"), Toast.LENGTH_LONG).show();
             refresh();
+            renderSavedChoices();
         });
         policyCard.addView(reset);
         settingsPage.addView(policyCard);
@@ -340,8 +349,50 @@ public final class MainActivity extends Activity {
         };
     }
 
+    /** Only remembered applications, not an invasive inventory of installed apps. */
+    private void renderSavedChoices() {
+        if (savedChoicesContainer == null) return;
+        savedChoicesContainer.removeAllViews();
+        Map<String, ?> all = preferences().getAll();
+        List<String> packages = new ArrayList<>();
+        for (String k : all.keySet()) {
+            if (k.startsWith(RewardAdvisor.PREF_PREFIX)) {
+                packages.add(k.substring(RewardAdvisor.PREF_PREFIX.length()));
+            }
+        }
+        Collections.sort(packages);
+        if (packages.isEmpty()) {
+            savedChoicesContainer.addView(label(t("no_choices"), 12, false,
+                UiPrefs.secondary(this)));
+            return;
+        }
+        for (String pkg : packages) {
+            String key = RewardAdvisor.PREF_PREFIX + pkg;
+            savedChoicesContainer.addView(label(pkg, 12, true, UiPrefs.textColor(this)));
+            String[] options = {"ask", "allow", "block"};
+            String[] labels = {t("rule_ask"), t("rule_allow"), t("rule_block")};
+            Spinner select = selector(labels, options, preferences().getString(key, "ask"));
+            select.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override public void onItemSelected(AdapterView<?> parent, View view,
+                                                     int position, long id) {
+                    if (position < 0 || position >= options.length) return;
+                    String newValue = options[position];
+                    String existing = preferences().getString(key, "ask");
+                    if (newValue.equals(existing)) return;
+                    SharedPreferences.Editor edit = preferences().edit();
+                    if ("ask".equals(newValue)) edit.remove(key);
+                    else edit.putString(key, newValue);
+                    edit.apply();
+                }
+                @Override public void onNothingSelected(AdapterView<?> parent) {}
+            });
+            savedChoicesContainer.addView(select);
+        }
+    }
+
     private void setTab(boolean settings) {
         preferencesVisible = settings;
+        if (settings) renderSavedChoices();
         home.setVisibility(settings ? View.GONE : View.VISIBLE);
         settingsPage.setVisibility(settings ? View.VISIBLE : View.GONE);
         refresh();
