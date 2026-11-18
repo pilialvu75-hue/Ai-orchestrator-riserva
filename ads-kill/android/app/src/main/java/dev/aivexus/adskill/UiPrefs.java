@@ -43,6 +43,9 @@ final class UiPrefs {
         put("status_off", "Protezione disattivata", "Protection désactivée", "Protection disabled", "Protección desactivada");
         put("start", "Attiva protezione", "Activer la protection", "Enable protection", "Activar protección");
         put("stop", "Disattiva protezione", "Désactiver la protection", "Disable protection", "Desactivar protección");
+        put("emergency_stop", "ARRESTO EMERGENZA VPN", "ARRÊT D'URGENCE VPN", "EMERGENCY STOP VPN", "DETENER VPN DE EMERGENCIA");
+        put("emergency_info", "Sempre disponibile. Se Android riattiva la VPN, disabilita 'VPN sempre attiva' nelle impostazioni VPN del telefono.", "Toujours disponible. Si Android réactive le VPN, désactivez « VPN permanent » dans les paramètres VPN du téléphone.", "Always available. If Android restarts the VPN, disable Always-on VPN in the phone's VPN settings.", "Siempre disponible. Si Android reinicia la VPN, desactiva VPN siempre activa en los ajustes del teléfono.");
+        put("stop_failed", "Impossibile arrestare la VPN dall'app: usa Impostazioni Android > Connessioni > VPN.", "Impossible d'arrêter le VPN : utilisez Paramètres Android > Connexions > VPN.", "Could not stop VPN in app: open Android Settings > Connections > VPN.", "No se pudo detener la VPN: abre Ajustes Android > Conexiones > VPN.");
         put("dns_queries", "Richieste DNS", "Requêtes DNS", "DNS requests", "Solicitudes DNS");
         put("dns_blocked", "Pubblicità bloccate", "Publicités bloquées", "Ads blocked", "Anuncios bloqueados");
         put("pause", "Consenti 60 secondi", "Autoriser 60 secondes", "Allow for 60 seconds", "Permitir 60 segundos");
