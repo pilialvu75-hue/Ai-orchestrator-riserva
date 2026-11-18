@@ -84,4 +84,3 @@ jobs:
           else
             gh release upload "$TAG" "${assets[@]}" --clobber
           fi
-          fi
