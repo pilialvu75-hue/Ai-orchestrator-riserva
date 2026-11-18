@@ -2,7 +2,7 @@ name: Ads Kill - Android beta
 on:
   push:
     branches:
-      - ads-kill/android-i18n-reward-ux
+      - ads-kill/android-v0.1.4-session
     paths:
       - 'ads-kill/**'
       - '.github/workflows/ads-kill-android.yml'
@@ -54,33 +54,33 @@ jobs:
           printf '%s' "$ADS_KILL_KEYSTORE_BASE64" | base64 --decode > "$ADS_KILL_KEYSTORE_PATH"
           gradle --no-daemon --stacktrace assembleRelease
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk ../../ads-kill-v0.1.3-beta1-signed.apk
+          cp app/build/outputs/apk/release/app-release.apk ../../ads-kill-v0.1.4-beta1-signed.apk
           echo 'signed=true' >> "$GITHUB_OUTPUT"
       - name: Rename APK
-        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.3-beta1-debug.apk
+        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.4-beta1-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Ads-Kill-Android-0.1.3-beta1
+          name: Ads-Kill-Android-0.1.4-beta1
           path: |
-            ads-kill-v0.1.3-beta1-debug.apk
-            ads-kill-v0.1.3-beta1-signed.apk
+            ads-kill-v0.1.4-beta1-debug.apk
+            ads-kill-v0.1.4-beta1-signed.apk
           if-no-files-found: warn
           retention-days: 30
       - name: Publish first test prerelease
-        if: github.ref == 'refs/heads/ads-kill/android-i18n-reward-ux'
+        if: github.ref == 'refs/heads/ads-kill/android-v0.1.4-session'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=ads-kill-v0.1.3-beta1
-          assets=(ads-kill-v0.1.3-beta1-debug.apk)
-          if [[ -f ads-kill-v0.1.3-beta1-signed.apk ]]; then
-            assets+=(ads-kill-v0.1.3-beta1-signed.apk)
+          TAG=ads-kill-v0.1.4-beta1
+          assets=(ads-kill-v0.1.4-beta1-debug.apk)
+          if [[ -f ads-kill-v0.1.4-beta1-signed.apk ]]; then
+            assets+=(ads-kill-v0.1.4-beta1-signed.apk)
           fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" "${assets[@]}" \
               --target "$GITHUB_SHA" --prerelease \
-              --title "Ads Kill Android 0.1.3 beta1 (all-app, language and theme)" \
-              --notes "All-app foreground heuristic and per-app remembered choices; renamed Block next time without interrupting current ad; Italian French English Spanish; light dark system themes. Indeterminate progress shows elapsed allowance only. Mute and black screen saved as future-only preferences, not active. Ephemeral debug signature requires uninstall to upgrade; stable signing not yet configured."
+              --title "Ads Kill Android 0.1.4 beta1 (privacy session and all-app rules)" \
+              --notes "All-app heuristic, per-app remembered rules, themes, four languages. Experimental black-screen overlay (default on, Show video to reveal) and global media volume mute with restoration during 60-second DNS allowance. Progress bar is indeterminate and timer shows only allowance, NOT ad progress. Underlying ad may fail to grant reward. In-app updater requires persistent Ads Kill signing secrets; this debug build may require uninstall first."
           else
             gh release upload "$TAG" "${assets[@]}" --clobber
           fi

@@ -161,6 +161,7 @@ final class RewardAdvisor {
 
     /** Only called on a candidate ad-domain DNS request. */
     boolean autoAllowIfRemembered() {
+        if (System.currentTimeMillis() < prefs().getLong("manual_block_until", 0L)) return false;
         if (!service.isFilteringActive() || !prefs().getBoolean(PREF_KEY, false)
             || !hasOverlayAccess(service) || !hasUsageAccess(service)) return false;
         if (!inspecting.compareAndSet(false, true)) return false;
@@ -421,7 +422,12 @@ final class RewardAdvisor {
         });
     }
 
-    void hideStopControl() { main.post(this::dismissAllowance); }
+    void hideStopControl() {
+        main.post(() -> {
+            revealVideoForSession = false;
+            dismissAllowance();
+        });
+    }
 
     private void dismissSuggestion() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
@@ -449,6 +455,7 @@ final class RewardAdvisor {
 
     void dismiss() {
         main.post(() -> {
+            revealVideoForSession = false;
             dismissSuggestion();
             dismissAllowance();
         });

@@ -61,6 +61,7 @@ public final class AdsVpnService extends VpnService {
     }
 
     void allowAdsFor60Seconds() {
+        if (!isFilteringActive()) return;
         long until = System.currentTimeMillis() + 60000L;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
             .putLong("allow_until", until).apply();
@@ -71,12 +72,12 @@ public final class AdsVpnService extends VpnService {
 
     void blockAdsNow() {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        SharedPreferences.Editor edit = prefs.edit().putLong("allow_until", 0L);
+        SharedPreferences.Editor edit = prefs.edit()
+            .putLong("allow_until", 0L)
+            // Prevent immediate re-allow without changing the user's remembered rule.
+            .putLong("manual_block_until", System.currentTimeMillis() + 60_000L);
         edit.apply();
         if (sessionAudio != null) sessionAudio.restore();
-        // Explicitly terminate the current allowance and revoke any automatic
-        // permission for the app that triggered it, so it cannot restart instantly.
-        if (rewardAdvisor != null) rewardAdvisor.blockNextTime();
         if (rewardAdvisor != null) rewardAdvisor.hideStopControl();
         notifyStatus();
     }

@@ -78,3 +78,14 @@ Priority next: fix device findings, add signed-beta update path, per-app control
 - The floating allowance strip shows **elapsed time since an allowance** with an indeterminate progress indicator, NEVER a fabricated percentage or claim that the ad finished. Future accurate progress/end events require a trustworthy integration (first-party SDK callbacks for cooperating apps, permitted metadata sources, or opt-in device-local observation under platform rules). Such callbacks cannot ordinarily be obtained from another app.
 - User-initiated GitHub update check still only offers an APK signed with a **persistent dedicated Ads Kill key** and digest, verified before Android's confirmation. If the dedicated ADS_KILL_* secrets are absent, the beta release contains an ephemeral debug APK only, so **reinstallation is still necessary**.
 - Keep existing Android beta tests for WeWard, then test Car Jam Solver and 2 more apps to spot false prompts, unwanted exemptions and foreground detection errors.
+
+
+## Android 0.1.4 beta1 — combined test APK
+
+- New session mode after **Consenti 60 s**, including optional **black screen (default ON)**, instant **Mostra il video** button, indeterminate bar and the **remaining DNS allowance time**. This is NOT the video's progress and does NOT establish reward eligibility.
+- Optional **mute media stream (default ON)** for the 60-second allowance, using a reversible global STREAM_MUSIC volume adjustment. This affects ALL concurrent device media, not just the ad. Ads Kill attempts to restore the volume when the allowance ends or the VPN closes, unless user changed the volume. A sudden device/system crash can sometimes leave the volume at zero; check phone volume if needed.
+- Both settings are experimental and may prevent rewarded videos from granting rewards. They are NOT based on verified ad classification. Use the Show video control or disable the two options from Settings if rewards fail.
+- The small overlay can be restored by choosing Oscura lo schermo; the panel has Blocca per la prossima volta (records a future per-app BLOCK) and Termina pausa ora (immediate DNS blocking, separate behavior). Immediate blocking uses a temporary 60-second re-allow suppression, without changing a saved permanent app rule.
+- A list of apps with saved decisions is now editable under Settings; only apps for which decisions are already saved are shown, not an inventory of all installed apps.
+- Themes: Light, Dark, System. Interface language: IT, FR, EN, ES, System. Test Android 17 S24 FE and multiple apps.
+- Still missing: reliable video/ad classification, actual ad-completion percentage and ad-complete callbacks from third-party applications, DNS-over-TLS auto recognition, HTTPS content filtering, and a permanent APK signature / in-place upgrade. See upstream Android and ad SDK documentation for the platform limits.
