@@ -53,6 +53,9 @@ final class RewardAdvisor {
 
     private volatile String lastAllowedApp = null;
     private volatile long lastAllowedTime = 0L;
+    private volatile String recentCandidateApp = null;
+    private volatile long recentCandidateAt = 0L;
+    private boolean revealVideoForSession = false;
     private volatile String cachedForeground = null;
     private volatile long cacheTime = 0L;
 
@@ -182,7 +185,10 @@ final class RewardAdvisor {
         if (!inspecting.compareAndSet(false, true)) return;
         try {
             String pkg = foregroundPackage();
-            if (pkg == null || !ASK.equals(choice(pkg))) return;
+            if (pkg == null) return;
+            recentCandidateApp = pkg;
+            recentCandidateAt = SystemClock.elapsedRealtime();
+            if (!ASK.equals(choice(pkg))) return;
             long now = SystemClock.elapsedRealtime();
             long last = cooldownByApp.getOrDefault(pkg, 0L);
             if (last != 0L && now - last < COOLDOWN_MS) return;
@@ -197,14 +203,19 @@ final class RewardAdvisor {
 
     /** Remembered block applies on future requests and does NOT interrupt current video. */
     boolean blockNextTime() {
-        String pkg = lastAllowedApp;
-        if (pkg == null || SystemClock.elapsedRealtime() - lastAllowedTime > 120_000L) {
-            pkg = foregroundPackage();
+        // Prefer the currently visible app, then an explicitly allowed app,
+        // and finally a recent ad-domain context. This is heuristic only.
+        String pkg = foregroundPackage();
+        long now = SystemClock.elapsedRealtime();
+        if (pkg == null && lastAllowedApp != null && now - lastAllowedTime < 120_000L) {
+            pkg = lastAllowedApp;
+        }
+        if (pkg == null && recentCandidateApp != null && now - recentCandidateAt < 120_000L) {
+            pkg = recentCandidateApp;
         }
         if (pkg == null) return false;
         saveChoice(pkg, BLOCK);
-        main.post(this::dismissAllowance);
-        return true;
+        return true; // Does not interrupt this ad session or terminate the overlay.
     }
 
     private int dp(int n) { return Math.round(n * service.getResources().getDisplayMetrics().density); }
@@ -296,53 +307,115 @@ final class RewardAdvisor {
     }
 
     /** The strip shows elapsed allowance time, NOT an invented ad-completion percentage. */
+    /**
+     * Consent session is NOT a verified rewarded-ad playback session. The timer
+     * tracks the global DNS permission, never claims ad completion or reward.
+     * Optional opaque overlay can hide playback; the user may reveal it at once.
+     */
     void showStopControl() {
         main.post(() -> {
             if (!service.isFilteringActive() || !hasOverlayAccess(service)) return;
             dismissAllowance();
+            boolean black = prefs().getBoolean("planned_black", true) && !revealVideoForSession;
             try {
                 wm = service.getSystemService(WindowManager.class);
                 if (wm == null) return;
-                LinearLayout view = new LinearLayout(service);
-                view.setOrientation(LinearLayout.VERTICAL);
-                view.setPadding(dp(12), dp(7), dp(12), dp(8));
-                view.setBackground(panelBackground());
-                TextView elapsed = label("", 13, true);
-                view.addView(elapsed);
-                ProgressBar uncertain = new ProgressBar(service, null,
+
+                LinearLayout panel = new LinearLayout(service);
+                panel.setOrientation(LinearLayout.VERTICAL);
+                panel.setPadding(dp(16), dp(15), dp(16), dp(15));
+                panel.setGravity(black ? Gravity.CENTER : Gravity.CENTER_VERTICAL);
+                if (black) panel.setBackgroundColor(Color.BLACK);
+                else panel.setBackground(panelBackground());
+
+                TextView header = label(
+                    black ? t("screen_black_active") : t("overlay_title"),
+                    black ? 19 : 13, true);
+                if (black) header.setTextColor(Color.WHITE);
+                panel.addView(header);
+
+                TextView elapsed = label("", black ? 17 : 12, false);
+                if (black) elapsed.setTextColor(Color.WHITE);
+                elapsed.setPadding(0, dp(9), 0, dp(8));
+                panel.addView(elapsed);
+
+                ProgressBar indicator = new ProgressBar(service, null,
                     android.R.attr.progressBarStyleHorizontal);
-                uncertain.setIndeterminate(true);
-                uncertain.setIndeterminateTintList(ColorStateList.valueOf(UiPrefs.accent(service)));
-                view.addView(uncertain, new LinearLayout.LayoutParams(
+                indicator.setIndeterminate(true);
+                indicator.setIndeterminateTintList(ColorStateList.valueOf(
+                    UiPrefs.accent(service)));
+                panel.addView(indicator, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, dp(5)));
-                TextView note = label(t("overlay_timer"), 10, false);
-                note.setPadding(0, dp(3), 0, 0);
-                view.addView(note);
-                Button blockNext = new Button(service);
-                blockNext.setAllCaps(false);
-                blockNext.setText(t("overlay_stop_next"));
-                blockNext.setOnClickListener(v -> {
-                    blockNextTime(); // does not terminate the current allowance
-                    dismissAllowance();
+
+                TextView explanation = label(black
+                    ? t("screen_black_risk") : t("overlay_timer"), 11, false);
+                if (black) explanation.setTextColor(Color.rgb(205, 218, 229));
+                explanation.setPadding(0, dp(10), 0, dp(10));
+                panel.addView(explanation);
+
+                Button reveal = new Button(service);
+                reveal.setAllCaps(false);
+                reveal.setText(black ? t("show_video") : t("cover_screen"));
+                reveal.setOnClickListener(v -> {
+                    revealVideoForSession = black;
+                    showStopControl();
                 });
-                view.addView(blockNext);
-                wm.addView(view, params(330, WindowManager.LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 48));
-                allowanceStrip = view;
-                final long start = SystemClock.elapsedRealtime();
+                panel.addView(reveal);
+
+                Button next = new Button(service);
+                next.setAllCaps(false);
+                next.setText(t("overlay_stop_next"));
+                next.setOnClickListener(v -> {
+                    boolean saved = blockNextTime();
+                    android.widget.Toast.makeText(service,
+                        t(saved ? "choice_saved" : "no_context"),
+                        android.widget.Toast.LENGTH_SHORT).show();
+                });
+                panel.addView(next);
+
+                Button endNow = new Button(service);
+                endNow.setAllCaps(false);
+                endNow.setText(t("stop_current"));
+                endNow.setOnClickListener(v -> {
+                    service.blockAdsNow();
+                    revealVideoForSession = false;
+                });
+                panel.addView(endNow);
+
+                WindowManager.LayoutParams overlayParams;
+                if (black) {
+                    overlayParams = new WindowManager.LayoutParams(
+                        WindowManager.LayoutParams.MATCH_PARENT,
+                        WindowManager.LayoutParams.MATCH_PARENT,
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        PixelFormat.TRANSLUCENT);
+                    overlayParams.gravity = Gravity.CENTER;
+                } else {
+                    overlayParams = params(330,
+                        WindowManager.LayoutParams.WRAP_CONTENT,
+                        Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 42);
+                }
+                wm.addView(panel, overlayParams);
+                allowanceStrip = panel;
                 refreshAllowance = new Runnable() {
                     @Override public void run() {
-                        if (allowanceStrip != view || !service.isFilteringActive()) return;
-                        long remaining = service.remainingAllowanceSeconds();
-                        if (remaining <= 0) { dismissAllowance(); return; }
-                        elapsed.setText(UiPrefs.format(service, "overlay_elapsed",
-                            (int)Math.min(60, (SystemClock.elapsedRealtime() - start) / 1000L)));
+                        if (allowanceStrip != panel || !service.isFilteringActive()) return;
+                        long seconds = service.remainingAllowanceSeconds();
+                        if (seconds <= 0L) {
+                            dismissAllowance();
+                            revealVideoForSession = false;
+                            return;
+                        }
+                        elapsed.setText(UiPrefs.format(service, "session_remaining",
+                            seconds));
                         main.postDelayed(this, 1000L);
                     }
                 };
                 main.post(refreshAllowance);
-            } catch (RuntimeException e) {
-                Log.w("AdsKill", "Allowance strip unavailable", e);
+            } catch (RuntimeException ex) {
+                Log.w("AdsKill", "Session overlay not available", ex);
                 dismissAllowance();
             }
         });
