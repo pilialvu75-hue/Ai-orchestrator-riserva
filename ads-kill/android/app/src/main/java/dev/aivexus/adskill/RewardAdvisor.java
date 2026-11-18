@@ -445,6 +445,13 @@ final class RewardAdvisor {
                 });
                 panel.addView(endNow);
 
+                // A fullscreen overlay must never prevent the user stopping the VPN.
+                Button stopVpn = new Button(service);
+                stopVpn.setAllCaps(false);
+                stopVpn.setText(t("emergency_stop"));
+                stopVpn.setOnClickListener(v -> service.stopFromOverlay());
+                panel.addView(stopVpn);
+
                 WindowManager.LayoutParams overlayParams;
                 if (black) {
                     overlayParams = new WindowManager.LayoutParams(
