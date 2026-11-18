@@ -174,7 +174,7 @@ public final class AdsVpnService extends VpnService {
             .putLong("blocked", prefs.getLong("blocked", 0) + (block ? 1 : 0))
             .apply();
         notifyStatus();
-        if (block && rewardAdvisor != null) rewardAdvisor.onBlockedAdvertisingDomain();
+        if (block && rewardAdvisor != null) rewardAdvisor.onBlockedAdvertisingDomain(p.domain);
     }
 
     private byte[] forwardDns(byte[] query) {
