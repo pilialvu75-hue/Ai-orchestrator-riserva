@@ -11,6 +11,11 @@ on:
 permissions:
   contents: write
 
+# New pushes cancel older builds, preventing stale APKs overwriting the beta.
+concurrency:
+  group: ads-kill-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -83,4 +88,5 @@ jobs:
               --notes "Conservative Smart Reward: launch grace period, multiple blocked DNS hints before prompting; fewer ungrounded popups, no claim of reward detection. Existing per-app choices, themes, four languages, experimental overlay and mute are preserved. Black screen can interfere with rewards. In-app updates still require persistent Ads Kill signing secrets."
           else
             gh release upload "$TAG" "${assets[@]}" --clobber
+            gh release edit "$TAG" --target "$GITHUB_SHA"
           fi
