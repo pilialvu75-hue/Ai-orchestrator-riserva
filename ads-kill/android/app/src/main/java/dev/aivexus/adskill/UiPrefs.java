@@ -20,6 +20,15 @@ final class UiPrefs {
         // Each entry: IT, FR, EN, ES
         put("app", "Ads Kill", "Ads Kill", "Ads Kill", "Ads Kill");
         put("subtitle", "Protezione intelligente, controllo semplice", "Protection intelligente, contrôle simple", "Smart protection, simple control", "Protección inteligente, control sencillo");
+        put("home", "Home", "Accueil", "Home", "Inicio");
+        put("settings", "Impostazioni", "Paramètres", "Settings", "Ajustes");
+        put("section_protection", "PROTEZIONE", "PROTECTION", "PROTECTION", "PROTECCIÓN");
+        put("section_permissions", "AUTORIZZAZIONI", "AUTORISATIONS", "PERMISSIONS", "PERMISOS");
+        put("choices_count", "App con scelta ricordata: %d", "Applications avec choix mémorisé : %d", "Apps with remembered choices: %d", "Apps con opciones recordadas: %d");
+        put("next_hint", "La scelta sarà registrata se Ads Kill ha identificato l'app della pubblicità.", "Le choix est mémorisé si Ads Kill a identifié l'appli publicitaire.", "Choice is saved if Ads Kill identified the ad app.", "La opción se guarda si Ads Kill identificó la app del anuncio.");
+        put("black_default", "Schermo nero predefinito (previsto)", "Écran noir par défaut (prévu)", "Default black screen (planned)", "Pantalla negra predeterminada (previsto)");
+        put("mute_default", "Muto predefinito (previsto)", "Son coupé par défaut (prévu)", "Mute by default (planned)", "Silencio predeterminado (previsto)");
+        put("privacy_future", "Preferenze memorizzate per un motore futuro: in questa beta non oscurano né silenziano le altre app.", "Préférences enregistrées pour une future version : cette bêta ne masque ni ne coupe le son des autres applis.", "Preferences saved for a future engine: this beta does not black out or mute other apps.", "Preferencias guardadas para un motor futuro: esta beta no oscurece ni silencia otras apps.");
         put("status_on", "Protezione attiva", "Protection active", "Protection enabled", "Protección activada");
         put("status_off", "Protezione disattivata", "Protection désactivée", "Protection disabled", "Protección desactivada");
         put("start", "Attiva protezione", "Activer la protection", "Enable protection", "Activar protección");
