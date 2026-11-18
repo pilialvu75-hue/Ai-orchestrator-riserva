@@ -15,10 +15,13 @@ class RuntimeSelfTestResult {
   const RuntimeSelfTestResult({
     required this.success,
     required this.summary,
+    this.generatedText,
   });
 
   final bool success;
   final String summary;
+  /// Only the short result of the fixed synthetic test prompt; no user input.
+  final String? generatedText;
 }
 
 class RuntimeSelfTestService {
@@ -79,7 +82,8 @@ class RuntimeSelfTestService {
     );
   }
 
-  Future<RuntimeSelfTestResult> run() async {
+  Future<RuntimeSelfTestResult> run({CancellationToken? cancellationToken}) async {
+    final verificationCancellation = cancellationToken ?? CancellationToken();
     final notes = <String>[];
     _log('[COMM_TEST_START] session=$selfTestSessionId');
 
@@ -129,9 +133,13 @@ class RuntimeSelfTestService {
         '2. Runtime validation: OK (${validation.status.name}${validationMsg.isEmpty ? '' : ' – $validationMsg'})',
       );
 
+      if (verificationCancellation.isCancelled) {
+        return const RuntimeSelfTestResult(
+          success: false,
+          summary: 'Runtime self-test cancelled before inference.',
+        );
+      }
       await _chatRepository.clearSession(selfTestSessionId);
-
-      final cancellationToken = CancellationToken();
       final responseBuffer = StringBuffer();
       String? firstToken;
       String? streamTerminalError;
@@ -150,11 +158,11 @@ class RuntimeSelfTestService {
           modelId: selectedModel.effectiveRuntimeModelId,
           modelPath: selectedModel.localPath,
         ),
-        cancellationToken: cancellationToken,
+        cancellationToken: verificationCancellation,
       ).timeout(
         _selfTestCompletionTimeout,
         onTimeout: (sink) {
-          cancellationToken.cancel();
+          verificationCancellation.cancel();
           sink.add(InferenceResponse.error(
             'Runtime self-test stream timed out before provider completion.',
           ));
@@ -260,6 +268,7 @@ class RuntimeSelfTestService {
         success: pass,
         summary:
             '${notes.join('\n')}\nCommunication self-test result: PASS\nGenerated text:\n$finalText',
+        generatedText: finalText,
       );
     } catch (error) {
       _log('[COMM_TEST_FAIL] reason=exception error=$error');

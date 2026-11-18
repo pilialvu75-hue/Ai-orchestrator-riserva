@@ -223,7 +223,15 @@ jobs:
 
       - name: Build coordinated Windows release
         shell: pwsh
-        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }}
+        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }} --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=${{ steps.computer_use_lab.outputs.enabled }}
+
+      - name: Package local ChatGPT adapter for beta only
+        if: steps.computer_use_lab.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $toolsDir = Join-Path $PWD 'build\windows\x64\runner\Release\mcp-tools'
+          New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
+          Copy-Item 'scripts\chatgpt_bridge\aivexus_mcp.ps1' (Join-Path $toolsDir 'aivexus_mcp.ps1')
 
       - name: Verify bundled Windows GGUF inference
         shell: pwsh

@@ -1,0 +1,137 @@
+name: ChatGPT Local Test Bridge Protocol
+on:
+  pull_request:
+    paths:
+      - 'scripts/chatgpt_bridge/**'
+      - 'plugins/aivexus-local-desktop-readonly/**'
+      - '.github/workflows/chatgpt-local-test-bridge.yml'
+  push:
+    branches:
+      - 'feature/chatgpt-local-test-bridge-*'
+    paths:
+      - 'scripts/chatgpt_bridge/**'
+      - 'plugins/aivexus-local-desktop-readonly/**'
+      - '.github/workflows/chatgpt-local-test-bridge.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  python-mcp-stdio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run synthetic MCP protocol tests without dependencies or secrets
+        run: python -m unittest discover -s scripts/chatgpt_bridge -p 'test_*.py' -v
+
+  powershell-mcp-stdio:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and smoke-test tunnel launcher without credentials or networking
+        shell: powershell
+        run: |
+          $launcher = Join-Path $PWD 'scripts/chatgpt_bridge/aivexus_tunnel_start.ps1'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($launcher, [ref]$tokens, [ref]$errors) | Out-Null
+          if (@($errors).Count -ne 0) {
+            throw ('PowerShell tunnel launcher parse failures: ' + @($errors).Count)
+          }
+          $staging = Join-Path $env:RUNNER_TEMP 'aivexus-tunnel-precheck'
+          New-Item -Path $staging -ItemType Directory -Force | Out-Null
+          $fakeClient = Join-Path $staging 'tunnel-client.exe'
+          $fakeAdapter = Join-Path $staging 'aivexus_mcp.ps1'
+          New-Item -Path $fakeClient -ItemType File -Force | Out-Null
+          New-Item -Path $fakeAdapter -ItemType File -Force | Out-Null
+          $output = & powershell.exe -NoProfile -File $launcher -CheckOnly -TunnelId 'tunnel_00000000000000000000000000000000' -TunnelClientExe $fakeClient -McpScriptPath $fakeAdapter
+          if ($LASTEXITCODE -ne 0) { throw 'Tunnel precheck failed' }
+          if (-not (@($output) -match 'PRECHECK PASS')) { throw 'Expected no-network precheck success marker' }
+      - name: Check Windows PowerShell 5.1 JSON-RPC handshake with no policy bypass
+        shell: powershell
+        env:
+          AIVEXUS_MCP_TEST_MODE: '1'
+        run: |
+          $messages = @(
+            '{"jsonrpc":"2.0","id":1,"method":"initialize"}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"../invalid","kind":"runtime"}}}',
+            '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"synthetic-123","kind":"runtime"}}}'
+          )
+          $raw = $messages | & powershell.exe -NoProfile -File scripts/chatgpt_bridge/aivexus_mcp.ps1
+          if (@($raw).Count -ne 4) { throw "Expected four protocol responses" }
+          # Only synthetic handshake messages are used here; safe to show on CI.
+          Write-Output ($raw -join " | ")
+          $hello = $raw[0] | ConvertFrom-Json
+          $list = $raw[1] | ConvertFrom-Json
+          $invalid = $raw[2] | ConvertFrom-Json
+          $valid = $raw[3] | ConvertFrom-Json
+          if ($hello.result.serverInfo.name -ne 'aivexus-local-test-bridge') { throw "Incorrect handshake" }
+          if (@($list.result.tools).Count -ne 6) { throw "Wrong tool allow-list" }
+          if (-not $invalid.result.isError) { throw "Invalid request was not rejected" }
+          $body = $valid.result.content[0].text | ConvertFrom-Json
+          if ($body.error -ne "bridge_token_missing") { throw "Valid test command did not reach the credential gate" }
+      - name: Enforce instance_info-only mode without changing default MCP tools
+        shell: powershell
+        env:
+          AIVEXUS_MCP_INSTANCE_ONLY: '1'
+          AIVEXUS_MCP_TEST_MODE: '1'
+        run: |
+          $messages = @(
+            '{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"synthetic-123","kind":"runtime"}}}'
+          )
+          $raw = $messages | & powershell.exe -NoProfile -File scripts/chatgpt_bridge/aivexus_mcp.ps1
+          if (@($raw).Count -ne 2) { throw 'Expected two read-only test responses' }
+          $list = $raw[0] | ConvertFrom-Json
+          $blocked = $raw[1] | ConvertFrom-Json
+          if (@($list.result.tools).Count -ne 1) { throw 'Instance-only profile leaked additional tools' }
+          if ($list.result.tools[0].name -ne 'instance_info') { throw 'Wrong tool exposed' }
+          if (-not $blocked.result.isError) { throw 'Non-read tool call was not blocked' }
+          $body = $blocked.result.content[0].text | ConvertFrom-Json
+          if ($body.error -ne 'tool_disabled_by_read_only_profile') { throw 'Wrong readonly denial' }
+      - name: Verify bundled Desktop-only MCP restricts tools on Windows
+        shell: powershell
+        run: |
+          $base = Join-Path $PWD 'plugins/aivexus-local-desktop-readonly'
+          foreach ($name in @('server/aivexus_mcp.ps1','server/aivexus_desktop_readonly.ps1','setup-token.ps1')) {
+            $p = Join-Path $base $name
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors) | Out-Null
+            if (@($errors).Count -ne 0) { throw ('Script parse failure: ' + $name) }
+          }
+          $mcp = Get-Content -LiteralPath (Join-Path $base 'mcp.json') -Raw | ConvertFrom-Json
+          $plugin = Get-Content -LiteralPath (Join-Path $base 'plugin.json') -Raw | ConvertFrom-Json
+          if ($mcp.mcpServers.'aivexus-desktop-info'.type -ne 'stdio') { throw 'Expected local stdio transport' }
+          if ($mcp.mcpServers.'aivexus-desktop-info'.env.AIVEXUS_MCP_INSTANCE_ONLY -ne '1') { throw 'Read-only mode not declared' }
+          if (-not $plugin.extensions.'com.openai'.requires_local_executor) { throw 'Missing Desktop-only marker' }
+          $messages = @(
+            '{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test_start","arguments":{"request_id":"synthetic-123","kind":"runtime"}}}',
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"instance_info","arguments":{}}}'
+          )
+          $oldToken = $env:AIVEXUS_BRIDGE_TOKEN
+          $env:AIVEXUS_BRIDGE_TOKEN = $null
+          try {
+            $raw = $messages | & powershell.exe -NoProfile -File (Join-Path $base 'server/aivexus_desktop_readonly.ps1')
+          } finally {
+            $env:AIVEXUS_BRIDGE_TOKEN = $oldToken
+          }
+          if (@($raw).Count -ne 3) { throw 'Wrong Desktop MCP frame count' }
+          $list = $raw[0] | ConvertFrom-Json
+          $blocked = $raw[1] | ConvertFrom-Json
+          $info = $raw[2] | ConvertFrom-Json
+          if (@($list.result.tools).Count -ne 1 -or $list.result.tools[0].name -ne 'instance_info') {
+            throw 'Desktop plugin did not expose exactly instance_info'
+          }
+          if (-not $blocked.result.isError) { throw 'Bundled adapter allowed blocked test_start' }
+          $blockedBody = $blocked.result.content[0].text | ConvertFrom-Json
+          if ($blockedBody.error -ne 'tool_disabled_by_read_only_profile') { throw 'Wrong denied call response' }
+          $infoBody = $info.result.content[0].text | ConvertFrom-Json
+          if ($infoBody.error -ne 'bridge_token_missing') { throw 'Missing key not handled cleanly' }

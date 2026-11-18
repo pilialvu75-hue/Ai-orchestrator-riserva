@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "aivexus-local-test",
+  "version": "0.1.0",
+  "description": "Opt-in AIVEXUS Windows QA runtime status and fixed synthetic self-tests via private local MCP.",
+  "repository": "https://github.com/pilialvu75-hue/Ai-orchestrator-riserva",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "AIVEXUS Local Test",
+        "shortDescription": "Inspect the running local AIVEXUS QA app",
+        "longDescription": "Limited local diagnostic MCP tools. The status tools read sanitized data; starting or cancelling a fixed synthetic runtime test can change local runtime activity. No personal chats or arbitrary shell access.",
+        "developerName": "AIVEXUS Laboratory",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Use AIVEXUS Local Test instance_info to identify the running app.",
+          "Read the status of an existing AIVEXUS runtime test without starting another."
+        ]
+      }
+    }
+  }
+}
