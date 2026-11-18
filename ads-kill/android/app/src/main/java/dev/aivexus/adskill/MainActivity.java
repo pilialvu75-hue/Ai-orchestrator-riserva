@@ -256,6 +256,25 @@ public final class MainActivity extends Activity {
         languageSelect.setOnItemSelectedListener(choiceListener(languages, UiPrefs.LANG));
         settingsPage.addView(appearance);
 
+        LinearLayout futurePrivacy = card();
+        heading(futurePrivacy, t("privacy"));
+        CheckBox plannedBlack = new CheckBox(this);
+        plannedBlack.setText(t("black_default"));
+        plannedBlack.setTextColor(UiPrefs.textColor(this));
+        plannedBlack.setChecked(preferences().getBoolean("planned_black", true));
+        plannedBlack.setOnCheckedChangeListener((v, checked) ->
+            preferences().edit().putBoolean("planned_black", checked).apply());
+        futurePrivacy.addView(plannedBlack);
+        CheckBox plannedMute = new CheckBox(this);
+        plannedMute.setText(t("mute_default"));
+        plannedMute.setTextColor(UiPrefs.textColor(this));
+        plannedMute.setChecked(preferences().getBoolean("planned_mute", true));
+        plannedMute.setOnCheckedChangeListener((v, checked) ->
+            preferences().edit().putBoolean("planned_mute", checked).apply());
+        futurePrivacy.addView(plannedMute);
+        futurePrivacy.addView(label(t("privacy_future"), 12, false, UiPrefs.secondary(this)));
+        settingsPage.addView(futurePrivacy);
+
         LinearLayout permissionsCard = card();
         heading(permissionsCard, t("section_permissions"));
         Button overlays = actionButton(t("permission_overlay"), false);
