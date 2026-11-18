@@ -44,10 +44,13 @@ public final class AdsVpnService extends VpnService {
     private ParcelFileDescriptor tun;
     private FileOutputStream out;
     private RewardAdvisor rewardAdvisor;
+    private SessionAudio sessionAudio;
 
     @Override public void onCreate() {
         super.onCreate();
         rewardAdvisor = new RewardAdvisor(this);
+        sessionAudio = new SessionAudio(this);
+        sessionAudio.recoverStale();
     }
 
     boolean isFilteringActive() { return running.get() && tun != null; }
@@ -58,8 +61,10 @@ public final class AdsVpnService extends VpnService {
     }
 
     void allowAdsFor60Seconds() {
+        long until = System.currentTimeMillis() + 60000L;
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-            .putLong("allow_until", System.currentTimeMillis() + 60000L).apply();
+            .putLong("allow_until", until).apply();
+        if (sessionAudio != null) sessionAudio.begin(until);
         notifyStatus();
         if (rewardAdvisor != null) rewardAdvisor.showStopControl();
     }
@@ -68,6 +73,7 @@ public final class AdsVpnService extends VpnService {
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         SharedPreferences.Editor edit = prefs.edit().putLong("allow_until", 0L);
         edit.apply();
+        if (sessionAudio != null) sessionAudio.restore();
         // Explicitly terminate the current allowance and revoke any automatic
         // permission for the app that triggered it, so it cannot restart instantly.
         if (rewardAdvisor != null) rewardAdvisor.blockNextTime();
@@ -220,6 +226,8 @@ public final class AdsVpnService extends VpnService {
 
     @Override public void onRevoke() { stopSelf(); }
     @Override public void onDestroy() {
+        if (sessionAudio != null) sessionAudio.restore();
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putLong("allow_until", 0L).apply();
         if (rewardAdvisor != null) rewardAdvisor.dismiss();
         running.set(false);
         active = false;
