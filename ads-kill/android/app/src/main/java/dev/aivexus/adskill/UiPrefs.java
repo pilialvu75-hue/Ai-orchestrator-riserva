@@ -35,6 +35,10 @@ final class UiPrefs {
         put("cover_screen", "Oscura lo schermo", "Masquer l'écran", "Cover screen", "Oscurecer pantalla");
         put("session_remaining", "Consenso DNS residuo: %d s", "Autorisation DNS restante : %d s", "DNS allowance remaining: %d s", "Permiso DNS restante: %d s");
         put("choice_saved", "La prossima pubblicità sospetta di quest'app sarà bloccata", "La prochaine publicité suspecte de cette appli sera bloquée", "The next suspected ad in this app will be blocked", "El próximo anuncio sospechoso de esta app será bloqueado");
+        put("no_choices", "Nessuna scelta per app ancora registrata", "Aucun choix par application enregistré", "No per-app choice saved yet", "Aún no hay opciones guardadas por app");
+        put("rule_ask", "Chiedi", "Demander", "Ask", "Preguntar");
+        put("rule_allow", "Consenti 60 s", "Autoriser 60 s", "Allow 60 s", "Permitir 60 s");
+        put("rule_block", "Blocca", "Bloquer", "Block", "Bloquear");
         put("status_on", "Protezione attiva", "Protection active", "Protection enabled", "Protección activada");
         put("status_off", "Protezione disattivata", "Protection désactivée", "Protection disabled", "Protección desactivada");
         put("start", "Attiva protezione", "Activer la protection", "Enable protection", "Activar protección");
