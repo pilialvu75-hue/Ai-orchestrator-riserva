@@ -100,7 +100,7 @@ void main() {
     expect(await controller.pairingKeyForExplicitCopy(), isNull);
   });
 
-  test('only an existing authorized key may be restored after restart',
+  test('restart requires a new explicit activation even with an existing key',
       () async {
     final store = _MemorySecretStore();
     final original = AivexusBridgeController(
@@ -116,8 +116,10 @@ void main() {
       buildHost: (_) => _FakeHost(),
     );
     await restored.restore();
-    expect(restored.isEnabled, isTrue);
+    expect(restored.isEnabled, isFalse);
     expect(store.value, key);
+    await restored.enable();
+    expect(restored.isEnabled, isTrue);
   });
 
   test('failed enable does not retain new secret', () async {
