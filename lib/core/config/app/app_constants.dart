@@ -118,21 +118,6 @@ class AppConstants {
 
   static const List<Map<String, dynamic>> availableModels = [
     {
-      'id': 'minicpm5_2b',
-      'displayName': 'MiniCPM5 2B (OpenBMB, prova)',
-      'fileName': 'MiniCPM5-2B-Q4_K_M.gguf',
-      'downloadUrl':
-          'https://huggingface.co/openbmb/MiniCPM5-2B-GGUF/resolve/main/'
-          'MiniCPM5-2B-Q4_K_M.gguf',
-      'version': '1.0.0',
-      'sizeBytes': 1560000000,
-      'description':
-          'MiniCPM5 2B Q4_K_M. Candidato sperimentale Windows per '
-          'chat LOCAL e Computer Use; verificare la compatibilita runtime.',
-      'platformTarget': 'windows',
-      'sizeCategory': '2B',
-    },
-    {
       'id': 'llama_1b',
       'displayName': 'TinyLlama 1.1B Chat',
       'fileName': 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
@@ -180,6 +165,21 @@ class AppConstants {
           'local model for concise reasoning and tool use.',
       'platformTarget': 'android',
       'sizeCategory': '4B',
+    },
+    {
+      'id': 'minicpm5_2b',
+      'displayName': 'MiniCPM5 2B (OpenBMB, prova)',
+      'fileName': 'MiniCPM5-2B-Q4_K_M.gguf',
+      'downloadUrl':
+          'https://huggingface.co/openbmb/MiniCPM5-2B-GGUF/resolve/main/'
+          'MiniCPM5-2B-Q4_K_M.gguf',
+      'version': '1.0.0',
+      'sizeBytes': 1560000000,
+      'description':
+          'MiniCPM5 2B Q4_K_M. Candidato sperimentale Windows per '
+          'chat LOCAL e Computer Use; verificare la compatibilita runtime.',
+      'platformTarget': 'windows',
+      'sizeCategory': '2B',
     },
   ];
 
