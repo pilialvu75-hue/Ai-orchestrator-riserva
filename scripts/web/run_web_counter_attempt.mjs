@@ -1,4 +1,7 @@
 import { createWebD1ExecutionJournal } from './d1_execution_journal_store.mjs';
+import {
+  createD1WebCounterArtifactStore, MAX_COUNTER_D1_ZIP_BYTES,
+} from './d1_web_counter_artifact_store.mjs';
 import { webCounterSpecSha256 } from './d1_web_proposal_approval_writer.mjs';
 import {
   MAX_ARTIFACT_BYTES, readVerifiedWebZip, webZipSha256,
@@ -14,8 +17,10 @@ WHERE idempotency_key = ?1 AND attempt_id = ?2 AND product = 'aivexus-web'
 // Internal scope only. buildAndTestCounter is a trusted isolated runner that
 // resolves to the ZIP bytes after the fixed counter's build and tests pass.
 export async function runWebCounterAttempt({ db, bucket, key, attemptId, buildAndTestCounter }) {
-  if (typeof db?.prepare !== 'function' || typeof bucket?.get !== 'function' ||
-      typeof bucket?.put !== 'function' || typeof buildAndTestCounter !== 'function') {
+  const store = bucket ?? createD1WebCounterArtifactStore(db);
+  const maxBytes = bucket == null ? MAX_COUNTER_D1_ZIP_BYTES : MAX_ARTIFACT_BYTES;
+  if (typeof db?.prepare !== 'function' || typeof store.get !== 'function' ||
+      typeof store.put !== 'function' || typeof buildAndTestCounter !== 'function') {
     return { ok: false, reason: 'runner_unavailable' };
   }
   let execution;
@@ -38,7 +43,7 @@ export async function runWebCounterAttempt({ db, bucket, key, attemptId, buildAn
   try {
     zip = await buildAndTestCounter();
     if (!(zip instanceof Uint8Array) || zip.byteLength === 0 ||
-        zip.byteLength > MAX_ARTIFACT_BYTES) {
+        zip.byteLength > maxBytes) {
       throw new Error('Invalid ZIP byte count');
     }
   } catch (_) {
@@ -49,12 +54,12 @@ export async function runWebCounterAttempt({ db, bucket, key, attemptId, buildAn
   try {
     const sha256 = await webZipSha256(zip);
     const storageKey = `web-artifacts/${execution.executionId}/${sha256}.zip`;
-    const put = await bucket.put(storageKey, zip, {
+    const put = await store.put(storageKey, zip, {
       onlyIf: new Headers({ 'If-None-Match': '*' }),
       httpMetadata: { contentType: 'application/zip' },
     });
     const readback = put && await readVerifiedWebZip({
-      bucket, storageKey, size: zip.byteLength, sha256,
+      bucket: store, storageKey, size: zip.byteLength, sha256,
     });
     if (readback) {
       const completed = await journal.completeVerifiedArtifact({

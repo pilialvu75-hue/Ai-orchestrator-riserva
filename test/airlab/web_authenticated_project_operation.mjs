@@ -17,6 +17,9 @@ import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
 import { runWebCounterAttempt } from '../../scripts/web/run_web_counter_attempt.mjs';
 import { buildAndTestCounter } from '../../scripts/web/build_verified_counter_zip.mjs';
+import {
+  createD1WebCounterArtifactStore, MAX_COUNTER_D1_ZIP_BYTES,
+} from '../../scripts/web/d1_web_counter_artifact_store.mjs';
 
 const issuer = 'https://aivexus-test.cloudflareaccess.com';
 const audience = 'test-web-access-application';
@@ -406,6 +409,7 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
     '001_web_approval_reservation.sql',
     '002_web_proposal_approval_audit.sql',
     '003_web_execution_journal.sql',
+    '004_web_counter_artifacts.sql',
   ]) {
     sqlite.exec(readFileSync(new URL('../../scripts/web/sql/' + name, import.meta.url), 'utf8'));
   }
@@ -414,9 +418,14 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
       const statement = sqlite.prepare(sql);
       return {
         bind(...args) {
-          const params = Object.fromEntries(args.map((value, index) => ['?' + (index + 1), value]));
+          const params = Object.fromEntries(args.map((value, index) => [
+            '?' + (index + 1), value instanceof ArrayBuffer ? new Uint8Array(value) : value,
+          ]));
           return {
-            first: async () => statement.get(params) ?? null,
+            first: async column => {
+              const row = statement.get(params);
+              return (column ? row?.[column] : row) ?? null;
+            },
             run: async () => {
               const totalChanges = sqlite.prepare('SELECT total_changes() AS count');
               const before = totalChanges.get().count;
@@ -558,6 +567,37 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
     'SELECT status FROM web_execution_reservations WHERE execution_id = ?',
   ).get(second.executionId).status, 'review_required');
   assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_execution_artifact_receipts').get().count, 1);
+
+  const d1ProjectId = 'counter-d1-storage';
+  assert.equal((await stage(token, { projectId: d1ProjectId })).status, 200);
+  assert.equal((await approve(token, { ...approval, projectId: d1ProjectId })).status, 200);
+  const d1Execution = await body(await send(
+    reserveExecution, '/api/cantiere/executions/reserve', token, { projectId: d1ProjectId },
+  ));
+  const d1Key = sqlite.prepare(
+    'SELECT idempotency_key AS key FROM web_execution_reservations WHERE execution_id = ?',
+  ).get(d1Execution.executionId).key;
+  assert.deepEqual(await runWebCounterAttempt({
+    db, key: d1Key, attemptId: d1Execution.attemptId, buildAndTestCounter: async () => zip,
+  }), { ok: true, executionId: d1Execution.executionId });
+
+  const d1Store = createD1WebCounterArtifactStore(db);
+  const d1StorageKey = `web-artifacts/${d1Execution.executionId}/${sha256}.zip`;
+  assert.equal(await d1Store.put(d1StorageKey, Buffer.alloc(zip.length)), null);
+  await assert.rejects(() => d1Store.put(d1StorageKey, new Uint8Array(MAX_COUNTER_D1_ZIP_BYTES + 1)),
+    RangeError);
+  const downloadFromD1 = assertion => downloadExecution({
+    request: webRequest(assertion, null, {
+      method: 'GET', requestOrigin: null,
+      path: '/api/cantiere/executions/download?executionId=' + d1Execution.executionId,
+    }),
+    env: { ...env, AIVEXUS_WEB_ARTIFACTS: undefined },
+  });
+  assert.equal((await downloadFromD1(otherToken)).status, 404);
+  const d1Response = await downloadFromD1(token);
+  assert.equal(d1Response.status, 200);
+  assert.deepEqual(Buffer.from(await d1Response.arrayBuffer()), zip);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_counter_artifacts').get().count, 1);
 });
 
 test('storage failures and JWKS outages return sanitized errors without mutating project', async () => {
