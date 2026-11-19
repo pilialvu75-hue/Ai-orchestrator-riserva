@@ -417,7 +417,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         ),
         maxSteps: 24,
         // Repeating LEFT/UP/etc is legitimate when the board changes.
-        // The game is still limited to 24 actions and eight minutes.
+        // The game remains limited to 24 actions; its total time is bounded.
         maxConsecutiveIdenticalActions: 0,
         maxDuration: Duration(minutes: isMiniCpm5 ? 12 : 8),
         operationTimeout: Duration(seconds: isMiniCpm5 ? 135 : 70),
