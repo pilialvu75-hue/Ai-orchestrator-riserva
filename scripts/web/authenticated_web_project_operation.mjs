@@ -11,9 +11,10 @@ import { approveTrustedWebProposal, revokeTrustedWebApproval, stageTrustedWebCou
   './d1_web_proposal_approval_writer.mjs';
 import { reserveApprovedWebExecution } from './approved_execution_reservation.mjs';
 import { readWebExecutionZip } from './web_execution_artifact_download.mjs';
+import { handleWebCounterAdvance } from './advance_web_counter.mjs';
 
 const MAX_JSON_BYTES = 2048;
-const OPERATIONS = new Set(['stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download']);
+const OPERATIONS = new Set(['stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance']);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
 
@@ -97,6 +98,7 @@ async function readJson(request) {
 function operationFailure(result) {
   const reason = result?.reason;
   if (reason === 'invalid_request') return reject(400, 'invalid_request');
+  if (reason === 'execution_not_found') return reject(404, 'execution_not_found');
   if (reason === 'storage_unavailable' ||
       reason === 'storage_inconsistent') return reject(503, 'storage_unavailable');
   if (reason === 'approval_required' ||
@@ -110,7 +112,7 @@ function operationFailure(result) {
  * No public endpoint is registered by calling this factory.
  */
 export function createAuthenticatedWebProjectOperation({
-  operation, expectedOrigin, accessIssuer, accessAudience, db, bucket,
+  operation, expectedOrigin, accessIssuer, accessAudience, db, bucket, runner,
   fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
@@ -206,7 +208,9 @@ export function createAuthenticatedWebProjectOperation({
     let result;
     try {
       const principal = verified.principal;
-      if (operation === 'stage_counter') {
+      if (operation === 'advance') {
+        result = await handleWebCounterAdvance({ request: parsed.value, principal, db, bucket, runner });
+      } else if (operation === 'stage_counter') {
         result = await stageTrustedWebCounterProposal({
           request: parsed.value, principal, db,
         });

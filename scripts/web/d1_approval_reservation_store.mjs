@@ -41,10 +41,13 @@ FROM web_execution_reservations WHERE idempotency_key = ?1
 `;
 
 const READ_LATEST_EXECUTION = `
-SELECT execution_id AS executionId, attempt_id AS attemptId, revision, status
-FROM web_execution_reservations
-WHERE owner_subject = ?1 AND project_id = ?2 AND product = 'aivexus-web'
-ORDER BY revision DESC, created_at DESC, execution_id DESC
+SELECT e.execution_id AS executionId, e.attempt_id AS attemptId, e.revision,
+       CASE WHEN e.status = 'reserved' AND d.state IS NOT NULL
+         THEN d.state ELSE e.status END AS status
+FROM web_execution_reservations AS e
+LEFT JOIN web_counter_dispatch AS d ON d.execution_id = e.execution_id
+WHERE e.owner_subject = ?1 AND e.project_id = ?2 AND e.product = 'aivexus-web'
+ORDER BY e.revision DESC, e.created_at DESC, e.execution_id DESC
 LIMIT 1
 `;
 

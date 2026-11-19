@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { onRequest as reserveExecution } from
   '../../functions/api/cantiere/executions/reserve.js';
+import { onRequest as advanceExecution } from
+  '../../functions/api/cantiere/executions/advance.js';
 import { onRequest as readExecutionStatus } from
   '../../functions/api/cantiere/executions/status.js';
 import { onRequest as downloadExecution } from
@@ -17,6 +20,13 @@ import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
 import { runWebCounterAttempt } from '../../scripts/web/run_web_counter_attempt.mjs';
 import { buildAndTestCounter } from '../../scripts/web/build_verified_counter_zip.mjs';
+import { sealCounterRunnerZip } from '../../scripts/web/counter_runner_envelope.mjs';
+import {
+  dispatchReservedWebCounter, readWebCounterDispatch,
+} from '../../scripts/web/d1_web_counter_dispatch.mjs';
+import {
+  createD1WebCounterArtifactStore, MAX_COUNTER_D1_ZIP_BYTES,
+} from '../../scripts/web/d1_web_counter_artifact_store.mjs';
 
 const issuer = 'https://aivexus-test.cloudflareaccess.com';
 const audience = 'test-web-access-application';
@@ -406,6 +416,8 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
     '001_web_approval_reservation.sql',
     '002_web_proposal_approval_audit.sql',
     '003_web_execution_journal.sql',
+    '004_web_counter_artifacts.sql',
+    '005_web_counter_dispatch.sql',
   ]) {
     sqlite.exec(readFileSync(new URL('../../scripts/web/sql/' + name, import.meta.url), 'utf8'));
   }
@@ -414,9 +426,14 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
       const statement = sqlite.prepare(sql);
       return {
         bind(...args) {
-          const params = Object.fromEntries(args.map((value, index) => ['?' + (index + 1), value]));
+          const params = Object.fromEntries(args.map((value, index) => [
+            '?' + (index + 1), value instanceof ArrayBuffer ? new Uint8Array(value) : value,
+          ]));
           return {
-            first: async () => statement.get(params) ?? null,
+            first: async column => {
+              const row = statement.get(params);
+              return (column ? row?.[column] : row) ?? null;
+            },
             run: async () => {
               const totalChanges = sqlite.prepare('SELECT total_changes() AS count');
               const before = totalChanges.get().count;
@@ -462,9 +479,11 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
     AIVEXUS_WEB_D1: db,
     AIVEXUS_WEB_ARTIFACTS: bucket,
   };
-  t.mock.method(globalThis, 'fetch', async url => {
-    assert.equal(url, issuer + '/cdn-cgi/access/certs');
-    return Response.json({ keys: [signing.jwk] });
+  let githubFixture;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url === issuer + '/cdn-cgi/access/certs') return Response.json({ keys: [signing.jwk] });
+    assert.ok(githubFixture, 'Unexpected external request');
+    return githubFixture(url, options);
   });
   const send = (route, path, assertion, payload) =>
     route({ request: webRequest(assertion, payload, { path }), env });
@@ -547,6 +566,15 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
   const secondKey = sqlite.prepare(
     'SELECT idempotency_key AS key FROM web_execution_reservations WHERE execution_id = ?',
   ).get(second.executionId).key;
+  let ambiguousPosts = 0;
+  const ambiguous = {
+    db, ownerSubject: subject, executionId: second.executionId,
+    expectedHeadSha: '1'.repeat(40), publicKeySpki: 'YWJj',
+    github: { async dispatch() { ambiguousPosts++; throw new Error('Connection lost'); } },
+  };
+  assert.deepEqual(await dispatchReservedWebCounter(ambiguous), { state: 'review_required' });
+  assert.deepEqual(await dispatchReservedWebCounter(ambiguous), { state: 'review_required' });
+  assert.equal(ambiguousPosts, 1);
   const collision = {
     ...attempt, key: secondKey, attemptId: second.attemptId,
     buildAndTestCounter: async () => zip,
@@ -558,6 +586,118 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
     'SELECT status FROM web_execution_reservations WHERE execution_id = ?',
   ).get(second.executionId).status, 'review_required');
   assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_execution_artifact_receipts').get().count, 1);
+
+  const d1ProjectId = 'counter-d1-storage';
+  assert.equal((await stage(token, { projectId: d1ProjectId })).status, 200);
+  assert.equal((await approve(token, { ...approval, projectId: d1ProjectId })).status, 200);
+  const d1Execution = await body(await send(
+    reserveExecution, '/api/cantiere/executions/reserve', token, { projectId: d1ProjectId },
+  ));
+  const d1Key = sqlite.prepare(
+    'SELECT idempotency_key AS key FROM web_execution_reservations WHERE execution_id = ?',
+  ).get(d1Execution.executionId).key;
+  let dispatches = 0;
+  const dispatch = {
+    ...ambiguous, executionId: d1Execution.executionId,
+    github: { async dispatch() { dispatches++; return 1234; } },
+  };
+  assert.deepEqual(await dispatchReservedWebCounter({ ...dispatch, ownerSubject: 'other' }),
+    { state: 'not_found' });
+  await Promise.all(Array.from({ length: 8 }, () => dispatchReservedWebCounter(dispatch)));
+  assert.equal(dispatches, 1);
+  const submitted = await readWebCounterDispatch(dispatch);
+  assert.equal(submitted.runId, 1234);
+  assert.equal(submitted.executionKey, d1Key);
+  assert.equal(submitted.headSha, dispatch.expectedHeadSha);
+  assert.deepEqual(await dispatchReservedWebCounter(dispatch), { state: 'submitted' });
+  const { publicKey, privateKey } = await crypto.subtle.generateKey({
+    name: 'RSA-OAEP', modulusLength: 2048, hash: 'SHA-256',
+    publicExponent: new Uint8Array([1, 0, 1]),
+  }, true, ['encrypt', 'decrypt']);
+  const envelope = await sealCounterRunnerZip({ publicKey, ticket: submitted.ticket, zip });
+  const archive = execFileSync(process.env.AIVEXUS_COUNTER_PYTHON || 'python3', ['-c', [
+    'import io, sys, zipfile',
+    'out = io.BytesIO()',
+    "with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_STORED) as z:",
+    "    z.writestr('counter.aivexus', sys.stdin.buffer.read())",
+    'sys.stdout.buffer.write(out.getvalue())',
+  ].join('\n')], { input: envelope });
+  const repo = { id: 1235011890 };
+  const api = 'https://api.github.com/repos/pilialvu75-hue/Ai-orchestrator-riserva/actions';
+  const storageUrl = 'https://counter-fixture.blob.core.windows.net/opaque';
+  let remoteState = 'pending';
+  let archiveReads = 0;
+  githubFixture = (url, options) => {
+    if (url === api + '/runs/1234') return Response.json({
+      id: 1234, event: 'workflow_dispatch', run_attempt: 1, repository: repo,
+      head_repository: repo, head_branch: 'main', head_sha: dispatch.expectedHeadSha,
+      path: '.github/workflows/web-counter-runner.yml',
+      status: remoteState === 'ready' ? 'completed' : 'in_progress', conclusion: 'success',
+    });
+    if (url === api + '/runs/1234/artifacts?per_page=2') return Response.json({
+      total_count: 1,
+      artifacts: [{
+        id: 4321, name: 'aivexus-counter-envelope', expired: false,
+        size_in_bytes: archive.length, digest: 'sha256:' + createHash('sha256').update(archive).digest('hex'),
+        workflow_run: { id: 1234, repository_id: repo.id, head_repository_id: repo.id,
+          head_branch: 'main', head_sha: dispatch.expectedHeadSha },
+      }],
+    });
+    if (url === api + '/artifacts/4321/zip') {
+      return new Response(null, { status: 302, headers: { location: storageUrl } });
+    }
+    assert.equal(url, storageUrl);
+    assert.equal(options.headers, undefined);
+    archiveReads++;
+    return new Response(archive);
+  };
+  const runnerEnv = {
+    ...env, AIVEXUS_WEB_ARTIFACTS: undefined,
+    AIVEXUS_COUNTER_GITHUB_HEAD_SHA: dispatch.expectedHeadSha,
+    AIVEXUS_COUNTER_GITHUB_TOKEN: 'local-fixture',
+    AIVEXUS_COUNTER_PUBLIC_KEY: Buffer.from(await crypto.subtle.exportKey('spki', publicKey)).toString('base64'),
+    AIVEXUS_COUNTER_PRIVATE_KEY: Buffer.from(await crypto.subtle.exportKey('pkcs8', privateKey)).toString('base64'),
+  };
+  const advance = assertion => advanceExecution({
+    request: webRequest(assertion, { executionId: d1Execution.executionId }, {
+      path: '/api/cantiere/executions/advance',
+    }),
+    env: runnerEnv,
+  });
+  assert.equal((await advance(otherToken)).status, 404);
+  assert.equal((await body(await advance(token))).status, 'submitted');
+  assert.equal(archiveReads, 0);
+  const recovered = await readExecutionStatus({
+    request: webRequest(token, null, {
+      method: 'GET', requestOrigin: null,
+      path: '/api/cantiere/executions/status?projectId=' + d1ProjectId,
+    }),
+    env,
+  });
+  assert.equal((await body(recovered)).status, 'submitted');
+  remoteState = 'ready';
+  assert.deepEqual(await body(await advance(token)),
+    { version: 1, ok: true, executionId: d1Execution.executionId, status: 'completed' });
+  assert.equal((await body(await advance(token))).status, 'completed');
+  assert.equal(archiveReads, 1);
+
+  const d1Store = createD1WebCounterArtifactStore(db);
+  const d1StorageKey = `web-artifacts/${d1Execution.executionId}/${sha256}.zip`;
+  assert.equal(await d1Store.put(d1StorageKey, Buffer.alloc(zip.length)), null);
+  await assert.rejects(() => d1Store.put(d1StorageKey, new Uint8Array(MAX_COUNTER_D1_ZIP_BYTES + 1)),
+    RangeError);
+  const downloadFromD1 = assertion => downloadExecution({
+    request: webRequest(assertion, null, {
+      method: 'GET', requestOrigin: null,
+      path: '/api/cantiere/executions/download?executionId=' + d1Execution.executionId,
+    }),
+    env: { ...env, AIVEXUS_WEB_ARTIFACTS: undefined },
+  });
+  assert.equal((await downloadFromD1(otherToken)).status, 404);
+  const d1Response = await downloadFromD1(token);
+  assert.equal(d1Response.status, 200);
+  assert.deepEqual(Buffer.from(await d1Response.arrayBuffer()), zip);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_counter_artifacts').get().count, 1);
 });
 
 test('storage failures and JWKS outages return sanitized errors without mutating project', async () => {
