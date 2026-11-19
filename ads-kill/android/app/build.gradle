@@ -9,8 +9,8 @@ android {
         applicationId 'dev.aivexus.adskill'
         minSdk 29
         targetSdk 35
-        versionCode 8
-        versionName '0.1.6-beta1'
+        versionCode 9
+        versionName '0.1.7-beta1'
     }
 
     // Dedicated Ads Kill key supplied through GitHub repository secrets.
