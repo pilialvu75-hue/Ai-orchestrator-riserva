@@ -1879,6 +1879,12 @@ class ModelDownloadService {
     final normalized =
         fileName.toLowerCase();
 
+    if (normalized.contains('minicpm5-2b') ||
+        normalized.contains('minicpm5_2b') ||
+        normalized.contains('minicpm-5-2b')) {
+      return 'minicpm5';
+    }
+
     if (normalized.contains('deepseek')) {
       return 'deepseek';
     }
@@ -1921,6 +1927,11 @@ class ModelDownloadService {
         sizeBytes >= 3500000000;
 
     switch (family) {
+      // Imported file IDs use local_import_<uuid>. The runtime model ID must
+      // be a recognized identifier, not the opaque storage ID.
+      case 'minicpm5':
+        return 'minicpm5_2b';
+
       case 'deepseek':
         if (normalized.contains(
           'coder',
@@ -1990,6 +2001,9 @@ class ModelDownloadService {
     String? runtimeModelId,
   ) {
     switch (runtimeModelId) {
+      case 'minicpm5_2b':
+        return 'windows';
+
       case 'deepseek_r1_1_5b':
       case 'phi3_5_mini':
       case 'llama_1b':
@@ -2036,6 +2050,10 @@ class ModelDownloadService {
                 ) ??
                 '')
             .toLowerCase();
+
+    if (id == 'minicpm5_2b') {
+      return '2B';
+    }
 
     if (id.contains('phi3_5') ||
         normalized.contains('phi-3.5') ||
