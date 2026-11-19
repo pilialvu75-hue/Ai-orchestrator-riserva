@@ -2,7 +2,7 @@ name: Ads Kill - Android beta
 on:
   push:
     branches:
-      - ads-kill/android-v0.1.6-emergency-stop
+      - ads-kill/android-v0.1.7-identity-updates
     paths:
       - 'ads-kill/**'
       - '.github/workflows/ads-kill-android.yml'
@@ -39,6 +39,13 @@ jobs:
       - name: Build debug APK
         working-directory: ads-kill/android
         run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Verify APK package, version and launcher icon
+        working-directory: ads-kill/android
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          BADGING=$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK")
+          printf '%s\n' "$BADGING" | grep -F "package: name='dev.aivexus.adskill' versionCode='9' versionName='0.1.7-beta1'"
+          printf '%s\n' "$BADGING" | grep -F "application-icon"
       - name: Build persistently signed release when dedicated Ads Kill key is configured
         id: signing
         working-directory: ads-kill/android
@@ -59,33 +66,33 @@ jobs:
           printf '%s' "$ADS_KILL_KEYSTORE_BASE64" | base64 --decode > "$ADS_KILL_KEYSTORE_PATH"
           gradle --no-daemon --stacktrace assembleRelease
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk ../../ads-kill-v0.1.6-beta1-signed.apk
+          cp app/build/outputs/apk/release/app-release.apk ../../ads-kill-v0.1.7-beta1-signed.apk
           echo 'signed=true' >> "$GITHUB_OUTPUT"
       - name: Rename APK
-        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.6-beta1-debug.apk
+        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.7-beta1-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Ads-Kill-Android-0.1.6-beta1
+          name: Ads-Kill-Android-0.1.7-beta1
           path: |
-            ads-kill-v0.1.6-beta1-debug.apk
-            ads-kill-v0.1.6-beta1-signed.apk
+            ads-kill-v0.1.7-beta1-debug.apk
+            ads-kill-v0.1.7-beta1-signed.apk
           if-no-files-found: warn
           retention-days: 30
       - name: Publish first test prerelease
-        if: github.ref == 'refs/heads/ads-kill/android-v0.1.6-emergency-stop'
+        if: github.ref == 'refs/heads/ads-kill/android-v0.1.7-identity-updates'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=ads-kill-v0.1.6-beta1
-          assets=(ads-kill-v0.1.6-beta1-debug.apk)
-          if [[ -f ads-kill-v0.1.6-beta1-signed.apk ]]; then
-            assets+=(ads-kill-v0.1.6-beta1-signed.apk)
+          TAG=ads-kill-v0.1.7-beta1
+          assets=(ads-kill-v0.1.7-beta1-debug.apk)
+          if [[ -f ads-kill-v0.1.7-beta1-signed.apk ]]; then
+            assets+=(ads-kill-v0.1.7-beta1-signed.apk)
           fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" "${assets[@]}" \
               --target "$GITHUB_SHA" --prerelease \
-              --title "Ads Kill Android 0.1.6 beta1 (emergency stop fix)" \
-              --notes "Emergency VPN stop: direct stopService() in the main app, immediate TUN teardown, non-sticky background service, stop control in overlay and notification, and four-language recovery guidance. Smart Reward and existing settings preserved. This is a debug-signed beta; an uninstall may be required. In-app updates require persistent signing secrets."
+              --title "Ads Kill Android 0.1.7 beta1 (identity and update clarity)" \
+              --notes "Dedicated launcher icon; installed app version and build visible on home and settings; honest debug-versus-signed update status; direct GitHub beta link; emergency VPN stop and Smart Reward retained. The debug APK cannot be installed over older debug builds with different certificates. Persistent signing secrets are still required for in-place updates."
           else
             gh release upload "$TAG" "${assets[@]}" --clobber
             gh release edit "$TAG" --target "$GITHUB_SHA"
