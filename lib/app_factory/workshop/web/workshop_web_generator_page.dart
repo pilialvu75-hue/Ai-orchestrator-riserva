@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.d
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/link.dart';
 import 'package:uuid/uuid.dart';
 
 class WorkshopWebGeneratorPage extends StatefulWidget {
@@ -23,6 +24,17 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   );
   static final _digestPattern = RegExp(r'^[0-9a-f]{64}$');
   static const _terminalStates = {'generated', 'failed', 'interrupted'};
+  static const _verificationStates = {
+    'ready',
+    'checks_missing',
+    'dispatching',
+    'submitted',
+    'importing',
+    'review_required',
+    'verified',
+    'failed',
+    'unavailable',
+  };
 
   final _prompt = TextEditingController();
   late final http.Client _client = widget.client ?? http.Client();
@@ -32,6 +44,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   String? _pendingPrompt;
   String? _error;
   Map<String, dynamic>? _receipt;
+  Map<String, dynamic>? _verification;
   bool _busy = true;
 
   @override
@@ -91,7 +104,9 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         _pendingPrompt = prompt;
       });
       final result = await _call(id, prompt: prompt);
-      if (mounted) setState(() => _receipt = result);
+      if (!mounted) return;
+      setState(() => _receipt = result);
+      if (result?['status'] == 'generated') await _readVerification(id);
     });
   }
 
@@ -104,6 +119,39 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       setState(() => _generationId = null);
     }
     setState(() => _receipt = result);
+    if (result?['status'] == 'generated') await _readVerification(id);
+  }
+
+  Future<void> _readVerification(String id, {bool advance = false}) async {
+    final uri = Uri.base.resolve('/api/cantiere/proposals/verify');
+    final response = await (advance
+            ? _client.post(uri,
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({'generationId': id}))
+            : _client.get(uri.replace(queryParameters: {'generationId': id})))
+        .timeout(const Duration(seconds: 50));
+    final result = jsonDecode(utf8.decode(response.bodyBytes));
+    if (result is! Map<String, dynamic> || result['version'] != 1) {
+      throw const FormatException('Invalid application verification response');
+    }
+    if (response.statusCode == 503 &&
+        result['error'] == 'verification_unavailable') {
+      throw const _GeneratorRequestException(
+          'Verifica temporaneamente non disponibile.');
+    }
+    if (response.statusCode != 200 ||
+        result['ok'] != true ||
+        result['generationId'] != id ||
+        !_verificationStates.contains(result['status'])) {
+      throw const FormatException('Invalid application verification status');
+    }
+    if (result['status'] == 'verified') {
+      final digest = result['zipSha256'];
+      if (digest is! String || !_digestPattern.hasMatch(digest)) {
+        throw const FormatException('Invalid ZIP digest');
+      }
+    }
+    if (mounted) setState(() => _verification = result);
   }
 
   Future<void> _reset() async {
@@ -114,6 +162,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         _generationId = null;
         _pendingPrompt = null;
         _receipt = null;
+        _verification = null;
         _prompt.clear();
       });
     });
@@ -185,6 +234,20 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       'interrupted' => 'Generazione interrotta',
       _ => null,
     };
+    final verificationStatus = _verification?['status'];
+    final verificationLabel = switch (verificationStatus) {
+      'checks_missing' =>
+        'Crea una nuova generazione per ottenere un piano di verifica.',
+      'dispatching' || 'submitted' => 'Verifica in coda o in esecuzione',
+      'importing' => 'Importazione dello ZIP in corso',
+      'verified' => 'Applicazione verificata',
+      'failed' => 'I controlli non sono passati',
+      'review_required' => 'Avvio del runner da verificare',
+      'unavailable' => 'Il runner non ha completato la verifica',
+      _ => null,
+    };
+    final canAdvance = {'ready', 'dispatching', 'submitted', 'importing'}
+        .contains(verificationStatus);
     return Scaffold(
       appBar: AppBar(title: Text(tr('Genera applicazione'))),
       body: SafeArea(
@@ -231,6 +294,40 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                   const SizedBox(height: 8),
                   const Text('SHA-256'),
                   SelectableText(receipt['sourceSha256'] as String),
+                  if (id != null) ...[
+                    const SizedBox(height: 16),
+                    if (verificationLabel != null)
+                      Semantics(
+                          liveRegion: true, child: Text(tr(verificationLabel))),
+                    Wrap(
+                      spacing: 12,
+                      children: [
+                        if (verificationStatus == null || canAdvance)
+                          OutlinedButton(
+                            onPressed: _busy
+                                ? null
+                                : () => _run(() =>
+                                    _readVerification(id, advance: canAdvance)),
+                            child: Text(tr(verificationStatus == 'ready'
+                                ? 'Verifica applicazione'
+                                : 'Aggiorna verifica')),
+                          ),
+                        if (verificationStatus == 'verified')
+                          Link(
+                            uri: Uri.base
+                                .resolve('/api/cantiere/proposals/download')
+                                .replace(queryParameters: {'generationId': id}),
+                            target: LinkTarget.blank,
+                            builder: (context, followLink) =>
+                                OutlinedButton.icon(
+                              onPressed: _busy ? null : followLink,
+                              icon: const Icon(Icons.download_outlined),
+                              label: Text(tr('Scarica ZIP')),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 16),
                 Wrap(
