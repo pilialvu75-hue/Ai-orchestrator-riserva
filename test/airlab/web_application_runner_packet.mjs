@@ -141,15 +141,14 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
   const repo = { id: 1235011890 };
   const head = 'ab'.repeat(20);
   const storage = 'https://artifacts.blob.core.windows.net/test-fixture';
-  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${'0'.repeat(32)}/ai/v1/chat/completions`;
   const model = '@cf/google/gemma-4-26b-a4b-it';
   const env = {
     AIVEXUS_WEB_ORIGIN: origin, AIVEXUS_WEB_ACCESS_ISSUER: issuer, AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
-    CANTIERE_CLOUD_ROUTES_JSON: JSON.stringify({ coding: [{
-      id: 'fixture', webBuilderOnly: true, endpoint, model, apiKeySecret: 'FIXTURE_KEY',
-    }] }),
-    FIXTURE_KEY: 'fake', AIVEXUS_WEB_BUILDER_GITHUB_TOKEN: 'fake', AIVEXUS_WEB_BUILDER_GITHUB_HEAD_SHA: head,
+    AIVEXUS_WEB_BUILDER_AI: { async run() { return { model, choices: [{ finish_reason: 'stop', message: {
+      content: JSON.stringify({ ...f.source, checks: f.checks }),
+    } }] }; } },
+    AIVEXUS_WEB_BUILDER_GITHUB_TOKEN: 'fake', AIVEXUS_WEB_BUILDER_GITHUB_HEAD_SHA: head,
     AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY: f.authorizationSecret,
     AIVEXUS_WEB_BUILDER_JOB_PUBLIC_KEY: encodeRunnerBase64(new Uint8Array(await crypto.subtle.exportKey('spki', f.runner.publicKey))),
     AIVEXUS_WEB_BUILDER_RESULT_PUBLIC_KEY: f.encodeJob.resultPublicKeySpki,
@@ -166,9 +165,6 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
       if (String(url).startsWith('http://127.0.0.1:')) return localFetch(url, opts);
       const target = String(url);
       if (target === issuer + '/cdn-cgi/access/certs') return Response.json({ keys: [jwk] });
-      if (target === endpoint) return Response.json({ model, choices: [{ finish_reason: 'stop', message: {
-        content: JSON.stringify({ ...f.source, checks: f.checks }),
-      } }] });
       if (url === storage) {
         downloads++;
         assert.equal(opts.headers, undefined);

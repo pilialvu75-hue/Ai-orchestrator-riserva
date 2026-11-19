@@ -60,10 +60,8 @@ test('Chromium detects a syntax error and passes the same real DOM checks after 
   const model = '@cf/google/gemma-4-26b-a4b-it';
   const env = {
     AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
-    CANTIERE_CLOUD_ROUTES_JSON: JSON.stringify({ coding: [{
-      id: 'test-builder', model, endpoint, webBuilderOnly: true, apiKeySecret: 'TEST_KEY',
-    }] }),
-    TEST_KEY: 'local-placeholder',
+    AIVEXUS_WEB_BUILDER_ACCOUNT_ID: '0'.repeat(32),
+    AIVEXUS_BUILDER_WORKERS_AI_TOKEN: 'local-placeholder',
   };
   const localFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = localFetch; });
@@ -71,7 +69,10 @@ test('Chromium detects a syntax error and passes the same real DOM checks after 
   globalThis.fetch = (url, options) => {
     if (String(url) !== endpoint) return localFetch(url, options);
     calls++;
+    assert.equal(options.redirect, 'manual');
+    assert.equal(options.headers.Authorization, 'Bearer local-placeholder');
     const request = JSON.parse(options.body);
+    assert.equal(request.model, model);
     const input = JSON.parse(request.messages.at(-1).content);
     assert.equal(input.diagnosis, 'javascript_error');
     assert.deepEqual(input.source, broken);
