@@ -139,9 +139,17 @@ del dispatch. L'artefatto GitHub contiene soltanto `application.aivexus`
 cifrato e scade dopo un giorno.
 
 Il client accetta l'artefatto solo dopo aver verificato repository, workflow,
-commit, tentativo e digest. Il ticket e gli ID GitHub sono interni. Prima
-dell'attivazione resta da collegare la prenotazione della generazione a D1 e da
-salvare il risultato autenticato sotto il proprietario originario.
+commit, tentativo e digest. Il ticket e gli ID GitHub sono interni. La
+migrazione `007` registra un solo dispatch per generazione e proprietario.
+`POST /api/cantiere/proposals/verify` avvia la verifica o recupera un risultato
+concluso. `GET` sullo stesso percorso è in sola lettura. Le generazioni più
+vecchie senza controlli propongono lo stato `checks_missing`.
+
+Pages conserva ricevuta, sorgente verificato e ZIP nel D1 del prodotto con
+un’unica scrittura. `GET /api/cantiere/proposals/download?generationId=…`
+verifica di nuovo il digest dello ZIP e serve il file solo al proprietario.
+I binding di produzione del runner e le chiavi richiedono la configurazione
+autorizzata. Il codice di un progetto viene eseguito in Chromium, nel runner.
 
 ## Security and sequencing
 

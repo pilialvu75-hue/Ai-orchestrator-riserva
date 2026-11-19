@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { validateWebApplicationChecks } from './web_application_checks.mjs';
 
 const PATH = /^(?:[a-z0-9][a-z0-9_-]*\/){0,3}[a-z0-9][a-z0-9_-]*\.(?:html|css|js|mjs|json|txt|md)$/;
 const MAX_SOURCE_BYTES = 65536;
@@ -10,8 +11,8 @@ function validText(value, max) {
 
 export function readVerificationInput(input) {
   const { source, checks } = input ?? {};
-  if (!Array.isArray(source?.files) || source.files.length === 0 || source.files.length > 12 ||
-      !Array.isArray(checks) || checks.length === 0 || checks.length > 16) return null;
+  const plan = validateWebApplicationChecks(checks);
+  if (!Array.isArray(source?.files) || source.files.length === 0 || source.files.length > 12 || !plan) return null;
   if (Buffer.byteLength(JSON.stringify(source)) > MAX_SOURCE_BYTES) return null;
 
   const assets = new Map();
@@ -23,15 +24,7 @@ export function readVerificationInput(input) {
   }
   if (!assets.has('index.html')) return null;
 
-  for (const check of checks) {
-    if (!validText(check?.selector, 240)) return null;
-    if (check.action === 'click') continue;
-    if (check.action === 'fill' && typeof check.value === 'string' && check.value.length <= 600) continue;
-    if (check.action === 'text' && validText(check.value, 600)) continue;
-    return null;
-  }
-  if (!checks.some(check => check.action === 'text')) return null;
-  return { assets, checks };
+  return { assets, checks: plan };
 }
 
 // A trusted test plan stays fixed across repairs. Infrastructure failure and

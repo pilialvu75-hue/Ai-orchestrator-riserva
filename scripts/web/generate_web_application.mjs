@@ -1,8 +1,12 @@
-const GENERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+import { validateWebApplicationChecks } from './web_application_checks.mjs';
+import { WEB_RUNNER_TICKET as GENERATION_ID } from './web_runner_envelope.mjs';
 const FILE_PATH = /^(?:[a-z0-9][a-z0-9_-]*\/){0,3}[a-z0-9][a-z0-9_-]*\.(?:html|css|js|mjs|json|txt|md)$/;
 const INSTRUCTION = `Generate an original, self-contained browser application matching the user's brief.
 Return a single JSON object with title, requirements (an array of user-visible behavior descriptions),
-and files (an array of objects with path and content). The entry point is index.html.
+files (an array of objects with path and content), and checks (up to 16 browser actions).
+Each check contains action and selector, and value for text or fill. Use click to activate controls,
+fill to enter text, and text to assert visible text. Include an assertion that verifies a behavior
+requested by the user after interacting with it. The entry point is index.html.
 Choose the other file names and number of files based on the brief. Use lowercase portable paths,
 local dependencies only, no package installation, secrets or external network requests.
 Keep the application compact enough to return all source within the response limit.`;
@@ -41,11 +45,17 @@ function cleanText(value, max) {
   return text && text.length <= max ? text : null;
 }
 
-export function parseGeneratedWebApplication(output) {
+function parseResponse(output) {
   if (typeof output !== 'string') return null;
   const fenced = /^```(?:json)?\s*\n([\s\S]+)\n```$/i.exec(output);
-  let parsed;
-  try { parsed = JSON.parse(fenced ? fenced[1] : output); } catch (_) { return null; }
+  try { return JSON.parse(fenced ? fenced[1] : output); } catch (_) { return null; }
+}
+
+export function parseGeneratedWebApplication(output) {
+  return normalizeSource(parseResponse(output));
+}
+
+function normalizeSource(parsed) {
 
   const title = cleanText(parsed?.title, 100);
   if (!title || !Array.isArray(parsed.requirements) || parsed.requirements.length < 1 ||
@@ -117,12 +127,14 @@ export async function generateWebApplication({ request, ownerSubject, db, infer 
     { role: 'system', content: INSTRUCTION },
     { role: 'user', content: brief },
   ]).catch(() => ({ ok: false }));
-  const source = inference.ok ? parseGeneratedWebApplication(inference.text) : null;
+  const reply = inference.ok ? parseResponse(inference.text) : null;
+  const source = normalizeSource(reply);
   if (source) {
     const { model, reportedModel, provider, routeId, tokensGenerated } = inference;
     const provenance = { model, reportedModel, provider, routeId, tokensGenerated };
     const sourceSha256 = await sha256Text(JSON.stringify(source));
-    const serialized = JSON.stringify({ source, sourceSha256, provenance });
+    const checks = validateWebApplicationChecks(reply?.checks);
+    const serialized = JSON.stringify({ source, sourceSha256, provenance, checks });
     if (encoder.encode(serialized).byteLength <= 65536) resultJson = serialized;
   }
   const status = resultJson ? 'generated' : 'failed';

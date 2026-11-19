@@ -13,11 +13,15 @@ import { reserveApprovedWebExecution } from './approved_execution_reservation.mj
 import { readWebExecutionZip } from './web_execution_artifact_download.mjs';
 import { handleWebCounterAdvance } from './advance_web_counter.mjs';
 import { generateWebApplication, readWebApplicationGeneration } from './generate_web_application.mjs';
+import {
+  advanceWebApplicationVerification, readWebApplicationVerification, readWebApplicationZip,
+} from './d1_web_application_verification.mjs';
 
 const MAX_JSON_BYTES = 2048;
 const OPERATIONS = new Set([
   'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
   'generate_app', 'generation_status',
+  'verify_app', 'verification_status', 'download_app',
 ]);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
@@ -107,11 +111,26 @@ function operationFailure(result) {
   if (reason === 'generation_conflict') return reject(409, 'generation_conflict');
   if (reason === 'generation_quota_exceeded') return reject(429, reason);
   if (reason === 'generation_unavailable') return reject(503, 'generation_unavailable');
+  if (reason === 'verification_checks_missing') return reject(409, 'verification_checks_missing');
+  if (reason === 'verification_payload_too_large') return reject(413, 'verification_payload_too_large');
+  if (reason === 'verification_unavailable') return reject(503, 'verification_unavailable');
   if (reason === 'storage_unavailable' ||
       reason === 'storage_inconsistent') return reject(503, 'storage_unavailable');
   if (reason === 'approval_required' ||
       reason === 'stale_or_not_ready') return reject(409, 'approval_not_ready');
   return reject(503, 'operation_unavailable');
+}
+
+function zipResponse(bytes, filename) {
+  return new Response(bytes, {
+    headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
 }
 
 /**
@@ -127,7 +146,9 @@ export function createAuthenticatedWebProjectOperation({
   const readsStatus = operation === 'status';
   const downloads = operation === 'download';
   const readsGeneration = operation === 'generation_status';
-  const readOnly = readsStatus || downloads || readsGeneration;
+  const readsVerification = operation === 'verification_status';
+  const downloadsApp = operation === 'download_app';
+  const readOnly = readsStatus || downloads || readsGeneration || readsVerification || downloadsApp;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -179,15 +200,7 @@ export function createAuthenticatedWebProjectOperation({
         if (result.error === 'invalid_request') return reject(400, result.error);
         if (result.error === 'execution_not_found') return reject(404, result.error);
         if (result.error) return reject(503, result.error);
-        return new Response(result.bytes, {
-          headers: {
-            'Content-Type': 'application/zip',
-            'Content-Disposition': 'attachment; filename="aivexus-counter.zip"',
-            'Cache-Control': 'no-store',
-            'X-Content-Type-Options': 'nosniff',
-            'Referrer-Policy': 'no-referrer',
-          },
-        });
+        return zipResponse(result.bytes, 'aivexus-counter.zip');
       } catch (_) {
         return reject(503, 'artifact_unavailable');
       }
@@ -211,14 +224,17 @@ export function createAuthenticatedWebProjectOperation({
       }
     }
 
-    if (readsGeneration) {
+    if (readsGeneration || readsVerification || downloadsApp) {
       if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
       try {
-        const result = await readWebApplicationGeneration({
+        const read = downloadsApp ? readWebApplicationZip :
+          readsVerification ? readWebApplicationVerification : readWebApplicationGeneration;
+        const result = await read({
           db, ownerSubject: verified.principal.subject,
           generationId: url.searchParams.get('generationId'),
         });
-        return result.ok ? respond(200, result) : operationFailure(result);
+        if (!result.ok) return operationFailure(result);
+        return downloadsApp ? zipResponse(result.bytes, 'aivexus-application.zip') : respond(200, result);
       } catch (_) {
         return reject(503, 'storage_unavailable');
       }
@@ -232,6 +248,8 @@ export function createAuthenticatedWebProjectOperation({
       const principal = verified.principal;
       if (operation === 'generate_app') {
         result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, db, infer });
+      } else if (operation === 'verify_app') {
+        result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'advance') {
         result = await handleWebCounterAdvance({ request: parsed.value, principal, db, bucket, runner });
       } else if (operation === 'stage_counter') {
