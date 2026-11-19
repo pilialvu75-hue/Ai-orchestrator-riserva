@@ -162,12 +162,6 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
         _loading = false;
       });
       try {
-        final intake = await _repository.loadIntake();
-        if (mounted) setState(() { _intake = intake; _intakeError = null; });
-      } catch (error) {
-        if (mounted) setState(() { _intake = const []; _intakeError = error.toString(); });
-      }
-      try {
         final development = await _repository.loadDevelopment();
         if (mounted) {
           setState(() {
@@ -182,6 +176,14 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
             _developmentError = error.toString();
           });
         }
+      }
+      // Prefer the small source-bound development index over an expensive
+      // sequential GitHub tree+manifest walk for every historical intake item.
+      try {
+        final intake = await _repository.loadIntake();
+        if (mounted) setState(() { _intake = intake; _intakeError = null; });
+      } catch (error) {
+        if (mounted) setState(() { _intake = const []; _intakeError = error.toString(); });
       }
       unawaited(_refreshLab());
     } catch (error) {
