@@ -125,7 +125,7 @@ void main() {
   });
 
   test('rejects a dev entry with fabricated consumer PASS', () async {
-    final invalid = index('a' * 64);
+    final invalid = index(List<String>.filled(64, 'a').join());
     (invalid['packages'] as List).first['independent_export_consumer'] = 'FAILED';
     final source = ModuleLibraryDevelopmentSource(
         client: MockClient((_) async => answer(invalid)));
