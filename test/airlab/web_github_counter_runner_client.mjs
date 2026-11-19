@@ -26,7 +26,7 @@ function setup(responses) {
     token: 'local-fixture', expectedHeadSha: head,
     async fetchImpl(url, options) {
       assert.equal(new URL(url).origin, 'https://api.github.com');
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       assert.equal(options.headers.Authorization, 'Bearer local-fixture');
       const next = responses[calls.length];
       calls.push({ url, options });
@@ -101,7 +101,7 @@ function downloadFixture({ url = storage, body = archive, expected = archive } =
         return new Response(null, { status: 302, headers: { location: url } });
       }
       assert.equal(target, storage);
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       assert.equal(options.credentials, 'omit');
       assert.equal(options.headers, undefined);
       return new Response(body);

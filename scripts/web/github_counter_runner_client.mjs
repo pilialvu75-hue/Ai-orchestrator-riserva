@@ -27,7 +27,7 @@ function storageRedirect(location) {
 
 async function readArchive(response, size) {
   const length = response.headers.get('content-length');
-  if (!response.ok || !response.body || (length !== null && Number(length) !== size)) {
+  if (response.status !== 200 || !response.body || (length !== null && Number(length) !== size)) {
     throw new Error('Counter runner archive download failed');
   }
   const reader = response.body.getReader();
@@ -57,7 +57,7 @@ export function createGitHubCounterRunnerClient({ token, expectedHeadSha, fetchI
     throw new TypeError('Counter runner GitHub configuration is invalid');
   }
 
-  function apiRequest(path, { body, redirect = 'error' } = {}) {
+  function apiRequest(path, { body } = {}) {
     return fetchImpl(API + path, {
       method: body ? 'POST' : 'GET',
       headers: {
@@ -68,7 +68,7 @@ export function createGitHubCounterRunnerClient({ token, expectedHeadSha, fetchI
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
-      redirect,
+      redirect: 'manual',
       signal: AbortSignal.timeout(5000),
     });
   }
@@ -134,13 +134,11 @@ export function createGitHubCounterRunnerClient({ token, expectedHeadSha, fetchI
           typeof sha256 !== 'string' || !DIGEST.test('sha256:' + sha256)) {
         throw new TypeError('Counter runner archive metadata is invalid');
       }
-      const response = await apiRequest('/actions/artifacts/' + artifactId + '/zip', {
-        redirect: 'manual',
-      });
+      const response = await apiRequest('/actions/artifacts/' + artifactId + '/zip');
       if (response.status !== 302) throw new Error('Counter runner archive redirect failed');
       const target = storageRedirect(response.headers.get('location'));
       const archived = await fetchImpl(target.href, {
-        method: 'GET', redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(10000),
+        method: 'GET', redirect: 'manual', credentials: 'omit', signal: AbortSignal.timeout(10000),
       });
       const bytes = await readArchive(archived, size);
       if (await webZipSha256(bytes) !== sha256) throw new Error('Counter runner archive digest mismatch');
