@@ -47,6 +47,7 @@ public final class MainActivity extends Activity {
     private LinearLayout savedChoicesContainer;
     private boolean preferencesVisible = false;
     private boolean receiverActive = false;
+    private int vpnCommandEpoch = 0;
 
     private final Runnable refreshTask = new Runnable() {
         @Override public void run() {
@@ -202,6 +203,14 @@ public final class MainActivity extends Activity {
         Button emergency = actionButton(t("emergency_stop"), false);
         emergency.setOnClickListener(v -> stopVpnDirectly());
         protection.addView(emergency);
+        Button androidVpn = actionButton(t("vpn_android_settings"), false);
+        androidVpn.setOnClickListener(v -> {
+            try { startActivity(new Intent(Settings.ACTION_VPN_SETTINGS)); }
+            catch (RuntimeException e) {
+                Toast.makeText(this, t("vpn_settings_failed"), Toast.LENGTH_LONG).show();
+            }
+        });
+        protection.addView(androidVpn);
         protection.addView(label(t("emergency_info"), 11, false,
             UiPrefs.secondary(this)));
         home.addView(protection);
@@ -433,20 +442,37 @@ public final class MainActivity extends Activity {
     }
 
     /**
-     * stopService() stops the existing foreground VPN directly. Using
-     * startService(ACTION_STOP) here previously relied on another command
-     * reaching the service, which could leave the tunnel active.
+     * Record the user's OFF request synchronously before any service call.
+     * Send ACTION_STOP to tear down the TUN explicitly, then use stopService()
+     * as a fallback. The command epoch prevents an old fallback from killing
+     * a newly started session when the user toggles quickly.
      */
     private void stopVpnDirectly() {
-        try {
-            boolean found = stopService(new Intent(this, AdsVpnService.class));
-            // If Android has already destroyed the service, discard stale UI state.
-            if (!found) AdsVpnService.active = false;
-            handler.postDelayed(this::refresh, 200L);
-            handler.postDelayed(this::refresh, 1000L);
-        } catch (RuntimeException ex) {
+        final int epoch = ++vpnCommandEpoch;
+        if (!preferences().edit()
+            .putBoolean(AdsVpnService.PREF_VPN_REQUESTED, false).commit()) {
             Toast.makeText(this, t("stop_failed"), Toast.LENGTH_LONG).show();
         }
+        try {
+            startService(new Intent(this, AdsVpnService.class)
+                .setAction(AdsVpnService.ACTION_STOP));
+        } catch (RuntimeException e) {
+            // On some Android builds stopService still works when a STOP intent
+            // cannot be delivered. Do not drop the user's OFF request.
+            try { stopService(new Intent(this, AdsVpnService.class)); }
+            catch (RuntimeException ignored) { }
+        }
+        refresh();
+        handler.postDelayed(() -> {
+            if (epoch != vpnCommandEpoch || preferences()
+                .getBoolean(AdsVpnService.PREF_VPN_REQUESTED, false)) return;
+            try { stopService(new Intent(this, AdsVpnService.class)); }
+            catch (RuntimeException e) {
+                Toast.makeText(this, t("stop_failed"), Toast.LENGTH_LONG).show();
+            }
+            refresh();
+        }, 700L);
+        handler.postDelayed(this::refresh, 1400L);
     }
 
     private void toggleVpn() {
@@ -465,18 +491,27 @@ public final class MainActivity extends Activity {
     }
 
     private void startVpn() {
+        ++vpnCommandEpoch;
+        if (!preferences().edit()
+            .putBoolean(AdsVpnService.PREF_VPN_REQUESTED, true).commit()) {
+            Toast.makeText(this, t("start_failed"), Toast.LENGTH_LONG).show();
+            return;
+        }
         try {
             startForegroundService(new Intent(this, AdsVpnService.class)
                 .setAction(AdsVpnService.ACTION_START));
         } catch (Exception ex) {
-            Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show();
+            preferences().edit().putBoolean(AdsVpnService.PREF_VPN_REQUESTED, false).apply();
+            Toast.makeText(this, t("start_failed"), Toast.LENGTH_LONG).show();
         }
     }
 
     private void refresh() {
         if (state == null) return;
         boolean on = AdsVpnService.active;
-        state.setText(t(on ? "status_on" : "status_off"));
+        boolean stopping = on && !preferences()
+            .getBoolean(AdsVpnService.PREF_VPN_REQUESTED, false);
+        state.setText(t(stopping ? "status_stopping" : on ? "status_on" : "status_off"));
         state.setTextColor(on ? UiPrefs.accent(this) : UiPrefs.secondary(this));
         power.setText(t(on ? "stop" : "start"));
         pause.setEnabled(on);
