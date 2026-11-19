@@ -66,6 +66,14 @@ class ComputerUseWindowsBetaContractTest(unittest.TestCase):
         self.assertIn("test_windows_llama_bundle.ps1", w)
         self.assertIn("Bundle and audit pinned ASUS CUDA engine", w)
         self.assertIn("bundle_windows_cuda_runtime.ps1", w)
+        # The in-app settings menu is compile-time gated and the MCP script
+        # must ship next to the AIVEXUS exe, not just exist in the source tree.
+        self.assertIn("--dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=true", w)
+        self.assertIn("--dart-define=AIVEXUS_WINDOWS_CUDA_QA=true", w)
+        self.assertIn("scripts\\chatgpt_bridge\\aivexus_mcp.ps1", w)
+        self.assertIn("mcp-tools", w)
+        self.assertIn("Test authenticated local ChatGPT bridge", w)
+        self.assertIn("test/core/diagnostics/chatgpt_bridge/", w)
         self.assertIn("test_windows_cuda_bundle.ps1", w)
         self.assertIn("windows\\installer\\ai_orchestrator.iss", w)
         self.assertIn("AI-Orchestrator-Setup-x64.exe", w)
