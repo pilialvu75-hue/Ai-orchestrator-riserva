@@ -561,12 +561,44 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         children: [
           Text(
             _isWindows
-                ? 'Test Windows locale: schermata, clic, testo e navigazione. '
-                  'Nessuna esecuzione di shell o invio automatico di immagini.'
+                ? 'Controlla una finestra alla volta: autorizza, apri e seleziona '
+                  'l’app. Aprirla non significa ancora controllarla.'
                 : 'Test sperimentale di sola osservazione. '
                   'Permesso schermo richiesto dal sistema operativo; '
                   'mouse, tastiera e agente IA non sono abilitati.',
           ),
+          if (_isWindows) ...[
+            const SizedBox(height: 12),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Stato: ${interactive ? 'controllo attivo' : active ? 'sola osservazione' : 'non avviato'}',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '1. Avvia controllo e autorizza.\n'
+                      '2. Apri un’applicazione.\n'
+                      '3. Seleziona la sua finestra (4 secondi).\n'
+                      '4. Torna qui per scrivere, cliccare o premere tasti.\n'
+                      'Per verificare usa la prova guidata Blocco note.',
+                    ),
+                    if (active && !interactive)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Sei in sola osservazione: premi STOP e avvia il controllo per usare mouse e tastiera.',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (_isAndroid) ...[
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -592,20 +624,20 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                   onPressed: !_busy && !active
                       ? () => _begin(interactive: false)
                       : null,
-                  child: const Text('Osserva schermo'),
+                  child: const Text('Solo osservazione'),
                 ),
                 if (_canInput)
                   FilledButton(
                     onPressed: !_busy && !active
                         ? () => _begin(interactive: true)
                         : null,
-                    child: const Text('Abilita interazione'),
+                    child: const Text('1. Avvia controllo'),
                   ),
                 OutlinedButton(
                   onPressed: !_busy && active
                       ? () => _run(_refreshFrame)
                       : null,
-                  child: const Text('Aggiorna'),
+                  child: const Text('Aggiorna schermata'),
                 ),
                 if (_isWindows) ...[
                   OutlinedButton(
@@ -632,7 +664,11 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               FilledButton.icon(
                 onPressed: _busy ? null : _runAutomaticSmokeTest,
                 icon: const Icon(Icons.play_arrow),
-                label: const Text('Test automatico: Blocco note'),
+                label: const Text('Prova guidata: scrivi in Blocco note'),
+              ),
+              const Text(
+                'La prova guidata seleziona la finestra e verifica davvero '
+                'che il testo venga scritto: aprire l’app da solo non basta.',
               ),
               const Text(
                 'Apre Blocco note, scrive un testo di prova e verifica '
@@ -652,7 +688,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                               'app': 'notepad',
                             }),
                     icon: const Icon(Icons.notes_outlined),
-                    label: const Text('Apri Blocco note'),
+                    label: const Text('2. Apri Blocco note'),
                   ),
                   OutlinedButton.icon(
                     onPressed: _busy
@@ -662,7 +698,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                               'app': 'calculator',
                             }),
                     icon: const Icon(Icons.calculate_outlined),
-                    label: const Text('Apri Calcolatrice'),
+                    label: const Text('2. Apri Calcolatrice'),
                   ),
                   if (_isWindows) ...[
                     OutlinedButton.icon(
@@ -673,7 +709,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                                 'app': 'paint',
                               }),
                       icon: const Icon(Icons.brush_outlined),
-                      label: const Text('Apri Paint'),
+                      label: const Text('2. Apri Paint'),
                     ),
                     OutlinedButton.icon(
                       onPressed: _busy
@@ -683,7 +719,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                                 'app': 'qa2048',
                               }),
                       icon: const Icon(Icons.sports_esports_outlined),
-                      label: const Text('Gioco 2048 offline (QA)'),
+                      label: const Text('2. Apri 2048 (sperimentale)'),
                     ),
                   ],
                 ],
@@ -692,7 +728,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                 FilledButton.icon(
                   onPressed: _busy ? null : _play2048WithLocalAi,
                   icon: const Icon(Icons.psychology_outlined),
-                  label: const Text('Fai giocare Aivexus LOCAL a 2048'),
+                  label: const Text('4. Fai giocare AIVEXUS a 2048'),
                 ),
                 const Text(
                   'Esperimento di ragionamento reale: apri 2048, '
@@ -707,11 +743,11 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               OutlinedButton.icon(
                 onPressed: _busy ? null : _selectTargetWindow,
                 icon: const Icon(Icons.select_all_outlined),
-                label: const Text('Seleziona finestra attiva (4 secondi)'),
+                label: const Text('3. Seleziona finestra (4 secondi)'),
               ),
               const Text(
-                'Premi il pulsante, poi passa subito a Blocco note. '
-                'La selezione non richiede password né privilegi elevati.',
+                'Premi il pulsante e passa entro 4 secondi alla finestra da '
+                'controllare. Poi torna qui e prova un comando.',
               ),
               if (_isWindows) ...[
                 const SizedBox(height: 8),
@@ -763,9 +799,8 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               ),
             if (interactive) ...[
               const SizedBox(height: 16),
-              const Text('Seleziona prima la finestra da controllare. '
-                  'Poi torna qui per inviare testo o tasti; '
-                  'Aivexus riattiverà la finestra scelta.'),
+              const Text('4. Interagisci con la finestra selezionata. '
+                  'Se non succede nulla, prova prima il test guidato Blocco note.'),
               const SizedBox(height: 8),
               TextField(
                 controller: _textController,
