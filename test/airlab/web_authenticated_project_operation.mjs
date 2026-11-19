@@ -176,7 +176,7 @@ function setup(f, signing, operation = 'approve', opts = {}) {
     fetchImpl: async (url, init) => {
       fetches++;
       assert.equal(url, issuer + '/cdn-cgi/access/certs');
-      assert.equal(init.redirect, 'error');
+      assert.equal(init.redirect, 'manual');
       return new Response(JSON.stringify({ keys: [signing.jwk] }), {
         headers: { 'Content-Type': 'application/json' },
       });
