@@ -118,7 +118,7 @@ void main() {
   });
 
   test('rejects index that falsely claims production certification', () async {
-    final invalid = index('a' * 64)..['production_certified'] = true;
+    final invalid = index(List<String>.filled(64, 'a').join())..['production_certified'] = true;
     final source = ModuleLibraryDevelopmentSource(
         client: MockClient((_) async => answer(invalid)));
     await expectLater(source.load(token: 't'), throwsFormatException);
