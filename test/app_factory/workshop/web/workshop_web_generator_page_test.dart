@@ -22,6 +22,24 @@ void main() {
     var verificationPosts = 0;
     final client = MockClient((request) async {
       requests++;
+      if (request.url.path == '/api/cantiere/proposals/source') {
+        expect(request.method, 'GET');
+        expect(request.url.queryParameters, {'generationId': generationId});
+        return http.Response(
+            jsonEncode({
+              'version': 1,
+              'ok': true,
+              'generationId': generationId,
+              'sourceSha256': 'a' * 64,
+              'source': {
+                'files': [
+                  {'path': 'index.html', 'content': '<h1>Intervalli</h1>'},
+                  {'path': 'timer.mjs', 'content': 'const seconds = 30;'},
+                ]
+              },
+            }),
+            200);
+      }
       if (request.url.path == '/api/cantiere/proposals/verify') {
         if (request.method == 'GET') {
           expect(request.url.queryParameters, {'generationId': generationId});
@@ -42,6 +60,7 @@ void main() {
                 _ => 'verified',
               },
               if (verificationPosts > 1) 'zipSha256': 'b' * 64,
+              if (verificationPosts > 1) 'sourceSha256': 'a' * 64,
             }),
             200);
       }
@@ -117,5 +136,10 @@ void main() {
     final download = tester.widget<Link>(find.byType(Link));
     expect(download.uri?.path, '/api/cantiere/proposals/download');
     expect(download.uri?.queryParameters, {'generationId': generationId});
+    expect(find.text('Anteprima'), findsOneWidget);
+    await tester.tap(find.text('Sorgenti'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sorgenti verificati'), findsOneWidget);
+    expect(find.text('<h1>Intervalli</h1>'), findsOneWidget);
   });
 }

@@ -7,6 +7,8 @@ import { pathToFileURL } from 'node:url';
 import { onRequest as generate } from '../../functions/api/cantiere/proposals/generate.js';
 import { onRequest as verify } from '../../functions/api/cantiere/proposals/verify.js';
 import { onRequest as download } from '../../functions/api/cantiere/proposals/download.js';
+import { onRequest as readSource } from '../../functions/api/cantiere/proposals/source.js';
+import { onRequest as preview } from '../../functions/api/cantiere/proposals/preview.js';
 import { runEncryptedWebApplicationJob } from '../../scripts/web/run_encrypted_web_application_job.mjs';
 import {
   decodeRunnerBase64, decodeWebAppJob, decodeWebAppResult, encodeRunnerBase64,
@@ -234,6 +236,19 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
   const zip = new Uint8Array(await artifact.arrayBuffer());
   assert.equal(await runnerPayloadSha256(zip), result.zipSha256);
   assert.ok(Buffer.from(zip).includes(Buffer.from(f.source.files[1].content)));
+  assert.equal((await call(readSource, 'source', stranger, null, query)).status, 404);
+  assert.equal((await call(preview, 'preview', stranger, null, query)).status, 404);
+  const sourceResponse = await call(readSource, 'source', owner, null, query);
+  assert.equal(sourceResponse.status, 200);
+  assert.equal(sourceResponse.headers.get('cache-control'), 'no-store');
+  const source = await sourceResponse.json();
+  assert.equal(source.sourceSha256, generated.sourceSha256);
+  assert.equal(source.source.files[0].content, f.source.files[1].content);
+
+  await platform.db.prepare(`UPDATE web_app_verifications SET source_json = '{}'
+    WHERE owner_subject = 'owner' AND generation_id = ?1 RETURNING generation_id`).bind(generationId).first();
+  assert.equal((await call(readSource, 'source', owner, null, query)).status, 503);
+  assert.equal((await call(preview, 'preview', owner, null, query)).status, 503);
 
   await platform.db.prepare(`UPDATE web_app_verifications SET zip_bytes = x'504b0304'
     WHERE owner_subject = 'owner' AND generation_id = ?1 RETURNING generation_id`).bind(generationId).first();

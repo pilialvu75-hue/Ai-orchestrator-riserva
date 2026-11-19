@@ -159,6 +159,18 @@ verifica di nuovo il digest dello ZIP e serve il file solo al proprietario.
 I binding di produzione del runner e le chiavi richiedono la configurazione
 autorizzata. Il codice di un progetto viene eseguito in Chromium, nel runner.
 
+## Sorgenti e anteprima
+
+`GET /api/cantiere/proposals/source` e `GET /api/cantiere/proposals/preview`
+accettano `generationId` e leggono lo snapshot verificato del proprietario. Il
+server confronta il digest dello snapshot con la ricevuta a ogni lettura. La
+schermata Flutter visualizza i file come testo. L’anteprima usa un iframe con
+origine opaca, `sandbox allow-scripts` e una CSP senza accesso a fetch, form o
+frame esterni. JavaScript e CSS locali referenziati dall’entry point sono
+incorporati nel documento. Gli import relativi all’interno di un modulo
+JavaScript, i percorsi verso altre pagine e le risorse esterne restano fuori
+dal percorso di anteprima. Lo ZIP conserva tutti i file verificati.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does

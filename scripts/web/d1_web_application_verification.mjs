@@ -183,3 +183,18 @@ export async function readWebApplicationZip({ db, ownerSubject, generationId }) 
   }
   return { ok: true, bytes };
 }
+
+export async function readVerifiedWebApplicationSource({ db, ownerSubject, generationId }) {
+  if (!validId(generationId)) return failure('invalid_request');
+  const row = await db.prepare(`SELECT source_json AS sourceJson, receipt_json AS receiptJson FROM web_app_verifications
+    WHERE owner_subject = ?1 AND generation_id = ?2 AND status = 'verified'`).bind(ownerSubject, generationId).first();
+  if (!row) return failure('generation_not_found');
+  const { sourceSha256 } = JSON.parse(row.receiptJson);
+  if (!digest(sourceSha256) || typeof row.sourceJson !== 'string' || row.sourceJson.length > 65536 ||
+      await runnerPayloadSha256(encoder.encode(row.sourceJson)) !== sourceSha256) {
+    return failure('storage_unavailable');
+  }
+  const source = parseGeneratedWebApplication(row.sourceJson);
+  if (!source) return failure('storage_unavailable');
+  return { ok: true, generationId, sourceSha256, source };
+}

@@ -15,13 +15,15 @@ import { handleWebCounterAdvance } from './advance_web_counter.mjs';
 import { generateWebApplication, readWebApplicationGeneration } from './generate_web_application.mjs';
 import {
   advanceWebApplicationVerification, readWebApplicationVerification, readWebApplicationZip,
+  readVerifiedWebApplicationSource,
 } from './d1_web_application_verification.mjs';
+import { previewWebApplication } from './web_application_preview.mjs';
 
 const MAX_JSON_BYTES = 2048;
 const OPERATIONS = new Set([
   'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
   'generate_app', 'generation_status',
-  'verify_app', 'verification_status', 'download_app',
+  'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
 ]);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
@@ -148,7 +150,9 @@ export function createAuthenticatedWebProjectOperation({
   const readsGeneration = operation === 'generation_status';
   const readsVerification = operation === 'verification_status';
   const downloadsApp = operation === 'download_app';
-  const readOnly = readsStatus || downloads || readsGeneration || readsVerification || downloadsApp;
+  const previewsApp = operation === 'preview_app';
+  const readsSource = operation === 'read_app_source' || previewsApp;
+  const readOnly = readsStatus || downloads || readsGeneration || readsVerification || downloadsApp || readsSource;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -224,16 +228,17 @@ export function createAuthenticatedWebProjectOperation({
       }
     }
 
-    if (readsGeneration || readsVerification || downloadsApp) {
+    if (readsGeneration || readsVerification || downloadsApp || readsSource) {
       if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
       try {
-        const read = downloadsApp ? readWebApplicationZip :
+        const read = downloadsApp ? readWebApplicationZip : readsSource ? readVerifiedWebApplicationSource :
           readsVerification ? readWebApplicationVerification : readWebApplicationGeneration;
         const result = await read({
           db, ownerSubject: verified.principal.subject,
           generationId: url.searchParams.get('generationId'),
         });
         if (!result.ok) return operationFailure(result);
+        if (previewsApp) return previewWebApplication(result.source);
         return downloadsApp ? zipResponse(result.bytes, 'aivexus-application.zip') : respond(200, result);
       } catch (_) {
         return reject(503, 'storage_unavailable');

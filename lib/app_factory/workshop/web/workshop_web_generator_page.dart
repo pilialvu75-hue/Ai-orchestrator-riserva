@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_source_page.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -159,8 +161,12 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     }
     if (result['status'] == 'verified') {
       final digest = result['zipSha256'];
-      if (digest is! String || !_digestPattern.hasMatch(digest)) {
-        throw const FormatException('Invalid ZIP digest');
+      final sourceDigest = result['sourceSha256'];
+      if (digest is! String ||
+          !_digestPattern.hasMatch(digest) ||
+          sourceDigest is! String ||
+          !_digestPattern.hasMatch(sourceDigest)) {
+        throw const FormatException('Invalid verification digest');
       }
     }
     if (mounted) setState(() => _verification = result);
@@ -178,6 +184,61 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         _prompt.clear();
       });
     });
+  }
+
+  Uri _generationResource(String route, String id) => Uri.base
+      .resolve('/api/cantiere/proposals/$route')
+      .replace(queryParameters: {'generationId': id});
+
+  Future<Map<String, String>> _loadSource(String id) async {
+    final response = await _client
+        .get(_generationResource('source', id))
+        .timeout(const Duration(seconds: 15));
+    final result = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode != 200 ||
+        result is! Map<String, dynamic> ||
+        result['version'] != 1 ||
+        result['ok'] != true ||
+        result['generationId'] != id ||
+        result['sourceSha256'] != _verification?['sourceSha256']) {
+      throw const FormatException('Invalid verified source response');
+    }
+    final source = result['source'];
+    if (source is! Map<String, dynamic> || source['files'] is! List) {
+      throw const FormatException('Invalid source files');
+    }
+    final files = <String, String>{};
+    for (final entry in source['files'] as List) {
+      if (entry is! Map<String, dynamic> ||
+          entry['path'] is! String ||
+          entry['content'] is! String) {
+        throw const FormatException('Invalid source file');
+      }
+      final path = entry['path'] as String;
+      if (files.containsKey(path))
+        throw const FormatException('Duplicate source file');
+      files[path] = entry['content'] as String;
+    }
+    if (!files.containsKey('index.html'))
+      throw const FormatException('Missing entry point');
+    return files;
+  }
+
+  void _openSources(String id) {
+    final files = _loadSource(id);
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => WorkshopWebSourcePage(files: files),
+    ));
+  }
+
+  void _openPreview(String id) {
+    final title = WorkshopWebLanguageScope.tr(context, 'Anteprima');
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: WorkshopWebPreviewFrame(uri: _generationResource('preview', id)),
+      ),
+    ));
   }
 
   Future<Map<String, dynamic>?> _call(String id, {String? prompt}) async {
@@ -324,11 +385,17 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                                 ? 'Verifica applicazione'
                                 : 'Aggiorna verifica')),
                           ),
-                        if (verificationStatus == 'verified')
+                        if (verificationStatus == 'verified') ...[
+                          OutlinedButton(
+                            onPressed: _busy ? null : () => _openPreview(id),
+                            child: Text(tr('Anteprima')),
+                          ),
+                          OutlinedButton(
+                            onPressed: _busy ? null : () => _openSources(id),
+                            child: Text(tr('Sorgenti')),
+                          ),
                           Link(
-                            uri: Uri.base
-                                .resolve('/api/cantiere/proposals/download')
-                                .replace(queryParameters: {'generationId': id}),
+                            uri: _generationResource('download', id),
                             target: LinkTarget.blank,
                             builder: (context, followLink) =>
                                 OutlinedButton.icon(
@@ -337,6 +404,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                               label: Text(tr('Scarica ZIP')),
                             ),
                           ),
+                        ],
                       ],
                     ),
                   ],
