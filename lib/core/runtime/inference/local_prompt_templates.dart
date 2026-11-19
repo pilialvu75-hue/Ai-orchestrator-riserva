@@ -266,6 +266,15 @@ class LocalPromptTemplates {
           includeBos: !assistantModelCompatibility,
         );
 
+      case LocalInferenceModelIds.templateMiniCpm5:
+        // MiniCPM5 official GGUF uses ChatML delimiters. Do not send Qwen3's
+        // /no_think prefix: MiniCPM5 has its own hybrid thinking protocol.
+        return _buildQwenChatPrompt(
+          systemPrompt: finalSystemPrompt,
+          context: boundedContext,
+          userPrompt: userPrompt,
+        );
+
       case LocalInferenceModelIds.templateQwen:
       case 'qwen': // Historical alias.
         return _buildQwenChatPrompt(
