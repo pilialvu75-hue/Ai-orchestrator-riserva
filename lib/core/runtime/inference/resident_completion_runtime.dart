@@ -35,13 +35,14 @@ class ResidentCompletionRuntime {
 
   /// Load the engine without generating or adding any conversation tokens.
   Future<void> prepare({required String executable, required String modelPath,
-      required String sessionId, required int threads, String? device, int? batchSize}) async {
+      required String sessionId, required int threads, String? device, int? batchSize,
+      int? ubatchSize, bool flashAttention = false}) async {
     if (_busy) throw ResidentRuntimeBusy();
     _busy = true;
     _idle?.cancel();
     try {
       await _ensureStarted(executable, modelPath, sessionId, threads,
-          CancellationToken(), batchSize, device);
+          CancellationToken(), batchSize, ubatchSize, device, flashAttention);
     } catch (_) {
       await close();
       rethrow;
@@ -62,6 +63,8 @@ class ResidentCompletionRuntime {
     required double repeatPenalty,
     required int threads,
     int? batchSize,
+    int? ubatchSize,
+    bool flashAttention = false,
     String? device,
     required CancellationToken cancellation,
     void Function(int cached, int evaluated)? onPromptUsage,
@@ -79,12 +82,17 @@ class ResidentCompletionRuntime {
       if (batchSize != null && (batchSize < 1 || batchSize > 2048)) {
         throw ArgumentError.value(batchSize, 'batchSize');
       }
-      if (device != null && !RegExp(r'^Vulkan\d+$').hasMatch(device)) {
+      if (ubatchSize != null && (ubatchSize < 1 || ubatchSize > 2048 ||
+          (batchSize != null && ubatchSize > batchSize))) {
+        throw ArgumentError.value(ubatchSize, 'ubatchSize');
+      }
+      if (device != null && !RegExp(r'^(?:Vulkan|CUDA)\d+$').hasMatch(device)) {
         throw ArgumentError.value(device, 'device');
       }
       final firstContentWatch = Stopwatch()..start();
       var sawContent = false;
-      await _ensureStarted(executable, modelPath, sessionId, threads, cancellation, batchSize, device);
+      await _ensureStarted(executable, modelPath, sessionId, threads, cancellation,
+          batchSize, ubatchSize, device, flashAttention);
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       final request = await _request('POST', '/completion');
       request.headers.contentType = ContentType.json;
@@ -150,8 +158,9 @@ class ResidentCompletionRuntime {
   }
 
   Future<void> _ensureStarted(String executable, String model, String session,
-      int threads, CancellationToken cancellation, int? batchSize, String? device) async {
-    final identity = '$executable\u0000$model\u0000$session\u0000$batchSize\u0000$device';
+      int threads, CancellationToken cancellation, int? batchSize, int? ubatchSize,
+      String? device, bool flashAttention) async {
+    final identity = '$executable\u0000$model\u0000$session\u0000$batchSize\u0000$ubatchSize\u0000$device\u0000$flashAttention';
     if (_process != null && _identity == identity) return;
     final startupWatch = Stopwatch()..start();
     await close();
@@ -168,9 +177,11 @@ class ResidentCompletionRuntime {
       // Avoid an extra synthetic generation before the first real request.
       // Measured with this pinned Vulkan package; CPU/legacy paths unchanged.
       if (device != null) ...['--device', device, '--no-warmup'],
+      if (flashAttention) ...['--flash-attn', 'on'],
       '--threads-batch', '${threads.clamp(1, 8)}',
       // Bound recurrent-state rollback only for an explicitly measured profile.
       if (batchSize != null) ...['--batch-size', '$batchSize'],
+      if (ubatchSize != null) ...['--ubatch-size', '$ubatchSize'],
       '--no-slots', '--sleep-idle-seconds', '${idleTimeout.inSeconds.clamp(1, 86400)}',
     ]);
     RuntimeEventLog.instance.emit('[ASSISTANT_RESIDENT_PHASE] phase=process_started elapsed_ms=${startupWatch.elapsedMilliseconds}');
