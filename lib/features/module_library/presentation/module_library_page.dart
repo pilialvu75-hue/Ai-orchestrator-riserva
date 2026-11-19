@@ -15,7 +15,7 @@ import 'package:ai_orchestrator/features/module_library/presentation/module_lab_
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:ai_orchestrator/features/module_library/presentation/development_module_detail_page.dart';
 
 typedef ModuleCuratorRunner = Future<ModuleCuratorResult> Function({
   required ModuleCuratorTask task,
@@ -578,7 +578,7 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
                       onOpenDevelopment: (entry) {
                         Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (_) => _DevelopmentModuleDetailPage(
+                            builder: (_) => DevelopmentModuleDetailPage(
                               repository: _repository,
                               entry: entry,
                             ),
