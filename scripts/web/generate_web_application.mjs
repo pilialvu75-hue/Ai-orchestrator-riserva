@@ -41,7 +41,7 @@ function cleanText(value, max) {
   return text && text.length <= max ? text : null;
 }
 
-function validateSource(output) {
+export function parseGeneratedWebApplication(output) {
   if (typeof output !== 'string') return null;
   const fenced = /^```(?:json)?\s*\n([\s\S]+)\n```$/i.exec(output);
   let parsed;
@@ -117,7 +117,7 @@ export async function generateWebApplication({ request, ownerSubject, db, infer 
     { role: 'system', content: INSTRUCTION },
     { role: 'user', content: brief },
   ]).catch(() => ({ ok: false }));
-  const source = inference.ok ? validateSource(inference.text) : null;
+  const source = inference.ok ? parseGeneratedWebApplication(inference.text) : null;
   if (source) {
     const { model, reportedModel, provider, routeId, tokensGenerated } = inference;
     const provenance = { model, reportedModel, provider, routeId, tokensGenerated };

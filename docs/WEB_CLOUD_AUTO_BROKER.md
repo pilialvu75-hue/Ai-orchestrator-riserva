@@ -111,6 +111,23 @@ catalogo diagnostico continuano a usare le proprie configurazioni.
 Lo stato `generated` conferma il salvataggio dei sorgenti. Test, anteprima ed
 esportazione appartengono ai passaggi successivi.
 
+## Collaudo isolato dei sorgenti
+
+Il coordinatore Node `runWebApplicationVerification` riceve il sorgente e un
+piano di verifica attendibile con azioni `click`, `fill` e `text`. Il piano
+resta invariato durante la riparazione. Chromium usa un profilo temporaneo,
+il sandbox del browser e una policy che permette soltanto le risorse del
+progetto servite via DevTools. Il processo del browser riceve un ambiente
+ristretto, senza i segreti del broker. Le prove verificano gli errori JavaScript
+e il comportamento reale del DOM.
+
+Un errore del codice permette al massimo tre correzioni attraverso la rotta
+dedicata del broker. Un guasto d’infrastruttura interrompe il ciclo. Dopo una
+prova riuscita, lo ZIP viene riaperto e ogni file viene verificato prima della
+consegna al chiamante. Il coordinatore è un modulo Node. La Pages Function
+salva la generazione e la ricevuta, mentre il collegamento al runner isolato
+richiede il trasporto autenticato del progetto e del risultato.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does
