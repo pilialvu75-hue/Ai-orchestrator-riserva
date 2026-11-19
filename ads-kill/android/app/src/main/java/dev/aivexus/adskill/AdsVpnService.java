@@ -39,6 +39,7 @@ public final class AdsVpnService extends VpnService {
 
     private static final String CHANNEL_ID = "ads_kill_filter";
     private static final String PREFS = "ads_kill";
+    static final String PREF_VPN_REQUESTED = "vpn_user_requested_on";
     private final AtomicBoolean running = new AtomicBoolean(false);
     private ExecutorService workers;
     private ParcelFileDescriptor tun;
@@ -86,6 +87,8 @@ public final class AdsVpnService extends VpnService {
         // A killed VPN must never resurrect without a new explicit user action.
         String action = intent == null ? ACTION_STOP : intent.getAction();
         if (ACTION_STOP.equals(action)) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(PREF_VPN_REQUESTED, false).commit();
             shutdownVpn();
             stopSelf();
             return START_NOT_STICKY;
@@ -101,7 +104,12 @@ public final class AdsVpnService extends VpnService {
             else if (rewardAdvisor != null) rewardAdvisor.blockNextTime();
             return START_NOT_STICKY;
         }
-        if (!ACTION_START.equals(action)) {
+        // An ACTION_START is only valid if explicitly requested from Ads Kill UI.
+        // A process restart or stale queued start may never re-enable the VPN.
+        if (!ACTION_START.equals(action)
+            || !getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean(PREF_VPN_REQUESTED, false)) {
+            shutdownVpn();
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -126,6 +134,8 @@ public final class AdsVpnService extends VpnService {
             notifyStatus();
         } catch (Exception e) {
             Log.e("AdsKill", "Could not start DNS VPN", e);
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(PREF_VPN_REQUESTED, false).apply();
             shutdownVpn();
             stopSelf();
         }
@@ -261,17 +271,23 @@ public final class AdsVpnService extends VpnService {
 
     /** Exposed only to the app's own in-process emergency overlay. */
     void stopFromOverlay() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putBoolean(PREF_VPN_REQUESTED, false).commit();
         shutdownVpn();
         stopSelf();
     }
 
     @Override public void onRevoke() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putBoolean(PREF_VPN_REQUESTED, false).apply();
         shutdownVpn();
         stopSelf();
         super.onRevoke();
     }
 
     @Override public void onDestroy() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putBoolean(PREF_VPN_REQUESTED, false).apply();
         shutdownVpn();
         super.onDestroy();
     }
