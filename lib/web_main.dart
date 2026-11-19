@@ -7,6 +7,7 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_browser_au
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_checkpoint_storage.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_counter_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_tools_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
@@ -201,6 +202,20 @@ class _WorkshopWebHomeState extends State<WorkshopWebHome> {
                 onTap: () {
                   Navigator.of(context).pop();
                   setState(() => _selectedIndex = 1);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.code_outlined),
+                title: Text(widget.language.text('Genera applicazione')),
+                onTap: () {
+                  final navigator = Navigator.of(context);
+                  navigator.pop();
+                  navigator.push(MaterialPageRoute<void>(
+                    builder: (_) => WorkshopWebLanguageScope(
+                      language: widget.language,
+                      child: const WorkshopWebGeneratorPage(),
+                    ),
+                  ));
                 },
               ),
               ListTile(

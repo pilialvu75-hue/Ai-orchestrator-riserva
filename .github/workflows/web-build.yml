@@ -58,6 +58,7 @@ jobs:
           flutter test --platform chrome test/app_factory/workshop/web/workshop_web_checkpoint_storage_test.dart
           flutter test --platform chrome test/app_factory/workshop/web/workshop_web_cloud_broker_test.dart
           flutter test --platform chrome test/app_factory/workshop/web/aivexus_browser_storage_test.dart
+          flutter test --platform chrome test/app_factory/workshop/web/workshop_web_generator_page_test.dart
 
       - name: Validate Cloudflare Function module syntax
         shell: bash

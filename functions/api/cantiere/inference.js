@@ -410,6 +410,31 @@ async function callRoute(route, request) {
   return { ok: false, status: 502, failureKind: 'upstream_unknown' };
 }
 
+// The Pages binding is assigned by the deploy operator on Workers Free. This
+// model is available only on the authenticated generator, with no fallback.
+export function createWebBuilderInference(env) {
+  const ai = env.AIVEXUS_WEB_BUILDER_AI;
+  if (env.AIVEXUS_WEB_BUILDER_FREE_ENABLED !== 'true' || typeof ai?.run !== 'function') return null;
+  const model = '@cf/google/gemma-4-26b-a4b-it';
+  return async function infer(input) {
+    const messages = validateMessages(input);
+    if (!messages) return { ok: false };
+    const result = await ai.run(model, {
+      messages, max_tokens: 4096, temperature: 0.2, top_p: 0.9, stream: false, store: false,
+    });
+    const choice = result?.choices?.[0];
+    const text = choice?.message?.content;
+    if (choice?.finish_reason !== 'stop' || typeof text !== 'string' ||
+        !text.trim() || text.length > MAX_OUTPUT_CHARS) return { ok: false };
+    const reported = result.model;
+    const reportedModel = typeof reported === 'string' && /^[a-z0-9@._:/-]{1,128}$/i.test(reported)
+      ? reported : model;
+    const tokens = result.usage?.completion_tokens;
+    return { ok: true, text: text.trim(), model, reportedModel, provider: 'Cloudflare Workers AI',
+      routeId: 'builder-free', tokensGenerated: Number.isSafeInteger(tokens) && tokens >= 0 ? tokens : null };
+  };
+}
+
 export async function onRequest(context) {
   if (context.request.method !== 'POST') {
     return new Response('Method not allowed.', {
