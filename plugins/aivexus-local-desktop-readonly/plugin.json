@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "aivexus-local-desktop-readonly",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Private, Windows desktop-only read-only status bridge for the running local AIVEXUS instance.",
   "author": {
     "name": "AIVEXUS"
