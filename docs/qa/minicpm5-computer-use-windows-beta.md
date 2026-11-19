@@ -11,8 +11,17 @@ This candidate is additive to the model catalogue; Qwen is retained.
 - Official license: Apache-2.0 (verify upstream before redistribution)
 - URL: https://huggingface.co/openbmb/MiniCPM5-2B-GGUF/resolve/main/MiniCPM5-2B-Q4_K_M.gguf
 - The app **does not bundle the GGUF**. Download is user initiated with the existing model manager.
-- The installed `llama.cpp` runtime must be verified with this specific model.
-  Catalog registration or unit tests do not prove that inference works.
+- MiniCPM5 requires the modern llama.cpp tokenizer (introduced after the
+  legacy Windows 7/8.1 helper's pinned May 2026 source). The Windows 10/11
+  beta must bundle the SHA256-verified `runtime-modern/llama-completion.exe`
+  from `tool/bundle_windows_modern_runtime.ps1` (llama.cpp b11753, Oct 2026).
+  The MiniCPM5 selection uses it exclusively; missing modern runtime fails
+  explicitly, never silently falls back to the older helper.
+- The modern helper and DLLs must be **Authenticode signed** with the final
+  Windows beta bundle; unsigned or unverifiable publication is disallowed.
+- The installed `llama.cpp` runtime must still be verified with this specific
+  model. Catalog registration, unit tests and a different-model smoke test do
+  **not** prove that MiniCPM5 inference works on the ASUS.
 
 ## Manual beta test
 
@@ -46,9 +55,10 @@ This candidate is additive to the model catalogue; Qwen is retained.
   permissions, STOP, step count and per-action verification remain.
 - The model is not a visual/screenshot reader. The 2048 test uses the
   existing Windows accessibility description, not vision inference.
-- The existing model catalogue and runtime support do not guarantee
-  Windows 8.1 compatibility; this candidate is specifically targeted at
-  Windows testing on the ASUS.
+- MiniCPM5 is **not enabled on Windows 8.1 or Windows 7**, or on Android,
+  macOS and Linux in this experiment. Their original CPU/runtime paths remain.
+- For MiniCPM5 only, the CLI sets `--min-p 0.0` as OpenBMB recommends to
+  reduce pathological repetition. Other models keep existing sampling.
 - No automatic downloads, no Cloud fallback, no publication outside
   the owner's approved beta, and no claim that this model is production
   certified.
