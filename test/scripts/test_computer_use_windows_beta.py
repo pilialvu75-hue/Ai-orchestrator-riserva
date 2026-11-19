@@ -1,4 +1,4 @@
-"""Static release safety contracts: computer-use Windows beta is NOT automatic.
+"""Static release safety contracts: Windows beta requires an explicit owner request.
 
 These tests are intentionally stdlib-only so pull-request CI can verify the
 manifest/updater integration contract without building an installer.
@@ -23,7 +23,7 @@ class ComputerUseWindowsBetaContractTest(unittest.TestCase):
         cls.installer = INSTALLER.read_text(encoding="utf-8")
         cls.signer = TRUSTED_SIGNING.read_text(encoding="utf-8")
 
-    def test_owner_opt_in_and_main_release_only(self):
+    def test_owner_opt_in_and_reviewed_main_release_only(self):
         w = self.workflow
         self.assertIn("workflow_dispatch:", w)
         self.assertIn("github.event_name == 'workflow_dispatch'", w)
@@ -32,7 +32,12 @@ class ComputerUseWindowsBetaContractTest(unittest.TestCase):
         self.assertNotIn("confirm_public_beta:", w)
         self.assertNotIn("YES_PUBLISH_WINDOWS_BETA", w)
         self.assertIn("if: github.event_name == 'pull_request'", w)
-        self.assertNotIn("push:\n", w)
+        self.assertIn("push:", w)
+        self.assertIn("release-request/windows-cuda-beta", w)
+        self.assertIn("release-requests/windows-cuda-beta.txt", w)
+        self.assertIn("main_sha=$mainSha", w)
+        self.assertIn("ref: ${{ steps.source.outputs.main_sha }}", w)
+        self.assertNotIn("branches: [main]", w.split("  push:", 1)[1].split("  pull_request:", 1)[0])
 
     def test_unique_tag_never_clobbers_existing_release(self):
         w = self.workflow
@@ -47,7 +52,7 @@ class ComputerUseWindowsBetaContractTest(unittest.TestCase):
         self.assertIn("refusing overwrite", w)
         self.assertNotIn("gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName", w)
         self.assertIn("gh release create $tag", w)
-        self.assertIn("--target $env:GITHUB_SHA", w)
+        self.assertIn("--target '${{ steps.source.outputs.main_sha }}'", w)
         self.assertIn("--prerelease", w)
         self.assertNotIn("--clobber", w)
         self.assertNotIn("gh release upload", w)
@@ -59,6 +64,9 @@ class ComputerUseWindowsBetaContractTest(unittest.TestCase):
         self.assertIn("AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=true", w)
         self.assertIn("flutter test", w)
         self.assertIn("test_windows_llama_bundle.ps1", w)
+        self.assertIn("Bundle and audit pinned ASUS CUDA engine", w)
+        self.assertIn("bundle_windows_cuda_runtime.ps1", w)
+        self.assertIn("test_windows_cuda_bundle.ps1", w)
         self.assertIn("windows\\installer\\ai_orchestrator.iss", w)
         self.assertIn("AI-Orchestrator-Setup-x64.exe", w)
         self.assertIn("Get-FileHash $exe -Algorithm SHA256", w)
