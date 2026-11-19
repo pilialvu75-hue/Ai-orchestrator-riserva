@@ -6,8 +6,14 @@ on:
       - 'functions/api/cantiere/executions/reserve.js'
       - 'functions/api/cantiere/executions/status.js'
       - 'functions/api/cantiere/executions/download.js'
+      - 'functions/api/cantiere/executions/advance.js'
+      - 'scripts/web/advance_web_counter.mjs'
+      - 'scripts/web/counter_runner_*.mjs'
+      - 'scripts/web/github_counter_runner_client.mjs'
+      - 'test/airlab/web_*counter_runner*.mjs'
       - 'scripts/web/web_execution_artifact_download.mjs'
       - 'scripts/web/d1_web_counter_artifact_store.mjs'
+      - 'scripts/web/d1_web_counter_dispatch.mjs'
       - 'scripts/web/run_web_counter_attempt.mjs'
       - 'scripts/web/*counter*.py'
       - 'scripts/web/build_verified_counter_zip.mjs'
@@ -31,8 +37,14 @@ on:
       - 'functions/api/cantiere/executions/reserve.js'
       - 'functions/api/cantiere/executions/status.js'
       - 'functions/api/cantiere/executions/download.js'
+      - 'functions/api/cantiere/executions/advance.js'
+      - 'scripts/web/advance_web_counter.mjs'
+      - 'scripts/web/counter_runner_*.mjs'
+      - 'scripts/web/github_counter_runner_client.mjs'
+      - 'test/airlab/web_*counter_runner*.mjs'
       - 'scripts/web/web_execution_artifact_download.mjs'
       - 'scripts/web/d1_web_counter_artifact_store.mjs'
+      - 'scripts/web/d1_web_counter_dispatch.mjs'
       - 'scripts/web/run_web_counter_attempt.mjs'
       - 'scripts/web/*counter*.py'
       - 'scripts/web/build_verified_counter_zip.mjs'
@@ -69,14 +81,16 @@ jobs:
         with:
           python-version: '3.11'
       - name: Verify authenticated HTTP-to-D1 operation contract
-        run: node --test test/airlab/web_authenticated_project_operation.mjs
+        run: |
+          node --test test/airlab/web_authenticated_project_operation.mjs
+          node --test test/airlab/web_counter_runner_envelope.mjs test/airlab/web_github_counter_runner_client.mjs
       - name: Bundle Cloudflare Pages Functions
         env:
           WRANGLER_SEND_METRICS: 'false'
         run: |
           npx --yes wrangler@4 pages functions build functions --outfile "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           test -s "$RUNNER_TEMP/aivexus-pages-worker.mjs"
-          for route in executions/reserve executions/status executions/download proposals/counter proposals/approve; do
+          for route in executions/reserve executions/status executions/download executions/advance proposals/counter proposals/approve; do
             grep -Fq "/api/cantiere/$route" "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           done
       - name: Apply Web migrations to local D1
@@ -103,8 +117,9 @@ jobs:
               (SELECT COUNT(*) FROM web_execution_reservations) AS reservations,
               (SELECT COUNT(*) FROM web_execution_journal_events) AS journal,
               (SELECT COUNT(*) FROM web_execution_artifact_receipts) AS receipts,
-              (SELECT COUNT(*) FROM web_counter_artifacts) AS artifacts' \
-            | jq -e '.[0] | .success and (.results == [{"migrations":4,"approvals":0,"reservations":0,"journal":0,"receipts":0,"artifacts":0}])'
+              (SELECT COUNT(*) FROM web_counter_artifacts) AS artifacts,
+              (SELECT COUNT(*) FROM web_counter_dispatch) AS dispatches' \
+            | jq -e '.[0] | .success and (.results == [{"migrations":5,"approvals":0,"reservations":0,"journal":0,"receipts":0,"artifacts":0,"dispatches":0}])'
       - name: Regression for verified Access JWT and D1 reservations
         run: |
           node --test test/airlab/web_access_jwt_verifier.mjs

@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/link.dart';
 
-enum _CounterAction { recover, prepare, approve, reserve }
+enum _CounterAction { recover, prepare, approve, reserve, advance }
 
 /// The fixed counter sample has one server-owned project per Access principal.
 class WorkshopWebCounterPage extends StatefulWidget {
@@ -19,6 +19,8 @@ class _WorkshopWebCounterPageState extends State<WorkshopWebCounterPage> {
   static const _projectId = 'web-counter-v1';
   static const _executionStates = {
     'reserved',
+    'dispatching',
+    'submitted',
     'running',
     'review_required',
     'failed',
@@ -58,12 +60,17 @@ class _WorkshopWebCounterPageState extends State<WorkshopWebCounterPage> {
         case _CounterAction.prepare:
           result = await _call('/proposals/counter');
         case _CounterAction.approve:
-          result = await _call('/proposals/approve', extra: {
+          result = await _call('/proposals/approve', payload: {
+            'projectId': _projectId,
             'expectedRevision': 1,
             'expectedSpecSha256': _digest,
           });
         case _CounterAction.reserve:
           result = await _call('/executions/reserve');
+        case _CounterAction.advance:
+          result = await _call('/executions/advance',
+              payload: {'executionId': _executionId},
+              timeout: const Duration(seconds: 35));
       }
       if (!mounted) return;
       final status =
@@ -83,7 +90,8 @@ class _WorkshopWebCounterPageState extends State<WorkshopWebCounterPage> {
               result['projectId'] == _projectId,
         _CounterAction.approve =>
           result['approvedRevision'] == 1 && result['projectId'] == _projectId,
-        _CounterAction.reserve =>
+        _CounterAction.reserve ||
+        _CounterAction.advance =>
           _executionStates.contains(status) && id is String && id.isNotEmpty,
       };
       if (!valid) throw const FormatException('Unexpected counter response');
@@ -105,7 +113,8 @@ class _WorkshopWebCounterPageState extends State<WorkshopWebCounterPage> {
   Future<Map<String, dynamic>> _call(
     String path, {
     bool read = false,
-    Map<String, Object?> extra = const {},
+    Map<String, Object?> payload = const {'projectId': _projectId},
+    Duration timeout = const Duration(seconds: 15),
   }) async {
     final uri = Uri.base.resolve('/api/cantiere$path');
     final response = await (read
@@ -113,8 +122,8 @@ class _WorkshopWebCounterPageState extends State<WorkshopWebCounterPage> {
                 .get(uri.replace(queryParameters: {'projectId': _projectId}))
             : _client.post(uri,
                 headers: {'Content-Type': 'application/json'},
-                body: jsonEncode({'projectId': _projectId, ...extra})))
-        .timeout(const Duration(seconds: 15));
+                body: jsonEncode(payload)))
+        .timeout(timeout);
     final decoded = jsonDecode(utf8.decode(response.bodyBytes));
     if (decoded is! Map<String, dynamic> || decoded['version'] != 1) {
       throw const FormatException('Unexpected counter response');
@@ -138,18 +147,23 @@ class _WorkshopWebCounterPageState extends State<WorkshopWebCounterPage> {
       'proposal_ready' when _error != null => _CounterAction.prepare,
       'proposal_ready' => _CounterAction.approve,
       'approved' => _CounterAction.reserve,
+      'reserved' || 'dispatching' || 'submitted' => _CounterAction.advance,
       _ => _CounterAction.recover,
     };
     final label = switch (action) {
       _CounterAction.prepare => 'Prepara proposta',
       _CounterAction.approve => 'Approva proposta',
       _CounterAction.reserve => 'Prenota esecuzione',
+      _CounterAction.advance =>
+        _status == 'reserved' ? 'Avvia il contatore' : 'Controlla il runner',
       _CounterAction.recover => 'Aggiorna stato',
     };
     final state = switch (_status) {
       'proposal_ready' => 'Proposta pronta per l’approvazione',
       'approved' => 'Proposta approvata',
       'reserved' => 'Esecuzione prenotata',
+      'dispatching' => 'Invio al runner in corso',
+      'submitted' => 'Runner GitHub in attesa o in esecuzione',
       'running' => 'Esecuzione in corso',
       'review_required' => 'Esecuzione da verificare',
       'failed' => 'Esecuzione non riuscita',
