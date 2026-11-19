@@ -341,7 +341,19 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         }
 
         final executable =
-            _resolveLlamaExecutable();
+            _resolveLlamaExecutable(modelId: modelId);
+        // Never direct MiniCPM5 to the old Windows 7/8.1-compatible helper:
+        // its tokenizer predates MiniCPM5 and cannot generate valid results.
+        if (Platform.isWindows &&
+            modelId.toLowerCase().contains('minicpm5') &&
+            !File(executable).existsSync()) {
+          controller.add(InferenceResponse.error(
+            'MiniCPM5 requires the bundled modern Windows runtime. '
+            'Update to the signed AIVEXUS Windows 10/11 beta.',
+          ));
+          await controller.close();
+          return;
+        }
         RuntimeEventLog.instance.emit('[MODEL_RUNTIME] modelId=$modelId runtime=${Platform.isAndroid ? 'android_ffi' : 'process_cli'}');
         RuntimeEventLog.instance.emit('[MODEL_COMPATIBLE] modelId=$modelId compatible=true');
 
@@ -606,7 +618,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     if (normalizedId == 'minicpm5_2b' ||
         normalizedId.contains('minicpm5-2b') ||
         normalizedId.contains('minicpm-5-2b')) {
-      return Platform.isWindows;
+      return Platform.isWindows &&
+          WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion);
     }
 
     final baseAllowed = _isDesktopPlatform()
@@ -657,11 +670,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         id.contains('tinyllama');
   }
 
-  String _resolveLlamaExecutable() {
+  String _resolveLlamaExecutable({String? modelId}) {
     if (Platform.isWindows) {
       return WindowsLlamaRuntime.resolveExecutable(
         appExecutable: Platform.resolvedExecutable,
         environment: Platform.environment,
+        modelId: modelId,
         windowsVersion: Platform.operatingSystemVersion,
       );
     }
@@ -711,6 +725,11 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
       effectiveTopP.toString(),
       '--top-k',
       LlamaNativeDefaults.topK.toString(),
+      // Official OpenBMB llama.cpp guidance: MiniCPM5 otherwise may repeat
+      // indefinitely with llama.cpp's default min-p=0.05.
+      if ((request.modelId ?? '').toLowerCase().contains('minicpm5')) ...<String>[
+        '--min-p', '0.0',
+      ],
       '--repeat-penalty',
       effectiveRepeatPenalty.toString(),
       if (Platform.isMacOS) ...<String>[
