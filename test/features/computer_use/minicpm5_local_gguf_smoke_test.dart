@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/features/computer_use/computer_use_aivexus_local_decision_model.dart';
@@ -96,7 +97,8 @@ void main() {
     ]) {
       expect(
         provider.supportsModel(testModel(id)),
-        Platform.isWindows,
+        Platform.isWindows &&
+            WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion),
         reason: 'Production mode on ${Platform.operatingSystem}: $id',
       );
     }
