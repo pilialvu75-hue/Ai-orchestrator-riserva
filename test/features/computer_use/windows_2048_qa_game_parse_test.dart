@@ -5,6 +5,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/features/computer_use/windows_2048_qa_game_script.dart';
 import 'package:ai_orchestrator/features/computer_use/windows_computer_use_accessibility_script.dart';
 
+/// Mirrors the Windows 2048 launch contract: PowerShell expects UTF-16LE.
+String _encodedPowerShellCommand(String script) {
+  final bytes = <int>[];
+  for (final unit in script.codeUnits) {
+    bytes.add(unit & 0xff);
+    bytes.add((unit >> 8) & 0xff);
+  }
+  return base64Encode(bytes);
+}
+
 void main() {
   test('read-only Windows UIA can enumerate the complete 2048 control tree',
       () {
@@ -98,7 +108,13 @@ $form.Dispose()
     final script = source.replaceFirst(entrypoint, headlessChecks);
     final result = await Process.run(
       'powershell.exe',
-      <String>['-NoProfile', '-NonInteractive', '-STA', '-Command', script],
+      <String>[
+        '-NoProfile',
+        '-NonInteractive',
+        '-STA',
+        '-EncodedCommand',
+        _encodedPowerShellCommand(script),
+      ],
     ).timeout(const Duration(seconds: 45));
     // No interactive window, user data or keyboard/mouse injection in CI.
     expect(result.exitCode, 0,
