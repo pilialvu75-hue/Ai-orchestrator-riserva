@@ -40,25 +40,36 @@ SELECT idempotency_key AS idempotencyKey,
 FROM web_execution_reservations WHERE idempotency_key = ?1
 `;
 
+const READ_LATEST_EXECUTION = `
+SELECT execution_id AS executionId, attempt_id AS attemptId, revision, status
+FROM web_execution_reservations
+WHERE owner_subject = ?1 AND project_id = ?2 AND product = 'aivexus-web'
+ORDER BY revision DESC, created_at DESC, execution_id DESC
+LIMIT 1
+`;
+
 /**
  * Requires a D1-compatible database with prepare().bind().first()/run().
  * Uses one INSERT...SELECT statement to check the latest trusted approval
  * while reserving the unique key. No read-then-write race for authorization.
- * D1's changes count is NOT used to decide created: a separate SELECT is
- * required and duplicate requests return the same receipt.
+ * A positive D1 changes count identifies a new reservation. A separate
+ * SELECT returns the persisted receipt on both creation and replay.
  */
 export function createWebD1ReservationStore(db) {
   if (!db || typeof db.prepare !== 'function') {
     throw new TypeError('D1 binding required');
   }
   return Object.freeze({
+    async readLatestExecution({ ownerSubject, projectId }) {
+      return await db.prepare(READ_LATEST_EXECUTION)
+        .bind(ownerSubject, projectId).first();
+    },
     async readApprovedProject({ ownerSubject, projectId }) {
       return await db.prepare(READ_APPROVAL)
         .bind(ownerSubject, projectId).first();
     },
     async reserveOnce({ key, intended }) {
-      // D1 run() returns a count for the actual inserted row. A non-atomic
-      // "SELECT then INSERT" is forbidden; INSERT OR IGNORE is the gate.
+      // INSERT OR IGNORE is the atomic gate. D1 may also count the journal trigger.
       const result = await db.prepare(INSERT_RESERVATION)
         .bind(key, intended.ownerSubject, intended.projectId,
           intended.revision, intended.approvedSpecSha256,
@@ -66,7 +77,7 @@ export function createWebD1ReservationStore(db) {
           intended.approvalId).run();
       const record = await db.prepare(READ_RESERVATION).bind(key).first();
       if (!record) return { created: false, record: null };
-      const created = Number(result?.meta?.changes) === 1;
+      const created = Number(result?.meta?.changes) > 0;
       return { created, record };
     },
   });

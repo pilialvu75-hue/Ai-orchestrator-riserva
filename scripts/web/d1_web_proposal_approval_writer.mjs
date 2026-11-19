@@ -1,13 +1,24 @@
-// SOURCE-ONLY Web-owned D1 proposal approval/revocation writer.
-// NEVER expose directly as an HTTP endpoint. The eventual Pages Function must
-// verify Cloudflare Access JWT signature, issuer, audience and expiry BEFORE
-// constructing the trusted principal. Headers/browser JSON are NOT identity.
-// The proposal hash must already exist in D1 from a trusted server-side writer.
-// Apply migrations 001 and 002 before using this module. No live binding yet.
+// Web-owned D1 proposal staging, approval and revocation.
+// Call only after verifying the Access JWT in the HTTP operation gate.
+// Apply migrations 001 and 002 before using this module.
 
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const SHA256 = /^[0-9a-f]{64}$/;
 const APPROVAL_ID = /^web-approval-[0-9a-f-]{36}$/;
+const COUNTER_SPEC = 'original-counter-specification-v1';
+
+const STAGE_COUNTER_SQL = `
+INSERT INTO web_project_approvals
+(owner_subject, project_id, product, status, current_revision, updated_at, proposal_spec_sha256)
+VALUES (?1, ?2, 'aivexus-web', 'proposal_ready', 1, ?3, ?4)
+ON CONFLICT(owner_subject, project_id) DO NOTHING
+`;
+
+const READ_COUNTER_PROPOSAL_SQL = `
+SELECT status, current_revision AS revision, proposal_spec_sha256 AS specSha256
+FROM web_project_approvals
+WHERE owner_subject = ?1 AND project_id = ?2 AND product = 'aivexus-web'
+`;
 
 // UPDATE is a single atomic compare-and-swap of owner, revision, proposal
 // digest and state. Browser-provided digest is a precondition, not the value
@@ -61,12 +72,12 @@ function verifiedSubject(principal) {
 async function update(db, sql, params) {
   try {
     const result = await db.prepare(sql).bind(...params).run();
-    if (result?.success === false || !Number.isInteger(result?.meta?.changes)) {
+    const changes = result?.meta?.changes;
+    if (result?.success === false || !Number.isSafeInteger(changes) || changes < 0) {
       return fail('storage_unavailable');
     }
-    return result.meta.changes === 1 ? { ok: true } :
-      result.meta.changes === 0 ? fail('stale_or_not_ready') :
-      fail('storage_inconsistent');
+    // The WHERE matches one primary key; D1 also counts the audit trigger.
+    return changes > 0 ? { ok: true } : fail('stale_or_not_ready');
   } catch (_) {
     // Never emit D1 errors, SQL or credentials into browser responses.
     return fail('storage_unavailable');
@@ -79,6 +90,39 @@ function preflight(principal, db) {
     return fail('storage_unavailable');
   }
   return { ok: true, subject };
+}
+
+export async function webCounterSpecSha256() {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(COUNTER_SPEC));
+  return Array.from(new Uint8Array(digest), byte =>
+    byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function stageTrustedWebCounterProposal({ request, principal, db } = {}) {
+  const ctx = preflight(principal, db);
+  if (!ctx.ok) return ctx;
+  if (!hasExactKeys(request, ['projectId']) || !validProject(request.projectId)) {
+    return fail('invalid_request');
+  }
+
+  const { projectId } = request;
+  const specSha256 = await webCounterSpecSha256();
+  try {
+    const result = await db.prepare(STAGE_COUNTER_SQL)
+      .bind(ctx.subject, projectId, new Date().toISOString(), specSha256).run();
+    if (result?.success !== true || ![0, 1].includes(result.meta?.changes)) {
+      return fail('storage_unavailable');
+    }
+    const proposal = await db.prepare(READ_COUNTER_PROPOSAL_SQL)
+      .bind(ctx.subject, projectId).first();
+    if (proposal?.revision !== 1 || proposal.specSha256 !== specSha256 ||
+        !['proposal_ready', 'approved'].includes(proposal.status)) {
+      return fail('stale_or_not_ready');
+    }
+    return { ok: true, projectId, revision: 1, specSha256, status: proposal.status };
+  } catch (_) {
+    return fail('storage_unavailable');
+  }
 }
 
 export async function approveTrustedWebProposal({ request, principal, db } = {}) {
