@@ -6,6 +6,7 @@ import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_browser_audio.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_checkpoint_storage.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_counter_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_tools_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
@@ -200,6 +201,17 @@ class _WorkshopWebHomeState extends State<WorkshopWebHome> {
                 onTap: () {
                   Navigator.of(context).pop();
                   setState(() => _selectedIndex = 1);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.exposure_outlined),
+                title: Text(widget.language.text('Contatore Web')),
+                onTap: () {
+                  final navigator = Navigator.of(context);
+                  navigator.pop();
+                  navigator.push(MaterialPageRoute<void>(
+                    builder: (_) => const WorkshopWebCounterPage(),
+                  ));
                 },
               ),
               const Divider(),

@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { onRequest as reserveExecution } from
   '../../functions/api/cantiere/executions/reserve.js';
+import { onRequest as readExecutionStatus } from
+  '../../functions/api/cantiere/executions/status.js';
+import { onRequest as downloadExecution } from
+  '../../functions/api/cantiere/executions/download.js';
+import { onRequest as stageCounter } from
+  '../../functions/api/cantiere/proposals/counter.js';
+import { onRequest as approveProposal } from
+  '../../functions/api/cantiere/proposals/approve.js';
 import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
+import { createWebD1ExecutionJournal } from
+  '../../scripts/web/d1_execution_journal_store.mjs';
 
 const issuer = 'https://aivexus-test.cloudflareaccess.com';
 const audience = 'test-web-access-application';
@@ -63,6 +75,12 @@ function d1Fixture() {
                   approval.projectId === project ? { ...approval } : null;
               }
               if (sql.includes('FROM web_execution_reservations')) {
+                if (sql.includes('LIMIT 1')) {
+                  const [owner, project] = args;
+                  return [...reservations.values()]
+                    .filter(row => row.ownerSubject === owner && row.projectId === project)
+                    .sort((a, b) => b.revision - a.revision)[0] ?? null;
+                }
                 return reservations.get(args[0]) || null;
               }
               throw new Error('Unexpected SELECT');
@@ -308,7 +326,7 @@ test('browser cannot choose server operation or reserve with spoofed approval', 
   assert.equal((await invalid.handler(webRequest(token, { projectId }))).status, 503);
 });
 
-test('Pages reservation route uses server bindings and preserves ownership and idempotency', async t => {
+test('Pages routes reserve once and recover status for the verified owner', async t => {
   const signing = await signer();
   const f = d1Fixture();
   const issuedAt = Math.floor(Date.now() / 1000) - 10;
@@ -355,6 +373,146 @@ test('Pages reservation route uses server bindings and preserves ownership and i
   assert.equal(replay.executionId, first.executionId);
   assert.equal(replay.attemptId, first.attemptId);
   assert.equal(f.reservations.size, 1);
+
+  const status = (assertion, query = '?projectId=' + projectId, options = {}) =>
+    readExecutionStatus({
+      request: webRequest(assertion, null, {
+        path: '/api/cantiere/executions/status' + query,
+        requestOrigin: null, method: 'GET', ...options,
+      }),
+      env,
+    });
+  const prepared = f.prepares;
+  const changes = f.changes;
+  assert.equal((await status(null)).status, 401);
+  assert.equal((await status(token, undefined, { site: 'cross-site' })).status, 403);
+  assert.equal((await status(token, '?projectId=x&projectId=y')).status, 400);
+  assert.equal(f.prepares, prepared);
+  assert.deepEqual(await body(await status(otherToken)), {
+    version: 1, ok: false, error: 'execution_not_found',
+  });
+  assert.deepEqual(await body(await status(token)), {
+    version: 1, ok: true, revision: 1, status: 'reserved',
+    executionId: first.executionId, attemptId: first.attemptId,
+  });
+  assert.equal(f.changes, changes);
+});
+
+test('Pages stages and approves a counter, then serves only its verified ZIP to its owner', async t => {
+  const sqlite = new DatabaseSync(':memory:');
+  t.after(() => sqlite.close());
+  for (const name of [
+    '001_web_approval_reservation.sql',
+    '002_web_proposal_approval_audit.sql',
+    '003_web_execution_journal.sql',
+  ]) {
+    sqlite.exec(readFileSync(new URL('../../scripts/web/sql/' + name, import.meta.url), 'utf8'));
+  }
+  const db = {
+    prepare(sql) {
+      const statement = sqlite.prepare(sql);
+      return {
+        bind(...args) {
+          const params = Object.fromEntries(args.map((value, index) => ['?' + (index + 1), value]));
+          return {
+            first: async () => statement.get(params) ?? null,
+            run: async () => ({ success: true, meta: { changes: statement.run(params).changes } }),
+          };
+        },
+      };
+    },
+  };
+  const signing = await signer();
+  const issuedAt = Math.floor(Date.now() / 1000) - 10;
+  const claims = { iat: issuedAt, nbf: issuedAt, exp: issuedAt + 300 };
+  const token = await signing.sign(claims);
+  const otherToken = await signing.sign({ ...claims, sub: 'access-subject-b' });
+  const zip = Buffer.from('504b0506000000000000000000000000000000000000', 'hex');
+  let stored = zip;
+  let objectReads = 0;
+  const sha256 = Buffer.from(await crypto.subtle.digest('SHA-256', zip)).toString('hex');
+  const env = {
+    AIVEXUS_WEB_ORIGIN: origin,
+    AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_ARTIFACTS: {
+      async get(key) {
+        objectReads++;
+        assert.match(key, new RegExp('^web-artifacts/web-exec-[0-9a-f]{32}/' + sha256 + '\\.zip$'));
+        return {
+          size: stored.length,
+          arrayBuffer: async () => Uint8Array.from(stored).buffer,
+        };
+      },
+    },
+  };
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(url, issuer + '/cdn-cgi/access/certs');
+    return Response.json({ keys: [signing.jwk] });
+  });
+  const send = (route, path, assertion, payload) =>
+    route({ request: webRequest(assertion, payload, { path }), env });
+  const stage = (assertion, payload) =>
+    send(stageCounter, '/api/cantiere/proposals/counter', assertion, payload);
+  const approve = (assertion, payload) =>
+    send(approveProposal, '/api/cantiere/proposals/approve', assertion, payload);
+  const reserve = assertion =>
+    send(reserveExecution, '/api/cantiere/executions/reserve', assertion, { projectId });
+
+  assert.equal((await stage(null, { projectId })).status, 401);
+  assert.equal((await stage(token, { projectId, approved: true })).status, 400);
+  const staged = await Promise.all(Array.from({ length: 8 }, () => stage(token, { projectId })));
+  assert.ok(staged.every(response => response.status === 200));
+  const proposal = await body(staged[0]);
+  assert.equal(proposal.revision, 1);
+  assert.equal(proposal.status, 'proposal_ready');
+  assert.equal(proposal.specSha256, '7d0da7c7ea33af0fa75196e6d627d6a2c600c04bc09923ff86e648689bc827af');
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_project_approvals').get().count, 1);
+  assert.equal((await reserve(token)).status, 409);
+
+  const approval = { projectId, expectedRevision: 1, expectedSpecSha256: proposal.specSha256 };
+  assert.equal((await approve(otherToken, approval)).status, 409);
+  assert.equal((await approve(token, { ...approval, expectedSpecSha256: digest })).status, 409);
+  assert.equal((await approve(token, approval)).status, 200);
+  assert.equal((await body(await stage(token, { projectId }))).status, 'approved');
+  const reserved = await body(await reserve(token));
+  assert.equal(reserved.status, 'reserved');
+  assert.equal((await body(await reserve(token))).executionId, reserved.executionId);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_approval_audit').get().count, 1);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_execution_journal_events').get().count, 1);
+
+  const download = assertion => downloadExecution({
+    request: webRequest(assertion, null, {
+      method: 'GET', requestOrigin: null,
+      path: '/api/cantiere/executions/download?executionId=' + reserved.executionId,
+    }),
+    env,
+  });
+  assert.equal((await download(null)).status, 401);
+  assert.equal((await download(token)).status, 404);
+  assert.equal(objectReads, 0);
+
+  const key = sqlite.prepare('SELECT idempotency_key AS key FROM web_execution_reservations').get().key;
+  const journal = createWebD1ExecutionJournal(db);
+  const attempt = { key, attemptId: reserved.attemptId, workerToken: crypto.randomUUID() };
+  assert.equal((await journal.claimReserved(attempt)).ok, true);
+  assert.equal((await journal.completeVerifiedArtifact({
+    ...attempt, artifactSha256: sha256, artifactSizeBytes: zip.length,
+    storageReadbackVerified: true, testsPassed: true,
+  })).ok, true);
+  assert.equal((await download(otherToken)).status, 404);
+  assert.equal(objectReads, 0);
+  const response = await download(token);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'application/zip');
+  assert.match(response.headers.get('content-disposition'), /^attachment;/);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), zip);
+  stored = Buffer.alloc(zip.length);
+  assert.deepEqual(await body(await download(token)), {
+    version: 1, ok: false, error: 'artifact_unavailable',
+  });
 });
 
 test('storage failures and JWKS outages return sanitized errors without mutating project', async () => {
