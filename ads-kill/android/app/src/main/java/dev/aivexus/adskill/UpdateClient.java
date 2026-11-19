@@ -81,6 +81,17 @@ final class UpdateClient {
                         selectedTag = TAG_PREFIX + version;
                     }
                 }
+                // Debug APKs published by CI may use a different certificate on
+                // every run. Never offer a false "in-place update" to a debug install.
+                if ((activity.getApplicationInfo().flags
+                    & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                    final String notice = selectedTag == null
+                        ? UiPrefs.text(activity, "debug_no_inplace")
+                        : UiPrefs.format(activity, "debug_newer",
+                            selectedTag.substring(TAG_PREFIX.length()));
+                    activity.runOnUiThread(() -> listener.error(notice));
+                    return;
+                }
                 if (selectedTag == null) {
                     activity.runOnUiThread(() -> listener.ready(null));
                     return;
@@ -111,13 +122,12 @@ final class UpdateClient {
                 final Release result = found;
                 activity.runOnUiThread(() -> {
                     if (result != null) listener.ready(result);
-                    else listener.error("Una beta più recente esiste, ma non è ancora firmata "
-                        + "con una chiave Ads Kill persistente. Nessun aggiornamento installabile.");
+                    else listener.error(UiPrefs.text(activity, "update_unavailable"));
                 });
             } catch (Exception e) {
                 Log.w("AdsKill", "Update check failed", e);
                 activity.runOnUiThread(() -> listener.error(
-                    "Impossibile controllare gli aggiornamenti. Verifica Internet o GitHub."));
+                    UiPrefs.text(activity, "update_network_error")));
             }
         }, "ads-kill-check-update").start();
     }
