@@ -32,14 +32,21 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   AssistantResidentLocalRuntimeProvider({required LocalRuntimeProvider delegate,
       ResidentCompletionRuntime? runtime, String? Function()? executable,
       bool Function()? isWindowsHost, bool Function()? isModernWindowsHost,
-      Future<String?> Function(String executable)? gpuDeviceListing})
+      Future<String?> Function(String executable)? gpuDeviceListing,
+      bool Function()? cudaQaEnabled})
       : _delegate = delegate, _runtime = runtime ?? ResidentCompletionRuntime(),
         _executable = executable ?? _bundledServer,
         _isWindowsHost = isWindowsHost ?? _platformIsWindows,
         _isModernWindowsHost = isModernWindowsHost ?? _platformIsModernWindows,
-        _gpuDeviceListing = gpuDeviceListing;
+        _gpuDeviceListing = gpuDeviceListing,
+        _cudaQaEnabled = cudaQaEnabled ?? _defaultCudaQaEnabled;
 
   static bool _platformIsWindows() => Platform.isWindows;
+
+  // A stale runtime-cuda directory from a Beta must never affect Stable.
+  // Only a deliberately compiled Windows CUDA QA build may select it.
+  static bool _defaultCudaQaEnabled() => const bool.fromEnvironment(
+        'AIVEXUS_WINDOWS_CUDA_QA', defaultValue: false);
   static bool _platformIsModernWindows() => Platform.isWindows &&
       WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion);
 
@@ -49,6 +56,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   final bool Function() _isWindowsHost;
   final bool Function() _isModernWindowsHost;
   final Future<String?> Function(String executable)? _gpuDeviceListing;
+  final bool Function() _cudaQaEnabled;
   AppLifecycleListener? _lifecycle;
   bool _unavailable = false;
   bool _gpuUnavailable = false;
@@ -72,7 +80,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     final watch = Stopwatch()..start();
     final modelBytes = await File(modelPath).length();
     final cudaCandidate = p.join(p.dirname(cpuExecutable), '..', 'runtime-cuda', 'llama-server.exe');
-    if (!_cudaUnavailable && File(cudaCandidate).existsSync()) {
+    if (_cudaQaEnabled() && !_cudaUnavailable && File(cudaCandidate).existsSync()) {
       final cudaListing = await _cudaDevices.get(() => _listGpuDevices(cudaCandidate),
           usable: (value) => WindowsCudaDevice.select(value, modelBytes: modelBytes) != null);
       final cudaDevice = WindowsCudaDevice.select(cudaListing ?? '', modelBytes: modelBytes);
@@ -232,7 +240,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     String? gpuExecutable;
     String? gpuDevice;
     String? gpuBackend;
-    if (_isWindowsHost() && !_cudaUnavailable &&
+    if (_isWindowsHost() && _cudaQaEnabled() && !_cudaUnavailable &&
         _isModernWindowsHost() &&
         AssistantWindowsGpuPolicy.supports(request.modelId!)) {
       final candidate = p.join(p.dirname(executable), '..', 'runtime-cuda', 'llama-server.exe');
