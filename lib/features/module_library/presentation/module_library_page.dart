@@ -682,7 +682,15 @@ class _ModuleIndexView extends StatelessWidget {
               ],
             );
           }
-          if (index == 2) return _ModuleLabCard(run: labRun, loading: labLoading, error: labError, onRun: onRunResearcher, onRefresh: onRefreshLab);
+          if (index == 2) {
+            return _ModuleLabCard(
+              run: labRun,
+              loading: labLoading,
+              error: labError,
+              onRun: onRunResearcher,
+              onRefresh: onRefreshLab,
+            );
+          }
           if (index == 3) return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1062,7 +1070,7 @@ class _ModuleLabCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final current = run;
     final running = current?.running ?? false;
-    final state = current == null ? 'Nessun run disponibile' : running ? 'Researcher in esecuzione' : 'Ultimo run: ${current!.conclusion ?? current.status}';
+    final state = current == null ? 'Nessun run disponibile' : running ? 'Researcher in esecuzione' : 'Ultimo run: ${current.conclusion ?? current.status}';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
