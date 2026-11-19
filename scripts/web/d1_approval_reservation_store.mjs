@@ -40,6 +40,14 @@ SELECT idempotency_key AS idempotencyKey,
 FROM web_execution_reservations WHERE idempotency_key = ?1
 `;
 
+const READ_LATEST_EXECUTION = `
+SELECT execution_id AS executionId, attempt_id AS attemptId, revision, status
+FROM web_execution_reservations
+WHERE owner_subject = ?1 AND project_id = ?2 AND product = 'aivexus-web'
+ORDER BY revision DESC, created_at DESC, execution_id DESC
+LIMIT 1
+`;
+
 /**
  * Requires a D1-compatible database with prepare().bind().first()/run().
  * Uses one INSERT...SELECT statement to check the latest trusted approval
@@ -52,6 +60,10 @@ export function createWebD1ReservationStore(db) {
     throw new TypeError('D1 binding required');
   }
   return Object.freeze({
+    async readLatestExecution({ ownerSubject, projectId }) {
+      return await db.prepare(READ_LATEST_EXECUTION)
+        .bind(ownerSubject, projectId).first();
+    },
     async readApprovedProject({ ownerSubject, projectId }) {
       return await db.prepare(READ_APPROVAL)
         .bind(ownerSubject, projectId).first();

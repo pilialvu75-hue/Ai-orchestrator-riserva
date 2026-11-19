@@ -1,8 +1,5 @@
-// SOURCE-ONLY: AIVEXUS Web authenticated operation gate.
-// Intentionally NOT imported by a live Cloudflare Pages Function. No D1
-// binding/migrations/deployment/provider call is created by this module.
-//
-// The future Pages Function must construct this handler with TRUSTED env
+// AIVEXUS Web authenticated operation gate.
+// The Pages Function must construct this handler with trusted environment
 // Access issuer/audience, expected browser origin, Web-owned D1 binding and
 // one fixed operation. Never derive factory options from request JSON/headers.
 // Authentication always verifies the Access JWT signature and claims before
@@ -10,12 +7,14 @@
 
 import { createCloudflareAccessPrincipalResolver } from './cloudflare_access_principal_resolver.mjs';
 import { createWebD1ReservationStore } from './d1_approval_reservation_store.mjs';
-import { approveTrustedWebProposal, revokeTrustedWebApproval } from
+import { approveTrustedWebProposal, revokeTrustedWebApproval, stageTrustedWebCounterProposal } from
   './d1_web_proposal_approval_writer.mjs';
 import { reserveApprovedWebExecution } from './approved_execution_reservation.mjs';
+import { readWebExecutionZip } from './web_execution_artifact_download.mjs';
 
 const MAX_JSON_BYTES = 2048;
-const OPERATIONS = new Set(['approve', 'revoke', 'reserve']);
+const OPERATIONS = new Set(['stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download']);
+const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
 
 function respond(status, data) {
@@ -106,25 +105,28 @@ function operationFailure(result) {
 }
 
 /**
- * Creates a source-only Web-owned gate for one server-selected operation.
+ * Creates a Web-owned gate for one server-selected operation.
  * fetchImpl/nowSeconds are test seams. Do NOT feed them from browser input.
  * No public endpoint is registered by calling this factory.
  */
 export function createAuthenticatedWebProjectOperation({
-  operation, expectedOrigin, accessIssuer, accessAudience, db,
+  operation, expectedOrigin, accessIssuer, accessAudience, db, bucket,
   fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
+  const readsStatus = operation === 'status';
+  const downloads = operation === 'download';
+  const readOnly = readsStatus || downloads;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
     ...(nowSeconds ? { nowSeconds } : {}),
   });
   return async function handle(request) {
-    if (!serverConfigValid(config)) {
+    if (!serverConfigValid(config) || (downloads && typeof bucket?.get !== 'function')) {
       return reject(503, 'operation_unavailable');
     }
-    if (!request || request.method !== 'POST' ||
+    if (!request || request.method !== (readOnly ? 'GET' : 'POST') ||
         !request.headers || typeof request.headers.get !== 'function') {
       return reject(405, 'method_not_allowed');
     }
@@ -134,8 +136,9 @@ export function createAuthenticatedWebProjectOperation({
     try { url = new URL(request.url); } catch (_) {
       return reject(400, 'invalid_request');
     }
+    const origin = request.headers.get('origin');
     if (url.origin !== expectedOrigin ||
-        request.headers.get('origin') !== expectedOrigin ||
+        ((!readOnly || origin !== null) && origin !== expectedOrigin) ||
         request.headers.get('sec-fetch-site') === 'cross-site') {
       return reject(403, 'origin_forbidden');
     }
@@ -155,13 +158,59 @@ export function createAuthenticatedWebProjectOperation({
       return reject(401, 'access_denied');
     }
 
+    if (downloads) {
+      if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
+      try {
+        const result = await readWebExecutionZip({
+          db, bucket, ownerSubject: verified.principal.subject,
+          executionId: url.searchParams.get('executionId'),
+        });
+        if (result.error === 'invalid_request') return reject(400, result.error);
+        if (result.error === 'execution_not_found') return reject(404, result.error);
+        if (result.error) return reject(503, result.error);
+        return new Response(result.bytes, {
+          headers: {
+            'Content-Type': 'application/zip',
+            'Content-Disposition': 'attachment; filename="aivexus-counter.zip"',
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'no-referrer',
+          },
+        });
+      } catch (_) {
+        return reject(503, 'artifact_unavailable');
+      }
+    }
+
+    if (readsStatus) {
+      const [projectId] = url.searchParams.getAll('projectId');
+      if (!PROJECT_ID.test(projectId ?? '') ||
+          url.searchParams.size !== 1) {
+        return reject(400, 'invalid_request');
+      }
+      try {
+        const execution = await createWebD1ReservationStore(db).readLatestExecution({
+          ownerSubject: verified.principal.subject, projectId,
+        });
+        if (!execution) return reject(404, 'execution_not_found');
+        const { executionId, attemptId, revision, status } = execution;
+        return respond(200, { ok: true, executionId, attemptId, revision, status });
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+    }
+
     const parsed = await readJson(request);
     if (!parsed.ok) return reject(parsed.status, parsed.reason);
 
     let result;
     try {
       const principal = verified.principal;
-      if (operation === 'approve') {
+      if (operation === 'stage_counter') {
+        result = await stageTrustedWebCounterProposal({
+          request: parsed.value, principal, db,
+        });
+      } else if (operation === 'approve') {
         result = await approveTrustedWebProposal({
           request: parsed.value, principal, db,
         });
@@ -180,7 +229,7 @@ export function createAuthenticatedWebProjectOperation({
     }
     if (!result?.ok) return operationFailure(result);
     // Writer/reservation return sanitized receipts only. Never serialize
-    // access assertion, principal, DB row, spec or provider payload.
+    // access assertion, principal, DB row, spec contents or provider payload.
     const { ok, ...receipt } = result;
     return respond(200, { ok, ...receipt });
   };

@@ -4,6 +4,11 @@ on:
   pull_request:
     paths:
       - 'functions/api/cantiere/executions/reserve.js'
+      - 'functions/api/cantiere/executions/status.js'
+      - 'functions/api/cantiere/executions/download.js'
+      - 'scripts/web/web_execution_artifact_download.mjs'
+      - 'functions/api/cantiere/proposals/approve.js'
+      - 'functions/api/cantiere/proposals/counter.js'
       - 'scripts/web/authenticated_web_project_operation.mjs'
       - 'test/airlab/web_authenticated_project_operation.mjs'
       - '.github/workflows/web-authenticated-project-operation.yml'
@@ -17,6 +22,11 @@ on:
       - main
     paths:
       - 'functions/api/cantiere/executions/reserve.js'
+      - 'functions/api/cantiere/executions/status.js'
+      - 'functions/api/cantiere/executions/download.js'
+      - 'scripts/web/web_execution_artifact_download.mjs'
+      - 'functions/api/cantiere/proposals/approve.js'
+      - 'functions/api/cantiere/proposals/counter.js'
       - 'scripts/web/authenticated_web_project_operation.mjs'
       - 'test/airlab/web_authenticated_project_operation.mjs'
       - '.github/workflows/web-authenticated-project-operation.yml'
