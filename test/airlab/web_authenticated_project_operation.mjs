@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { onRequest as reserveExecution } from
@@ -14,8 +15,8 @@ import { onRequest as approveProposal } from
   '../../functions/api/cantiere/proposals/approve.js';
 import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
-import { createWebD1ExecutionJournal } from
-  '../../scripts/web/d1_execution_journal_store.mjs';
+import { runWebCounterAttempt } from '../../scripts/web/run_web_counter_attempt.mjs';
+import { buildAndTestCounter } from '../../scripts/web/build_verified_counter_zip.mjs';
 
 const issuer = 'https://aivexus-test.cloudflareaccess.com';
 const audience = 'test-web-access-application';
@@ -427,25 +428,34 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
   const claims = { iat: issuedAt, nbf: issuedAt, exp: issuedAt + 300 };
   const token = await signing.sign(claims);
   const otherToken = await signing.sign({ ...claims, sub: 'access-subject-b' });
-  const zip = Buffer.from('504b0506000000000000000000000000000000000000', 'hex');
-  let stored = zip;
+  let zip;
+  let stored;
   let objectReads = 0;
-  const sha256 = Buffer.from(await crypto.subtle.digest('SHA-256', zip)).toString('hex');
+  let objectWrites = 0;
+  let sha256;
+  const bucket = {
+    async put(key, bytes, options) {
+      assert.match(key, new RegExp('^web-artifacts/web-exec-[0-9a-f]{32}/' + sha256 + '\\.zip$'));
+      assert.equal(options.onlyIf.get('If-None-Match'), '*');
+      objectWrites++;
+      if (stored) return null;
+      stored = Buffer.from(bytes);
+      return { size: stored.length };
+    },
+    async get() {
+      objectReads++;
+      return stored ? {
+        size: stored.length,
+        arrayBuffer: async () => Uint8Array.from(stored).buffer,
+      } : null;
+    },
+  };
   const env = {
     AIVEXUS_WEB_ORIGIN: origin,
     AIVEXUS_WEB_ACCESS_ISSUER: issuer,
     AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_D1: db,
-    AIVEXUS_WEB_ARTIFACTS: {
-      async get(key) {
-        objectReads++;
-        assert.match(key, new RegExp('^web-artifacts/web-exec-[0-9a-f]{32}/' + sha256 + '\\.zip$'));
-        return {
-          size: stored.length,
-          arrayBuffer: async () => Uint8Array.from(stored).buffer,
-        };
-      },
-    },
+    AIVEXUS_WEB_ARTIFACTS: bucket,
   };
   t.mock.method(globalThis, 'fetch', async url => {
     assert.equal(url, issuer + '/cdn-cgi/access/certs');
@@ -494,15 +504,24 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
   assert.equal(objectReads, 0);
 
   const key = sqlite.prepare('SELECT idempotency_key AS key FROM web_execution_reservations').get().key;
-  const journal = createWebD1ExecutionJournal(db);
-  const attempt = { key, attemptId: reserved.attemptId, workerToken: crypto.randomUUID() };
-  assert.equal((await journal.claimReserved(attempt)).ok, true);
-  assert.equal((await journal.completeVerifiedArtifact({
-    ...attempt, artifactSha256: sha256, artifactSizeBytes: zip.length,
-    storageReadbackVerified: true, testsPassed: true,
-  })).ok, true);
+  let builds = 0;
+  const attempt = {
+    db, bucket, key, attemptId: reserved.attemptId,
+    buildAndTestCounter: async () => {
+      builds++;
+      zip = await buildAndTestCounter();
+      sha256 = createHash('sha256').update(zip).digest('hex');
+      return zip;
+    },
+  };
+  const attempts = await Promise.all(Array.from({ length: 8 }, () => runWebCounterAttempt(attempt)));
+  assert.equal(attempts.filter(result => result.ok).length, 1);
+  assert.equal(builds, 1);
+  assert.ok(zip.length > 0);
+  assert.equal(objectWrites, 1);
+  assert.equal(objectReads, 1);
   assert.equal((await download(otherToken)).status, 404);
-  assert.equal(objectReads, 0);
+  assert.equal(objectReads, 1);
   const response = await download(token);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type'), 'application/zip');
@@ -513,6 +532,27 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
   assert.deepEqual(await body(await download(token)), {
     version: 1, ok: false, error: 'artifact_unavailable',
   });
+
+  const secondProjectId = 'second-counter';
+  assert.equal((await stage(token, { projectId: secondProjectId })).status, 200);
+  assert.equal((await approve(token, { ...approval, projectId: secondProjectId })).status, 200);
+  const second = await body(await send(
+    reserveExecution, '/api/cantiere/executions/reserve', token, { projectId: secondProjectId },
+  ));
+  const secondKey = sqlite.prepare(
+    'SELECT idempotency_key AS key FROM web_execution_reservations WHERE execution_id = ?',
+  ).get(second.executionId).key;
+  const collision = {
+    ...attempt, key: secondKey, attemptId: second.attemptId,
+    buildAndTestCounter: async () => zip,
+    bucket: { put: async () => null, get: async () => assert.fail('Unexpected object read') },
+  };
+  assert.deepEqual(await runWebCounterAttempt(collision), { ok: false, reason: 'review_required' });
+  assert.equal((await runWebCounterAttempt(collision)).ok, false);
+  assert.equal(sqlite.prepare(
+    'SELECT status FROM web_execution_reservations WHERE execution_id = ?',
+  ).get(second.executionId).status, 'review_required');
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_execution_artifact_receipts').get().count, 1);
 });
 
 test('storage failures and JWKS outages return sanitized errors without mutating project', async () => {

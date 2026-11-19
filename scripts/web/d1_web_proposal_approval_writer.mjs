@@ -92,6 +92,12 @@ function preflight(principal, db) {
   return { ok: true, subject };
 }
 
+export async function webCounterSpecSha256() {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(COUNTER_SPEC));
+  return Array.from(new Uint8Array(digest), byte =>
+    byte.toString(16).padStart(2, '0')).join('');
+}
+
 export async function stageTrustedWebCounterProposal({ request, principal, db } = {}) {
   const ctx = preflight(principal, db);
   if (!ctx.ok) return ctx;
@@ -100,9 +106,7 @@ export async function stageTrustedWebCounterProposal({ request, principal, db } 
   }
 
   const { projectId } = request;
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(COUNTER_SPEC));
-  const specSha256 = Array.from(new Uint8Array(digest), byte =>
-    byte.toString(16).padStart(2, '0')).join('');
+  const specSha256 = await webCounterSpecSha256();
   try {
     const result = await db.prepare(STAGE_COUNTER_SQL)
       .bind(ctx.subject, projectId, new Date().toISOString(), specSha256).run();
