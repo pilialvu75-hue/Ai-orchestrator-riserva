@@ -6,6 +6,9 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -60,6 +63,21 @@ public final class MainActivity extends Activity {
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private SharedPreferences preferences() { return UiPrefs.preferences(this); }
 
+    /** Read the installed package, never infer its version from a GitHub release. */
+    private String installedVersion() {
+        try {
+            PackageInfo packageInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
+            long code = packageInfo.getLongVersionCode();
+            return UiPrefs.format(this, "installed_version", packageInfo.versionName, code);
+        } catch (PackageManager.NameNotFoundException e) {
+            return t("version_unknown");
+        }
+    }
+
+    private boolean debugBuild() {
+        return (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
     @Override public void onCreate(Bundle stateBundle) {
         setTheme(UiPrefs.dark(this)
             ? android.R.style.Theme_Material_NoActionBar
@@ -90,6 +108,7 @@ public final class MainActivity extends Activity {
         LinearLayout heading = column();
         heading.addView(label(t("app"), 29, true, UiPrefs.textColor(this)));
         heading.addView(label(t("subtitle"), 12, false, UiPrefs.secondary(this)));
+        heading.addView(label(installedVersion(), 12, true, UiPrefs.accent(this)));
         title.addView(heading);
         hero.addView(title);
         root.addView(hero);
@@ -321,12 +340,21 @@ public final class MainActivity extends Activity {
 
         LinearLayout updater = card();
         heading(updater, t("section_updates"));
+        updater.addView(label(installedVersion(), 15, true, UiPrefs.textColor(this)));
+        updater.addView(label(
+            t(debugBuild() ? "debug_channel" : "signed_channel"),
+            12, false, UiPrefs.secondary(this)));
         updater.addView(label(t("update_info"), 13, false, UiPrefs.secondary(this)));
         checkUpdates = actionButton(t("check_updates"), true);
         checkUpdates.setOnClickListener(v -> checkUpdates());
         updater.addView(checkUpdates);
         updateStatus = label("", 12, false, UiPrefs.secondary(this));
         updater.addView(updateStatus);
+        updateStatus.setText(debugBuild() ? t("debug_no_inplace") : t("signed_update_ready"));
+        Button githubReleases = actionButton(t("open_releases"), false);
+        githubReleases.setOnClickListener(v -> startActivity(new Intent(Intent.ACTION_VIEW,
+            Uri.parse("https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/releases?q=ads-kill"))));
+        updater.addView(githubReleases);
         settingsPage.addView(updater);
     }
 
