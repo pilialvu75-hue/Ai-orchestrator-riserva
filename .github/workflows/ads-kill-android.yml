@@ -2,7 +2,7 @@ name: Ads Kill - Android beta
 on:
   push:
     branches:
-      - ads-kill/android-v0.1.7-identity-updates
+      - ads-kill/android-v0.1.8-stop-fix
     paths:
       - 'ads-kill/**'
       - '.github/workflows/ads-kill-android.yml'
@@ -44,8 +44,14 @@ jobs:
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
           BADGING=$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK")
-          printf '%s\n' "$BADGING" | grep -F "package: name='dev.aivexus.adskill' versionCode='9' versionName='0.1.7-beta1'"
+          printf '%s\n' "$BADGING" | grep -F "package: name='dev.aivexus.adskill' versionCode='10' versionName='0.1.8-beta1'"
           printf '%s\n' "$BADGING" | grep -F "application-icon"
+      - name: Verify VPN can be disabled by user
+        run: |
+          grep -F 'android.net.VpnService.SUPPORTS_ALWAYS_ON' ads-kill/android/app/src/main/AndroidManifest.xml
+          grep -F 'android:value="false"' ads-kill/android/app/src/main/AndroidManifest.xml
+          grep -F 'PREF_VPN_REQUESTED' ads-kill/android/app/src/main/java/dev/aivexus/adskill/AdsVpnService.java
+          grep -F 'setAction(AdsVpnService.ACTION_STOP)' ads-kill/android/app/src/main/java/dev/aivexus/adskill/MainActivity.java
       - name: Build persistently signed release when dedicated Ads Kill key is configured
         id: signing
         working-directory: ads-kill/android
@@ -66,33 +72,33 @@ jobs:
           printf '%s' "$ADS_KILL_KEYSTORE_BASE64" | base64 --decode > "$ADS_KILL_KEYSTORE_PATH"
           gradle --no-daemon --stacktrace assembleRelease
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk ../../ads-kill-v0.1.7-beta1-signed.apk
+          cp app/build/outputs/apk/release/app-release.apk ../../ads-kill-v0.1.8-beta1-signed.apk
           echo 'signed=true' >> "$GITHUB_OUTPUT"
       - name: Rename APK
-        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.7-beta1-debug.apk
+        run: cp ads-kill/android/app/build/outputs/apk/debug/app-debug.apk ads-kill-v0.1.8-beta1-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Ads-Kill-Android-0.1.7-beta1
+          name: Ads-Kill-Android-0.1.8-beta1
           path: |
-            ads-kill-v0.1.7-beta1-debug.apk
-            ads-kill-v0.1.7-beta1-signed.apk
+            ads-kill-v0.1.8-beta1-debug.apk
+            ads-kill-v0.1.8-beta1-signed.apk
           if-no-files-found: warn
           retention-days: 30
       - name: Publish first test prerelease
-        if: github.ref == 'refs/heads/ads-kill/android-v0.1.7-identity-updates'
+        if: github.ref == 'refs/heads/ads-kill/android-v0.1.8-stop-fix'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=ads-kill-v0.1.7-beta1
-          assets=(ads-kill-v0.1.7-beta1-debug.apk)
-          if [[ -f ads-kill-v0.1.7-beta1-signed.apk ]]; then
-            assets+=(ads-kill-v0.1.7-beta1-signed.apk)
+          TAG=ads-kill-v0.1.8-beta1
+          assets=(ads-kill-v0.1.8-beta1-debug.apk)
+          if [[ -f ads-kill-v0.1.8-beta1-signed.apk ]]; then
+            assets+=(ads-kill-v0.1.8-beta1-signed.apk)
           fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" "${assets[@]}" \
               --target "$GITHUB_SHA" --prerelease \
-              --title "Ads Kill Android 0.1.7 beta1 (identity and update clarity)" \
-              --notes "Dedicated launcher icon; installed app version and build visible on home and settings; honest debug-versus-signed update status; direct GitHub beta link; emergency VPN stop and Smart Reward retained. The debug APK cannot be installed over older debug builds with different certificates. Persistent signing secrets are still required for in-place updates."
+              --title "Ads Kill Android 0.1.8 beta1 (Samsung VPN stop fix)" \
+              --notes "Samsung Galaxy S24 FE VPN shutdown fix: record explicit OFF request before stopping, send ACTION_STOP to tear down TUN, stopService fallback, disable unsupported Always-on VPN in beta, and add direct Android VPN settings link. Version 0.1.8 build 10, new launcher icon and manual beta checker retained. Debug build signing keys may differ across releases; uninstall may be necessary. Not yet device-tested."
           else
             gh release upload "$TAG" "${assets[@]}" --clobber
             gh release edit "$TAG" --target "$GITHUB_SHA"
