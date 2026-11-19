@@ -26,3 +26,45 @@ The plugin runs `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File <
 - If the user changes the AIVEXUS connection key or starts a new app instance, repeat the local setup. If there is no token, the tool responds with `bridge_token_missing`.
 - Stop/remove this plugin in the Desktop plugin manager. Run `setup-token.ps1 -Clear` to erase the stored encrypted token.
 - The repo and package contain no personal bridge token, Platform key, identity, or persistent runtime credentials.
+
+## Status and troubleshooting: ChatGPT Chat versus local MCP
+
+As of 2026-11-19, the personal plugin is installed as v0.1.1, its skill is
+enabled and its server appears in Settings > Plugins > MCP under "From plugins".
+The Windows user confirmed that the DPAPI file exists, but ordinary ChatGPT Chat
+did **not** expose the `instance_info` callable tool. The listing and DPAPI
+file existence do **not** prove startup, token validity or a successful call.
+
+Official OpenAI guidance: Desktop-only MCP plugins require a **local execution
+surface**; saving them in the account does not make their tools callable from a
+web/mobile or ordinary cloud-hosted chat. Do not change the bridge credentials,
+restart inference or duplicate a tunnel to solve an unavailable tool selection.
+Refs:
+- https://help.openai.com/en/articles/20001256-plugins-in-chatgpt
+- https://developers.openai.com/plugins/deploy/desktop-only
+
+If a local Windows diagnosis is needed, **do not re-run setup-token.ps1** when the
+protected file is already present. To distinguish ChatGPT tool availability from
+local bridge authentication, open normal (non-admin) Windows PowerShell and run
+the installed read-only wrapper. This is a read-only `instance_info` call;
+it does not start inference or synthetic tests, print the stored key or reach
+the internet:
+
+```powershell
+$root = Join-Path $env:USERPROFILE '.codex\plugins\cache\created-by-me-remote\aivexus-local-desktop-readonly'
+$adapter = Get-ChildItem -LiteralPath $root -Recurse -Filter aivexus_desktop_readonly.ps1 -File |
+    Sort-Object FullName -Descending | Select-Object -First 1
+if ($null -eq $adapter) { throw 'Plugin runtime script not found in local cache' }
+$request = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"instance_info","arguments":{}}}'
+$raw = $request | & powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File $adapter.FullName
+if ($LASTEXITCODE -ne 0) { throw 'Local MCP adapter did not start' }
+$response = $raw | Select-Object -First 1 | ConvertFrom-Json
+if ($null -eq $response.result) { throw 'MCP response missing' }
+$body = $response.result.content[0].text | ConvertFrom-Json
+$body | ConvertTo-Json -Depth 8
+```
+
+The result should be a version/model/runtime object (local bridge reachable)
+or an error code such as `bridge_token_missing`, `bridge_http_error` or
+`aivexus_not_reachable`. No key is exposed. A successful PowerShell response
+still does **not** make the tool available in normal ChatGPT Chat.
