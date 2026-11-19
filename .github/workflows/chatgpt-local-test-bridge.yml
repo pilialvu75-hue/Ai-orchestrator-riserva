@@ -135,3 +135,37 @@ jobs:
           if ($blockedBody.error -ne 'tool_disabled_by_read_only_profile') { throw 'Wrong denied call response' }
           $infoBody = $info.result.content[0].text | ConvertFrom-Json
           if ($infoBody.error -ne 'bridge_token_missing') { throw 'Missing key not handled cleanly' }
+      - name: Verify DPAPI token setup handles Windows PowerShell 5.1 clipboard
+        shell: powershell
+        run: |
+          $setup = Join-Path $PWD 'plugins/aivexus-local-desktop-readonly/setup-token.ps1'
+          $previousLocalAppData = $env:LOCALAPPDATA
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'aivexus-dpapi-test'
+          try {
+            $global:AivexusCiFakeKey = ('Q' * 48)
+            $global:AivexusCiClearedTo = $null
+            function global:Read-Host { param([string]$Prompt) return '' }
+            function global:Get-Clipboard { param([switch]$Raw) return $global:AivexusCiFakeKey }
+            function global:Set-Clipboard {
+              param([Parameter(Mandatory)][string]$Value)
+              if ($Value.Length -eq 0) { throw 'Empty clipboard not allowed in PowerShell 5.1' }
+              $global:AivexusCiClearedTo = $Value
+            }
+            & $setup
+            $tokenPath = Join-Path $env:LOCALAPPDATA 'AIVEXUS\ChatGPT-Desktop-ReadOnly\bridge-token.dpapi'
+            if (-not (Test-Path -LiteralPath $tokenPath)) { throw 'DPAPI token not created' }
+            $encrypted = (Get-Content -LiteralPath $tokenPath -Raw).Trim()
+            if ($encrypted -ceq $global:AivexusCiFakeKey) { throw 'Secret stored as plaintext' }
+            $decrypted = ConvertTo-SecureString -String $encrypted
+            if ($decrypted.Length -ne $global:AivexusCiFakeKey.Length) { throw 'DPAPI secret did not decrypt' }
+            $decrypted.Dispose()
+            if ($global:AivexusCiClearedTo -cne ' ') { throw 'Clipboard was not replaced safely' }
+            & $setup -Clear
+            if (Test-Path -LiteralPath $tokenPath) { throw 'DPAPI token not removed by -Clear' }
+          } finally {
+            $env:LOCALAPPDATA = $previousLocalAppData
+            Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue
+            Remove-Item Function:\Get-Clipboard -ErrorAction SilentlyContinue
+            Remove-Item Function:\Set-Clipboard -ErrorAction SilentlyContinue
+            Remove-Variable -Name AivexusCiFakeKey,AivexusCiClearedTo -Scope Global -ErrorAction SilentlyContinue
+          }
