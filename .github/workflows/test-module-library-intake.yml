@@ -25,5 +25,5 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: dart analyze lib/features/module_library/data/module_library_intake_source.dart test/features/module_library/module_library_intake_source_test.dart
-      - run: flutter test test/features/module_library/module_library_intake_source_test.dart
+      - run: dart analyze lib/features/module_library/data/module_library_intake_source.dart lib/features/module_library/data/module_library_development_source.dart lib/features/module_library/data/module_library_status_repository.dart lib/features/module_library/presentation/module_library_page.dart lib/features/module_library/presentation/development_module_detail_page.dart test/features/module_library/module_library_intake_source_test.dart test/features/module_library/module_library_development_source_test.dart
+      - run: flutter test test/features/module_library/module_library_intake_source_test.dart test/features/module_library/module_library_development_source_test.dart
