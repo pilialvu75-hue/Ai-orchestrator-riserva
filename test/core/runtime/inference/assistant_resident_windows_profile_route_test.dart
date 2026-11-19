@@ -210,7 +210,7 @@ void main() {
       executable: () => cpuServer.path,
       isWindowsHost: () => true,
       isModernWindowsHost: () => true,
-      gpuDeviceListing: (executable) async => executable == cudaServer.path
+      gpuDeviceListing: (executable) async => p.normalize(executable) == p.normalize(cudaServer.path)
           ? 'CUDA0: NVIDIA GeForce RTX 4060 Laptop GPU (8192 MiB, 7000 MiB free)'
           : 'Vulkan0: NVIDIA GeForce RTX 4060 Laptop GPU (8192 MiB, 7000 MiB free)',
     );
