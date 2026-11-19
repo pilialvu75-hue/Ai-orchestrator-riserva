@@ -73,6 +73,19 @@ jobs:
       - name: Test NVIDIA synthetic probes and safe failure classifications
         run: node --test test/airlab/web_nvidia_selftest_diagnostics.mjs
 
+      - name: Set up Node 22 for generated Web checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify a generated Web app in isolated Chrome
+        shell: bash
+        run: |
+          export AIVEXUS_WEB_CHROMIUM="$(command -v google-chrome)"
+          test -x "$AIVEXUS_WEB_CHROMIUM"
+          node --test test/airlab/web_generated_application_verification.mjs
+          node --test test/airlab/web_application_runner_packet.mjs
+
       - name: Build ordinary Cantiere Web application
         run: flutter build web --release --target lib/web_main.dart
 

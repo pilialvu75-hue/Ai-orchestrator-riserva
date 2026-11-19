@@ -147,7 +147,7 @@ function boundedNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, value));
 }
 
-function validateMessages(value) {
+function validateMessages(value, maxMessageChars = MAX_MESSAGE_CHARS, maxTotalChars = MAX_TOTAL_CHARS) {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_MESSAGES) {
     return null;
   }
@@ -162,9 +162,9 @@ function validateMessages(value) {
     if (typeof row.content !== 'string') return null;
 
     const content = row.content.trim();
-    if (!content || content.length > MAX_MESSAGE_CHARS) return null;
+    if (!content || content.length > maxMessageChars) return null;
     totalChars += content.length;
-    if (totalChars > MAX_TOTAL_CHARS) return null;
+    if (totalChars > maxTotalChars) return null;
 
     if (row.role === 'system') {
       systemParts.push(content);
@@ -186,7 +186,7 @@ function validateMessages(value) {
   const messages = [];
   if (systemParts.length > 0) {
     const mergedSystem = systemParts.join('\n\n');
-    if (mergedSystem.length > MAX_TOTAL_CHARS) return null;
+    if (mergedSystem.length > maxTotalChars) return null;
     messages.push({ role: 'system', content: mergedSystem });
   }
   messages.push(...conversation);
@@ -417,7 +417,7 @@ export function createWebBuilderInference(env) {
   if (env.AIVEXUS_WEB_BUILDER_FREE_ENABLED !== 'true' || typeof ai?.run !== 'function') return null;
   const model = '@cf/google/gemma-4-26b-a4b-it';
   return async function infer(input) {
-    const messages = validateMessages(input);
+    const messages = validateMessages(input, 70000, 72000);
     if (!messages) return { ok: false };
     const result = await ai.run(model, {
       messages, max_tokens: 4096, temperature: 0.2, top_p: 0.9, stream: false, store: false,

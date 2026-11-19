@@ -6,16 +6,45 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/link.dart';
 
 void main() {
   testWidgets('submits once and recovers a saved generation without the prompt',
       (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(950, 1000);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     const prompt = 'Un allenamento a intervalli';
     String? generationId;
     var requests = 0;
+    var verificationPosts = 0;
     final client = MockClient((request) async {
       requests++;
+      if (request.url.path == '/api/cantiere/proposals/verify') {
+        if (request.method == 'GET') {
+          expect(request.url.queryParameters, {'generationId': generationId});
+          expect(request.body, isEmpty);
+        } else {
+          expect(request.method, 'POST');
+          expect(jsonDecode(request.body), {'generationId': generationId});
+          verificationPosts++;
+        }
+        return http.Response(
+            jsonEncode({
+              'version': 1,
+              'ok': true,
+              'generationId': generationId,
+              'status': switch (verificationPosts) {
+                0 => 'ready',
+                1 => 'submitted',
+                _ => 'verified',
+              },
+              if (verificationPosts > 1) 'zipSha256': 'b' * 64,
+            }),
+            200);
+      }
       expect(request.url.path, '/api/cantiere/proposals/generate');
       if (request.method == 'POST') {
         final submitted = jsonDecode(request.body) as Map;
@@ -68,11 +97,25 @@ void main() {
     await tester.pumpWidget(
         MaterialApp(home: WorkshopWebGeneratorPage(client: client)));
     await tester.pumpAndSettle();
-    expect(requests, 2);
+    expect(requests, 3);
+    expect(verificationPosts, 0);
     expect(find.text('Sorgenti generati'), findsOneWidget);
     expect(find.text('Allenamento a intervalli'), findsOneWidget);
     expect(find.text('timer.mjs'), findsOneWidget);
     expect(find.text('@cf/google/gemma-4-26b-a4b-it'), findsOneWidget);
     expect(find.text(prompt), findsNothing);
+    expect(find.text('Scarica ZIP'), findsNothing);
+
+    await tester.tap(find.text('Verifica applicazione'));
+    await tester.pumpAndSettle();
+    expect(verificationPosts, 1);
+    expect(find.text('Verifica in coda o in esecuzione'), findsOneWidget);
+    await tester.tap(find.text('Aggiorna verifica'));
+    await tester.pumpAndSettle();
+    expect(verificationPosts, 2);
+    expect(find.text('Applicazione verificata'), findsOneWidget);
+    final download = tester.widget<Link>(find.byType(Link));
+    expect(download.uri?.path, '/api/cantiere/proposals/download');
+    expect(download.uri?.queryParameters, {'generationId': generationId});
   });
 }

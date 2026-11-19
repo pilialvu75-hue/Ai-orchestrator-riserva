@@ -111,6 +111,54 @@ catalogo diagnostico continuano a usare le proprie configurazioni.
 Lo stato `generated` conferma il salvataggio dei sorgenti. Test, anteprima ed
 esportazione appartengono ai passaggi successivi.
 
+## Collaudo isolato dei sorgenti
+
+Il coordinatore Node `runWebApplicationVerification` riceve il sorgente e un
+piano di verifica attendibile con azioni `click`, `fill` e `text`. Il piano
+resta invariato durante la riparazione. Chromium usa un profilo temporaneo,
+il sandbox del browser e una policy che permette soltanto le risorse del
+progetto servite via DevTools. Il processo del browser riceve un ambiente
+ristretto, senza i segreti del broker. Le prove verificano gli errori JavaScript
+e il comportamento reale del DOM.
+
+Un errore del codice permette al massimo tre correzioni attraverso la rotta
+dedicata del broker. Un guasto d’infrastruttura interrompe il ciclo. Dopo una
+prova riuscita, lo ZIP viene riaperto e ogni file viene verificato prima della
+consegna al chiamante. Il coordinatore è un modulo Node. La Pages Function
+salva la generazione e la ricevuta, mentre il collegamento al runner isolato
+richiede il trasporto autenticato del progetto e del risultato.
+
+Per abilitare la riparazione nel runner occorrono il flag gratuito, l’ID account
+`CLOUDFLARE_ACCOUNT_ID` già usato dal deploy privato e il segreto Actions
+`AIVEXUS_BUILDER_WORKERS_AI_TOKEN`, limitato a Workers AI sullo stesso account
+Free. Il coordinatore invia le richieste al solo endpoint Cloudflare di
+quell’account, con lo stesso modello della generazione. Chromium riceve soltanto
+il sorgente e i controlli da eseguire. Pages può riusare il token GitHub del
+contatore per il dispatch, con gli stessi permessi Actions sul medesimo repository.
+
+Il workflow `web-application-runner.yml` è riservato al primo tentativo su
+`main` e all'attore GitHub configurato dall'operatore. Riceve un ticket e un
+pacchetto cifrato e autenticato. La chiave privata del runner apre il job. Una
+seconda coppia di chiavi consente solo a Pages di aprire il risultato. L'HMAC
+distingue job e risultati. La risposta include il digest del job originale.
+Il job scade dopo 15 minuti e il campo cifrato è limitato a 61.000 caratteri.
+Un sorgente che supera i limiti della compressione deve essere rifiutato prima
+del dispatch. L'artefatto GitHub contiene soltanto `application.aivexus`
+cifrato e scade dopo un giorno.
+
+Il client accetta l'artefatto solo dopo aver verificato repository, workflow,
+commit, tentativo e digest. Il ticket e gli ID GitHub sono interni. La
+migrazione `007` registra un solo dispatch per generazione e proprietario.
+`POST /api/cantiere/proposals/verify` avvia la verifica o recupera un risultato
+concluso. `GET` sullo stesso percorso è in sola lettura. Le generazioni più
+vecchie senza controlli propongono lo stato `checks_missing`.
+
+Pages conserva ricevuta, sorgente verificato e ZIP nel D1 del prodotto con
+un’unica scrittura. `GET /api/cantiere/proposals/download?generationId=…`
+verifica di nuovo il digest dello ZIP e serve il file solo al proprietario.
+I binding di produzione del runner e le chiavi richiedono la configurazione
+autorizzata. Il codice di un progetto viene eseguito in Chromium, nel runner.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does
