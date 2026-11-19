@@ -29,7 +29,10 @@ This candidate is additive to the model catalogue; Qwen is retained.
    Do not disable Smart App Control or change Windows security policy.
 2. In Settings > Models, locate **MiniCPM5 2B (OpenBMB, prova)**
    under desktop models. Download, wait for file validation, select it
-   explicitly and select manual LOCAL model routing.
+   explicitly and select manual LOCAL model routing. Alternatively, importing
+   `MiniCPM5-2B-Q4_K_M.gguf` from local storage must preserve the opaque
+   `local_import_...` storage ID while mapping the runtime ID to `minicpm5_2b`
+   and keeping the Windows-only restriction.
 3. In ordinary LOCAL chat, send `Ciao, rispondi in italiano.` and
    `Explique la conduction thermique en français.` Verify complete
    replies, error states, elapsed time, first token, token rate if reported.
