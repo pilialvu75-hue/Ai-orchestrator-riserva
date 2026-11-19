@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import 'package:ai_orchestrator/core/runtime/inference/assistant_resident_local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/assistant_web_continuation_local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
@@ -155,7 +157,7 @@ void main() {
       executable: () => cpuServer.path,
       isWindowsHost: () => true,
       isModernWindowsHost: () => true,
-      gpuDeviceListing: (executable) async => executable == cudaServer.path
+      gpuDeviceListing: (executable) async => p.normalize(executable) == p.normalize(cudaServer.path)
           ? 'CUDA0: NVIDIA GeForce RTX 4060 Laptop GPU (8192 MiB, 7000 MiB free)'
           : 'Vulkan0: NVIDIA GeForce RTX 4060 Laptop GPU (8192 MiB, 7000 MiB free)',
     );
@@ -172,7 +174,7 @@ void main() {
       ).toList();
       expect(cli.calls, 0);
       expect(resident.calls, 1);
-      expect(resident.lastExecutable, cudaServer.path);
+      expect(p.normalize(resident.lastExecutable!), p.normalize(cudaServer.path));
       expect(resident.lastDevice, 'CUDA0');
       expect(resident.lastBatchSize, 512);
       expect(resident.lastUbatchSize, 256);
@@ -225,7 +227,7 @@ void main() {
       ).toList();
       expect(cli.calls, 0);
       expect(resident.calls, 2);
-      expect(resident.lastExecutable, vulkanServer.path);
+      expect(p.normalize(resident.lastExecutable!), p.normalize(vulkanServer.path));
       expect(resident.lastDevice, 'Vulkan0');
       expect(responses.last.isError, isFalse);
       expect(responses.last.text, 'RESIDENT');
