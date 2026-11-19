@@ -23,6 +23,7 @@ import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dart';
 import 'package:ai_orchestrator/native/runtime/windows/windows_vulkan_device.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_cuda_device.dart';
 import 'package:ai_orchestrator/native/runtime/windows/windows_gpu_probe_cache.dart';
 
 /// Assistant-only warm desktop runtime. Workshop and diagnostics retain their
@@ -30,21 +31,30 @@ import 'package:ai_orchestrator/native/runtime/windows/windows_gpu_probe_cache.d
 final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   AssistantResidentLocalRuntimeProvider({required LocalRuntimeProvider delegate,
       ResidentCompletionRuntime? runtime, String? Function()? executable,
-      bool Function()? isWindowsHost})
+      bool Function()? isWindowsHost, bool Function()? isModernWindowsHost,
+      Future<String?> Function(String executable)? gpuDeviceListing})
       : _delegate = delegate, _runtime = runtime ?? ResidentCompletionRuntime(),
         _executable = executable ?? _bundledServer,
-        _isWindowsHost = isWindowsHost ?? _platformIsWindows;
+        _isWindowsHost = isWindowsHost ?? _platformIsWindows,
+        _isModernWindowsHost = isModernWindowsHost ?? _platformIsModernWindows,
+        _gpuDeviceListing = gpuDeviceListing;
 
   static bool _platformIsWindows() => Platform.isWindows;
+  static bool _platformIsModernWindows() => Platform.isWindows &&
+      WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion);
 
   final LocalRuntimeProvider _delegate;
   final ResidentCompletionRuntime _runtime;
   final String? Function() _executable;
   final bool Function() _isWindowsHost;
+  final bool Function() _isModernWindowsHost;
+  final Future<String?> Function(String executable)? _gpuDeviceListing;
   AppLifecycleListener? _lifecycle;
   bool _unavailable = false;
   bool _gpuUnavailable = false;
+  bool _cudaUnavailable = false;
   final _gpuDevices = WindowsGpuProbeCache();
+  final _cudaDevices = WindowsGpuProbeCache();
   Future<void>? _preparation;
 
   /// Prepare only the measured Windows GPU route while the app opens.
@@ -54,14 +64,32 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   }
 
   Future<void> _prepareSelectedModel(AiModel model) async {
-    if (!Platform.isWindows || _gpuUnavailable ||
+    if (!_isWindowsHost() || _gpuUnavailable ||
         !AssistantWindowsGpuPolicy.supports(model.effectiveRuntimeModelId)) return;
     final cpuExecutable = _executable();
     final modelPath = model.localPath;
     if (cpuExecutable == null || modelPath == null || !File(modelPath).existsSync()) return;
+    final watch = Stopwatch()..start();
+    final modelBytes = await File(modelPath).length();
+    final cudaCandidate = p.join(p.dirname(cpuExecutable), '..', 'runtime-cuda', 'llama-server.exe');
+    if (!_cudaUnavailable && File(cudaCandidate).existsSync()) {
+      final cudaListing = await _cudaDevices.get(() => _listGpuDevices(cudaCandidate),
+          usable: (value) => WindowsCudaDevice.select(value, modelBytes: modelBytes) != null);
+      final cudaDevice = WindowsCudaDevice.select(cudaListing ?? '', modelBytes: modelBytes);
+      if (cudaDevice != null) {
+        try {
+          await _runtime.prepare(executable: cudaCandidate, modelPath: modelPath,
+              sessionId: 'default', threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8),
+              device: cudaDevice, batchSize: 512, ubatchSize: 256, flashAttention: true);
+          RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_PREPARE] backend=cuda status=ready elapsed_ms=${watch.elapsedMilliseconds}');
+          return;
+        } catch (_) {
+          _cudaUnavailable = true;
+        }
+      }
+    }
     final candidate = p.join(p.dirname(cpuExecutable), '..', 'runtime-vulkan', 'llama-server.exe');
     if (!File(candidate).existsSync()) return;
-    final watch = Stopwatch()..start();
     try {
       final listing = await _gpuDevices.get(() => _listGpuDevices(candidate),
           usable: (value) => WindowsVulkanDevice.select(value, modelBytes: File(modelPath).lengthSync()) != null);
@@ -72,13 +100,15 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       }
       await _runtime.prepare(executable: candidate, modelPath: modelPath,
           sessionId: 'default', threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8), device: device);
-      RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_PREPARE] status=ready elapsed_ms=${watch.elapsedMilliseconds}');
+      RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_PREPARE] backend=vulkan status=ready elapsed_ms=${watch.elapsedMilliseconds}');
     } catch (_) {
       RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_PREPARE] status=failed action=normal_request_startup');
     }
   }
 
   Future<String?> _listGpuDevices(String executable) async {
+    final injected = _gpuDeviceListing;
+    if (injected != null) return injected(executable);
     Process? probe;
     try {
       probe = await Process.start(executable, ['--list-devices']);
@@ -201,8 +231,29 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     } finally { await bytes.close(); }
     String? gpuExecutable;
     String? gpuDevice;
-    if (Platform.isWindows && !_gpuUnavailable &&
-        WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion) &&
+    String? gpuBackend;
+    if (_isWindowsHost() && !_cudaUnavailable &&
+        _isModernWindowsHost() &&
+        AssistantWindowsGpuPolicy.supports(request.modelId!)) {
+      final candidate = p.join(p.dirname(executable), '..', 'runtime-cuda', 'llama-server.exe');
+      if (File(candidate).existsSync()) {
+        final listing = await _cudaDevices.get(() => _listGpuDevices(candidate),
+            usable: (value) => WindowsCudaDevice.select(value, modelBytes: file.lengthSync()) != null);
+        if (cancellationToken.isCancelled) {
+          yield InferenceResponse.error('Inference cancelled.', state: InferenceTerminalState.cancelled);
+          return;
+        }
+        gpuDevice = WindowsCudaDevice.select(listing ?? '', modelBytes: await file.length());
+        if (gpuDevice != null) {
+          gpuExecutable = candidate;
+          gpuBackend = 'cuda';
+        } else {
+          RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] backend=cuda stage=request reason=no_eligible_device_or_headroom retry_after_s=30');
+        }
+      }
+    }
+    if (gpuDevice == null && _isWindowsHost() && !_gpuUnavailable &&
+        _isModernWindowsHost() &&
         AssistantWindowsGpuPolicy.supports(request.modelId!)) {
       final candidate = p.join(p.dirname(executable), '..', 'runtime-vulkan', 'llama-server.exe');
       if (File(candidate).existsSync()) {
@@ -215,8 +266,9 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         gpuDevice = WindowsVulkanDevice.select(listing ?? '', modelBytes: await file.length());
         if (gpuDevice != null) {
           gpuExecutable = candidate;
+          gpuBackend = 'vulkan';
         } else {
-          RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] stage=request reason=no_eligible_device_or_headroom retry_after_s=30');
+          RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] backend=vulkan stage=request reason=no_eligible_device_or_headroom retry_after_s=30');
         }
       }
     }
@@ -237,8 +289,15 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8), cancellation: cancellationToken,
         device: gpuDevice,
         rejectTokenLimit: Platform.isWindows,
-        batchSize: gpuDevice == null && Platform.isWindows && LocalInferenceModelIds.resolveTemplate(request.modelId!) ==
-            LocalInferenceModelIds.templateNemotron ? 128 : null,
+        batchSize: gpuBackend == 'cuda'
+            ? 512
+            : (gpuDevice == null && Platform.isWindows &&
+                    LocalInferenceModelIds.resolveTemplate(request.modelId!) ==
+                        LocalInferenceModelIds.templateNemotron
+                ? 128
+                : null),
+        ubatchSize: gpuBackend == 'cuda' ? 256 : null,
+        flashAttention: gpuBackend == 'cuda',
         onPromptUsage: (cached, evaluated) => RuntimeEventLog.instance.emit(
           '[ASSISTANT_LOCAL_CACHE] cached_tokens=$cached evaluated_tokens=$evaluated'),
       );
@@ -272,8 +331,12 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         yield InferenceResponse.error('The response ended before a final answer. The reasoning budget may be insufficient.');
       } else if (chunks == 0) {
         if (gpuExecutable != null) {
-          _gpuUnavailable = true;
-          RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] status=unavailable action=resident_cpu_fallback');
+          if (gpuBackend == 'cuda') {
+            _cudaUnavailable = true;
+          } else {
+            _gpuUnavailable = true;
+          }
+          RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] backend=${gpuBackend ?? 'unknown'} status=unavailable action=resident_fallback');
           yield* streamInference(request: request, cancellationToken: cancellationToken);
           return;
         }
