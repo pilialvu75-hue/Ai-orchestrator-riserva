@@ -90,6 +90,25 @@ consentiti prompt arbitrari, invii di dati personali, cambi del provider
 dal browser o avvio automatico del test. Le rotte non marcate restano
 disponibili per il funzionamento ordinario del Cantiere, ma non per il test.
 
+## Generazione sorgenti Web
+
+La Pages Function `POST /api/cantiere/proposals/generate` applica il gate
+Access/D1 del Cantiere. Accetta `generationId` (UUID v4) e `prompt`. Il retry
+dello stesso identificativo con lo stesso prompt restituisce lo stato o la
+ricevuta precedente. L'identità è ricavata dall'asserzione Access e D1 conserva
+spec, sorgenti, digest e provenienza del modello sotto quella identità. Una
+generazione interrotta resta identificabile senza avviare un secondo job.
+
+Per abilitare nuove generazioni serve la migrazione `006`, il piano Workers Free
+verificato dall'operatore, `AIVEXUS_WEB_BUILDER_FREE_ENABLED=true` e una sola
+rotta `coding` con `webBuilderOnly: true`, il modello Cloudflare
+`@cf/google/gemma-4-26b-a4b-it` e l'endpoint diretto Workers AI
+`/client/v4/accounts/<account-id>/ai/v1/chat/completions`. Il token limitato a
+Workers AI si configura come segreto server. Questa rotta viene esclusa da
+AUTO e dal catalogo diagnostico. Il generatore non cambia modello al fallimento.
+Lo stato `generated` conferma il salvataggio dei sorgenti. Test, anteprima ed
+esportazione appartengono ai passaggi successivi.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does

@@ -16,6 +16,10 @@ import { onRequest as stageCounter } from
   '../../functions/api/cantiere/proposals/counter.js';
 import { onRequest as approveProposal } from
   '../../functions/api/cantiere/proposals/approve.js';
+import { onRequest as generateApplication } from
+  '../../functions/api/cantiere/proposals/generate.js';
+import { onRequest as ordinaryInference } from '../../functions/api/cantiere/inference.js';
+import { onRequest as cloudCapabilities } from '../../functions/api/cantiere/capabilities.js';
 import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
 import { runWebCounterAttempt } from '../../scripts/web/run_web_counter_attempt.mjs';
@@ -409,16 +413,10 @@ test('Pages routes reserve once and recover status for the verified owner', asyn
   assert.equal(f.changes, changes);
 });
 
-test('Pages stages and approves a counter, then serves only its verified ZIP to its owner', async t => {
+function sqliteD1(t, migrations) {
   const sqlite = new DatabaseSync(':memory:');
   t.after(() => sqlite.close());
-  for (const name of [
-    '001_web_approval_reservation.sql',
-    '002_web_proposal_approval_audit.sql',
-    '003_web_execution_journal.sql',
-    '004_web_counter_artifacts.sql',
-    '005_web_counter_dispatch.sql',
-  ]) {
+  for (const name of migrations) {
     sqlite.exec(readFileSync(new URL('../../scripts/web/sql/' + name, import.meta.url), 'utf8'));
   }
   const db = {
@@ -445,6 +443,17 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
       };
     },
   };
+  return { db, sqlite };
+}
+
+test('Pages stages and approves a counter, then serves only its verified ZIP to its owner', async t => {
+  const { db, sqlite } = sqliteD1(t, [
+    '001_web_approval_reservation.sql',
+    '002_web_proposal_approval_audit.sql',
+    '003_web_execution_journal.sql',
+    '004_web_counter_artifacts.sql',
+    '005_web_counter_dispatch.sql',
+  ]);
   const signing = await signer();
   const issuedAt = Math.floor(Date.now() / 1000) - 10;
   const claims = { iat: issuedAt, nbf: issuedAt, exp: issuedAt + 300 };
@@ -698,6 +707,133 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
   assert.equal(d1Response.status, 200);
   assert.deepEqual(Buffer.from(await d1Response.arrayBuffer()), zip);
   assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_counter_artifacts').get().count, 1);
+});
+
+test('Pages generates and persists sources through the dedicated free route', async t => {
+  const { db, sqlite } = sqliteD1(t, ['006_web_app_generations.sql']);
+  const signing = await signer();
+  const iat = Math.floor(Date.now() / 1000) - 10;
+  const token = await signing.sign({ iat, nbf: iat, exp: iat + 300 });
+  const otherToken = await signing.sign({ iat, nbf: iat, exp: iat + 300, sub: 'other-owner' });
+  const model = '@cf/google/gemma-4-26b-a4b-it';
+  const endpoint = 'https://api.cloudflare.com/client/v4/accounts/' + '0'.repeat(32) + '/ai/v1/chat/completions';
+  const route = {
+    id: 'builder-free', endpoint, model, webBuilderOnly: true, apiKeySecret: 'TEST_BUILDER_KEY',
+  };
+  const env = {
+    AIVEXUS_WEB_ORIGIN: origin,
+    AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
+    CANTIERE_CLOUD_ROUTES_JSON: JSON.stringify({ coding: [route] }),
+    TEST_BUILDER_KEY: 'fixture-not-a-secret',
+  };
+  const path = '/api/cantiere/proposals/generate';
+  const submit = (assertion, payload, bindings = env, requestOrigin = origin) => generateApplication({
+    request: webRequest(assertion, payload, { path, requestOrigin }), env: bindings,
+  });
+  const first = { generationId: crypto.randomUUID(), prompt: 'Un timer per infusi con pausa.' };
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const prompts = [];
+  let release;
+  const wait = new Promise(resolve => { release = resolve; });
+  const cases = new Map([
+    [first.prompt, { title: 'Timer per infusi', file: 'timer.mjs' }],
+    ['Una scheda per annotare libri.', { title: 'Libri', file: 'notes.css' }],
+    ['Una tabella per calcolare medie.', { title: 'Medie', file: 'averages.js' }],
+  ]);
+  let started;
+  const reachedProvider = new Promise(resolve => { started = resolve; });
+  globalThis.fetch = async (url, options) => {
+    if (String(url) === `${issuer}/cdn-cgi/access/certs`) return Response.json({ keys: [signing.jwk] });
+    assert.equal(String(url), endpoint);
+    assert.equal(options.redirect, 'error');
+    const request = JSON.parse(options.body);
+    assert.equal(request.model, model);
+    assert.equal(request.max_tokens, 4096);
+    const prompt = request.messages.at(-1).content;
+    prompts.push(prompt);
+    if (prompt === first.prompt) {
+      started();
+      await wait;
+    }
+    if (prompt === 'Provider non disponibile') return new Response(null, { status: 429 });
+    const fixture = cases.get(prompt);
+    return Response.json({
+      model,
+      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({
+        title: fixture?.title ?? 'Fixture non valida', requirements: [prompt],
+        files: [
+          { path: 'index.html', content: `<h1>${fixture?.title ?? 'Test'}</h1>` },
+          { path: fixture?.file ?? '../index.html', content: 'source fixture' },
+        ],
+      }) } }], usage: { completion_tokens: 100 },
+    });
+  };
+
+  assert.equal((await submit(null, first)).status, 401);
+  assert.equal((await submit(token, first, env, 'https://different.invalid')).status, 403);
+  assert.equal((await submit(token, first, { ...env, AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'false' })).status, 503);
+  assert.equal((await submit(token, first, {
+    ...env, CANTIERE_CLOUD_ROUTES_JSON: JSON.stringify({ coding: [route, { ...route, id: 'other' }] }),
+  })).status, 503);
+  const capabilityResponse = await cloudCapabilities({ request: new Request(origin), env });
+  assert.deepEqual((await capabilityResponse.json()).capabilities, []);
+  const normalResponse = await ordinaryInference({
+    request: webRequest(token, { version: 1, capability: 'coding', messages: [{ role: 'user', content: first.prompt }] }),
+    env,
+  });
+  assert.equal(normalResponse.status, 503);
+  assert.deepEqual(prompts, []);
+
+  const pending = submit(token, first);
+  try {
+    await Promise.race([
+      reachedProvider,
+      pending.then(response => assert.fail(`Provider did not receive request (HTTP ${response.status})`)),
+    ]);
+    const replay = await Promise.all(Array.from({ length: 4 }, () => submit(token, first)));
+    for (const response of replay) assert.equal((await response.json()).status, 'generating');
+  } finally {
+    release();
+  }
+  const result = await (await pending).json();
+  assert.equal(result.status, 'generated');
+  assert.equal(result.provenance.reportedModel, model);
+  assert.deepEqual(result.paths, ['index.html', 'timer.mjs']);
+  assert.deepEqual(await (await submit(token, first)).json(), result);
+  assert.equal((await submit(token, { ...first, prompt: 'Un altro prompt' })).status, 409);
+  assert.equal((await submit(otherToken, first, { ...env, AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'false' })).status, 503);
+  assert.deepEqual(prompts, [first.prompt]);
+
+  const hashes = new Set([result.sourceSha256]);
+  for (const prompt of [...cases.keys()].slice(1)) {
+    const next = await (await submit(token, { generationId: crypto.randomUUID(), prompt })).json();
+    assert.equal(next.status, 'generated');
+    assert.ok(next.paths.includes(cases.get(prompt).file));
+    hashes.add(next.sourceSha256);
+  }
+  assert.equal(hashes.size, 3);
+  assert.deepEqual(prompts, [...cases.keys()]);
+  const saved = sqlite.prepare('SELECT result_json FROM web_app_generations WHERE generation_id = ?').get(first.generationId);
+  const stored = JSON.parse(saved.result_json);
+  assert.match(stored.source.files[0].content, /Timer per infusi/);
+  assert.equal(createHash('sha256').update(JSON.stringify(stored.source)).digest('hex'), result.sourceSha256);
+
+  for (const prompt of ['Percorso non valido', 'Provider non disponibile']) {
+    const bad = { generationId: crypto.randomUUID(), prompt };
+    assert.equal((await (await submit(token, bad)).json()).status, 'failed');
+    assert.equal((await (await submit(token, bad)).json()).status, 'failed');
+    assert.equal(prompts.filter(value => value === prompt).length, 1);
+  }
+  sqlite.prepare(`INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status, created_at)
+    SELECT owner_subject, '00000000-0000-4000-8000-000000000001', prompt_sha256, 'generating', unixepoch()-181
+    FROM web_app_generations WHERE generation_id = ?`).run(first.generationId);
+  const interrupted = await submit(token, { ...first, generationId: '00000000-0000-4000-8000-000000000001' });
+  assert.equal((await interrupted.json()).status, 'interrupted');
+  assert.equal(prompts.filter(prompt => prompt === first.prompt).length, 1);
 });
 
 test('storage failures and JWKS outages return sanitized errors without mutating project', async () => {

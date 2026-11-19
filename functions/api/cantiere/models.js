@@ -36,6 +36,7 @@ function catalogue(env) {
   for (const row of rows) {
     if (models.length >= MAX_MODELS) break;
     if (!row || typeof row !== 'object') continue;
+    if (row.webBuilderOnly === true) continue;
     const routeId = typeof row.id === 'string' ? row.id.trim() : '';
     const model = typeof row.model === 'string' ? row.model.trim() : '';
     const secret = typeof row.apiKeySecret === 'string'

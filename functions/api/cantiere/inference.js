@@ -115,6 +115,7 @@ function parseRoutes(env) {
         // Large trial models can be selected explicitly without being
         // silently used by AUTO/failover before a separate authorization.
         manualOnly: row.manualOnly === true,
+        webBuilderOnly: row.webBuilderOnly === true,
       });
     }
     if (valid.length > 0) result[capability] = valid;
@@ -296,7 +297,8 @@ async function callRoute(route, request) {
   if (!apiKey) return { ok: false, status: 503, failureKind: 'binding_missing' };
 
   const params = request.selfTest ? selfTestGenerationFor(route) : request;
-  for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {
+  const attempts = route.webBuilderOnly ? 1 : MAX_ROUTE_ATTEMPTS;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 80000);
     try {
@@ -316,9 +318,10 @@ async function callRoute(route, request) {
           stream: false,
         }),
         signal: controller.signal,
+        ...(route.webBuilderOnly ? { redirect: 'error' } : {}),
       });
 
-      const resolvedResponse = await resolvePendingResponse({
+      const resolvedResponse = route.webBuilderOnly ? response : await resolvePendingResponse({
         response,
         route,
         apiKey,
@@ -334,7 +337,7 @@ async function callRoute(route, request) {
 
       if (!response.ok) {
         if (
-          attempt + 1 < MAX_ROUTE_ATTEMPTS &&
+          attempt + 1 < attempts &&
           isTransientStatus(response.status)
         ) {
           const delay = retryDelayMs(response, attempt);
@@ -359,6 +362,9 @@ async function callRoute(route, request) {
 
       const choice = decoded?.choices?.[0];
       const text = choice?.message?.content;
+      if (route.webBuilderOnly && choice?.finish_reason !== 'stop') {
+        return { ok: false, status: 502, failureKind: 'incomplete_output' };
+      }
       if (
         typeof text !== 'string' ||
         !text.trim() ||
@@ -408,6 +414,26 @@ async function callRoute(route, request) {
   }
 
   return { ok: false, status: 502, failureKind: 'upstream_unknown' };
+}
+
+// Called only by the authenticated builder operation with a server-authored
+// instruction and user prompt. The deployment operator verifies Workers Free
+// and explicitly enables only one direct account route for the builder.
+export function createWebBuilderInference(env) {
+  if (env.AIVEXUS_WEB_BUILDER_FREE_ENABLED !== 'true') return null;
+  const routes = (parseRoutes(env).coding || []).filter(route => route.webBuilderOnly);
+  const [route] = routes;
+  if (routes.length !== 1 || route.model !== '@cf/google/gemma-4-26b-a4b-it' ||
+      !/^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/[a-f0-9]{32}\/ai\/v1\/chat\/completions$/.test(route.endpoint)) {
+    return null;
+  }
+  return async function infer(input) {
+    const messages = validateMessages(input);
+    if (!messages) return { ok: false };
+    const result = await callRoute(route, { env, messages, maxTokens: 4096, temperature: 0.2, topP: 0.9 });
+    if (!result.ok || result.reportedModel !== route.model) return { ok: false };
+    return { ...result, provider: 'Cloudflare Workers AI' };
+  };
 }
 
 export async function onRequest(context) {
@@ -495,6 +521,7 @@ export async function onRequest(context) {
   const configuredRoutes = parseRoutes(context.env)[capability] || [];
   const routes = configuredRoutes.filter(
     (route) =>
+      !route.webBuilderOnly &&
       (!selfTest && !hasSelectedRoute || route.selfTestFree) &&
       (!route.manualOnly || hasSelectedRoute) &&
       (!hasSelectedRoute || route.id === selectedRouteId),

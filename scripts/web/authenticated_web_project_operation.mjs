@@ -12,9 +12,10 @@ import { approveTrustedWebProposal, revokeTrustedWebApproval, stageTrustedWebCou
 import { reserveApprovedWebExecution } from './approved_execution_reservation.mjs';
 import { readWebExecutionZip } from './web_execution_artifact_download.mjs';
 import { handleWebCounterAdvance } from './advance_web_counter.mjs';
+import { generateWebApplication } from './generate_web_application.mjs';
 
 const MAX_JSON_BYTES = 2048;
-const OPERATIONS = new Set(['stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance']);
+const OPERATIONS = new Set(['stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance', 'generate_app']);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
 
@@ -44,13 +45,13 @@ function serverConfigValid({ operation, expectedOrigin, db }) {
     return false;
   }
 }
-async function readJson(request) {
+async function readJson(request, maxBytes = MAX_JSON_BYTES) {
   if (!JSON_TYPE.test(request.headers.get('content-type') || '')) {
     return { ok: false, status: 415, reason: 'json_required' };
   }
   const length = request.headers.get('content-length');
   if (length !== null &&
-      (!/^\d+$/.test(length) || Number(length) > MAX_JSON_BYTES)) {
+      (!/^\d+$/.test(length) || Number(length) > maxBytes)) {
     return { ok: false, status: 413, reason: 'request_too_large' };
   }
   if (!request.body || typeof request.body.getReader !== 'function') {
@@ -67,7 +68,7 @@ async function readJson(request) {
         return { ok: false, status: 400, reason: 'invalid_request' };
       }
       size += value.byteLength;
-      if (size > MAX_JSON_BYTES) {
+      if (size > maxBytes) {
         await reader.cancel().catch(() => {});
         return { ok: false, status: 413, reason: 'request_too_large' };
       }
@@ -99,6 +100,8 @@ function operationFailure(result) {
   const reason = result?.reason;
   if (reason === 'invalid_request') return reject(400, 'invalid_request');
   if (reason === 'execution_not_found') return reject(404, 'execution_not_found');
+  if (reason === 'generation_conflict') return reject(409, 'generation_conflict');
+  if (reason === 'generation_unavailable') return reject(503, 'generation_unavailable');
   if (reason === 'storage_unavailable' ||
       reason === 'storage_inconsistent') return reject(503, 'storage_unavailable');
   if (reason === 'approval_required' ||
@@ -113,7 +116,7 @@ function operationFailure(result) {
  */
 export function createAuthenticatedWebProjectOperation({
   operation, expectedOrigin, accessIssuer, accessAudience, db, bucket, runner,
-  fetchImpl, nowSeconds,
+  infer, fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
   const readsStatus = operation === 'status';
@@ -202,13 +205,15 @@ export function createAuthenticatedWebProjectOperation({
       }
     }
 
-    const parsed = await readJson(request);
+    const parsed = await readJson(request, operation === 'generate_app' ? 8192 : MAX_JSON_BYTES);
     if (!parsed.ok) return reject(parsed.status, parsed.reason);
 
     let result;
     try {
       const principal = verified.principal;
-      if (operation === 'advance') {
+      if (operation === 'generate_app') {
+        result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, db, infer });
+      } else if (operation === 'advance') {
         result = await handleWebCounterAdvance({ request: parsed.value, principal, db, bucket, runner });
       } else if (operation === 'stage_counter') {
         result = await stageTrustedWebCounterProposal({
