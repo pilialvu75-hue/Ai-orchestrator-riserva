@@ -41,8 +41,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     LocalInferenceModelIds.phi3_5_mini,
   };
 
-  static const Set<String> _desktopValidatedModelIds =
-      AndroidFfiRuntimeModelIds.validatedModelIds;
+  static const Set<String> _desktopValidatedModelIds = {
+    ...AndroidFfiRuntimeModelIds.validatedModelIds,
+    // Windows-only, opt-in catalogue candidate; runtime GGUF decoding is
+    // separately verified on the physical device.
+    'minicpm5_2b',
+  };
 
   final bool Function() _developerModeProvider;
 
@@ -594,6 +598,17 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   }
 
   bool _isModelAllowedOnPlatform(String modelId) {
+    final normalizedId = modelId.trim().toLowerCase();
+    // This opt-in candidate is Windows-only for now. Handle the catalogue ID
+    // and imported GGUF filenames before the broad desktop/mobile allowlists,
+    // so it is neither blocked in production Windows builds nor unintentionally
+    // enabled on mobile, macOS or Linux.
+    if (normalizedId == 'minicpm5_2b' ||
+        normalizedId.contains('minicpm5-2b') ||
+        normalizedId.contains('minicpm-5-2b')) {
+      return Platform.isWindows;
+    }
+
     final baseAllowed = _isDesktopPlatform()
         ? _desktopValidatedModelIds
         : _mobileValidatedModelIds;
