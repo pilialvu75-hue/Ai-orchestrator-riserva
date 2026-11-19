@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:ai_orchestrator/features/module_library/presentation/delta_codec_demo_page.dart';
 import 'dart:io';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
@@ -482,6 +483,13 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
       appBar: AppBar(
         title: const Text('Moduli'),
         actions: [
+          IconButton(
+            tooltip: 'Prova modulo Delta Codec (offline)',
+            icon: const Icon(Icons.functions),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const DeltaCodecDemoPage()),
+            ),
+          ),
           if (_connected && !_externalRepository)
             IconButton(
               tooltip: 'Lab moduli',
