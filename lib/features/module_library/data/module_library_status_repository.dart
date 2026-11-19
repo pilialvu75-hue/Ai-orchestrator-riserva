@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/features/module_library/data/module_library_intake_source.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_library_development_source.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
@@ -16,12 +17,15 @@ final class ModuleLibraryStatusRepository {
     WorkshopLibraryGitHubAuthClient? authClient,
     http.Client? client,
     ModuleResearchStatusSource? researchSource,
+    ModuleLibraryDevelopmentSource? developmentSource,
   })  : _credentialStore = credentialStore ?? WorkshopLibraryGitHubCredentialStore(),
         _configStore = configStore ?? ModuleLibraryGitHubConfigStore(),
         _authClient = authClient ?? WorkshopLibraryGitHubAuthClient(),
         _client = client ?? http.Client(),
         _researchSource =
-            researchSource ?? GitHubDiagnosticsResearchStatusSource();
+            researchSource ?? GitHubDiagnosticsResearchStatusSource(),
+        _developmentSource =
+            developmentSource ?? ModuleLibraryDevelopmentSource(client: client);
 
   static const String _repository =
       'pilialvu75-hue/AI-Orchestrator-Module-Library';
@@ -31,6 +35,22 @@ final class ModuleLibraryStatusRepository {
   final WorkshopLibraryGitHubAuthClient _authClient;
   final http.Client _client;
   final ModuleResearchStatusSource _researchSource;
+  final ModuleLibraryDevelopmentSource _developmentSource;
+
+  Future<List<ModuleDevelopmentEntry>> loadDevelopment() async {
+    final credential = await _usableCredential();
+    return _developmentSource.load(token: credential.accessToken);
+  }
+
+  Future<ModuleDevelopmentPackage> loadDevelopmentPackage(
+    ModuleDevelopmentEntry entry,
+  ) async {
+    final credential = await _usableCredential();
+    return _developmentSource.loadPackage(
+      token: credential.accessToken,
+      entry: entry,
+    );
+  }
 
   Future<List<ModuleLibraryIntakeEntry>> loadIntake() async {
     final credential = await _usableCredential();
