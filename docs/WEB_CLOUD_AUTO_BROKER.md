@@ -103,12 +103,11 @@ spec, sorgenti, digest e provenienza del modello sotto quella identità. Una
 generazione interrotta resta identificabile senza avviare un secondo job.
 
 Per abilitare nuove generazioni serve la migrazione `006`, il piano Workers Free
-verificato dall'operatore, `AIVEXUS_WEB_BUILDER_FREE_ENABLED=true` e una sola
-rotta `coding` con `webBuilderOnly: true`, il modello Cloudflare
-`@cf/google/gemma-4-26b-a4b-it` e l'endpoint diretto Workers AI
-`/client/v4/accounts/<account-id>/ai/v1/chat/completions`. Il token limitato a
-Workers AI si configura come segreto server. Questa rotta viene esclusa da
-AUTO e dal catalogo diagnostico. Il generatore non cambia modello al fallimento.
+verificato dall'operatore, `AIVEXUS_WEB_BUILDER_FREE_ENABLED=true` e il binding
+Pages Workers AI `AIVEXUS_WEB_BUILDER_AI`. Il generatore richiama il modello
+`@cf/google/gemma-4-26b-a4b-it` tramite il binding. D1 ammette sei tentativi per
+identità e 24 complessivi in 24 ore, inclusi gli esiti falliti. AUTO e il
+catalogo diagnostico continuano a usare le proprie configurazioni.
 Lo stato `generated` conferma il salvataggio dei sorgenti. Test, anteprima ed
 esportazione appartengono ai passaggi successivi.
 

@@ -716,18 +716,12 @@ test('Pages generates and persists sources through the dedicated free route', as
   const token = await signing.sign({ iat, nbf: iat, exp: iat + 300 });
   const otherToken = await signing.sign({ iat, nbf: iat, exp: iat + 300, sub: 'other-owner' });
   const model = '@cf/google/gemma-4-26b-a4b-it';
-  const endpoint = 'https://api.cloudflare.com/client/v4/accounts/' + '0'.repeat(32) + '/ai/v1/chat/completions';
-  const route = {
-    id: 'builder-free', endpoint, model, webBuilderOnly: true, apiKeySecret: 'TEST_BUILDER_KEY',
-  };
   const env = {
     AIVEXUS_WEB_ORIGIN: origin,
     AIVEXUS_WEB_ACCESS_ISSUER: issuer,
     AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_D1: db,
     AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
-    CANTIERE_CLOUD_ROUTES_JSON: JSON.stringify({ coding: [route] }),
-    TEST_BUILDER_KEY: 'fixture-not-a-secret',
   };
   const path = '/api/cantiere/proposals/generate';
   const submit = (assertion, payload, bindings = env, requestOrigin = origin) => generateApplication({
@@ -750,22 +744,23 @@ test('Pages generates and persists sources through the dedicated free route', as
   ]);
   let started;
   const reachedProvider = new Promise(resolve => { started = resolve; });
-  globalThis.fetch = async (url, options) => {
-    if (String(url) === `${issuer}/cdn-cgi/access/certs`) return Response.json({ keys: [signing.jwk] });
-    assert.equal(String(url), endpoint);
-    assert.equal(options.redirect, 'error');
-    const request = JSON.parse(options.body);
-    assert.equal(request.model, model);
+  globalThis.fetch = async url => {
+    assert.equal(String(url), `${issuer}/cdn-cgi/access/certs`);
+    return Response.json({ keys: [signing.jwk] });
+  };
+  env.AIVEXUS_WEB_BUILDER_AI = { async run(selectedModel, request) {
+    assert.equal(selectedModel, model);
     assert.equal(request.max_tokens, 4096);
+    assert.equal(request.store, false);
     const prompt = request.messages.at(-1).content;
     prompts.push(prompt);
     if (prompt === first.prompt) {
       started();
       await wait;
     }
-    if (prompt === 'Provider non disponibile') return new Response(null, { status: 429 });
+    if (prompt === 'Provider non disponibile') throw new Error('Simulated quota error');
     const fixture = cases.get(prompt);
-    return Response.json({
+    return {
       model,
       choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({
         title: fixture?.title ?? 'Fixture non valida', requirements: [prompt],
@@ -774,14 +769,14 @@ test('Pages generates and persists sources through the dedicated free route', as
           { path: fixture?.file ?? '../index.html', content: 'source fixture' },
         ],
       }) } }], usage: { completion_tokens: 100 },
-    });
-  };
+    };
+  } };
 
   assert.equal((await submit(null, first)).status, 401);
   assert.equal((await submit(token, first, env, 'https://different.invalid')).status, 403);
   assert.equal((await submit(token, first, { ...env, AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'false' })).status, 503);
   assert.equal((await submit(token, first, {
-    ...env, CANTIERE_CLOUD_ROUTES_JSON: JSON.stringify({ coding: [route, { ...route, id: 'other' }] }),
+    ...env, AIVEXUS_WEB_BUILDER_AI: undefined,
   })).status, 503);
   const capabilityResponse = await cloudCapabilities({ request: new Request(origin), env });
   assert.deepEqual((await capabilityResponse.json()).capabilities, []);
@@ -837,6 +832,10 @@ test('Pages generates and persists sources through the dedicated free route', as
     assert.equal((await (await submit(token, bad)).json()).status, 'failed');
     assert.equal(prompts.filter(value => value === prompt).length, 1);
   }
+  const competing = await Promise.all(Array.from({ length: 3 }, () => submit(token,
+    { generationId: crypto.randomUUID(), prompt: 'Una scheda per annotare libri.' })));
+  assert.deepEqual(competing.map(response => response.status).sort(), [200, 429, 429]);
+  assert.equal(prompts.length, 6);
   sqlite.prepare(`INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status, created_at)
     SELECT owner_subject, '00000000-0000-4000-8000-000000000001', prompt_sha256, 'generating', unixepoch()-181
     FROM web_app_generations WHERE generation_id = ?`).run(first.generationId);

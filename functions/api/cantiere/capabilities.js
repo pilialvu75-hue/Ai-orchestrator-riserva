@@ -28,7 +28,6 @@ function parseRoutes(env) {
     const valid = [];
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
-      if (row.webBuilderOnly === true) continue;
       const id = typeof row.id === 'string' ? row.id.trim() : '';
       const endpoint =
         typeof row.endpoint === 'string' ? row.endpoint.trim() : '';

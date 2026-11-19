@@ -7,9 +7,16 @@ Choose the other file names and number of files based on the brief. Use lowercas
 local dependencies only, no package installation, secrets or external network requests.
 Keep the application compact enough to return all source within the response limit.`;
 
+// Count reservations atomically before inference, including failed attempts.
 const CLAIM = `INSERT INTO web_app_generations
   (owner_subject, generation_id, prompt_sha256, status)
-  VALUES (?1, ?2, ?3, 'generating')
+  SELECT ?1, ?2, ?3, 'generating' WHERE NOT EXISTS (
+    SELECT 1 FROM web_app_generations WHERE owner_subject = ?1 AND created_at >= unixepoch() - 86400
+    LIMIT 1 OFFSET 5
+  ) AND NOT EXISTS (
+    SELECT 1 FROM web_app_generations WHERE created_at >= unixepoch() - 86400
+    LIMIT 1 OFFSET 23
+  )
   ON CONFLICT(owner_subject, generation_id) DO NOTHING
   RETURNING generation_id`;
 const READ = `SELECT CASE WHEN status = 'generating' AND unixepoch() - created_at >= 180
@@ -98,7 +105,8 @@ export async function generateWebApplication({ request, ownerSubject, db, infer 
   const claim = await db.prepare(CLAIM).bind(ownerSubject, generationId, promptSha256).first();
   if (!claim) {
     const winner = await db.prepare(READ).bind(ownerSubject, generationId).first();
-    if (!winner || winner.promptSha256 !== promptSha256) {
+    if (!winner) return { ok: false, reason: 'generation_quota_exceeded' };
+    if (winner.promptSha256 !== promptSha256) {
       return { ok: false, reason: 'generation_conflict' };
     }
     return receipt(generationId, winner.status, winner.resultJson);

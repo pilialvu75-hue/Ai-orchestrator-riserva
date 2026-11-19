@@ -105,6 +105,7 @@ function operationFailure(result) {
   if (reason === 'execution_not_found') return reject(404, 'execution_not_found');
   if (reason === 'generation_not_found') return reject(404, 'generation_not_found');
   if (reason === 'generation_conflict') return reject(409, 'generation_conflict');
+  if (reason === 'generation_quota_exceeded') return reject(429, reason);
   if (reason === 'generation_unavailable') return reject(503, 'generation_unavailable');
   if (reason === 'storage_unavailable' ||
       reason === 'storage_inconsistent') return reject(503, 'storage_unavailable');

@@ -11,3 +11,6 @@ CREATE TABLE IF NOT EXISTS web_app_generations (
     (status IN ('generating', 'failed') AND result_json IS NULL)
   )
 );
+
+CREATE INDEX IF NOT EXISTS web_app_generations_owner_recent ON web_app_generations (owner_subject, created_at);
+CREATE INDEX IF NOT EXISTS web_app_generations_recent ON web_app_generations (created_at);

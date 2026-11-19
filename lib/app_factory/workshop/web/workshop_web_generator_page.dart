@@ -136,6 +136,11 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         result['error'] == 'generation_not_found') {
       return null;
     }
+    if (response.statusCode == 429 &&
+        result['error'] == 'generation_quota_exceeded') {
+      throw const _GeneratorRequestException(
+          'Limite di generazione raggiunto. Riprova più tardi.');
+    }
     if (response.statusCode == 503 &&
         result['error'] == 'generation_unavailable') {
       throw const _GeneratorRequestException(
