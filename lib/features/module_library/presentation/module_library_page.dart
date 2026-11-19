@@ -536,7 +536,23 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
             ),
         ],
       ),
-      body: _loading
+      body: Column(
+        children: [
+          Card(
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: ListTile(
+              leading: const Icon(Icons.functions),
+              title: const Text('Delta Codec'),
+              subtitle: const Text('Modulo sperimentale offline · Tocca per utilizzarlo'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const DeltaCodecDemoPage(),
+                ),
+              ),
+            ),
+          ),
+          Expanded(child: _loading
           ? const Center(child: CircularProgressIndicator())
           : !_connected
               ? _ConnectionView(
@@ -563,7 +579,9 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
                       onRefresh: _refresh,
                       curatorLoading: _curatorLoading,
                       onCurator: _runCuratorForCapability,
-                    ),
+                    )),
+        ],
+      ),
     );
   }
 }
