@@ -61,7 +61,7 @@ test('valid signed assertion is verified from header and pinned issuer JWKS', as
     requests++;
     assert.equal(url, certsUrl);
     assert.equal(init.method, 'GET');
-    assert.equal(init.redirect, 'error');
+    assert.equal(init.redirect, 'manual');
     assert.equal(init.credentials, 'omit');
     assert.equal(init.cache, 'no-store');
     assert.equal(init.headers.Accept, 'application/json');
