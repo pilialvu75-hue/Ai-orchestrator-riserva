@@ -107,14 +107,14 @@ export function createCloudflareAccessPrincipalResolver({
     try {
       const response = await fetchImpl(certsUrl, {
         method: 'GET',
-        redirect: 'error',
+        redirect: 'manual',
         credentials: 'omit',
         cache: 'no-store',
         headers: { Accept: 'application/json' },
         signal: controller.signal,
       });
-      // Reject a fake/mock response claiming a different origin or URL,
-      // even if the fetch implementation did not honor redirect:'error'.
+      // Workerd supports manual redirects. The parser rejects 3xx responses,
+      // and this check pins the final response to the configured JWKS URL.
       if (typeof response?.url === 'string' && response.url &&
           response.url !== certsUrl) return null;
       return await readBoundedJson(response);
