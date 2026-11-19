@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { onRequest as reserveExecution } from
+  '../../functions/api/cantiere/executions/reserve.js';
 import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
 
@@ -134,13 +136,14 @@ function d1Fixture() {
 function webRequest(token, payload, {
   requestOrigin = origin, method = 'POST',
   type = 'application/json', site = 'same-origin',
+  path = '/api/cantiere/private/project-operation',
 } = {}) {
   const headers = new Headers();
   if (token !== null) headers.set('Cf-Access-Jwt-Assertion', token);
   if (requestOrigin !== null) headers.set('Origin', requestOrigin);
   if (type !== null) headers.set('Content-Type', type);
   if (site !== null) headers.set('Sec-Fetch-Site', site);
-  return new Request(origin + '/api/cantiere/private/project-operation', {
+  return new Request(origin + path, {
     method, headers,
     ...(method !== 'GET' ? { body: typeof payload === 'string'
       ? payload : JSON.stringify(payload) } : {}),
@@ -303,6 +306,55 @@ test('browser cannot choose server operation or reserve with spoofed approval', 
   assert.equal(f.reservations.size, 0);
   const invalid = setup(f, signing, 'build-and-deploy');
   assert.equal((await invalid.handler(webRequest(token, { projectId }))).status, 503);
+});
+
+test('Pages reservation route uses server bindings and preserves ownership and idempotency', async t => {
+  const signing = await signer();
+  const f = d1Fixture();
+  const issuedAt = Math.floor(Date.now() / 1000) - 10;
+  const claims = { iat: issuedAt, nbf: issuedAt, exp: issuedAt + 300 };
+  const token = await signing.sign(claims);
+  const otherToken = await signing.sign({ ...claims, sub: 'access-subject-b' });
+  const env = {
+    AIVEXUS_WEB_ORIGIN: origin,
+    AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_D1: f.db,
+  };
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(url, issuer + '/cdn-cgi/access/certs');
+    return Response.json({ keys: [signing.jwk] });
+  });
+  const send = (assertion, options, bindings = env) => reserveExecution({
+    request: webRequest(assertion, { projectId }, {
+      path: '/api/cantiere/executions/reserve', ...options,
+    }),
+    env: bindings,
+  });
+
+  assert.equal((await send(null)).status, 401);
+  assert.equal((await send(token, { requestOrigin: null })).status, 403);
+  assert.equal((await send(token, {}, {})).status, 503);
+  assert.equal((await send(token, {}, { ...env, AIVEXUS_WEB_ACCESS_AUDIENCE: '' })).status, 503);
+  assert.equal(f.prepares, 0);
+  assert.equal((await send(token)).status, 409);
+
+  const approve = setup(f, signing, 'approve');
+  const approval = await approve.handler(webRequest(await signing.sign(), {
+    projectId, expectedRevision: 1, expectedSpecSha256: digest,
+  }));
+  assert.equal(approval.status, 200);
+  assert.equal((await send(otherToken)).status, 409);
+  assert.equal(f.reservations.size, 0);
+
+  const first = await body(await send(token));
+  const replay = await body(await send(token));
+  assert.equal(first.status, 'reserved');
+  assert.equal(first.created, true);
+  assert.equal(replay.created, false);
+  assert.equal(replay.executionId, first.executionId);
+  assert.equal(replay.attemptId, first.attemptId);
+  assert.equal(f.reservations.size, 1);
 });
 
 test('storage failures and JWKS outages return sanitized errors without mutating project', async () => {

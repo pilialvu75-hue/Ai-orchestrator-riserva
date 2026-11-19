@@ -3,6 +3,7 @@ name: Aivexus Web Authenticated D1 Operation Gate
 on:
   pull_request:
     paths:
+      - 'functions/api/cantiere/executions/reserve.js'
       - 'scripts/web/authenticated_web_project_operation.mjs'
       - 'test/airlab/web_authenticated_project_operation.mjs'
       - '.github/workflows/web-authenticated-project-operation.yml'
@@ -15,6 +16,7 @@ on:
     branches:
       - main
     paths:
+      - 'functions/api/cantiere/executions/reserve.js'
       - 'scripts/web/authenticated_web_project_operation.mjs'
       - 'test/airlab/web_authenticated_project_operation.mjs'
       - '.github/workflows/web-authenticated-project-operation.yml'
