@@ -1,6 +1,6 @@
 const EXECUTION_ID = /^web-exec-[0-9a-f]{32}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
+export const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 
 const READ_OWNED_RECEIPT = `
 SELECT receipt.artifact_sha256 AS sha256,
@@ -16,6 +16,20 @@ WHERE execution.owner_subject = ?1 AND execution.execution_id = ?2
 LIMIT 1
 `;
 
+export async function webZipSha256(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), byte =>
+    byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function readVerifiedWebZip({ bucket, storageKey, size, sha256 }) {
+  const object = await bucket.get(storageKey);
+  if (!object || object.size !== size) return null;
+  const bytes = await object.arrayBuffer();
+  if (bytes.byteLength !== size || await webZipSha256(bytes) !== sha256) return null;
+  return bytes;
+}
+
 export async function readWebExecutionZip({ db, bucket, ownerSubject, executionId }) {
   if (!EXECUTION_ID.test(executionId ?? '')) return { error: 'invalid_request' };
   const receipt = await db.prepare(READ_OWNED_RECEIPT)
@@ -28,13 +42,6 @@ export async function readWebExecutionZip({ db, bucket, ownerSubject, executionI
       !Number.isSafeInteger(size) || size <= 0 || size > MAX_ARTIFACT_BYTES) {
     return { error: 'artifact_unavailable' };
   }
-  const object = await bucket.get(storageKey);
-  if (!object || object.size !== size) return { error: 'artifact_unavailable' };
-  const bytes = await object.arrayBuffer();
-  if (bytes.byteLength !== size) return { error: 'artifact_unavailable' };
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  const actual = Array.from(new Uint8Array(digest), byte =>
-    byte.toString(16).padStart(2, '0')).join('');
-  if (actual !== sha256) return { error: 'artifact_unavailable' };
-  return { bytes };
+  const bytes = await readVerifiedWebZip({ bucket, storageKey, size, sha256 });
+  return bytes ? { bytes } : { error: 'artifact_unavailable' };
 }

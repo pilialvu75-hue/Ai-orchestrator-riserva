@@ -8,10 +8,11 @@ import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 
 const builder = 'scripts/web/build_counter_smoke.py';
+const python = process.env.AIVEXUS_COUNTER_PYTHON || 'python3';
 const digest = (buffer) => createHash('sha256').update(buffer).digest('hex');
 
 function execute(args) {
-  return spawnSync('python3', [builder, ...args], { encoding: 'utf8' });
+  return spawnSync(python, [builder, ...args], { encoding: 'utf8' });
 }
 function withOutput(check) {
   const root = mkdtempSync(join(tmpdir(), 'aivexus-web-counter-'));
@@ -49,7 +50,7 @@ test('counter smoke creates real files, validated ZIP and receipt with byte hash
     for (const [file, sha] of Object.entries(receipt.sourceSha256)) {
       assert.equal(digest(readFileSync(join(out, 'source', file))), sha);
     }
-    const integrity = spawnSync('python3', [
+    const integrity = spawnSync(python, [
       '-m', 'zipfile', '-t', join(out, 'aivexus-web-counter-smoke.zip'),
     ], { encoding: 'utf8' });
     assert.equal(integrity.status, 0, integrity.stderr);
