@@ -122,12 +122,12 @@ export function createWebD1ExecutionJournal(db) {
   async function change(sql, args) {
     try {
       const result = await db.prepare(sql).bind(...args).run();
-      if (result?.success === false || !Number.isInteger(result?.meta?.changes)) {
+      const changes = result?.meta?.changes;
+      if (result?.success === false || !Number.isSafeInteger(changes) || changes < 0) {
         return fail('storage_unavailable');
       }
-      if (result.meta.changes === 1) return { ok: true, changed: true };
-      if (result.meta.changes === 0) return fail('stale_or_not_authorized');
-      return fail('storage_inconsistent');
+      // The attempt key selects one row; D1 also counts journal/receipt triggers.
+      return changes > 0 ? { ok: true, changed: true } : fail('stale_or_not_authorized');
     } catch (_) {
       // SQLite constraint violations, internal SQL and credentials stay private.
       return fail('storage_unavailable');

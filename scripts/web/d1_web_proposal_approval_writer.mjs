@@ -72,12 +72,12 @@ function verifiedSubject(principal) {
 async function update(db, sql, params) {
   try {
     const result = await db.prepare(sql).bind(...params).run();
-    if (result?.success === false || !Number.isInteger(result?.meta?.changes)) {
+    const changes = result?.meta?.changes;
+    if (result?.success === false || !Number.isSafeInteger(changes) || changes < 0) {
       return fail('storage_unavailable');
     }
-    return result.meta.changes === 1 ? { ok: true } :
-      result.meta.changes === 0 ? fail('stale_or_not_ready') :
-      fail('storage_inconsistent');
+    // The WHERE matches one primary key; D1 also counts the audit trigger.
+    return changes > 0 ? { ok: true } : fail('stale_or_not_ready');
   } catch (_) {
     // Never emit D1 errors, SQL or credentials into browser responses.
     return fail('storage_unavailable');

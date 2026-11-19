@@ -416,7 +416,12 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
           const params = Object.fromEntries(args.map((value, index) => ['?' + (index + 1), value]));
           return {
             first: async () => statement.get(params) ?? null,
-            run: async () => ({ success: true, meta: { changes: statement.run(params).changes } }),
+            run: async () => {
+              const totalChanges = sqlite.prepare('SELECT total_changes() AS count');
+              const before = totalChanges.get().count;
+              statement.run(params);
+              return { success: true, meta: { changes: totalChanges.get().count - before } };
+            },
           };
         },
       };
