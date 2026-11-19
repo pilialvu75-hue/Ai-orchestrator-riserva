@@ -23,9 +23,16 @@ try {
     New-Item -ItemType Directory -Path $folder -Force | Out-Null
     [System.IO.File]::WriteAllText($tokenPath, $protected,
         (New-Object System.Text.UTF8Encoding($false)))
-    # Clear only the original secret; never print it or send it to a remote host.
-    if (([string](Get-Clipboard -Raw)).Trim() -ceq $token) {
-        Set-Clipboard -Value ''
+    # Clear only if the clipboard still contains our original secret.
+    # Windows PowerShell 5.1 rejects Set-Clipboard -Value '' (empty -> null).
+    # Use a single space to replace the secret without passing a null value.
+    # Cleanup failure must not hide a successful DPAPI write.
+    try {
+        if (([string](Get-Clipboard -Raw)).Trim() -ceq $token) {
+            Set-Clipboard -Value ' ' -ErrorAction Stop
+        }
+    } catch {
+        Write-Warning 'Clipboard cleanup failed. Clear the clipboard manually; the key was already stored.'
     }
     Write-Host 'AIVEXUS Desktop: local key protected with Windows DPAPI for this Windows user.'
     Write-Host 'Run this setup again after AIVEXUS rotates the connection key.'
