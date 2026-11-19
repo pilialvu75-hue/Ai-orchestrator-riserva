@@ -22,7 +22,8 @@ class _CompletedRuntime extends ResidentCompletionRuntime {
     required String sessionId, required String prompt, required int maxTokens,
     required double temperature, required double topP,
     required double repeatPenalty, required int threads,
-    int? batchSize, String? device, required CancellationToken cancellation,
+    int? batchSize, int? ubatchSize, bool flashAttention = false,
+    String? device, required CancellationToken cancellation,
     void Function(int cached, int evaluated)? onPromptUsage,
     bool rejectTokenLimit = false,
   }) async* {
