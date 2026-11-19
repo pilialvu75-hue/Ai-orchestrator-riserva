@@ -172,8 +172,39 @@ jobs:
           --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=true
           test/features/computer_use
 
-      - name: Build AIVEXUS Windows (not a second application)
-        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+      - name: Build AIVEXUS Windows with Computer Use, CUDA and ChatGPT local test menu
+        run: >-
+          flutter build windows --release
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+          --dart-define=AIVEXUS_WINDOWS_CUDA_QA=true
+          --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=true
+
+      - name: Package ChatGPT Desktop local MCP adapter in application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          $toolsDir = Join-Path $releaseDir 'mcp-tools'
+          New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
+          $source = Join-Path $PWD 'scripts\chatgpt_bridge\aivexus_mcp.ps1'
+          $dest = Join-Path $toolsDir 'aivexus_mcp.ps1'
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw 'Missing ChatGPT MCP adapter; refusing an incomplete beta.'
+          }
+          Copy-Item -LiteralPath $source -Destination $dest
+          if (-not (Test-Path -LiteralPath $dest -PathType Leaf)) {
+            throw 'ChatGPT MCP adapter was not packaged.'
+          }
+          $tokens = $null
+          $parseErrors = $null
+          [Management.Automation.Language.Parser]::ParseFile($dest, [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            throw "Packaged ChatGPT MCP adapter syntax errors: $($parseErrors.Count)"
+          }
+
+      - name: Test authenticated local ChatGPT bridge
+        shell: pwsh
+        run: flutter test test/core/diagnostics/chatgpt_bridge/
 
       - name: Bundle and audit pinned ASUS CUDA engine (Beta only)
         shell: pwsh
