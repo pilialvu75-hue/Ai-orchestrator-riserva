@@ -9,6 +9,8 @@ import { onRequest as verify } from '../../functions/api/cantiere/proposals/veri
 import { onRequest as download } from '../../functions/api/cantiere/proposals/download.js';
 import { onRequest as readSource } from '../../functions/api/cantiere/proposals/source.js';
 import { onRequest as preview } from '../../functions/api/cantiere/proposals/preview.js';
+import { onRequest as revisions } from '../../functions/api/cantiere/proposals/revisions.js';
+import { onRequest as selectRevision } from '../../functions/api/cantiere/proposals/select-revision.js';
 import { runEncryptedWebApplicationJob } from '../../scripts/web/run_encrypted_web_application_job.mjs';
 import {
   decodeRunnerBase64, decodeWebAppJob, decodeWebAppResult, encodeRunnerBase64,
@@ -27,8 +29,9 @@ async function fixture({ now } = {}) {
     generateRsa(), generateRsa(), importWebAppAuthorizationKey(authorizationSecret),
   ]);
   const source = { title: 'Fixture privata', requirements: ['Attiva il promemoria'], files: [
-    { path: 'index.html', content: '<!doctype html><button id="toggle">Attiva</button><output id="state">Spento</output><script src="app.js"></script>' },
+    { path: 'index.html', content: '<!doctype html><link rel="stylesheet" href="theme.css"><button id="toggle">Attiva</button><output id="state">Spento</output><script src="app.js"></script>' },
     { path: 'app.js', content: 'document.querySelector("#toggle").onclick = () => { document.querySelector("#state").textContent = "Attivo"; };' },
+    { path: 'theme.css', content: 'output { color: rgb(0, 20, 30); }' },
   ] };
   const checks = [{ action: 'click', selector: '#toggle' }, { action: 'text', selector: '#state', value: 'Attivo' }];
   const resultPublicKeySpki = encodeRunnerBase64(new Uint8Array(await crypto.subtle.exportKey('spki', pages.publicKey)));
@@ -107,7 +110,7 @@ async function temporaryD1(t) {
   }
   const sqlite = new DatabaseSync(':memory:');
   t.after(() => sqlite.close());
-  for (const migration of ['006_web_app_generations.sql', '007_web_app_verifications.sql']) {
+  for (const migration of ['006_web_app_generations.sql', '007_web_app_verifications.sql', '008_web_app_revision_history.sql']) {
     sqlite.exec(readFileSync(new URL('../../scripts/web/sql/' + migration, import.meta.url), 'utf8'));
   }
   return { db: { prepare(sql) {
@@ -116,12 +119,15 @@ async function temporaryD1(t) {
       const params = Object.fromEntries(args.map((value, index) => [
         '?' + (index + 1), value instanceof ArrayBuffer ? new Uint8Array(value) : value,
       ]));
-      return { async first() { return statement.get(params) ?? null; } };
+      return {
+        async first() { return statement.get(params) ?? null; },
+        async all() { return { success: true, results: statement.all(params) }; },
+      };
     } };
   } }, async reopen() {} };
 }
 
-test('Pages reserves one verification and serves its verified ZIP only to the owner', { skip: !executable, timeout: 30000 }, async t => {
+test('Pages verifies Web versions, restores history and serves ZIP only to the owner', { skip: !executable, timeout: 35000 }, async t => {
   const f = await fixture();
   const platform = await temporaryD1(t);
   const accessKey = await crypto.subtle.generateKey({
@@ -142,41 +148,55 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
   const [owner, stranger] = await Promise.all([signed('owner'), signed('stranger')]);
   const repo = { id: 1235011890 };
   const head = 'ab'.repeat(20);
-  const storage = 'https://artifacts.blob.core.windows.net/test-fixture';
+  const storage = 'https://artifacts.blob.core.windows.net/test-fixture/';
   const model = '@cf/google/gemma-4-26b-a4b-it';
   const env = {
     AIVEXUS_WEB_ORIGIN: origin, AIVEXUS_WEB_ACCESS_ISSUER: issuer, AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
-    AIVEXUS_WEB_BUILDER_AI: { async run() { return { model, choices: [{ finish_reason: 'stop', message: {
-      content: JSON.stringify({ ...f.source, checks: f.checks }),
-    } }] }; } },
+    AIVEXUS_WEB_BUILDER_AI: { async run(selectedModel, request) {
+      assert.equal(selectedModel, model);
+      const input = request.messages.at(-1).content;
+      let output = { ...f.source, checks: f.checks };
+      if (input.startsWith('{')) {
+        const revision = JSON.parse(input);
+        assert.deepEqual(revision.checks, f.checks);
+        modelRevisions++;
+        output = {
+          changedFiles: [{ path: 'theme.css', content: `output { color: rgb(${modelRevisions}, 20, 30); }` }],
+          removedPaths: [], requirements: revision.source.requirements,
+        };
+      }
+      return { model, choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(output) } }] };
+    } },
     AIVEXUS_COUNTER_GITHUB_TOKEN: 'fake', AIVEXUS_WEB_BUILDER_GITHUB_HEAD_SHA: head,
     AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY: f.authorizationSecret,
     AIVEXUS_WEB_BUILDER_JOB_PUBLIC_KEY: encodeRunnerBase64(new Uint8Array(await crypto.subtle.exportKey('spki', f.runner.publicKey))),
     AIVEXUS_WEB_BUILDER_RESULT_PUBLIC_KEY: f.encodeJob.resultPublicKeySpki,
     AIVEXUS_WEB_BUILDER_RESULT_PRIVATE_KEY: encodeRunnerBase64(new Uint8Array(await crypto.subtle.exportKey('pkcs8', f.pages.privateKey))),
   };
-  let archive;
+  const archives = new Map();
   let posts = 0;
   let downloads = 0;
   let complete = false;
   let failDispatch = false;
+  let modelRevisions = 0;
   const localFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = localFetch; });
   globalThis.fetch = async (url, opts) => {
       if (String(url).startsWith('http://127.0.0.1:')) return localFetch(url, opts);
       const target = String(url);
       if (target === issuer + '/cdn-cgi/access/certs') return Response.json({ keys: [jwk] });
-      if (url === storage) {
+      if (target.startsWith(storage)) {
         downloads++;
         assert.equal(opts.headers, undefined);
         assert.equal(opts.credentials, 'omit');
-        return new Response(archive);
+        return new Response(archives.get(Number(target.slice(storage.length))));
       }
       const path = new URL(url).pathname;
       assert.equal(new URL(url).origin, 'https://api.github.com');
       if (path.endsWith('/web-application-runner.yml/dispatches')) {
         posts++;
+        const runId = 19 + posts;
         const { ref, inputs } = JSON.parse(opts.body);
         assert.equal(ref, 'main');
         assert.deepEqual(Object.keys(inputs).sort(), ['job', 'ticket']);
@@ -184,22 +204,24 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
         const output = await runEncryptedWebApplicationJob({ ...f.job,
           input: inputs.job, ticket: inputs.ticket, executable });
         assert.ok(!Buffer.from(output).includes(Buffer.from(f.source.files[1].content)));
-        archive = gitHubArchive(output);
-        return Response.json({ workflow_run_id: 19 });
+        archives.set(runId, gitHubArchive(output));
+        return Response.json({ workflow_run_id: runId });
       }
-      if (path.endsWith('/runs/19')) return Response.json({
-        id: 19, event: 'workflow_dispatch', run_attempt: 1, head_branch: 'main', head_sha: head,
+      const runId = Number(path.match(/\/runs\/(\d+)/)?.[1]);
+      if (path.endsWith(`/runs/${runId}`)) return Response.json({
+        id: runId, event: 'workflow_dispatch', run_attempt: 1, head_branch: 'main', head_sha: head,
         path: '.github/workflows/web-application-runner.yml', repository: repo, head_repository: repo,
         status: complete ? 'completed' : 'in_progress', conclusion: complete ? 'success' : null,
       });
-      if (path.endsWith('/runs/19/artifacts')) return Response.json({ total_count: 1, artifacts: [{
-        id: 23, name: 'aivexus-application-envelope', expired: false, size_in_bytes: archive.length,
-        digest: 'sha256:' + await runnerPayloadSha256(archive), workflow_run: {
-          id: 19, repository_id: repo.id, head_repository_id: repo.id, head_branch: 'main', head_sha: head,
+      if (path.endsWith(`/runs/${runId}/artifacts`)) return Response.json({ total_count: 1, artifacts: [{
+        id: runId, name: 'aivexus-application-envelope', expired: false, size_in_bytes: archives.get(runId).length,
+        digest: 'sha256:' + await runnerPayloadSha256(archives.get(runId)), workflow_run: {
+          id: runId, repository_id: repo.id, head_repository_id: repo.id, head_branch: 'main', head_sha: head,
         },
       }] });
-      assert.match(path, /\/artifacts\/23\/zip$/);
-      return new Response(null, { status: 302, headers: { location: storage } });
+      const artifactId = Number(path.match(/\/artifacts\/(\d+)\/zip$/)?.[1]);
+      assert.ok(archives.has(artifactId));
+      return new Response(null, { status: 302, headers: { location: storage + artifactId } });
   };
   function call(handler, route, token, body, query = '') {
     return handler({ request: new Request(`${origin}/api/cantiere/proposals/${route}${query}`, {
@@ -245,6 +267,40 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
   assert.equal(source.sourceSha256, generated.sourceSha256);
   assert.equal(source.source.files[0].content, f.source.files[1].content);
 
+  const generationIds = [generationId];
+  for (const instruction of ['Aggiungi un tema', 'Cambia colore', 'Aumenta il contrasto']) {
+    const id = crypto.randomUUID();
+    const payload = { generationId: id, baseGenerationId: generationIds.at(-1), instruction };
+    assert.equal((await call(revisions, 'revisions', stranger, payload)).status, 404);
+    const edits = await Promise.all(Array.from({ length: 3 }, () => call(revisions, 'revisions', owner, payload)));
+    const outcomes = await Promise.all(edits.map(response => response.json()));
+    assert.ok(outcomes.every(value => ['generating', 'generated'].includes(value.status)));
+    assert.equal((await call(revisions, 'revisions', owner, { ...payload, instruction: 'Richiesta diversa' })).status, 409);
+    assert.equal((await (await call(verify, 'verify', owner, { generationId: id })).json()).status, 'submitted');
+    assert.equal((await (await call(verify, 'verify', owner, { generationId: id })).json()).status, 'verified');
+    generationIds.push(id);
+  }
+  assert.equal(modelRevisions, 3);
+  assert.equal(posts, 4);
+  await platform.reopen();
+  const finalQuery = `?generationId=${generationIds.at(-1)}`;
+  assert.equal((await call(revisions, 'revisions', stranger, null, finalQuery)).status, 404);
+  const history = await (await call(revisions, 'revisions', owner, null, finalQuery)).json();
+  assert.equal(history.activeGenerationId, generationIds.at(-1));
+  assert.deepEqual(history.revisions.map(version => version.generationId), generationIds.slice().reverse());
+  assert.deepEqual(history.revisions.map(version => version.revision), [4, 3, 2, 1]);
+  assert.equal((await call(selectRevision, 'select-revision', stranger, { generationId })).status, 404);
+  assert.equal((await (await call(selectRevision, 'select-revision', owner, { generationId })).json()).activeGenerationId, generationId);
+  await platform.reopen();
+  const restored = await (await call(revisions, 'revisions', owner, null, finalQuery)).json();
+  assert.equal(restored.activeGenerationId, generationId);
+  for (const [index, id] of generationIds.entries()) {
+    const version = await (await call(readSource, 'source', owner, null, `?generationId=${id}`)).json();
+    assert.equal(version.source.files[0].content, f.source.files[1].content);
+    assert.equal(version.source.files[1].content, f.source.files[0].content);
+    assert.ok(version.source.files.find(file => file.path === 'theme.css').content.includes(`rgb(${index},`));
+  }
+
   await platform.db.prepare(`UPDATE web_app_verifications SET source_json = '{}'
     WHERE owner_subject = 'owner' AND generation_id = ?1 RETURNING generation_id`).bind(generationId).first();
   assert.equal((await call(readSource, 'source', owner, null, query)).status, 503);
@@ -261,5 +317,5 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
   const start = () => call(verify, 'verify', owner, { generationId: secondId });
   assert.equal((await (await start()).json()).status, 'review_required');
   assert.equal((await (await start()).json()).status, 'review_required');
-  assert.equal(posts, 2);
+  assert.equal(posts, 5);
 });

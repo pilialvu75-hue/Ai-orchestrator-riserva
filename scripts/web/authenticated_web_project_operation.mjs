@@ -18,12 +18,16 @@ import {
   readVerifiedWebApplicationSource,
 } from './d1_web_application_verification.mjs';
 import { previewWebApplication } from './web_application_preview.mjs';
+import {
+  createWebApplicationRevision, readWebApplicationRevisions, selectWebApplicationRevision,
+} from './d1_web_application_revisions.mjs';
 
 const MAX_JSON_BYTES = 2048;
 const OPERATIONS = new Set([
   'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
   'generate_app', 'generation_status',
   'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
+  'create_app_revision', 'app_revision_history', 'select_app_revision',
 ]);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
@@ -152,7 +156,8 @@ export function createAuthenticatedWebProjectOperation({
   const downloadsApp = operation === 'download_app';
   const previewsApp = operation === 'preview_app';
   const readsSource = operation === 'read_app_source' || previewsApp;
-  const readOnly = readsStatus || downloads || readsGeneration || readsVerification || downloadsApp || readsSource;
+  const readsHistory = operation === 'app_revision_history';
+  const readOnly = readsStatus || downloads || readsGeneration || readsVerification || downloadsApp || readsSource || readsHistory;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -228,10 +233,11 @@ export function createAuthenticatedWebProjectOperation({
       }
     }
 
-    if (readsGeneration || readsVerification || downloadsApp || readsSource) {
+    if (readsGeneration || readsVerification || downloadsApp || readsSource || readsHistory) {
       if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
       try {
-        const read = downloadsApp ? readWebApplicationZip : readsSource ? readVerifiedWebApplicationSource :
+        const read = readsHistory ? readWebApplicationRevisions :
+          downloadsApp ? readWebApplicationZip : readsSource ? readVerifiedWebApplicationSource :
           readsVerification ? readWebApplicationVerification : readWebApplicationGeneration;
         const result = await read({
           db, ownerSubject: verified.principal.subject,
@@ -245,7 +251,8 @@ export function createAuthenticatedWebProjectOperation({
       }
     }
 
-    const parsed = await readJson(request, operation === 'generate_app' ? 8192 : MAX_JSON_BYTES);
+    const modelInput = operation === 'generate_app' || operation === 'create_app_revision';
+    const parsed = await readJson(request, modelInput ? 8192 : MAX_JSON_BYTES);
     if (!parsed.ok) return reject(parsed.status, parsed.reason);
 
     let result;
@@ -253,6 +260,10 @@ export function createAuthenticatedWebProjectOperation({
       const principal = verified.principal;
       if (operation === 'generate_app') {
         result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, db, infer });
+      } else if (operation === 'create_app_revision') {
+        result = await createWebApplicationRevision({ request: parsed.value, ownerSubject: principal.subject, db, infer });
+      } else if (operation === 'select_app_revision') {
+        result = await selectWebApplicationRevision({ request: parsed.value, ownerSubject: principal.subject, db });
       } else if (operation === 'verify_app') {
         result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'advance') {
