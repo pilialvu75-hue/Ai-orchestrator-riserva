@@ -112,16 +112,20 @@ final class WindowsComputerUseAdapter
           'The selected application is not on the host allowlist.',
         ),
     };
+    // PowerShell's -Command parsing can corrupt a multiline Windows Forms
+    // program when Dart/Windows quotes it for CreateProcess. Supply the
+    // fixed, local QA script as UTF-16LE Base64 data instead; never evaluate
+    // model text, command-line paths or arbitrary user-provided scripts.
     final args = application == 'qa2048'
-        ? const <String>[
+        ? <String>[
             '-NoLogo',
             '-NoProfile',
             '-NonInteractive',
             '-STA',
             '-WindowStyle',
             'Hidden',
-            '-Command',
-            kWindows2048QaGameScript,
+            '-EncodedCommand',
+            _encodeUtf16(kWindows2048QaGameScript),
           ]
         : const <String>[];
     _targetWindow = null;
