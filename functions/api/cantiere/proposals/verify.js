@@ -9,7 +9,7 @@ export function onRequest({ request, env }) {
     accessAudience: env.AIVEXUS_WEB_ACCESS_AUDIENCE,
     db: env.AIVEXUS_WEB_D1,
     runner: {
-      token: env.AIVEXUS_WEB_BUILDER_GITHUB_TOKEN,
+      token: env.AIVEXUS_WEB_BUILDER_GITHUB_TOKEN || env.AIVEXUS_COUNTER_GITHUB_TOKEN,
       expectedHeadSha: env.AIVEXUS_WEB_BUILDER_GITHUB_HEAD_SHA,
       authorizationKey: env.AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY,
       jobPublicKey: env.AIVEXUS_WEB_BUILDER_JOB_PUBLIC_KEY,

@@ -38,7 +38,7 @@ jobs:
           AIVEXUS_WEB_BUILDER_JOB_PRIVATE_KEY: ${{ secrets.AIVEXUS_WEB_BUILDER_JOB_PRIVATE_KEY }}
           AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY: ${{ secrets.AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY }}
           AIVEXUS_WEB_BUILDER_FREE_ENABLED: ${{ vars.AIVEXUS_WEB_BUILDER_FREE_ENABLED }}
-          AIVEXUS_WEB_BUILDER_ACCOUNT_ID: ${{ vars.AIVEXUS_WEB_BUILDER_ACCOUNT_ID }}
+          AIVEXUS_WEB_BUILDER_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           AIVEXUS_BUILDER_WORKERS_AI_TOKEN: ${{ secrets.AIVEXUS_BUILDER_WORKERS_AI_TOKEN }}
         run: node scripts/web/build_web_application_runner_result.mjs "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/application.aivexus"
       - name: Upload only the encrypted result

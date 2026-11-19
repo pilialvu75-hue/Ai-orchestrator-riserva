@@ -148,7 +148,7 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
     AIVEXUS_WEB_BUILDER_AI: { async run() { return { model, choices: [{ finish_reason: 'stop', message: {
       content: JSON.stringify({ ...f.source, checks: f.checks }),
     } }] }; } },
-    AIVEXUS_WEB_BUILDER_GITHUB_TOKEN: 'fake', AIVEXUS_WEB_BUILDER_GITHUB_HEAD_SHA: head,
+    AIVEXUS_COUNTER_GITHUB_TOKEN: 'fake', AIVEXUS_WEB_BUILDER_GITHUB_HEAD_SHA: head,
     AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY: f.authorizationSecret,
     AIVEXUS_WEB_BUILDER_JOB_PUBLIC_KEY: encodeRunnerBase64(new Uint8Array(await crypto.subtle.exportKey('spki', f.runner.publicKey))),
     AIVEXUS_WEB_BUILDER_RESULT_PUBLIC_KEY: f.encodeJob.resultPublicKeySpki,

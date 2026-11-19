@@ -128,12 +128,13 @@ consegna al chiamante. Il coordinatore è un modulo Node. La Pages Function
 salva la generazione e la ricevuta, mentre il collegamento al runner isolato
 richiede il trasporto autenticato del progetto e del risultato.
 
-Per abilitare la riparazione nel runner occorrono il flag gratuito, la variabile
-GitHub `AIVEXUS_WEB_BUILDER_ACCOUNT_ID` e il segreto Actions
+Per abilitare la riparazione nel runner occorrono il flag gratuito, l’ID account
+`CLOUDFLARE_ACCOUNT_ID` già usato dal deploy privato e il segreto Actions
 `AIVEXUS_BUILDER_WORKERS_AI_TOKEN`, limitato a Workers AI sullo stesso account
 Free. Il coordinatore invia le richieste al solo endpoint Cloudflare di
 quell’account, con lo stesso modello della generazione. Chromium riceve soltanto
-il sorgente e i controlli da eseguire.
+il sorgente e i controlli da eseguire. Pages può riusare il token GitHub del
+contatore per il dispatch, con gli stessi permessi Actions sul medesimo repository.
 
 Il workflow `web-application-runner.yml` è riservato al primo tentativo su
 `main` e all'attore GitHub configurato dall'operatore. Riceve un ticket e un
