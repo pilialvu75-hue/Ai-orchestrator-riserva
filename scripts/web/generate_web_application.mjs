@@ -72,6 +72,13 @@ function receipt(generationId, status, saved) {
   };
 }
 
+export async function readWebApplicationGeneration({ db, ownerSubject, generationId }) {
+  if (!GENERATION_ID.test(generationId ?? '')) return { ok: false, reason: 'invalid_request' };
+  const row = await db.prepare(READ).bind(ownerSubject, generationId).first();
+  if (!row) return { ok: false, reason: 'generation_not_found' };
+  return receipt(generationId, row.status, row.resultJson);
+}
+
 export async function generateWebApplication({ request, ownerSubject, db, infer }) {
   const { generationId, prompt } = request;
   const brief = cleanText(prompt, 1200);

@@ -733,6 +733,10 @@ test('Pages generates and persists sources through the dedicated free route', as
   const submit = (assertion, payload, bindings = env, requestOrigin = origin) => generateApplication({
     request: webRequest(assertion, payload, { path, requestOrigin }), env: bindings,
   });
+  const status = (assertion, query) => generateApplication({
+    request: webRequest(assertion, undefined, { method: 'GET', path: `${path}?${query}`, requestOrigin: null }),
+    env,
+  });
   const first = { generationId: crypto.randomUUID(), prompt: 'Un timer per infusi con pausa.' };
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
@@ -796,6 +800,7 @@ test('Pages generates and persists sources through the dedicated free route', as
     ]);
     const replay = await Promise.all(Array.from({ length: 4 }, () => submit(token, first)));
     for (const response of replay) assert.equal((await response.json()).status, 'generating');
+    assert.equal((await (await status(token, `generationId=${first.generationId}`)).json()).status, 'generating');
   } finally {
     release();
   }
@@ -804,6 +809,10 @@ test('Pages generates and persists sources through the dedicated free route', as
   assert.equal(result.provenance.reportedModel, model);
   assert.deepEqual(result.paths, ['index.html', 'timer.mjs']);
   assert.deepEqual(await (await submit(token, first)).json(), result);
+  assert.deepEqual(await (await status(token, `generationId=${first.generationId}`)).json(), result);
+  assert.equal((await status(otherToken, `generationId=${first.generationId}`)).status, 404);
+  assert.equal((await status(token, `generationId=${first.generationId}&prompt=unexpected`)).status, 400);
+  assert.equal((await status(null, `generationId=${first.generationId}`)).status, 401);
   assert.equal((await submit(token, { ...first, prompt: 'Un altro prompt' })).status, 409);
   assert.equal((await submit(otherToken, first, { ...env, AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'false' })).status, 503);
   assert.deepEqual(prompts, [first.prompt]);

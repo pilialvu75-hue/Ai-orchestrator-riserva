@@ -4,11 +4,11 @@ import { createWebBuilderInference } from '../inference.js';
 
 export function onRequest({ request, env }) {
   return createAuthenticatedWebProjectOperation({
-    operation: 'generate_app',
+    operation: request.method === 'GET' ? 'generation_status' : 'generate_app',
     expectedOrigin: env.AIVEXUS_WEB_ORIGIN,
     accessIssuer: env.AIVEXUS_WEB_ACCESS_ISSUER,
     accessAudience: env.AIVEXUS_WEB_ACCESS_AUDIENCE,
     db: env.AIVEXUS_WEB_D1,
-    infer: createWebBuilderInference(env),
+    infer: request.method === 'POST' ? createWebBuilderInference(env) : null,
   })(request);
 }

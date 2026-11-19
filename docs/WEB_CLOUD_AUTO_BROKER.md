@@ -95,7 +95,10 @@ disponibili per il funzionamento ordinario del Cantiere, ma non per il test.
 La Pages Function `POST /api/cantiere/proposals/generate` applica il gate
 Access/D1 del Cantiere. Accetta `generationId` (UUID v4) e `prompt`. Il retry
 dello stesso identificativo con lo stesso prompt restituisce lo stato o la
-ricevuta precedente. L'identità è ricavata dall'asserzione Access e D1 conserva
+ricevuta precedente. `GET` sullo stesso percorso con `generationId` restituisce
+la ricevuta del proprietario senza richiedere di nuovo il prompt. Il browser
+conserva l'identificativo dell'ultima richiesta nelle preferenze Web. L'identità
+è ricavata dall'asserzione Access e D1 conserva
 spec, sorgenti, digest e provenienza del modello sotto quella identità. Una
 generazione interrotta resta identificabile senza avviare un secondo job.
 

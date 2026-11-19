@@ -12,10 +12,13 @@ import { approveTrustedWebProposal, revokeTrustedWebApproval, stageTrustedWebCou
 import { reserveApprovedWebExecution } from './approved_execution_reservation.mjs';
 import { readWebExecutionZip } from './web_execution_artifact_download.mjs';
 import { handleWebCounterAdvance } from './advance_web_counter.mjs';
-import { generateWebApplication } from './generate_web_application.mjs';
+import { generateWebApplication, readWebApplicationGeneration } from './generate_web_application.mjs';
 
 const MAX_JSON_BYTES = 2048;
-const OPERATIONS = new Set(['stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance', 'generate_app']);
+const OPERATIONS = new Set([
+  'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
+  'generate_app', 'generation_status',
+]);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
 
@@ -100,6 +103,7 @@ function operationFailure(result) {
   const reason = result?.reason;
   if (reason === 'invalid_request') return reject(400, 'invalid_request');
   if (reason === 'execution_not_found') return reject(404, 'execution_not_found');
+  if (reason === 'generation_not_found') return reject(404, 'generation_not_found');
   if (reason === 'generation_conflict') return reject(409, 'generation_conflict');
   if (reason === 'generation_unavailable') return reject(503, 'generation_unavailable');
   if (reason === 'storage_unavailable' ||
@@ -121,7 +125,8 @@ export function createAuthenticatedWebProjectOperation({
   const config = { operation, expectedOrigin, db };
   const readsStatus = operation === 'status';
   const downloads = operation === 'download';
-  const readOnly = readsStatus || downloads;
+  const readsGeneration = operation === 'generation_status';
+  const readOnly = readsStatus || downloads || readsGeneration;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -200,6 +205,19 @@ export function createAuthenticatedWebProjectOperation({
         if (!execution) return reject(404, 'execution_not_found');
         const { executionId, attemptId, revision, status } = execution;
         return respond(200, { ok: true, executionId, attemptId, revision, status });
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+    }
+
+    if (readsGeneration) {
+      if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
+      try {
+        const result = await readWebApplicationGeneration({
+          db, ownerSubject: verified.principal.subject,
+          generationId: url.searchParams.get('generationId'),
+        });
+        return result.ok ? respond(200, result) : operationFailure(result);
       } catch (_) {
         return reject(503, 'storage_unavailable');
       }
