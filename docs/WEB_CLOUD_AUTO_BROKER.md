@@ -128,6 +128,21 @@ consegna al chiamante. Il coordinatore è un modulo Node. La Pages Function
 salva la generazione e la ricevuta, mentre il collegamento al runner isolato
 richiede il trasporto autenticato del progetto e del risultato.
 
+Il workflow `web-application-runner.yml` è riservato al primo tentativo su
+`main` e all'attore GitHub configurato dall'operatore. Riceve un ticket e un
+pacchetto cifrato e autenticato. La chiave privata del runner apre il job. Una
+seconda coppia di chiavi consente solo a Pages di aprire il risultato. L'HMAC
+distingue job e risultati. La risposta include il digest del job originale.
+Il job scade dopo 15 minuti e il campo cifrato è limitato a 61.000 caratteri.
+Un sorgente che supera i limiti della compressione deve essere rifiutato prima
+del dispatch. L'artefatto GitHub contiene soltanto `application.aivexus`
+cifrato e scade dopo un giorno.
+
+Il client accetta l'artefatto solo dopo aver verificato repository, workflow,
+commit, tentativo e digest. Il ticket e gli ID GitHub sono interni. Prima
+dell'attivazione resta da collegare la prenotazione della generazione a D1 e da
+salvare il risultato autenticato sotto il proprietario originario.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does

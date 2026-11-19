@@ -1,0 +1,51 @@
+name: Aivexus Generated Web Application Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: Opaque dispatch ticket
+        required: true
+        type: string
+      job:
+        description: Authenticated encrypted source and verification plan
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify-application:
+    if: >-
+      github.ref == 'refs/heads/main' && github.run_attempt == 1 &&
+      vars.AIVEXUS_WEB_BUILDER_RUNNER_ACTOR != '' &&
+      github.actor == vars.AIVEXUS_WEB_BUILDER_RUNNER_ACTOR
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify and package the application
+        env:
+          AIVEXUS_WEB_BUILDER_JOB_PRIVATE_KEY: ${{ secrets.AIVEXUS_WEB_BUILDER_JOB_PRIVATE_KEY }}
+          AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY: ${{ secrets.AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY }}
+          AIVEXUS_WEB_BUILDER_FREE_ENABLED: ${{ vars.AIVEXUS_WEB_BUILDER_FREE_ENABLED }}
+          CANTIERE_CLOUD_ROUTES_JSON: ${{ vars.AIVEXUS_WEB_BUILDER_CLOUD_ROUTES_JSON }}
+          AIVEXUS_BUILDER_WORKERS_AI_TOKEN: ${{ secrets.AIVEXUS_BUILDER_WORKERS_AI_TOKEN }}
+        run: node scripts/web/build_web_application_runner_result.mjs "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/application.aivexus"
+      - name: Upload only the encrypted result
+        uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-application-envelope
+          path: ${{ runner.temp }}/application.aivexus
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
