@@ -42,6 +42,13 @@ jobs:
           node-version: '22'
       - name: Verify authenticated HTTP-to-D1 operation contract
         run: node --test test/airlab/web_authenticated_project_operation.mjs
+      - name: Bundle Cloudflare Pages Functions
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+        run: |
+          npx --yes wrangler@4 pages functions build functions --outfile "$RUNNER_TEMP/aivexus-pages-worker.mjs"
+          test -s "$RUNNER_TEMP/aivexus-pages-worker.mjs"
+          grep -Fq '/api/cantiere/executions/reserve' "$RUNNER_TEMP/aivexus-pages-worker.mjs"
       - name: Regression for verified Access JWT and D1 reservations
         run: |
           node --test test/airlab/web_access_jwt_verifier.mjs
