@@ -3,6 +3,49 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('desktop chat error floats above composer, leaving input tappable',
+      (tester) async {
+    final presenter = RuntimeNoticePresenter();
+    addTearDown(presenter.dispose);
+    late BuildContext chatContext;
+    const composerKey = Key('chat-composer');
+
+    // Desktop shell has a parent Scaffold. A chat-local messenger must own
+    // the notice, otherwise the parent snackbar overlaps the inner composer.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScaffoldMessenger(
+            child: Scaffold(
+              body: Builder(builder: (context) {
+                chatContext = context;
+                return const Center(child: Text('Chat'));
+              }),
+              bottomNavigationBar: const SizedBox(
+                height: 76,
+                child: TextField(key: composerKey),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    presenter.update(chatContext, 'Errore di inferenza');
+    await tester.pumpAndSettle();
+
+    final snackBar = find.byType(SnackBar);
+    expect(snackBar, findsOneWidget);
+    expect(tester.widget<SnackBar>(snackBar).behavior,
+        SnackBarBehavior.floating);
+    expect(
+      tester.getBottomLeft(snackBar).dy,
+      lessThanOrEqualTo(tester.getTopLeft(find.byKey(composerKey)).dy),
+    );
+    await tester.enterText(find.byKey(composerKey), 'Posso ancora scrivere');
+    expect(find.text('Posso ancora scrivere'), findsOneWidget);
+  });
+
   testWidgets('repeated notices expire once and leave the composer usable', (
     tester,
   ) async {
