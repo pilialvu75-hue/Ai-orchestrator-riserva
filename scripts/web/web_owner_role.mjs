@@ -18,16 +18,17 @@ export function existingWebOwnerSubject({
   if (principal?.verifiedBy !== 'cloudflare-access-jwt' ||
       typeof principal.subject !== 'string' ||
       !principal.subject || principal.subject.length > 256) return null;
-  // Preserve the old stable Cloudflare Access subject configuration.
+  // If the owner configured an email identity, it is authoritative:
+  // an obsolete legacy subject must not grant a *second* owner account.
+  const allowedEmail = canonicalEmail(configuredEmail);
+  if (allowedEmail) {
+    return canonicalEmail(principal.email) === allowedEmail
+      ? principal.subject : null;
+  }
+  // Backward-compatible existing Access subject when the email binding is
+  // absent. No new admin account, customer role or guest entitlement.
   if (typeof configuredSubject === 'string' && configuredSubject &&
       configuredSubject.length <= 256 &&
       principal.subject === configuredSubject) return principal.subject;
-  // Additional owner identity route: a *signed* Access email from the
-  // IdP, matched against a private server setting. No unverified header,
-  // raw request JSON, browser input, or self-registration can grant this role.
-  const allowedEmail = canonicalEmail(configuredEmail);
-  if (allowedEmail && canonicalEmail(principal.email) === allowedEmail) {
-    return principal.subject;
-  }
   return null;
 }
