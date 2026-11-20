@@ -12,7 +12,7 @@ import { approveTrustedWebProposal, revokeTrustedWebApproval, stageTrustedWebCou
 import { reserveApprovedWebExecution } from './approved_execution_reservation.mjs';
 import { readWebExecutionZip } from './web_execution_artifact_download.mjs';
 import { handleWebCounterAdvance } from './advance_web_counter.mjs';
-import { generateWebApplication, readWebApplicationGeneration } from './generate_web_application.mjs';
+import { generateWebApplication, readWebApplicationGeneration, readWebApplicationQuota } from './generate_web_application.mjs';
 import {
   advanceWebApplicationVerification, readWebApplicationVerification, readWebApplicationZip,
   readVerifiedWebApplicationSource,
@@ -25,7 +25,7 @@ const MAX_JSON_BYTES = 2048;
 const MAX_GENERATION_JSON_BYTES = 49152;
 const OPERATIONS = new Set([
   'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
-  'generate_app', 'generation_status',
+  'generate_app', 'generation_status', 'generation_quota',
   'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
 ]);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
@@ -151,11 +151,12 @@ export function createAuthenticatedWebProjectOperation({
   const readsStatus = operation === 'status';
   const downloads = operation === 'download';
   const readsGeneration = operation === 'generation_status';
+  const readsQuota = operation === 'generation_quota';
   const readsVerification = operation === 'verification_status';
   const downloadsApp = operation === 'download_app';
   const previewsApp = operation === 'preview_app';
   const readsSource = operation === 'read_app_source' || previewsApp;
-  const readOnly = readsStatus || downloads || readsGeneration || readsVerification || downloadsApp || readsSource;
+  const readOnly = readsStatus || downloads || readsGeneration || readsQuota || readsVerification || downloadsApp || readsSource;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -226,6 +227,19 @@ export function createAuthenticatedWebProjectOperation({
         if (!execution) return reject(404, 'execution_not_found');
         const { executionId, attemptId, revision, status } = execution;
         return respond(200, { ok: true, executionId, attemptId, revision, status });
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+    }
+
+    if (readsQuota) {
+      if (url.searchParams.size !== 0) return reject(400, 'invalid_request');
+      try {
+        const result = await readWebApplicationQuota({
+          db, ownerSubject: verified.principal.subject,
+        });
+        if (!result.ok) return operationFailure(result);
+        return respond(200, result);
       } catch (_) {
         return reject(503, 'storage_unavailable');
       }
