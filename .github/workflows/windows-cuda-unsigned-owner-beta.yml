@@ -177,9 +177,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
           & (Join-Path $PWD 'tool\bundle_windows_cuda_runtime.ps1') -ReleaseDir $dir
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned CUDA bundle download failed.' }
+          # PowerShell scripts throw on error; LASTEXITCODE here can be stale/null.
+          # Do not interpret it as the result of a PowerShell script invocation.
           & (Join-Path $PWD 'tool\test_windows_cuda_bundle.ps1') -ReleaseDir $dir
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned CUDA dependencies failed audit.' }
+          # The CUDA import audit throws on any missing or invalid dependency.
 
       - name: Verify bundled LOCAL inference
         shell: pwsh
@@ -187,9 +188,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
           & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $dir
-          if ($LASTEXITCODE -ne 0) { throw 'LOCAL runtime bundle failed.' }
+          # Local inference verification throws on failure.
           & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir $dir
-          if ($LASTEXITCODE -ne 0) { throw 'Windows compatibility bundle failed.' }
+          # Compatibility patcher throws on failure; no stale native exit code.
           if (-not (Test-Path (Join-Path $dir 'ai_orchestrator.exe'))) { throw 'Missing app EXE.' }
           if (-not (Test-Path (Join-Path $dir 'data'))) { throw 'Missing Flutter data.' }
 
