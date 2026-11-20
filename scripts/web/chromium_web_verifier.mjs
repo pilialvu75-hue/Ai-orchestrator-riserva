@@ -55,7 +55,7 @@ function connectDebugger(url) {
 }
 
 async function debuggerPage(profile, chrome) {
-  const deadline = Date.now() + 6000;
+  const deadline = Date.now() + 12000;
   while (Date.now() < deadline && chrome.exitCode === null) {
     try {
       const info = await readFile(join(profile, 'DevToolsActivePort'), 'utf8');
@@ -104,6 +104,7 @@ export function createChromiumWebVerifier({ executable }) {
     let exited;
     let chrome;
     let debuggerClient;
+    let failureDiagnosis = 'browser_startup_failed';
     try {
       chrome = spawn(executable, ['--headless', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
         `--user-data-dir=${profile}`, '--disable-extensions', '--disable-background-networking',
@@ -114,6 +115,7 @@ export function createChromiumWebVerifier({ executable }) {
       const startupFailed = new Promise((_, reject) => chrome.once('error', reject));
       exited = new Promise(resolve => chrome.once('close', resolve));
       debuggerClient = connectDebugger(await Promise.race([debuggerPage(profile, chrome), startupFailed]));
+      failureDiagnosis = 'browser_debugger_failed';
       const client = debuggerClient;
       let appError = false;
       let rejectedRequest = false;
@@ -176,7 +178,7 @@ export function createChromiumWebVerifier({ executable }) {
       }
       return { status: 'passed', diagnosis: 'browser_checks_passed', checks: checks.length };
     } catch (_) {
-      return { status: 'unavailable', diagnosis: 'browser_infrastructure' };
+      return { status: 'unavailable', diagnosis: failureDiagnosis };
     } finally {
       if (debuggerClient) {
         try { await debuggerClient.send('Browser.close'); } catch (_) { /* process cleanup follows */ }
