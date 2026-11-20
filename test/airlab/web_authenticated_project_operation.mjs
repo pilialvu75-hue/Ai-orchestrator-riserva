@@ -866,3 +866,77 @@ test('storage failures and JWKS outages return sanitized errors without mutating
   assert.equal(json.error, 'storage_unavailable');
   assert.doesNotMatch(JSON.stringify(json), /private|provider|credential|SQL/);
 });
+
+
+test('app generation accepts structured 8000-character and Unicode briefs within the dedicated size gate', async t => {
+  const { db, sqlite } = sqliteD1(t, ['006_web_app_generations.sql']);
+  const signing = await signer();
+  const iat = Math.floor(Date.now() / 1000) - 10;
+  const token = await signing.sign({ iat, nbf: iat, exp: iat + 300 });
+  const model = '@cf/google/gemma-4-26b-a4b-it';
+  let inferenceCalls = 0;
+  const env = {
+    AIVEXUS_WEB_ORIGIN: origin,
+    AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
+    AIVEXUS_WEB_BUILDER_AI: {
+      async run(selectedModel, request) {
+        assert.equal(selectedModel, model);
+        const brief = request.messages.at(-1).content;
+        assert.ok(brief.length >= 8000);
+        inferenceCalls++;
+        return {
+          model,
+          choices: [{ finish_reason: 'stop', message: {
+            content: JSON.stringify({
+              title: 'App da specifica strutturata',
+              requirements: ['Mostra una schermata navigabile'],
+              files: [{ path: 'index.html', content: '<main>Anteprima</main>' }],
+            }),
+          } }],
+          usage: { completion_tokens: 80 },
+        };
+      },
+    },
+  };
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(String(url), issuer + '/cdn-cgi/access/certs');
+    return Response.json({ keys: [signing.jwk] });
+  });
+  const send = brief => generateApplication({
+    request: webRequest(token, {
+      generationId: crypto.randomUUID(), prompt: brief,
+    }, { path: '/api/cantiere/proposals/generate' }),
+    env,
+  });
+
+  // >8 KiB UTF-8 with exactly 8000 visible characters: allowed.
+  const structured = 'é'.repeat(8000);
+  assert.ok(Buffer.byteLength(JSON.stringify({ generationId: crypto.randomUUID(), prompt: structured })) > 8192);
+  const accepted = await send(structured);
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).status, 'generated');
+  assert.equal(inferenceCalls, 1);
+
+  // Flutter's maxLength counts grapheme clusters, not JS UTF-16 units.
+  const emoji = '🛡️'.repeat(4000);
+  const unicodeResponse = await send(emoji);
+  assert.equal(unicodeResponse.status, 200);
+  assert.equal((await unicodeResponse.json()).status, 'generated');
+  assert.equal(inferenceCalls, 2);
+
+  const beyondLimit = await send('x'.repeat(8001));
+  assert.equal(beyondLimit.status, 400);
+  assert.equal((await beyondLimit.json()).error, 'invalid_request');
+  assert.equal(inferenceCalls, 2);
+
+  const excessiveBytes = await send('x'.repeat(55000));
+  assert.equal(excessiveBytes.status, 413);
+  assert.equal((await excessiveBytes.json()).error, 'request_too_large');
+  assert.equal(inferenceCalls, 2);
+
+  const records = sqlite.prepare('SELECT COUNT(*) AS count FROM web_app_generations').get().count;
+  assert.equal(records, 2);
+});

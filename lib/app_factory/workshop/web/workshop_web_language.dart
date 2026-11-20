@@ -74,6 +74,8 @@ final class WorkshopWebLanguageScope
 
 const Map<String, Map<String, String>> _translations = {
   'fr': {
+    'Il prompt supera la dimensione massima consentita. Riduci il testo.': 'La description dépasse la taille maximale autorisée. Raccourcissez le texte.',
+    'Prompt non valido o troppo lungo. Controlla il testo.': 'Description invalide ou trop longue. Vérifiez le texte.',
     'Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.': 'Décrivez votre application et modifiez le texte librement avant de l’envoyer.',
     'Piattaforma': 'Plateforme',
     'La piattaforma cambia il formato dell’anteprima Web; non crea un pacchetto nativo.': 'La plateforme adapte l’aperçu Web ; aucun paquet natif n’est créé.',
@@ -216,6 +218,8 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Inférence Cloud / AUTO',
   },
   'en': {
+    'Il prompt supera la dimensione massima consentita. Riduci il testo.': 'The prompt exceeds the maximum request size. Shorten the text.',
+    'Prompt non valido o troppo lungo. Controlla il testo.': 'Invalid or overly long prompt. Check the text.',
     'Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.': 'Describe your application. You can edit the text before sending it.',
     'Piattaforma': 'Platform',
     'La piattaforma cambia il formato dell’anteprima Web; non crea un pacchetto nativo.': 'The platform changes the Web preview format; it does not build a native package.',
@@ -318,6 +322,8 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Cloud / AUTO inference',
   },
   'es': {
+    'Il prompt supera la dimensione massima consentita. Riduci il testo.': 'La descripción supera el tamaño máximo permitido. Acorta el texto.',
+    'Prompt non valido o troppo lungo. Controlla il testo.': 'La descripción no es válida o es demasiado larga. Revisa el texto.',
     'Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.': 'Describe tu aplicación. Puedes editar el texto antes de enviarlo.',
     'Piattaforma': 'Plataforma',
     'La piattaforma cambia il formato dell’anteprima Web; non crea un pacchetto nativo.': 'La plataforma adapta la vista Web; no crea un paquete nativo.',
