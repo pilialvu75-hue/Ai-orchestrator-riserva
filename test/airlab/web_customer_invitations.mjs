@@ -188,7 +188,7 @@ test('expired and spoofed invites never authorize access; flags default closed',
     method: 'POST', body: { email: 'alice@example.test', expiresDays: 1 },
   })));
   assert.equal(created.http, 200);
-  sqlite.prepare('UPDATE web_client_invitations SET expires_at = unixepoch() - 1 WHERE invitation_id = ?')
+  sqlite.prepare('UPDATE web_client_invitations SET created_at = unixepoch() - 86402, expires_at = unixepoch() - 1 WHERE invitation_id = ?')
     .run(created.invitationId);
   const expired = await handler('claim')(request({
     token: alice, path: '/api/cantiere/access/claim', method: 'POST',
