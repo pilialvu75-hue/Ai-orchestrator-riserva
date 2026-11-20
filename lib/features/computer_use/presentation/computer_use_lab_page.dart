@@ -160,15 +160,35 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     });
   }
 
+  Offset? _androidPanStart;
+  Offset? _androidPanLast;
+
   Future<void> _tapAndroidGameFrame(TapUpDetails details, double width) async {
+    await _sendAndroidGameGesture(
+      details.localPosition, details.localPosition, width,
+    );
+  }
+
+  Future<void> _sendAndroidGameGesture(
+    Offset start, Offset end, double width,
+  ) async {
     if (!_isAndroid || !_session.isActive || _busy || _frame == null) return;
-    final x = (details.localPosition.dx * _frameWidth / width)
-        .floor().clamp(0, _frameWidth - 1);
-    final y = (details.localPosition.dy * _frameWidth / width)
-        .floor().clamp(0, _frameHeight - 1);
+    int imageX(Offset position) =>
+        (position.dx * _frameWidth / width)
+            .floor().clamp(0, _frameWidth - 1);
+    int imageY(Offset position) =>
+        (position.dy * _frameWidth / width)
+            .floor().clamp(0, _frameHeight - 1);
+    final x = imageX(start);
+    final y = imageY(start);
+    final endX = imageX(end);
+    final endY = imageY(end);
+    final swipe = x != endX || y != endY;
+    if (swipe && (end - start).distance < 16) return;
     final status =
         await _androidGestures.invokeMapMethod<String, dynamic>('getStatus');
-    if (status?['accessibilityEnabled'] != true || !mounted) {
+    if (!mounted) return;
+    if (status?['accessibilityEnabled'] != true) {
       setState(() => _message =
           'Abilita prima Computer Use nelle Impostazioni di accessibilità.');
       return;
@@ -176,11 +196,12 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Un tocco di prova su Car Jam'),
+        title: Text(swipe ? 'Scorrimento di prova su Car Jam'
+            : 'Tocco di prova su Car Jam'),
         content: Text(
-          'Fra 4 secondi AIVEXUS proverà un singolo tocco in posizione '
-          '($x, $y). Passa subito a Car Jam Solver. Nessun tocco sarà '
-          'inviato ad altre applicazioni. Premi Annulla per non procedere.',
+          'Fra 4 secondi AIVEXUS proverà ${swipe ? 'uno scorrimento' : 'un tocco'} '
+          'da ($x, $y) a ($endX, $endY). Passa subito a Car Jam Solver. '
+          'Non verrà inviato alcun gesto ad altre applicazioni.',
         ),
         actions: [
           TextButton(
@@ -189,7 +210,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Autorizzo questo tocco'),
+            child: const Text('Autorizzo questo gesto'),
           ),
         ],
       ),
@@ -198,17 +219,17 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     final revision = _session.sessionRevision;
     await _run(() async {
       setState(() => _message =
-          'Passa ora a Car Jam: tocco fra 4 secondi. STOP annulla.');
+          'Passa a Car Jam: gesto fra 4 secondi. STOP annulla.');
       await Future<void>.delayed(const Duration(seconds: 4));
       if (!_session.isActive || revision != _session.sessionRevision) return;
       final outcome = await _androidGestures.invokeMethod<String>(
-        'tapGame',
-        <String, Object>{'x': x, 'y': y},
+        swipe ? 'swipeGame' : 'tapGame',
+        <String, Object>{'x': x, 'y': y, 'endX': endX, 'endY': endY},
       );
       if (mounted && revision == _session.sessionRevision) {
         setState(() => _message =
-            'Tocco Android: ${outcome ?? 'nessun risultato'}. '
-            'Controlla visivamente se il gioco è cambiato.');
+            'Gesto Android: ${outcome ?? 'nessun risultato'}. '
+            'Verifica sul gioco il cambiamento effettivo.');
       }
     });
   }
@@ -680,8 +701,9 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
             ),
             const Text(
               'Dopo aver abilitato il servizio, avvia Solo osservazione, '
-              'acquisisci Car Jam tra 4 secondi e tocca la sua anteprima. '
-              'Torna al gioco entro 4 secondi per vedere il tocco.',
+              'acquisisci Car Jam tra 4 secondi. Tocca o trascina '
+              'sull’anteprima, conferma, poi torna al gioco entro '
+              '4 secondi per vedere il gesto.',
             ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _openCarJamPlayStore,
@@ -873,6 +895,26 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                             ? (details) => _tapAndroidGameFrame(
                                 details, box.maxWidth)
                             : null,
+                    onPanStart: _isAndroid && active && !_busy
+                        ? (details) {
+                            _androidPanStart = details.localPosition;
+                            _androidPanLast = details.localPosition;
+                          }
+                        : null,
+                    onPanUpdate: _isAndroid && active && !_busy
+                        ? (details) => _androidPanLast = details.localPosition
+                        : null,
+                    onPanEnd: _isAndroid && active && !_busy
+                        ? (_) {
+                            final start = _androidPanStart;
+                            final end = _androidPanLast;
+                            _androidPanStart = null;
+                            _androidPanLast = null;
+                            if (start != null && end != null) {
+                              _sendAndroidGameGesture(start, end, box.maxWidth);
+                            }
+                          }
+                        : null,
                     child: Image.memory(
                       _frame!,
                       fit: BoxFit.fill,
