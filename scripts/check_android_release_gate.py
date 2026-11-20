@@ -88,7 +88,7 @@ def validate_desktop_publisher(source: str, platform: str) -> list[str]:
             problems.append(f"{platform}: manual replay must reject non-authorized run or release")
     if "steps.version.outputs.tag" in source:
         problems.append(f"{platform}: publisher may not upload to an unsuffixed tag")
-    if platform == "macos" and 'version_code="$((100000 +' not in source:
+    if platform == "macos" and 'version_code="$((500000 +' not in source:
         problems.append("macOS must use the same build-code namespace as Android")
     if platform == "macos":
         # Regression guard: no paid Apple account is required to publish
