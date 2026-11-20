@@ -6,6 +6,7 @@ import { createWebCustomerAccessHandler, activeWebCustomerGrant } from
   '../../scripts/web/web_client_invitations.mjs';
 import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
+import { onRequest as rawInference } from '../../functions/api/cantiere/inference.js';
 
 const issuer = 'https://aivexus-test.cloudflareaccess.com';
 const audience = 'private-web-client';
@@ -213,5 +214,52 @@ test('expired and spoofed invites never authorize access; flags default closed',
       body: JSON.stringify({ email: 'bob@example.test', expiresDays: 3 }),
     }));
   assert.equal(noCsrf.status, 403);
+  sqlite.close();
+});
+
+
+test('accepted client cannot directly use raw AI broker or owner-only trials', async t => {
+  const { db, sqlite } = fixture();
+  const auth = await signedAccess();
+  const owner = await auth.sign({ sub: 'owner-subject', email: 'owner@example.test' });
+  const alice = await auth.sign({ sub: 'alice-sub', email: 'alice@example.test' });
+  const access = operation => createWebCustomerAccessHandler({
+    operation, db, accessIssuer: issuer, accessAudience: audience,
+    expectedOrigin: origin, configuredOwnerSubject: 'owner-subject',
+    fetchImpl: auth.fetchImpl, clientAccessEnabled: true,
+  });
+  const invite = await parse(await access('create')(request({
+    token: owner, path: '/api/cantiere/access/invitations', method: 'POST',
+    body: { email: 'alice@example.test', expiresDays: 3 },
+  })));
+  assert.equal(invite.http, 200);
+  assert.equal((await access('claim')(request({
+    token: alice, path: '/api/cantiere/access/claim', method: 'POST',
+    body: { invitationId: invite.invitationId },
+  }))).status, 200);
+  // The broker is not a backdoor to the owner's trial/Cloud API credits:
+  // even a currently invited client uses only D1-metered app generation.
+  t.mock.method(globalThis, 'fetch', auth.fetchImpl);
+  const r = await rawInference({
+    request: request({
+      token: alice, path: '/api/cantiere/inference', method: 'POST',
+      body: {
+        version: 1, capability: 'orchestration',
+        routeId: 'kimi-k26-orchestrator',
+        messages: [{ role: 'user', content: 'Use the giant trial model.' }],
+      },
+    }),
+    env: {
+      AIVEXUS_WEB_CLIENT_ACCESS_ENABLED: 'true',
+      AIVEXUS_WEB_ORIGIN: origin,
+      AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+      AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+      AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: 'owner-subject',
+      AIVEXUS_WEB_D1: db,
+    },
+  });
+  assert.equal(r.status, 403);
+  const output = await r.json();
+  assert.equal(output.error?.code, 'client_inference_not_enabled');
   sqlite.close();
 });
