@@ -401,7 +401,7 @@ void main() {
         return http.Response(jsonEncode({
           'version': 1, 'ok': true,
           'scope': 'aivexus_reservations',
-          'remaining': 10, 'userRemaining': 10, 'userLimit': 64,
+          'remaining': 10, 'userRemaining': 10, 'userLimit': 72,
           'tier': 'administrator',
           'globalRemaining': 72, 'globalLimit': 72,
           'nextAvailableAt': null,
