@@ -1,5 +1,7 @@
 import { validateWebApplicationChecks } from './web_application_checks.mjs';
 import { WEB_RUNNER_TICKET as GENERATION_ID } from './web_runner_envelope.mjs';
+export const MAX_WEB_APP_PROMPT_CHARACTERS = 8000;
+
 const FILE_PATH = /^(?:[a-z0-9][a-z0-9_-]*\/){0,3}[a-z0-9][a-z0-9_-]*\.(?:html|css|js|mjs|json|txt|md)$/;
 const INSTRUCTION = `Generate an original, self-contained browser application matching the user's brief.
 Return a single JSON object with title, requirements (an array of user-visible behavior descriptions),
@@ -43,6 +45,19 @@ function cleanText(value, max) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
   return text && text.length <= max ? text : null;
+}
+
+// Match Flutter TextField.maxLength: count user-perceived characters
+// (grapheme clusters), not UTF-16 code units. Validate before reserving quota.
+function cleanGenerationPrompt(value) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text || !text.isWellFormed()) return null;
+  let count = 0;
+  for (const _ of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) {
+    if (++count > MAX_WEB_APP_PROMPT_CHARACTERS) return null;
+  }
+  return text;
 }
 
 function parseResponse(output) {
@@ -98,7 +113,7 @@ export async function readWebApplicationGeneration({ db, ownerSubject, generatio
 
 export async function generateWebApplication({ request, ownerSubject, db, infer }) {
   const { generationId, prompt } = request;
-  const brief = cleanText(prompt, 1200);
+  const brief = cleanGenerationPrompt(prompt);
   if (Object.keys(request).length !== 2 || typeof generationId !== 'string' ||
       !GENERATION_ID.test(generationId) || !brief || !brief.isWellFormed()) {
     return { ok: false, reason: 'invalid_request' };
