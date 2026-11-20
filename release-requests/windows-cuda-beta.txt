@@ -1,0 +1,2 @@
+channel=windows-cuda-beta
+main_sha=4eadb421d186d0da708c20893fdeb185c50536ed
