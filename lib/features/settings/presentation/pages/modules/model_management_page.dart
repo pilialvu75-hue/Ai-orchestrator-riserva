@@ -424,6 +424,8 @@ class _VoiceTtsSelectorState extends State<_VoiceTtsSelector> {
   Future<void> _change(TtsBackend backend) async {
     setState(() { _busy = true; _notice = null; });
     try {
+      // End the previous PCM/native playback before switching engines.
+      await di.sl<VoiceEngine>().stopSpeaking();
       await VoiceTtsPreference.save(backend);
       if (!mounted) return;
       setState(() {
