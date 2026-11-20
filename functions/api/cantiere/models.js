@@ -1,3 +1,5 @@
+import { listWebBuilderLargeModels } from './inference.js';
+
 // Private, read-only diagnostic catalogue of the Web orchestration routes.
 // Cloudflare Access must remain the authentication boundary. Never return
 // endpoint URLs, secret names, token values, or authorization headers.
@@ -32,6 +34,10 @@ function catalogue(env) {
     return { configStatus: 'no_orchestration_routes', models: [] };
   }
   const models = [];
+  const approvedBuilderRoutes = new Set(
+    listWebBuilderLargeModels(env)
+      .filter(route => route.available).map(route => route.routeId),
+  );
   const seen = new Set();
   for (const row of rows) {
     if (models.length >= MAX_MODELS) break;
@@ -64,6 +70,8 @@ function catalogue(env) {
       testApproved,
       manualOnly: row.manualOnly === true,
       selectable: bindingPresent && testApproved,
+      // Permission only; provider trial capacity is not a real-time guarantee.
+      builderAvailable: approvedBuilderRoutes.has(routeId),
     });
   }
   return { configStatus: 'configured', models };
