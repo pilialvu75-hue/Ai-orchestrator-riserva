@@ -7,7 +7,7 @@ import { createCloudflareAccessPrincipalResolver } from './cloudflare_access_pri
 import { existingWebOwnerSubject } from './web_owner_role.mjs';
 
 const ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const EMAIL = /^[^\\s@<>]{1,64}@[a-z0-9.-]+\\.[a-z]{2,}$/i;
+const EMAIL = /^[^\s@<>]{1,64}@[a-z0-9.-]+\.[a-z]{2,}$/i;
 const MAX_BODY = 2048;
 const OPERATIONS = new Set(['create', 'list', 'claim', 'revoke', 'status']);
 
@@ -123,7 +123,7 @@ export async function claimWebClientInvitation({ db, principal, invitationId }) 
 }
 
 async function boundedBody(request) {
-  if (!/^application\\/json(?:\\s*;\\s*charset=utf-8)?$/i.test(
+  if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(
     request.headers.get('content-type') || '')) return null;
   if (Number(request.headers.get('content-length') || 0) > MAX_BODY) return null;
   const reader = request.body?.getReader?.();
