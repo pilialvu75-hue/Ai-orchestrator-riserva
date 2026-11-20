@@ -158,7 +158,7 @@ jobs:
         run: |
           set -euo pipefail
           version_name="$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)(\+[0-9]+)?[[:space:]]*$/\1/p' pubspec.yaml | head -n 1)"
-          version_code="$((100000 + ${{ steps.android_source.outputs.run_number }}))"
+          version_code="$((500000 + ${{ steps.android_source.outputs.run_number }}))"
           if [[ -z "$version_name" ]]; then
             echo 'Unable to resolve semantic application version from pubspec.yaml.' >&2
             exit 1
