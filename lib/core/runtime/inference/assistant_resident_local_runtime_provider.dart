@@ -147,7 +147,17 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     if (Platform.isWindows) {
       if (!WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion)) return null;
       final file = p.join(appDir, 'runtime-modern', 'llama-server.exe');
-      return File(file).existsSync() ? file : null;
+      if (File(file).existsSync()) return file;
+      // Owner QA 220005 bundles CUDA independently, without runtime-modern.
+      // Do not silently enter the old CPU process_cli path when a usable
+      // pinned CUDA resident server was actually installed next to the app.
+      // Stable builds never enter this gated route, even if a stale CUDA
+      // directory is left over from a previous beta.
+      if (_defaultCudaQaEnabled()) {
+        final cuda = p.join(appDir, 'runtime-cuda', 'llama-server.exe');
+        if (File(cuda).existsSync()) return cuda;
+      }
+      return null;
     }
     if (Platform.isMacOS || Platform.isLinux) {
       final file = p.join(appDir, 'llama-server');
