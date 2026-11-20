@@ -361,6 +361,7 @@ test('Pages routes reserve once and recover status for the verified owner', asyn
     AIVEXUS_WEB_ACCESS_ISSUER: issuer,
     AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_D1: f.db,
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
   };
   t.mock.method(globalThis, 'fetch', async url => {
     assert.equal(url, issuer + '/cdn-cgi/access/certs');
@@ -494,6 +495,7 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
     AIVEXUS_WEB_ACCESS_ISSUER: issuer,
     AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
     AIVEXUS_WEB_ARTIFACTS: bucket,
   };
   let githubFixture;
@@ -729,6 +731,7 @@ test('Pages generates and persists sources through the dedicated free route', as
     AIVEXUS_WEB_ACCESS_ISSUER: issuer,
     AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
     AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
   };
   const path = '/api/cantiere/proposals/generate';
@@ -894,6 +897,7 @@ test('app generation accepts structured 8000-character and Unicode briefs within
     AIVEXUS_WEB_ACCESS_ISSUER: issuer,
     AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
     AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
     AIVEXUS_WEB_BUILDER_AI: {
       async run(selectedModel, request) {
@@ -967,6 +971,7 @@ test('authenticated quota exposes exact personal/global counts and next availabl
     AIVEXUS_WEB_ACCESS_ISSUER: issuer,
     AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
   };
   t.mock.method(globalThis, 'fetch', async url => {
     assert.equal(String(url), issuer + '/cdn-cgi/access/certs');
@@ -1123,6 +1128,7 @@ test('only server-declared Cloudflare Access administrator can generate beyond s
     AIVEXUS_WEB_ACCESS_ISSUER: issuer,
     AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
     AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
     AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
     AIVEXUS_WEB_BUILDER_AI: {
@@ -1197,6 +1203,7 @@ test('verified same-owner project reuse does not invoke AI or consume quota', as
     AIVEXUS_WEB_ACCESS_ISSUER: issuer,
     AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
     AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
   };
   t.mock.method(globalThis, 'fetch', async url => {
     assert.equal(String(url), issuer + '/cdn-cgi/access/certs');
