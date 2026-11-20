@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:ai_orchestrator/core/voice/voice_tts_preference.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -49,6 +50,7 @@ class _ModelManagementView extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
               children: [
+                if (Platform.isAndroid) const _VoiceTtsSelector(),
                 if (Platform.isAndroid) const Padding(
                   padding: EdgeInsets.only(bottom: 16),
                   child: Text(
@@ -374,3 +376,133 @@ class _FileRow extends StatelessWidget {
   }
 }
 
+
+/// Audio-output choice is deliberately separate from the existing STT model
+/// integrity/download settings. Unsupported alternatives are not selectable.
+class _VoiceTtsSelector extends StatefulWidget {
+  const _VoiceTtsSelector();
+
+  @override
+  State<_VoiceTtsSelector> createState() => _VoiceTtsSelectorState();
+}
+
+class _VoiceTtsSelectorState extends State<_VoiceTtsSelector> {
+  TtsBackend _selected = TtsBackend.kokoro;
+  bool _busy = true;
+  bool _androidAvailable = false;
+  List<String> _languages = const [];
+  String? _notice;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final backend = await VoiceTtsPreference.read();
+    final status = await VoiceTtsPreference.inspectAndroid();
+    final voices = status['voices'];
+    final languages = <String>{};
+    if (voices is List) {
+      for (final voice in voices) {
+        if (voice is Map) {
+          final locale = voice['language']?.toString();
+          if (locale != null && locale.isNotEmpty) languages.add(locale);
+        }
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _selected = backend;
+      _androidAvailable = status['ready'] == true && languages.isNotEmpty;
+      _languages = languages.toList()..sort();
+      _busy = false;
+    });
+  }
+
+  Future<void> _change(TtsBackend backend) async {
+    setState(() { _busy = true; _notice = null; });
+    try {
+      // End the previous PCM/native playback before switching engines.
+      await di.sl<VoiceEngine>().stopSpeaking();
+      await VoiceTtsPreference.save(backend);
+      if (!mounted) return;
+      setState(() {
+        _selected = backend;
+        _notice = 'Scelta salvata. La prossima lettura userà il motore selezionato.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() { _notice = 'Motore non disponibile. Kokoro resta utilizzabile.'; });
+    } finally {
+      if (mounted) setState(() { _busy = false; });
+    }
+  }
+
+  Future<void> _preview() async {
+    setState(() { _busy = true; _notice = null; });
+    try {
+      final ok = await VoiceTtsPreference.channel.invokeMethod<bool>(
+        'speak', <String, String>{'text': 'Ciao, questa è una prova della voce Android.', 'language': 'it'},
+      );
+      if (mounted) setState(() { _notice = ok == true ? 'Prova completata.' : 'Prova interrotta.'; });
+    } catch (_) {
+      if (mounted) setState(() { _notice = 'La voce italiana offline non è disponibile.'; });
+    } finally {
+      if (mounted) setState(() { _busy = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: const Color(0xFF151515),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Motore di lettura vocale (TTS)',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            const Text('La scelta riguarda Ascolta e Live. Il microfono e il modello IA rimangono invariati.',
+                style: TextStyle(color: Colors.white70, fontSize: 12)),
+            RadioListTile<TtsBackend>(
+              title: const Text('Kokoro — attuale', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Mantieni il modello vocale esistente.', style: TextStyle(color: Colors.white60)),
+              value: TtsBackend.kokoro,
+              groupValue: _selected,
+              onChanged: _busy ? null : (v) { if (v != null) _change(v); },
+            ),
+            RadioListTile<TtsBackend>(
+              title: const Text('Voci native Android — offline', style: TextStyle(color: Colors.white)),
+              subtitle: Text(_androidAvailable
+                  ? 'Disponibili: ${_languages.join(", ")}'
+                  : 'Nessuna voce offline rilevata: verifica le voci installate su Android.',
+                  style: const TextStyle(color: Colors.white60)),
+              value: TtsBackend.androidSystem,
+              groupValue: _selected,
+              onChanged: _busy || !_androidAvailable ? null : (v) { if (v != null) _change(v); },
+            ),
+            const ListTile(
+              dense: true,
+              title: Text('Piper INT8 / Supertonic INT8', style: TextStyle(color: Colors.white70)),
+              subtitle: Text('Alternative in preparazione: non ancora installabili in questa build.',
+                  style: TextStyle(color: Colors.white54)),
+              trailing: Icon(Icons.lock_clock, color: Colors.white54),
+            ),
+            Row(children: [
+              TextButton(onPressed: _busy ? null : _load, child: const Text('Aggiorna voci')),
+              if (_androidAvailable)
+                TextButton(onPressed: _busy ? null : _preview, child: const Text('Prova Android')),
+            ]),
+            if (_busy) const LinearProgressIndicator(),
+            if (_notice != null)
+              Text(_notice!, style: const TextStyle(color: Color(0xFF8AB4F8), fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+}
