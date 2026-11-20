@@ -74,6 +74,7 @@ final class WorkshopWebLanguageScope
 
 const Map<String, Map<String, String>> _translations = {
   'fr': {
+    'Generazione NVIDIA riservata all’amministratore verificato: uso Gemma 4.': 'Génération NVIDIA réservée à l\'administrateur vérifié : utilisation de Gemma 4.',
     'Motore predefinito: Gemma 4 (Cloudflare).': 'Moteur par défaut : Gemma 4 (Cloudflare).',
     'Il modello scelto riguarda la chat; il generatore usa Gemma 4.': 'Le modèle sélectionné concerne le chat ; le générateur utilise Gemma 4.',
     'Modello NVIDIA non autorizzato per generare app: uso Gemma 4.': 'Modèle NVIDIA non autorisé pour générer des apps : utilisation de Gemma 4.',
@@ -232,6 +233,7 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Inférence Cloud / AUTO',
   },
   'en': {
+    'Generazione NVIDIA riservata all’amministratore verificato: uso Gemma 4.': 'NVIDIA generation is limited to the verified administrator: using Gemma 4.',
     'Motore predefinito: Gemma 4 (Cloudflare).': 'Default engine: Gemma 4 (Cloudflare).',
     'Il modello scelto riguarda la chat; il generatore usa Gemma 4.': 'The selected model applies to chat; the generator uses Gemma 4.',
     'Modello NVIDIA non autorizzato per generare app: uso Gemma 4.': 'NVIDIA model not approved for app generation: using Gemma 4.',
@@ -350,6 +352,7 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Cloud / AUTO inference',
   },
   'es': {
+    'Generazione NVIDIA riservata all’amministratore verificato: uso Gemma 4.': 'Generación NVIDIA reservada al administrador verificado: se utiliza Gemma 4.',
     'Motore predefinito: Gemma 4 (Cloudflare).': 'Motor predeterminado: Gemma 4 (Cloudflare).',
     'Il modello scelto riguarda la chat; il generatore usa Gemma 4.': 'El modelo seleccionado corresponde al chat; el generador utiliza Gemma 4.',
     'Modello NVIDIA non autorizzato per generare app: uso Gemma 4.': 'Modelo NVIDIA no autorizado para generar apps: se utiliza Gemma 4.',
