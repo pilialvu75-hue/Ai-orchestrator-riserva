@@ -1054,6 +1054,18 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   }));
   assert.equal(forgedHeaderQuota.tier, 'standard');
   assert.equal((await body(await requestQuota(token))).tier, 'standard');
+  // A configured owner email takes precedence over an obsolete sub mapping:
+  // do not accidentally authorize two separate administrators.
+  const staleSubjectEnv = {
+    ...ownerEmailEnv, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: 'customer-subject',
+  };
+  const staleRequest = webRequest(signedCustomer, null, {
+    method: 'GET', path: '/api/cantiere/proposals/quota',
+    requestOrigin: null,
+  });
+  assert.equal((await body(await quotaApplication({
+    request: staleRequest, env: staleSubjectEnv,
+  }))).tier, 'standard');
   // Signed emails must match *exactly* after case folding; no domain grants.
   assert.equal(existingWebOwnerSubject({
     principal: { verifiedBy: 'cloudflare-access-jwt',
