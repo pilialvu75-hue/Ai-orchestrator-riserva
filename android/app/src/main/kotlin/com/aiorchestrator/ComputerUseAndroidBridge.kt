@@ -24,15 +24,19 @@ object ComputerUseAndroidBridge {
                         context.startActivity(intent)
                         result.success(null)
                     }
-                    "tapGame" -> {
+                    "tapGame", "swipeGame" -> {
                         val x = call.argument<Int>("x")
                         val y = call.argument<Int>("y")
-                        if (x == null || y == null) {
+                        val endX = if (call.method == "swipeGame") call.argument<Int>("endX") else x
+                        val endY = if (call.method == "swipeGame") call.argument<Int>("endY") else y
+                        if (x == null || y == null || endX == null || endY == null) {
                             result.error("INVALID_COORDINATES", "Coordinates required", null)
                         } else {
-                            ComputerUseAccessibilityService.tapGame(x, y) { ok, code ->
+                            ComputerUseAccessibilityService.gestureGame(
+                                x, y, endX, endY,
+                            ) { ok, code ->
                                 if (ok) result.success(code)
-                                else result.error(code, "Tap not performed", null)
+                                else result.error(code, "Gesture not performed", null)
                             }
                         }
                     }
