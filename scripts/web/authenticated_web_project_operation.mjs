@@ -145,7 +145,7 @@ function zipResponse(bytes, filename) {
  */
 export function createAuthenticatedWebProjectOperation({
   operation, expectedOrigin, accessIssuer, accessAudience, db, bucket, runner,
-  infer, fetchImpl, nowSeconds,
+  infer, adminSubject, fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
   const readsStatus = operation === 'status';
@@ -236,7 +236,7 @@ export function createAuthenticatedWebProjectOperation({
       if (url.searchParams.size !== 0) return reject(400, 'invalid_request');
       try {
         const result = await readWebApplicationQuota({
-          db, ownerSubject: verified.principal.subject,
+          db, ownerSubject: verified.principal.subject, adminSubject,
         });
         if (!result.ok) return operationFailure(result);
         return respond(200, result);
@@ -269,7 +269,7 @@ export function createAuthenticatedWebProjectOperation({
     try {
       const principal = verified.principal;
       if (operation === 'generate_app') {
-        result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, db, infer });
+        result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, adminSubject, db, infer });
       } else if (operation === 'verify_app') {
         result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'advance') {
