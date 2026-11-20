@@ -991,10 +991,10 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   const empty = await body(await read(token));
   assert.deepEqual(empty, {
     version: 1, ok: true,
-    userLimit: 10, userUsed: 0, userRemaining: 10,
+    userLimit: 72, userUsed: 0, userRemaining: 72,
     globalLimit: 72, globalUsed: 0, globalRemaining: 72,
-    tier: 'standard',
-    remaining: 10, windowSeconds: 86400, nextAvailableAt: null,
+    tier: 'administrator',
+    remaining: 72, windowSeconds: 86400, nextAvailableAt: null,
     scope: 'aivexus_reservations',
   });
 
@@ -1012,7 +1012,7 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   assert.equal(adminQuota.tier, 'administrator');
   assert.equal(adminQuota.userLimit, 72);
   assert.equal(adminQuota.globalLimit, 72);
-  assert.equal(adminQuota.remaining, 64);
+  assert.equal(adminQuota.remaining, 72);
   const nonAdminResponse = await quotaApplication({
     request: webRequest(another, null, {
       method: 'GET', path: '/api/cantiere/proposals/quota',
@@ -1020,9 +1020,8 @@ test('authenticated quota exposes exact personal/global counts and next availabl
     }),
     env: adminEnv,
   });
-  const nonAdminQuota = await body(nonAdminResponse);
-  assert.equal(nonAdminQuota.tier, 'standard');
-  assert.equal(nonAdminQuota.userLimit, 10);
+  assert.equal(nonAdminResponse.status, 403);
+  assert.equal((await body(nonAdminResponse)).error, 'owner_required');
 
   // The existing owner can be recognized via email within a *signed*
   // Cloudflare Access JWT; no second admin account and no public whitelist.
@@ -1051,14 +1050,14 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   const signedOwnerQuota = await body(await requestQuota(signedOwner));
   assert.equal(signedOwnerQuota.tier, 'administrator');
   assert.equal(signedOwnerQuota.userLimit, 72);
-  assert.equal((await body(await requestQuota(signedCustomer))).tier, 'standard');
+  assert.equal((await requestQuota(signedCustomer)).status, 403);
   // An unsigned email header does NOT grant the customer owner privileges.
-  const forgedHeaderQuota = await body(await requestQuota(signedCustomer, {
+  const forgedHeaderQuota = await requestQuota(signedCustomer, {
     'cf-access-authenticated-user-email': ownerEmail,
     'x-aivexus-admin': 'true',
-  }));
-  assert.equal(forgedHeaderQuota.tier, 'standard');
-  assert.equal((await body(await requestQuota(token))).tier, 'standard');
+  });
+  assert.equal(forgedHeaderQuota.status, 403);
+  assert.equal((await requestQuota(token)).status, 403);
   // A configured owner email takes precedence over an obsolete sub mapping:
   // do not accidentally authorize two separate administrators.
   const staleSubjectEnv = {
@@ -1068,9 +1067,9 @@ test('authenticated quota exposes exact personal/global counts and next availabl
     method: 'GET', path: '/api/cantiere/proposals/quota',
     requestOrigin: null,
   });
-  assert.equal((await body(await quotaApplication({
+  assert.equal((await quotaApplication({
     request: staleRequest, env: staleSubjectEnv,
-  }))).tier, 'standard');
+  })).status, 403);
   // Signed emails must match *exactly* after case folding; no domain grants.
   assert.equal(existingWebOwnerSubject({
     principal: { verifiedBy: 'cloudflare-access-jwt',
@@ -1090,7 +1089,7 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   const full = await body(await read(token));
   assert.equal(full.userUsed, 10);
   assert.equal(full.globalUsed, 72);
-  assert.equal(full.userRemaining, 0);
+  assert.equal(full.userRemaining, 62);
   assert.equal(full.globalRemaining, 0);
   assert.equal(full.remaining, 0);
   assert.equal(full.scope, 'aivexus_reservations');
@@ -1100,17 +1099,16 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   assert.ok(recovery <= Date.now() + 86400 * 1000);
   assert.doesNotMatch(JSON.stringify(full), /other-owner|access-subject/);
 
-  const unrelated = await body(await read(another));
-  assert.equal(unrelated.userRemaining, 10);
-  assert.equal(unrelated.globalRemaining, 0);
-  assert.equal(unrelated.remaining, 0);
+  // A different signed Access subject cannot even read the quota in
+  // owner-only mode.
+  assert.equal((await read(another)).status, 403);
 
   // The rolling window clears expired rows without requiring a midnight reset.
   sqlite.prepare(
     'UPDATE web_app_generations SET created_at = unixepoch() - 86401 WHERE owner_subject = ?'
   ).run(subject);
   const partial = await body(await read(token));
-  assert.equal(partial.userRemaining, 10);
+  assert.equal(partial.userRemaining, 72);
   assert.equal(partial.globalRemaining, 10);
   assert.equal(partial.remaining, 10);
   assert.equal(partial.nextAvailableAt, null);
@@ -1166,8 +1164,8 @@ test('only server-declared Cloudflare Access administrator can generate beyond s
   });
   // A browser cannot claim the admin identity: it must match a server-side
   // value and the *signed* Access sub.
-  assert.equal((await send({ ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: undefined })).status, 429);
-  assert.equal((await send({ ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: 'someone-else' })).status, 429);
+  assert.equal((await send({ ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: undefined })).status, 403);
+  assert.equal((await send({ ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: 'someone-else' })).status, 403);
   assert.equal(inferenceCalls, 0);
   const accepted = await send(env);
   assert.equal(accepted.status, 200);
@@ -1183,7 +1181,7 @@ test('only server-declared Cloudflare Access administrator can generate beyond s
   assert.equal(quota.tier, 'administrator');
   assert.equal(quota.userUsed, 11);
   assert.equal(quota.userLimit, 72);
-  assert.equal(quota.userRemaining, 53);
+  assert.equal(quota.userRemaining, 61);
   assert.equal(quota.globalLimit, 72);
 });
 
