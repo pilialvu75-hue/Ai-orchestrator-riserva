@@ -35,10 +35,12 @@ void main() {
     final lab = File(
       'lib/features/computer_use/presentation/computer_use_lab_page.dart',
     ).readAsStringSync();
-    expect(lab, contains('Autorizzo questo tocco'));
+    expect(lab, contains('Autorizzo questo gesto'));
     expect(lab, contains('openAccessibilitySettings'));
     expect(lab, contains('_session.sessionRevision'));
     expect(lab, contains('tapGame'));
+    expect(lab, contains('swipeGame'));
+    expect(lab, contains('onPanUpdate'));
     expect(lab, contains('Acquisisci tra 4 secondi'));
   });
 }
