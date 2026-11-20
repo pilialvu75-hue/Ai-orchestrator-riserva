@@ -38,6 +38,18 @@ $env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODEL = $model
 try {
   flutter test test/core/runtime/inference/windows_bundle_real_inference_test.dart --reporter expanded
   if ($LASTEXITCODE -ne 0) { throw 'Real bundled GGUF inference failed' }
+  $accelerated = Join-Path $ReleaseDir 'runtime-cpu-avx2\llama-completion.exe'
+  if (Test-Path -LiteralPath $accelerated) {
+    $avxImports = & $dumpbin.FullName /imports $accelerated | Out-String
+    if ($LASTEXITCODE -ne 0) { throw 'AVX2 import audit failed' }
+    foreach ($symbol in ($forbidden + @('ggml', 'llama.dll', 'VCRUNTIME', 'MSVCP'))) {
+      if ($avxImports -match [regex]::Escape($symbol)) { throw "AVX2 imports forbidden dependency: $symbol" }
+    }
+    $env:AI_ORCHESTRATOR_WINDOWS_SMOKE_HELPER = $accelerated
+    flutter test test/core/runtime/inference/windows_bundle_real_inference_test.dart --reporter expanded
+    if ($LASTEXITCODE -ne 0) { throw 'AVX2 real GGUF inference failed' }
+    $env:AI_ORCHESTRATOR_WINDOWS_SMOKE_HELPER = $helper
+  }
   if ($env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN -eq '1') {
     flutter test test/core/runtime/inference/resident_completion_runtime_real_test.dart --reporter expanded
     if ($LASTEXITCODE -ne 0) { throw 'Resident GGUF cache, session isolation or cancellation test failed' }

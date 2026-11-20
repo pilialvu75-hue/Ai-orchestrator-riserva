@@ -2,6 +2,21 @@ import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dar
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('AVX2 helper requires CPU capability and an installed binary', () {
+    for (final supported in [false, true]) {
+      for (final installed in [false, true]) {
+        expect(WindowsLlamaRuntime.resolveExecutable(
+          appExecutable: r'C:\app\app.exe', environment: const {},
+          avx2Available: supported,
+          fileExists: (file) => file == r'C:\app\llama-completion.exe' ||
+              (installed && file == r'C:\app\runtime-cpu-avx2\llama-completion.exe'),
+        ), supported && installed
+            ? r'C:\app\runtime-cpu-avx2\llama-completion.exe'
+            : r'C:\app\llama-completion.exe');
+      }
+    }
+  });
+
   test('production prefers bundled helper even with stale modern DLL runtime', () {
     for (final version in [
       'Windows 11 Home 10.0 (Build 22621)',

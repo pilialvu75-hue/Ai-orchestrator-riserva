@@ -105,6 +105,10 @@ jobs:
         shell: pwsh
         run: flutter build windows --release
 
+      - name: Build capability-gated AVX2 helper
+        shell: pwsh
+        run: ./tool/build_windows_avx2_runtime.ps1 -ReleaseDir (Join-Path $PWD 'build/windows/x64/runner/Release')
+
       - name: Verify bundled Windows GGUF inference
         shell: pwsh
         run: |
@@ -178,6 +182,22 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Build and verify recovery helper
+        id: recovery
+        shell: pwsh
+        run: |
+          & ./tool/windows_rollback/test_recovery.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Recovery tests failed' }
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+          $dir = Join-Path $PWD 'build/windows/recovery'
+          New-Item $dir -ItemType Directory -Force | Out-Null
+          $exe = Join-Path $dir 'AivexusRecovery.exe'
+          $manifest = Join-Path $PWD 'tool/windows_rollback/recovery.manifest'
+          $source = Join-Path $PWD 'tool/windows_rollback/AivexusRecovery.cs'
+          & $csc /nologo /target:exe /r:System.Windows.Forms.dll "/win32manifest:$manifest" "/out:$exe" $source
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $exe)) { throw 'Recovery helper build failed' }
+          "helper=$exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Locate Windows installer toolchain
         id: installer-tools
         shell: pwsh
@@ -241,6 +261,7 @@ jobs:
           $generatedDefines = Join-Path $PWD 'windows\installer\ci_generated.iss'
           @(
             "#define AppVersion `"$appVersion`"",
+            "#define AivexusRecoveryHelper `"${{ steps.recovery.outputs.helper }}`"",
             "#define ReleaseDir `"$releaseDir`"",
             "#define VCRedistPath `"$($redist.FullName)`"",
             "#define OutputDir `"$outputDir`""
