@@ -6,6 +6,8 @@ import android.graphics.Path
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.os.Bundle
 
 /**
  * Owner-enabled, bounded QA gesture bridge. No autonomous model invocation.
@@ -51,6 +53,37 @@ class ComputerUseAccessibilityService : AccessibilityService() {
                 targetPackage = selected
                 targetSinceMs = android.os.SystemClock.elapsedRealtime()
                 callback(true, selected)
+            }
+        }
+
+        fun typeInSelectedEditable(text: String, callback: (Boolean, String) -> Unit) {
+            Handler(Looper.getMainLooper()).post {
+                val service = active
+                val selected = targetPackage
+                val fresh = android.os.SystemClock.elapsedRealtime() - targetSinceMs <= TARGET_TTL_MS
+                val root = service?.rootInActiveWindow
+                if (service == null || !fresh || selected.isNullOrEmpty() ||
+                    root?.packageName?.toString() != selected) {
+                    clearTarget()
+                    callback(false, "TARGET_CHANGED_OR_EXPIRED")
+                    return@post
+                }
+                // Never type into password fields or a non-editable target.
+                // The owner must first place focus in an ordinary text field.
+                val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                if (focused == null || !focused.isEditable || focused.isPassword ||
+                    text.isEmpty() || text.length > 512) {
+                    clearTarget()
+                    callback(false, "EDITABLE_FIELD_REQUIRED")
+                    return@post
+                }
+                clearTarget()
+                val args = Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+                }
+                val ok = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                focused.recycle()
+                callback(ok, if (ok) "TEXT_ACTION_SENT" else "TEXT_ACTION_REJECTED")
             }
         }
 
