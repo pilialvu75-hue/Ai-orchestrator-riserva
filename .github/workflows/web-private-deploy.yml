@@ -162,6 +162,39 @@ jobs:
           test -n "${CLOUDFLARE_API_TOKEN}"
           test -n "${CLOUDFLARE_PAGES_PROJECT}"
 
+      - name: Verify existing owner Access binding exists before private deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Read only the Pages project configuration, never log its values.
+          # A missing owner binding would lock out even the administrator after
+          # the owner-only app update. Stop BEFORE uploading that build.
+          response="$(mktemp)"
+          trap 'rm -f "$response"' EXIT
+          project_url="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}"
+          status="$(curl -sS --connect-timeout 10 --max-time 30 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -o "$response" -w '%{http_code}' "$project_url" || true)"
+          if [[ "$status" != "200" ]]; then
+            echo "Owner preflight unavailable. Private deploy blocked without exposing Cloudflare settings."
+            exit 1
+          fi
+          if ! jq -e '
+            .result.deployment_configs.production.env_vars as $vars
+            | .success == true
+              and ($vars | type == "object")
+              and ($vars | has("AIVEXUS_WEB_OWNER_EMAIL") or
+                               has("AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT"))
+              and (["AIVEXUS_WEB_ORIGIN",
+                    "AIVEXUS_WEB_ACCESS_ISSUER",
+                    "AIVEXUS_WEB_ACCESS_AUDIENCE"]
+                   | all(. as $key | $vars | has($key)))
+          ' "$response" >/dev/null; then
+            echo "Signed owner identity or Access configuration not present in Pages Production. No deployment."
+            exit 1
+          fi
+          echo "Owner identity binding and Access variable names present (values withheld)."
+
       - name: Prove Cloudflare Access is fail-closed before upload
         shell: bash
         run: |
