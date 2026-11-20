@@ -22,6 +22,7 @@ LIBRARY_BASE = (
     "pilialvu75-hue/AI-Orchestrator-Module-Library/main"
 )
 INDEX_PATH = "packages/experimental-index.json"
+DEVELOPMENT_INDEX_PATH = "packages/development-index.json"
 INDEX_SCHEMA = "ai-orchestrator.library-experimental-index.v1"
 PACKAGE_SCHEMA = "ai-orchestrator.library-module-package.v1"
 ENVELOPE_SCHEMA = "ai-orchestrator.library-module-package-envelope.v1"
@@ -188,14 +189,64 @@ console.log('PASS: imported and executed real Library experimental Mia OTA API')
     return result.stdout.strip()
 
 
+def discover_development(index: dict, experimental: dict) -> list[dict]:
+    """Discover independently qualified internal packages, never production grants."""
+    _ensure(index.get("schema") == "aivexus.library.development-qualified-index.v1"
+            and index.get("production_certified") is False
+            and index.get("production_approved") is False,
+            "invalid development index")
+    _ensure(experimental.get("schema") == INDEX_SCHEMA
+            and experimental.get("policy") == POLICY
+            and experimental.get("certified") is False,
+            "invalid experimental index")
+    rows = index.get("packages")
+    _ensure(isinstance(rows, list), "invalid development records")
+    result = []
+    seen = set()
+    for row in rows:
+        _ensure(isinstance(row, dict), "invalid development record")
+        pin = row.get("pin")
+        _ensure(isinstance(pin, str) and re.fullmatch(
+            r"utility[.]llm_generated[.][a-z][a-z0-9_]{1,60}@[0-9]+[.][0-9]+[.][0-9]+", pin)
+            and pin not in seen, "invalid or duplicate development pin")
+        seen.add(pin)
+        _ensure(row.get("development_qualified") is True
+                and row.get("independent_export_consumer") == "PASS"
+                and row.get("production_certified") is False
+                and row.get("production_approved") is False,
+                "missing independent development qualification")
+        matches = [x for x in experimental.get("packages", [])
+                   if isinstance(x, dict) and x.get("pin") == pin]
+        _ensure(len(matches) == 1, "development pin absent from sandbox index")
+        original = matches[0]
+        digest = row.get("package_sha256")
+        _ensure(isinstance(digest, str) and _SHA.fullmatch(digest)
+                and digest == original.get("package_sha256")
+                and row.get("path") == original.get("path")
+                and original.get("tier") == "sandbox_preview"
+                and original.get("production_approved") is False
+                and _safe_path(row.get("path")) ==
+                    "packages/experimental/" + pin.replace("@", "/") + "/package.json",
+                "development record disagrees with sandbox index")
+        result.append({"pin": pin, "path": row["path"], "package_sha256": digest,
+                       "scope": "internal-isolated-evaluation-only",
+                       "production_approved": False})
+    return sorted(result, key=lambda row: row["pin"])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pin", default=ALLOWLISTED_PROBE)
     parser.add_argument("--probe", action="store_true",
                         help="execute allowlisted public API smoke in temporary sandbox")
+    parser.add_argument("--list-development", action="store_true",
+                        help="discover qualified internal candidates without executing code")
     args = parser.parse_args()
     try:
         index = _download_json(INDEX_PATH)
+        if args.list_development:
+            print(json.dumps(discover_development(_download_json(DEVELOPMENT_INDEX_PATH), index), indent=2))
+            return 0
         item = next((x for x in index.get("packages", []) if x.get("pin") == args.pin), None)
         _ensure(item is not None, "module pin not in experimental index")
         package = _download_json(_safe_path(item.get("path")))
