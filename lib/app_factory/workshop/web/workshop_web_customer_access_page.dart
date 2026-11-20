@@ -184,7 +184,7 @@ class _WorkshopWebCustomerAccessPageState
                 title: Text(item['recipientEmail']?.toString() ?? ''),
                 subtitle: Text((item['status']?.toString() ?? '') +
                   ' · ' + (item['expiresAt']?.toString() ?? '')),
-                trailing: Wrap(mainAxisSize: MainAxisSize.min, children: [
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (item['status'] == 'pending') IconButton(
                     key: Key('web_customer_copy_' +
                       (item['invitationId']?.toString() ?? '')),
