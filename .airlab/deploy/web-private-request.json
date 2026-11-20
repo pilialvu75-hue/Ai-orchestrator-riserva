@@ -3,6 +3,6 @@
   "operation": "deploy_private",
   "confirmation": "DEPLOY_PRIVATE_CANTIERE",
   "environment": "web-private-production",
-  "requestId": "aivexus-web-studio-pr1220-pr1222-private-20261120",
-  "reason": "Private rollout of merged PR #1220 (AIVEXUS Studio first-prompt editor, chat and verified preview) and PR #1222 (bounded automatic generation/verification progression). Web CI PASS. Existing Access fail-closed preflight, no new secrets or provider routes, no changes to Android/desktop runtime."
+  "requestId": "aivexus-web-long-prompt-8000-pr1232-private-20261120",
+  "reason": "Private AIVEXUS Web rollout of merged PR #1232: raise first app-generation prompt to 8000 graphemes with aligned 48KiB JSON size gate, all non-generation routes still at 2KiB. Flutter Chrome and authenticated D1 CI PASS; no new provider, model, keys, database schema, or budget. Preserve Cloudflare Access fail-closed pre/post deployment verification."
 }
