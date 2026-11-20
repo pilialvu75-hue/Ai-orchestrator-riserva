@@ -21,6 +21,16 @@ void main() {
     var requests = 0;
     var verificationPosts = 0;
     final client = MockClient((request) async {
+      if (request.url.path == '/api/cantiere/proposals/quota') {
+        expect(request.method, 'GET');
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true,
+          'scope': 'aivexus_reservations',
+          'remaining': 10, 'userRemaining': 10, 'userLimit': 10,
+          'globalRemaining': 36, 'globalLimit': 36,
+          'nextAvailableAt': null,
+        }), 200);
+      }
       requests++;
       if (request.url.path == '/api/cantiere/proposals/source') {
         expect(request.method, 'GET');
@@ -100,6 +110,8 @@ void main() {
         MaterialApp(home: WorkshopWebGeneratorPage(client: client)));
     await tester.pumpAndSettle();
     expect(requests, 0);
+    expect(find.byKey(const Key('web_generator_quota_meter')), findsOneWidget);
+    expect(find.textContaining('Generazioni disponibili: 10'), findsOneWidget);
     expect(find.byKey(const Key('web_generator_first_prompt')), findsOneWidget);
     expect(find.byKey(const Key('web_preview_platform_web')), findsNothing);
     await tester.tap(find.byKey(const Key('web_platform_picker')));
@@ -179,6 +191,16 @@ void main() {
     expect(prompt.length, lessThan(8000));
     String? sentPrompt;
     final client = MockClient((request) async {
+      if (request.url.path == '/api/cantiere/proposals/quota') {
+        expect(request.method, 'GET');
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true,
+          'scope': 'aivexus_reservations',
+          'remaining': 10, 'userRemaining': 10, 'userLimit': 10,
+          'globalRemaining': 36, 'globalLimit': 36,
+          'nextAvailableAt': null,
+        }), 200);
+      }
       expect(request.method, 'POST');
       expect(request.url.path, '/api/cantiere/proposals/generate');
       sentPrompt = (jsonDecode(request.body) as Map)['prompt'] as String;
