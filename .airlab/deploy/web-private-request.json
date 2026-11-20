@@ -3,6 +3,6 @@
   "operation": "deploy_private",
   "confirmation": "DEPLOY_PRIVATE_CANTIERE",
   "environment": "web-private-production",
-  "requestId": "aivexus-web-large-nim-builder-gated-pr1244-20261120",
-  "reason": "Private deployment of merged, fully CI-validated PR #1244: adds administrator-only, free-verification-gated 550B/552B/1T NVIDIA NIM provider adapter to AIVEXUS Web source generator. NVIDIA trial activation remains OFF until account entitlement is independently confirmed; Gemma Workers Free remains default. No new billable service or secrets, no change to Local/Cloud/Hybrid or Cloudflare Access. Preserve fail-closed pre/post deployment checks."
+  "requestId": "aivexus-web-existing-owner-account-pr1251-20261120",
+  "reason": "Private release of merged PR #1251: existing AIVEXUS owner Cloudflare Access login is recognized through signed JWT identity (legacy subject or privately configured exact owner email, with email precedence). Customers remain standard; no new admin account, customer exposure, paid NVIDIA service, D1 migration or account changes. Maintain fail-closed Access checks and private hosting. Do not embed owner email in repository or response."
 }
