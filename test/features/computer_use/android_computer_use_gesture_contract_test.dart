@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Android Computer Use QA is permission gated and Car Jam only', () {
+  test('Android Computer Use QA binds one gesture to selected external app', () {
     final service = File(
       'android/app/src/main/kotlin/com/aiorchestrator/'
       'ComputerUseAccessibilityService.kt',
@@ -14,8 +14,11 @@ void main() {
       'android/app/src/main/res/xml/computer_use_accessibility.xml',
     ).readAsStringSync();
 
-    expect(service, contains('car.parking.jam.solver.puzzle.games'));
-    expect(service, contains('currentPackage != GAME_PACKAGE'));
+    expect(service, contains('selectForegroundTarget'));
+    expect(service, contains('currentPackage != selected'));
+    expect(service, contains('clearTarget()'));
+    expect(service, contains('TARGET_CHANGED_OR_EXPIRED'));
+    expect(service, contains('excludedPackages'));
     expect(service, contains('dispatchGesture('));
     expect(service, contains('INVALID_COORDINATES'));
     expect(service, isNot(contains('performGlobalAction(')));
@@ -38,8 +41,9 @@ void main() {
     expect(lab, contains('Autorizzo questo gesto'));
     expect(lab, contains('openAccessibilitySettings'));
     expect(lab, contains('_session.sessionRevision'));
-    expect(lab, contains('tapGame'));
-    expect(lab, contains('swipeGame'));
+    expect(lab, contains('tapTarget'));
+    expect(lab, contains('swipeTarget'));
+    expect(lab, contains('selectForegroundTarget'));
     expect(lab, contains('onPanUpdate'));
     expect(lab, contains('Acquisisci tra 4 secondi'));
   });
