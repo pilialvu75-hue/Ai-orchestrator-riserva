@@ -119,6 +119,12 @@ export async function verifyCloudflareAccessAssertion({
   return {
     ok: true,
     // INTERNAL only: pass straight to Web D1 approval/reservation modules.
-    principal: { subject: payload.sub, verifiedBy: 'cloudflare-access-jwt' },
+    principal: {
+      subject: payload.sub, verifiedBy: 'cloudflare-access-jwt',
+      // The IdP email is part of the cryptographically verified Access JWT.
+      // It is INTERNAL ONLY; API handlers must never serialize the principal.
+      ...(typeof payload.email === 'string' && payload.email.length <= 254
+        ? { email: payload.email } : {}),
+    },
   };
 }

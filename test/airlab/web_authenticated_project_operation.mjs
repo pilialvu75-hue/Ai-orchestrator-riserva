@@ -29,6 +29,7 @@ import { generateWebApplication } from '../../scripts/web/generate_web_applicati
 import { onRequest as cloudCapabilities } from '../../functions/api/cantiere/capabilities.js';
 import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
+import { existingWebOwnerSubject } from '../../scripts/web/web_owner_role.mjs';
 import { runWebCounterAttempt } from '../../scripts/web/run_web_counter_attempt.mjs';
 import { buildAndTestCounter } from '../../scripts/web/build_verified_counter_zip.mjs';
 import { sealCounterRunnerZip } from '../../scripts/web/counter_runner_envelope.mjs';
@@ -1017,6 +1018,65 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   const nonAdminQuota = await body(nonAdminResponse);
   assert.equal(nonAdminQuota.tier, 'standard');
   assert.equal(nonAdminQuota.userLimit, 10);
+
+  // The existing owner can be recognized via email within a *signed*
+  // Cloudflare Access JWT; no second admin account and no public whitelist.
+  const ownerEmail = 'owner@example.test';
+  const signedOwner = await signing.sign({
+    iat, nbf: iat, exp: iat + 300,
+    email: ownerEmail,
+  });
+  const signedCustomer = await signing.sign({
+    iat, nbf: iat, exp: iat + 300,
+    sub: 'customer-subject', email: 'customer@example.test',
+  });
+  const ownerEmailEnv = { ...env, AIVEXUS_WEB_OWNER_EMAIL: ownerEmail };
+  const requestQuota = (assertion, extraHeaders = null) => {
+    const request = webRequest(assertion, null, {
+      method: 'GET', path: '/api/cantiere/proposals/quota',
+      requestOrigin: null,
+    });
+    if (extraHeaders) {
+      for (const [key, value] of Object.entries(extraHeaders)) {
+        request.headers.set(key, value);
+      }
+    }
+    return quotaApplication({ request, env: ownerEmailEnv });
+  };
+  const signedOwnerQuota = await body(await requestQuota(signedOwner));
+  assert.equal(signedOwnerQuota.tier, 'administrator');
+  assert.equal(signedOwnerQuota.userLimit, 64);
+  assert.equal((await body(await requestQuota(signedCustomer))).tier, 'standard');
+  // An unsigned email header does NOT grant the customer owner privileges.
+  const forgedHeaderQuota = await body(await requestQuota(signedCustomer, {
+    'cf-access-authenticated-user-email': ownerEmail,
+    'x-aivexus-admin': 'true',
+  }));
+  assert.equal(forgedHeaderQuota.tier, 'standard');
+  assert.equal((await body(await requestQuota(token))).tier, 'standard');
+  // A configured owner email takes precedence over an obsolete sub mapping:
+  // do not accidentally authorize two separate administrators.
+  const staleSubjectEnv = {
+    ...ownerEmailEnv, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: 'customer-subject',
+  };
+  const staleRequest = webRequest(signedCustomer, null, {
+    method: 'GET', path: '/api/cantiere/proposals/quota',
+    requestOrigin: null,
+  });
+  assert.equal((await body(await quotaApplication({
+    request: staleRequest, env: staleSubjectEnv,
+  }))).tier, 'standard');
+  // Signed emails must match *exactly* after case folding; no domain grants.
+  assert.equal(existingWebOwnerSubject({
+    principal: { verifiedBy: 'cloudflare-access-jwt',
+      subject: 'test', email: 'Customer@Example.Test' },
+    configuredEmail: 'example.test',
+  }), null);
+  assert.equal(existingWebOwnerSubject({
+    principal: { verifiedBy: 'untrusted-header',
+      subject: 'test', email: ownerEmail },
+    configuredEmail: ownerEmail,
+  }), null);
 
   const seed = sqlite.prepare(
     "INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status, created_at) VALUES (?, ?, ?, 'failed', unixepoch())");

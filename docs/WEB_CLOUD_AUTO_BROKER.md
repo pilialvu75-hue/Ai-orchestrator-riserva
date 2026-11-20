@@ -121,12 +121,32 @@ restituisce i tentativi personali/globali residui e, in caso di blocco, il
 momento UTC del prossimo recupero (senza dati personali degli altri utenti).
 Il contatore misura solo la quota **interna AIVEXUS**, non i Neurons disponibili
 nell'account Cloudflare: il limite esterno Workers AI gratuito resta indipendente.
-L'identità privilegiata è abilitata **solo** se la variabile privata di Pages
-`AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT` contiene esattamente il campo `sub`
-di un JWT Cloudflare Access verificato; nessun cookie, email, header o flag Web
-fornito dall'utente conferisce privilegi. In assenza della configurazione si
-applica il limite normale. Il valore va impostato direttamente nei segreti di
-Cloudflare Pages, mai nella chat o in Git. Il budget globale 72 resta un
+L'amministratore AIVEXUS è il **proprietario esistente**, non un secondo
+account. Il ruolo privilegiato è riconosciuto **solo dopo** la verifica
+crittografica del JWT Cloudflare Access (firma, issuer, audience, expiry):
+- se il suo `sub` corrisponde esattamente alla vecchia impostazione privata
+  `AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT`, che rimane supportata;
+- **oppure** se l'email attestata nel JWT corrisponde esattamente, ignorando
+  soltanto maiuscole/minuscole, a `AIVEXUS_WEB_OWNER_EMAIL`, una nuova
+  impostazione privata server-side. Non è una nuova registrazione né un
+  secondo login: basta la sessione Access già esistente dell'owner.
+
+L'email amministrativa **non viene mai codificata nel repository** né
+restituita dalle API. L'Access identity dell'owner e la propria
+configurazione email privata devono corrispondere: nessun browser header,
+cookie, JSON, o autoproclamato ruolo `admin` è prova di autorità.
+Quando è configurata l'email dell'owner, prevale sul vecchio `sub`:
+non possono esserci due amministratori per errore. In sua assenza il
+precedente `sub` resta valido, senza necessità di migrazione.
+Senza corrispondenza esatta il ruolo è `standard`. Il segreto/variabile
+va configurato direttamente in Cloudflare Pages Production, non in chat.
+
+I clienti vengono ammessi separatamente tramite la futura procedura di
+invito con verifica della loro identità Cloudflare Access e permessi
+limitati, per progetto. Un cliente autenticato non è mai l'owner per
+semplice registrazione, email di invito o possesso del token di un'altra
+app. Beta-access oggi gestisce gli inviti di tester WEmulDroid, **non**
+un onboarding clienti di AIVEXUS Web già operativo. Il budget globale 72 resta un
 limite prudente per il piano gratuito, **non una garanzia** di ottenere 72
 chiamate: Workers AI Free dispone di 10.000 Neurons per account al giorno,
 condivisi da tutti i prodotti; verificare il piano Free e il consumo effettivo.
