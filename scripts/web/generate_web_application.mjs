@@ -2,8 +2,10 @@ import { validateWebApplicationChecks } from './web_application_checks.mjs';
 import { WEB_RUNNER_TICKET as GENERATION_ID } from './web_runner_envelope.mjs';
 export const MAX_WEB_APP_PROMPT_CHARACTERS = 8000;
 export const WEB_APP_USER_DAILY_LIMIT = 10;
-export const WEB_APP_ADMIN_DAILY_LIMIT = 64;
 export const WEB_APP_GLOBAL_DAILY_LIMIT = 72;
+// The private owner receives the entire currently configured no-cost quota.
+// Provider Cloudflare Free/Neurons availability may still be lower.
+export const WEB_APP_ADMIN_DAILY_LIMIT = WEB_APP_GLOBAL_DAILY_LIMIT;
 const QUOTA_WINDOW_SECONDS = 86400;
 
 const FILE_PATH = /^(?:[a-z0-9][a-z0-9_-]*\/){0,3}[a-z0-9][a-z0-9_-]*\.(?:html|css|js|mjs|json|txt|md)$/;
