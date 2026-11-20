@@ -1,0 +1,153 @@
+name: Windows Store MSIX private beta QA (source-only)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-store-msix-qa.yml'
+      - 'tool/build_windows_store_msix.ps1'
+      - 'test/scripts/test_windows_store_msix_contract.py'
+      - 'docs/windows-store-private-beta.md'
+  workflow_dispatch:
+    inputs:
+      identity_name:
+        description: Exact reserved Microsoft Partner Center product identity
+        required: true
+        type: string
+      publisher:
+        description: Exact Partner Center publisher subject (CN=...)
+        required: true
+        type: string
+      publisher_display_name:
+        description: Exact publisher display name
+        required: true
+        type: string
+      display_name:
+        description: Exact reserved application display name
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-store-msix-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 -m unittest discover -s test/scripts -p 'test_windows_store_msix_contract.py'
+
+  package-store-qa:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      STORE_IDENTITY: ${{ inputs.identity_name }}
+      STORE_PUBLISHER: ${{ inputs.publisher }}
+      STORE_PUBLISHER_DISPLAY: ${{ inputs.publisher_display_name }}
+      STORE_APP_DISPLAY: ${{ inputs.display_name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Flutter toolchain
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Restore locked dependencies
+        shell: pwsh
+        run: flutter pub get --enforce-lockfile
+      - name: Verify Computer Use and ChatGPT bridge
+        shell: pwsh
+        run: >-
+          flutter test --reporter expanded
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+          --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=true
+          test/features/computer_use
+          test/core/diagnostics/chatgpt_bridge
+      - name: Build AIVEXUS with CUDA Computer Use and ChatGPT
+        shell: pwsh
+        run: >-
+          flutter build windows --release
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+          --dart-define=AIVEXUS_WINDOWS_CUDA_QA=true
+          --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=true
+          --dart-define=AIVEXUS_WINDOWS_STORE_MSIX=true
+      - name: Bundle and audit pinned CUDA and ChatGPT adapter
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = Join-Path $PWD 'build\windows\x64\runner\Release'
+          $mcp = Join-Path $release 'mcp-tools'
+          New-Item -ItemType Directory -Path $mcp -Force | Out-Null
+          Copy-Item 'scripts\chatgpt_bridge\aivexus_mcp.ps1' (Join-Path $mcp 'aivexus_mcp.ps1')
+          & (Join-Path $PWD 'tool\bundle_windows_cuda_runtime.ps1') -ReleaseDir $release
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned CUDA download failed.' }
+          & (Join-Path $PWD 'tool\test_windows_cuda_bundle.ps1') -ReleaseDir $release
+          if ($LASTEXITCODE -ne 0) { throw 'CUDA dependency closure failed.' }
+          & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $release
+          if ($LASTEXITCODE -ne 0) { throw 'LOCAL GGUF bundle gate failed.' }
+      - name: Package and unpack-verify unsigned Store MSIX candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            # Placeholder identity only for structural tests; NOT Store upload.
+            $identity = 'AIVEXUS.QA'
+            $publisher = 'CN=AIVEXUS-QA'
+            $publisherDisplay = 'AIVEXUS QA'
+            $appDisplay = 'AIVEXUS QA'
+          } else {
+            $identity = $env:STORE_IDENTITY
+            $publisher = $env:STORE_PUBLISHER
+            $publisherDisplay = $env:STORE_PUBLISHER_DISPLAY
+            $appDisplay = $env:STORE_APP_DISPLAY
+            if ($identity -eq 'AIVEXUS.QA' -or $publisher -eq 'CN=AIVEXUS-QA') {
+              throw 'Real Store Product identity required for an owner submission candidate.'
+            }
+          }
+          # Revision (fourth component) must remain zero for Microsoft Store.
+          $number = 1000 + [int]$env:GITHUB_RUN_NUMBER
+          if ($number -gt 65535) { throw 'MSIX version reached 16-bit limit.' }
+          $version = "1.0.$number.0"
+          $output = Join-Path $PWD 'build\windows\store-msix-candidate'
+          $args = @{
+            ReleaseDir = (Join-Path $PWD 'build\windows\x64\runner\Release')
+            OutputDir = $output
+            IdentityName = $identity
+            Publisher = $publisher
+            PublisherDisplayName = $publisherDisplay
+            DisplayName = $appDisplay
+            Version = $version
+          }
+          & (Join-Path $PWD 'tool\build_windows_store_msix.ps1') @args
+          if ($LASTEXITCODE -ne 0) { throw 'Store MSIX packaging failed.' }
+          @(
+            'AIVEXUS Windows CUDA + Computer Use + ChatGPT MSIX - QA ONLY'
+            "Source commit: $env:GITHUB_SHA"
+            "Package version: $version"
+            "Identity: $identity"
+            "Publisher: $publisher"
+            'UNSIGNED. Do NOT sideload or install directly.'
+            'Requires Partner Center reservation, certification and Microsoft Store signing.'
+            'Store-managed updates are different from in-app EXE updates.'
+            'Never replace the current AIVEXUS installation before migration tests.'
+          ) | Set-Content (Join-Path $output 'README-STORE-QA.txt') -Encoding UTF8
+      - name: Upload temporary MSIX QA artifact only
+        uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-windows-store-msix-unsigned-qa
+          path: |
+            build/windows/store-msix-candidate/AIVEXUS-Windows-Store-Beta-x64.msix
+            build/windows/store-msix-candidate/AIVEXUS-Windows-Store-Beta-x64.msix.sha256
+            build/windows/store-msix-candidate/README-STORE-QA.txt
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 1
