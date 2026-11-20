@@ -64,3 +64,52 @@ synthetic prompt. `AUTO` and the fallback order remain unchanged.
 
 Web's existing 15% execution barrier is a separate issue: the server-side
 artifact builder is not yet connected. More capable models do not remove it.
+
+## AIVEXUS Studio builder adapter — manual, zero-cost gated (2026-11-20)
+
+The app generator supports an optional opaque `builderRouteId` chosen via
+the existing **Scelta modello** menu:
+
+- `nemotron-ultra-orchestrator` → `nvidia/nemotron-3-ultra-550b-a55b`
+- `kimi-k26-orchestrator` → `moonshotai/kimi-k2.6`
+- `deepseek-v41-flash-orchestrator` → `deepseek-ai/deepseek-v4.1-flash`
+
+**No NVIDIA route is enabled for source generation by merging this code.**
+Gemma 4 on Workers AI Free remains the default. Desktop/Android Local,
+Cloud and Hybrid are unchanged; manually selected large-model broker routes
+remain excluded from AUTO.
+
+All five server-side eligibility conditions must be met:
+
+1. Confirm NVIDIA trial entitlement and monetary cost zero for **full app
+   generation**, not only a short synthetic probe; no billable overages.
+2. The model/route must match the exact allowlist and NVIDIA trial endpoint
+   `https://integrate.api.nvidia.com/v1/chat/completions`.
+3. Its server-only `CANTIERE_CLOUD_ROUTES_JSON.orchestration` entry must
+   reference an existing encrypted key and have `manualOnly:true`,
+   `selfTestFree:true`, and the **separate** `builderFreeVerified:true`.
+4. Cloudflare Pages Production must have
+   `AIVEXUS_WEB_BUILDER_NIM_FREE_VERIFIED=true` set server-side.
+5. `/api/cantiere/models` must confirm `builderAvailable:true` for the
+   exact route. The catalogue signals authorization, not live credit balance.
+
+**Both new controls are OFF by default.** An operator must independently
+verify the specific account's free-trial terms before enabling them. No
+provider credentials, URLs or untrusted models enter the Flutter app.
+
+If the route is not approved, the client explicitly informs the user and
+uses the preexisting free Cloudflare Gemma builder. A deliberately submitted
+but unapproved builder alias is refused by the authenticated endpoint
+**before D1 reserves an attempt**. An approved manual trial makes at most
+**one NVIDIA request**, with no hidden paid-provider fallback or retries.
+If a trial expires, immediately turn off one or both server switches.
+
+The original prompt validation, D1 quotas, source checks, verification,
+owner isolation and GitHub runner are unchanged. Provenance records the
+requested model/provider/route. When the upstream model is not declared,
+the receipt says `not_reported_by_provider` instead of falsely attributing
+an identity. Selection of an approved trial intentionally skips the
+prompt-only verified-project cache, which might contain a Gemma result.
+
+The free Cloudflare Neuron allowance is separate from NVIDIA's preview
+credit pool. CI tests use fake NIM responses and make no real API calls.
