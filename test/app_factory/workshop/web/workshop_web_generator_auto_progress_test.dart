@@ -23,6 +23,15 @@ void main() {
     var verifyReads = 0;
     var verifyPosts = 0;
     final client = MockClient((request) async {
+      if (request.url.path == '/api/cantiere/proposals/quota') {
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true,
+          'scope': 'aivexus_reservations',
+          'remaining': 10, 'userRemaining': 10, 'userLimit': 10,
+          'globalRemaining': 36, 'globalLimit': 36,
+          'nextAvailableAt': null,
+        }), 200);
+      }
       if (request.url.path == '/api/cantiere/proposals/generate') {
         if (request.method == 'POST') {
           generationPosts++;
