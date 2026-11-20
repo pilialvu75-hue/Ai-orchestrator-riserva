@@ -1005,7 +1005,7 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   });
   const adminQuota = await body(adminResponse);
   assert.equal(adminQuota.tier, 'administrator');
-  assert.equal(adminQuota.userLimit, 64);
+  assert.equal(adminQuota.userLimit, 72);
   assert.equal(adminQuota.globalLimit, 72);
   assert.equal(adminQuota.remaining, 64);
   const nonAdminResponse = await quotaApplication({
@@ -1045,7 +1045,7 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   };
   const signedOwnerQuota = await body(await requestQuota(signedOwner));
   assert.equal(signedOwnerQuota.tier, 'administrator');
-  assert.equal(signedOwnerQuota.userLimit, 64);
+  assert.equal(signedOwnerQuota.userLimit, 72);
   assert.equal((await body(await requestQuota(signedCustomer))).tier, 'standard');
   // An unsigned email header does NOT grant the customer owner privileges.
   const forgedHeaderQuota = await body(await requestQuota(signedCustomer, {
@@ -1176,7 +1176,7 @@ test('only server-declared Cloudflare Access administrator can generate beyond s
   const quota = await body(quotaResponse);
   assert.equal(quota.tier, 'administrator');
   assert.equal(quota.userUsed, 11);
-  assert.equal(quota.userLimit, 64);
+  assert.equal(quota.userLimit, 72);
   assert.equal(quota.userRemaining, 53);
   assert.equal(quota.globalLimit, 72);
 });
