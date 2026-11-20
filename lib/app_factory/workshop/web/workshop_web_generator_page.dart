@@ -37,6 +37,12 @@ class WorkshopWebGeneratorPage extends StatefulWidget {
 
 class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   static const _maxFirstPromptCharacters = 8000;
+  // Shared opaque aliases from the existing ☰ → Scelta modello catalogue.
+  static const _largeBuilderRoutes = <String, String>{
+    'nemotron-ultra-orchestrator': 'Nemotron 3 Ultra · 550B',
+    'kimi-k26-orchestrator': 'Kimi K2.6 · 1T',
+    'deepseek-v41-flash-orchestrator': 'DeepSeek V4.1 Flash · 552B',
+  };
   static const _storageKey = 'aivexus.web.lastGeneration.v1';
   static const _platformStorageKey = 'aivexus.web.generationPreviewPlatform.v1';
   static final _idPattern = RegExp(
@@ -73,6 +79,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   Map<String, dynamic>? _quota;
   bool _quotaLoading = false;
   bool _reusedVerifiedGeneration = false;
+  String? _builderNotice;
   bool _busy = true;
 
   // UI-only, bounded follow-up to the existing idempotent generator + verify
@@ -347,11 +354,58 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     }
   }
 
+  // Reuse the existing Web model selection, but only a server-confirmed
+  // no-cost builder trial may replace Cloudflare Gemma for source generation.
+  // A stale/unavailable catalogue falls back to the existing free builder.
+  Future<String?> _selectedFreeBuilderRoute() async {
+    final id = widget.modelPreference?.routeId;
+    if (id == null) {
+      if (mounted) setState(() => _builderNotice = null);
+      return null;
+    }
+    if (!_largeBuilderRoutes.containsKey(id)) {
+      if (mounted) {
+        setState(() => _builderNotice =
+            'Il modello scelto riguarda la chat; il generatore usa Gemma 4.');
+      }
+      return null;
+    }
+    try {
+      final response = await _client
+          .get(Uri.base.resolve('/api/cantiere/models'))
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final result = jsonDecode(utf8.decode(response.bodyBytes));
+        if (result is Map<String, dynamic> && result['models'] is List) {
+          final routes = result['models'] as List;
+          final available = routes.any((row) =>
+              row is Map && row['routeId'] == id &&
+              row['builderAvailable'] == true);
+          if (available) {
+            if (mounted) {
+              setState(() => _builderNotice =
+                  'Generazione con modello NVIDIA di prova autorizzato.');
+            }
+            return id;
+          }
+        }
+      }
+    } catch (_) {
+      // Noncritical catalogue failures must not prevent creating the app.
+    }
+    if (mounted) {
+      setState(() => _builderNotice =
+          'Modello NVIDIA non autorizzato per generare app: uso Gemma 4.');
+    }
+    return null;
+  }
+
   Future<void> _submit() async {
     final prompt = _pendingPrompt ?? _prompt.text.trim();
     if (_busy || prompt.isEmpty) return;
     await _run(() async {
-      if (_generationId == null) {
+      final builderRouteId = await _selectedFreeBuilderRoute();
+      if (_generationId == null && builderRouteId == null) {
         final priorId = await _findReusableVerifiedGeneration(prompt);
         if (priorId != null) {
           Map<String, dynamic>? prior;
@@ -388,7 +442,8 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         _generationId = id;
         _pendingPrompt = prompt;
       });
-      final result = await _call(id, prompt: prompt);
+      final result = await _call(id, prompt: prompt,
+          builderRouteId: builderRouteId);
       if (!mounted) return;
       setState(() => _receipt = result);
       if (result?['status'] == 'generated') await _readVerification(id);
@@ -455,6 +510,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         _selectedPlatform = WorkshopWebTarget.web;
         _automaticChecks = 0;
         _reusedVerifiedGeneration = false;
+        _builderNotice = null;
         _verificationDispatchAttempts.clear();
         _generationId = null;
         _pendingPrompt = null;
@@ -523,13 +579,18 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     ));
   }
 
-  Future<Map<String, dynamic>?> _call(String id, {String? prompt}) async {
+  Future<Map<String, dynamic>?> _call(String id,
+      {String? prompt, String? builderRouteId}) async {
     final uri = Uri.base.resolve('/api/cantiere/proposals/generate');
     final response = await (prompt == null
             ? _client.get(uri.replace(queryParameters: {'generationId': id}))
             : _client.post(uri,
                 headers: {'Content-Type': 'application/json'},
-                body: jsonEncode({'generationId': id, 'prompt': prompt})))
+                body: jsonEncode({
+                  'generationId': id,
+                  'prompt': prompt,
+                  if (builderRouteId != null) 'builderRouteId': builderRouteId,
+                })))
         .timeout(Duration(seconds: prompt == null ? 15 : 95));
     final result = jsonDecode(utf8.decode(response.bodyBytes));
     if (result is! Map<String, dynamic> || result['version'] != 1) {
@@ -554,6 +615,11 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         result['error'] == 'generation_quota_exceeded') {
       throw const _GeneratorRequestException(
           'Limite di generazione raggiunto. Riprova più tardi.');
+    }
+    if (response.statusCode == 503 &&
+        result['error'] == 'generation_model_unavailable') {
+      throw const _GeneratorRequestException(
+          'Il modello NVIDIA non è disponibile gratuitamente per il generatore.');
     }
     if (response.statusCode == 503 &&
         result['error'] == 'generation_unavailable') {
@@ -662,6 +728,20 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                 style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
               _quotaMeter(tr),
+              Text(
+                tr('Motore predefinito: Gemma 4 (Cloudflare).') +
+                    (widget.modelPreference?.routeId != null &&
+                            _largeBuilderRoutes.containsKey(
+                                widget.modelPreference!.routeId)
+                        ? ' · ' + _largeBuilderRoutes[
+                            widget.modelPreference!.routeId]!
+                        : ''),
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              if (_builderNotice != null)
+                Text(tr(_builderNotice!),
+                    key: const Key('web_generator_builder_notice'),
+                    style: const TextStyle(color: Color(0xFF9AC9FF), fontSize: 12)),
               const SizedBox(height: 8),
               Expanded(
                 child: TextField(
@@ -762,6 +842,10 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
             padding: const EdgeInsets.all(16),
             children: [
               _quotaMeter(tr),
+              if (_builderNotice != null)
+                Text(tr(_builderNotice!),
+                    key: const Key('web_generator_builder_notice'),
+                    style: const TextStyle(color: Color(0xFF9AC9FF), fontSize: 12)),
               if (_reusedVerifiedGeneration)
                 Text(tr('App già verificata riutilizzata senza nuova inferenza.'),
                     key: const Key('web_generator_reused_verified'),
