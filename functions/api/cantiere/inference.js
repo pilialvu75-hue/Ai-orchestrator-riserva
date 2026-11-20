@@ -1,10 +1,3 @@
-import { createCloudflareAccessPrincipalResolver } from
-  '../../../scripts/web/cloudflare_access_principal_resolver.mjs';
-import { existingWebOwnerSubject } from
-  '../../../scripts/web/web_owner_role.mjs';
-import { activeWebCustomerGrant } from
-  '../../../scripts/web/web_client_invitations.mjs';
-
 const CAPABILITIES = new Set([
   'orchestration',
   'architecture_reasoning',
@@ -527,6 +520,23 @@ export async function onRequest(context) {
   // create their own app through the D1-metered generate endpoint, but cannot
   // consume raw provider API calls or owner-only large NVIDIA trials.
   if (context.env.AIVEXUS_WEB_CLIENT_ACCESS_ENABLED === 'true') {
+    // Keep the zero-cost broker's existing data-URL test harness compatible:
+    // load the authenticated customer gate only when client mode is enabled.
+    // Static specifiers are bundled by Cloudflare at build time.
+    let createCloudflareAccessPrincipalResolver;
+    let existingWebOwnerSubject;
+    let activeWebCustomerGrant;
+    try {
+      [{ createCloudflareAccessPrincipalResolver },
+       { existingWebOwnerSubject },
+       { activeWebCustomerGrant }] = await Promise.all([
+        import('../../../scripts/web/cloudflare_access_principal_resolver.mjs'),
+        import('../../../scripts/web/web_owner_role.mjs'),
+        import('../../../scripts/web/web_client_invitations.mjs'),
+      ]);
+    } catch (_) {
+      return error('access_unavailable', 503);
+    }
     const request = context.request;
     const expectedOrigin = context.env.AIVEXUS_WEB_ORIGIN;
     if (request.headers.get('origin') !== expectedOrigin ||
