@@ -153,6 +153,47 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     });
   }
 
+  Future<void> _typeAndroidSelectedText() async {
+    if (!_isAndroid || !_session.isActive || _busy) return;
+    final value = _textController.text;
+    if (value.isEmpty || value.length > 512) return;
+    final consent = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Inserire testo nell’app selezionata?'),
+        content: const Text(
+          'AIVEXUS inserirà il testo nel campo modificabile attualmente '
+          'selezionato. Torna nell’app entro 4 secondi. Non inserire '
+          'password o dati sensibili. Il salvataggio non è automatico.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annulla'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Autorizza inserimento'),
+          ),
+        ],
+      ),
+    );
+    if (consent != true || !mounted) return;
+    final revision = _session.sessionRevision;
+    await _run(() async {
+      setState(() => _message = 'Torna nell’app: inserimento fra 4 secondi.');
+      await Future<void>.delayed(const Duration(seconds: 4));
+      if (!_session.isActive || revision != _session.sessionRevision) return;
+      final outcome = await _androidGestures.invokeMethod<String>(
+        'typeTargetText', <String, String>{'text': value},
+      );
+      if (mounted && revision == _session.sessionRevision) {
+        setState(() => _message = 'Testo inviato al campo selezionato: '
+            '${outcome ?? 'nessun risultato'}. Salvataggio non verificato.');
+      }
+    });
+  }
+
   Future<void> _findAndOpenAndroidApp() async {
     if (!_isAndroid || _busy) return;
     final query = _appSearchController.text.trim();
@@ -777,6 +818,20 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               onPressed: _busy ? null : _findAndOpenAndroidApp,
               icon: const Icon(Icons.apps),
               label: const Text('Cerca e apri app'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _textController,
+              maxLength: 512,
+              decoration: const InputDecoration(
+                labelText: 'Testo da inserire nell’app selezionata',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: !_busy && active ? _typeAndroidSelectedText : null,
+              icon: const Icon(Icons.edit_note),
+              label: const Text('Inserisci testo nel campo attivo'),
             ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _openAndroidAccessibilitySettings,
