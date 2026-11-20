@@ -24,6 +24,7 @@ on:
       - 'functions/api/cantiere/proposals/counter.js'
       - 'functions/api/cantiere/proposals/generate.js'
       - 'functions/api/cantiere/proposals/quota.js'
+      - 'functions/api/cantiere/proposals/reuse.js'
       - 'functions/api/cantiere/proposals/verify.js'
       - 'functions/api/cantiere/proposals/download.js'
       - 'functions/api/cantiere/proposals/source.js'
@@ -70,6 +71,7 @@ on:
       - 'functions/api/cantiere/proposals/counter.js'
       - 'functions/api/cantiere/proposals/generate.js'
       - 'functions/api/cantiere/proposals/quota.js'
+      - 'functions/api/cantiere/proposals/reuse.js'
       - 'functions/api/cantiere/proposals/verify.js'
       - 'functions/api/cantiere/proposals/download.js'
       - 'functions/api/cantiere/proposals/source.js'
@@ -120,7 +122,7 @@ jobs:
         run: |
           npx --yes wrangler@4 pages functions build functions --outfile "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           test -s "$RUNNER_TEMP/aivexus-pages-worker.mjs"
-          for route in executions/reserve executions/status executions/download executions/advance proposals/counter proposals/approve proposals/generate proposals/quota proposals/verify proposals/download proposals/source proposals/preview; do
+          for route in executions/reserve executions/status executions/download executions/advance proposals/counter proposals/approve proposals/generate proposals/quota proposals/reuse proposals/verify proposals/download proposals/source proposals/preview; do
             grep -Fq "/api/cantiere/$route" "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           done
       - name: Apply Web migrations to local D1
