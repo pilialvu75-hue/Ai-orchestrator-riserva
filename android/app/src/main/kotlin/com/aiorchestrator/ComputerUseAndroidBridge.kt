@@ -79,6 +79,17 @@ object ComputerUseAndroidBridge {
                             else result.error(code, "Target not selected", null)
                         }
                     }
+                    "typeTargetText" -> {
+                        val value = call.argument<String>("text").orEmpty()
+                        if (value.isEmpty() || value.length > 512) {
+                            result.error("INVALID_TEXT", "Text must be between 1 and 512 characters", null)
+                        } else {
+                            ComputerUseAccessibilityService.typeInSelectedEditable(value) { ok, code ->
+                                if (ok) result.success(code)
+                                else result.error(code, "Text was not entered", null)
+                            }
+                        }
+                    }
                     "tapTarget", "swipeTarget" -> {
                         val x = call.argument<Int>("x")
                         val y = call.argument<Int>("y")
