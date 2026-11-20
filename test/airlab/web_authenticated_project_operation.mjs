@@ -1248,6 +1248,14 @@ test('large NVIDIA trial never spends a generation quota before free-entitlement
   env.AIVEXUS_WEB_BUILDER_NIM_FREE_VERIFIED = 'true';
   const routeNotApproved = createWebBuilderInference(env);
   assert.equal(routeNotApproved.supportsBuilderRoute(trial.id), true);
+  const normalUserDenied = await generateWebApplication({
+    request, ownerSubject: 'signed-user',
+    adminSubject: 'different-signed-admin',
+    db, infer: routeNotApproved,
+  });
+  assert.deepEqual(normalUserDenied,
+    { ok: false, reason: 'generation_model_unavailable' });
+  assert.equal(writes, 0);
   delete trial.builderFreeVerified;
   env.CANTIERE_CLOUD_ROUTES_JSON = JSON.stringify({ orchestration: [trial] });
   assert.equal(createWebBuilderInference(env).supportsBuilderRoute(trial.id), false);
