@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_checkpoint
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_counter_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_customer_access_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_tools_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
@@ -160,6 +161,30 @@ class WorkshopWebHome extends StatefulWidget {
 
 class _WorkshopWebHomeState extends State<WorkshopWebHome> {
   int _selectedIndex = 0;
+  bool _inviteOpened = false;
+
+  void _openCustomerAccess({String? invitationId}) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => WorkshopWebLanguageScope(
+        language: widget.language,
+        child: WorkshopWebCustomerAccessPage(invitationId: invitationId),
+      ),
+    ));
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _inviteOpened) return;
+      final invite = Uri.base.queryParameters['invite'];
+      if (invite != null && invite.length == 36) {
+        _inviteOpened = true;
+        _openCustomerAccess(invitationId: invite);
+      }
+    });
+  }
+
 
   void _openCloudTools(int initialTab) {
     Navigator.of(context).pop(); // close the hamburger drawer
@@ -218,6 +243,15 @@ class _WorkshopWebHomeState extends State<WorkshopWebHome> {
                       ),
                     ),
                   ));
+                },
+              ),
+              ListTile(
+                key: const Key('web_drawer_customer_access'),
+                leading: const Icon(Icons.group_add_outlined),
+                title: Text(widget.language.text('Accessi clienti')),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _openCustomerAccess();
                 },
               ),
               ListTile(
