@@ -10,6 +10,9 @@ allprojects {
     // require compileSdk 36+ (e.g. activity-ktx:1.12.4, core-ktx:1.18.0).
     configurations.all {
         resolutionStrategy {
+            // PostHog Flutter plugin compiles in its own Gradle subproject;
+            // app-only constraints do not protect that compile classpath.
+            force 'com.posthog:posthog-android:3.42.1'
             force 'org.jetbrains.kotlin:kotlin-stdlib:2.1.21'
             force 'org.jetbrains.kotlin:kotlin-reflect:2.1.21'
             force 'androidx.activity:activity:1.8.2'
