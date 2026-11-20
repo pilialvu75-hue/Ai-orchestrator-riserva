@@ -120,13 +120,20 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     Process? probe;
     try {
       probe = await Process.start(executable, ['--list-devices']);
+      // llama.cpp builds can emit --list-devices to either stdout or stderr.
+      // Drain both pipes concurrently to avoid blocking if either fills up.
       final stdout = probe.stdout.transform(utf8.decoder).join();
-      final stderr = probe.stderr.drain<void>();
+      final stderr = probe.stderr.transform(utf8.decoder).join();
       final code = await probe.exitCode.timeout(const Duration(seconds: 15));
-      await stderr;
       final listing = await stdout;
-      RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU_PROBE] exit_code=$code output_chars=${listing.length}');
-      return code == 0 ? listing : null;
+      final diagnosticListing = await stderr;
+      RuntimeEventLog.instance.emit(
+        '[ASSISTANT_LOCAL_GPU_PROBE] '
+        'backend=${p.basename(p.dirname(executable))} '
+        'exit_code=$code stdout_chars=${listing.length} '
+        'stderr_chars=${diagnosticListing.length}',
+      );
+      return code == 0 ? '$listing\n$diagnosticListing' : null;
     } catch (error) {
       RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU_PROBE] error_type=${error.runtimeType}');
       return null;
