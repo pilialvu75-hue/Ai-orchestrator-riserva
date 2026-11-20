@@ -125,10 +125,14 @@ void main() {
     expect(find.text(prompt), findsNothing);
     expect(find.text('Scarica ZIP'), findsNothing);
 
+    await tester.ensureVisible(find.text('Verifica applicazione'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Verifica applicazione'));
     await tester.pumpAndSettle();
     expect(verificationPosts, 1);
     expect(find.text('Verifica in coda o in esecuzione'), findsOneWidget);
+    await tester.ensureVisible(find.text('Aggiorna verifica'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Aggiorna verifica'));
     await tester.pumpAndSettle();
     expect(verificationPosts, 2);
@@ -137,6 +141,8 @@ void main() {
     expect(download.uri?.path, '/api/cantiere/proposals/download');
     expect(download.uri?.queryParameters, {'generationId': generationId});
     expect(find.text('Anteprima'), findsOneWidget);
+    await tester.ensureVisible(find.text('Sorgenti'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Sorgenti'));
     await tester.pumpAndSettle();
     expect(find.text('Sorgenti verificati'), findsOneWidget);
