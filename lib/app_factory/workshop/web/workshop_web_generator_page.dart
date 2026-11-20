@@ -1,7 +1,15 @@
 import 'dart:convert';
 
+import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
+import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
+import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
+
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_workspace.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_platform_picker.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_source_page.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -10,9 +18,15 @@ import 'package:url_launcher/link.dart';
 import 'package:uuid/uuid.dart';
 
 class WorkshopWebGeneratorPage extends StatefulWidget {
-  const WorkshopWebGeneratorPage({super.key, this.client});
+  const WorkshopWebGeneratorPage({
+    super.key,
+    this.client,
+    this.modelPreference,
+  });
 
   final http.Client? client;
+  /// Uses the already-configured Web Cloud/AUTO route; no new backend.
+  final WorkshopWebModelPreference? modelPreference;
 
   @override
   State<WorkshopWebGeneratorPage> createState() =>
@@ -21,6 +35,7 @@ class WorkshopWebGeneratorPage extends StatefulWidget {
 
 class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   static const _storageKey = 'aivexus.web.lastGeneration.v1';
+  static const _platformStorageKey = 'aivexus.web.generationPreviewPlatform.v1';
   static final _idPattern = RegExp(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
   );
@@ -39,6 +54,11 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   };
 
   final _prompt = TextEditingController();
+  final _chatInput = TextEditingController();
+  final List<ChatTurn> _chatTurns = <ChatTurn>[];
+  WorkshopChatController? _chatController;
+  bool _firstChatTurn = true;
+  WorkshopWebTarget _selectedPlatform = WorkshopWebTarget.web;
   late final http.Client _client = widget.client ?? http.Client();
   late final Future<SharedPreferences> _preferences =
       SharedPreferences.getInstance();
@@ -52,6 +72,19 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   @override
   void initState() {
     super.initState();
+    final preference = widget.modelPreference;
+    if (preference != null) {
+      _chatController = WorkshopChatController(
+        inferenceGateway: WorkshopInferenceGateway(
+          provider: WorkshopWebCloudRuntimeProvider(
+            capability: WorkshopWebCloudCapability.orchestration,
+            selectedRouteId: () => preference.routeId,
+          ),
+        ),
+        sessionId: 'web-generator-${const Uuid().v4()}',
+      );
+    }
+    _chatController?.addListener(_onChatControllerChanged);
     _restore();
   }
 
@@ -59,11 +92,28 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   void dispose() {
     if (widget.client == null) _client.close();
     _prompt.dispose();
+    _chatInput.dispose();
+    _chatController?.removeListener(_onChatControllerChanged);
+    _chatController?.dispose();
     super.dispose();
+  }
+
+  void _onChatControllerChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _selectPlatform(WorkshopWebTarget platform) async {
+    if (!mounted) return;
+    setState(() => _selectedPlatform = platform);
+    await (await _preferences).setString(_platformStorageKey, platform.name);
   }
 
   Future<void> _restore() async {
     await _run(() async {
+      final code = (await _preferences).getString(_platformStorageKey);
+      if (mounted) {
+        setState(() => _selectedPlatform = WorkshopWebTarget.fromCode(code));
+      }
       final requested = Uri.base.queryParameters['generationId'];
       if (requested != null && _idPattern.hasMatch(requested)) {
         final receipt = await _call(requested);
@@ -175,13 +225,18 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   Future<void> _reset() async {
     await _run(() async {
       await (await _preferences).remove(_storageKey);
+      await (await _preferences).remove(_platformStorageKey);
       if (!mounted) return;
       setState(() {
+        _selectedPlatform = WorkshopWebTarget.web;
         _generationId = null;
         _pendingPrompt = null;
         _receipt = null;
         _verification = null;
         _prompt.clear();
+        _chatInput.clear();
+        _chatTurns.clear();
+        _firstChatTurn = true;
       });
     });
   }
@@ -294,12 +349,358 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     return result;
   }
 
+  Future<void> _sendChatMessage() async {
+    final controller = _chatController;
+    final message = _chatInput.text.trim();
+    if (controller == null || controller.isBusy || message.isEmpty) return;
+
+    controller.setPreferredWebResponseLanguage(
+      WorkshopWebLanguageScope.maybeOf(context)?.replyLanguageName ??
+          'italiano',
+    );
+
+    _chatInput.clear();
+    setState(() {
+      _chatTurns.add(ChatTurn(role: ChatRole.user, content: message));
+    });
+
+    // Preserve the first generator prompt as context for the existing
+    // conversational Web agent. This does not call the generation API again.
+    final original = (_pendingPrompt ?? _prompt.text).trim();
+    final contextualMessage = _firstChatTurn && original.isNotEmpty
+        ? 'Richiesta iniziale dell’applicazione:\n$original\n\n'
+            'Domanda o modifica da discutere:\n$message'
+        : message;
+    _firstChatTurn = false;
+
+    final response = await controller.send(contextualMessage);
+    if (!mounted) return;
+    setState(() {
+      if (response != null) _chatTurns.add(response);
+    });
+  }
+
+  Widget _firstPromptEditor(String Function(String) tr) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 10),
+              const Text(
+                'AIVEXUS Studio',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.6,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                tr('Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.'),
+                style: const TextStyle(color: Colors.white70, fontSize: 15),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    tr('Piattaforma'),
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  WorkshopWebPlatformPicker(
+                    selected: _selectedPlatform,
+                    onChanged: _selectPlatform,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                tr('La piattaforma cambia il formato dell’anteprima Web; non crea un pacchetto nativo.'),
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: TextField(
+                  key: const Key('web_generator_first_prompt'),
+                  controller: _prompt,
+                  readOnly: _busy,
+                  minLines: null,
+                  maxLines: null,
+                  expands: true,
+                  maxLength: 1200,
+                  textAlignVertical: TextAlignVertical.top,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: tr('Descrivi l’applicazione'),
+                    alignLabelWithHint: true,
+                    filled: true,
+                    fillColor: const Color(0xFF151D29),
+                    contentPadding: const EdgeInsets.all(22),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                  ),
+                  style: const TextStyle(fontSize: 17, height: 1.5),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_busy) const LinearProgressIndicator(),
+              if (_error case final error?) ...[
+                const SizedBox(height: 8),
+                Text(tr(error), style: const TextStyle(color: Colors.orangeAccent)),
+              ],
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  key: const Key('web_generator_submit_first_prompt'),
+                  onPressed: _busy || _prompt.text.trim().isEmpty
+                      ? null
+                      : _submit,
+                  icon: const Icon(Icons.arrow_forward),
+                  label: Text(tr('Genera')),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _chatBubble(String label, String message, {bool fromUser = false}) {
+    return Align(
+      alignment: fromUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: fromUser
+              ? const Color(0xFF23364F)
+              : const Color(0xFF222A35),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF9CC7F6),
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 5),
+            SelectableText(message, style: const TextStyle(height: 1.35)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _conversationPane({
+    required String Function(String) tr,
+    required String? id,
+    required Map<String, dynamic>? receipt,
+    required String? status,
+    required String? verificationStatus,
+    required String? verificationLabel,
+    required bool canAdvance,
+  }) {
+    final controller = _chatController;
+    final firstPrompt = (_pendingPrompt ?? _prompt.text).trim();
+
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              if (firstPrompt.isNotEmpty)
+                _chatBubble(tr('Tu'), firstPrompt, fromUser: true),
+              for (final turn in _chatTurns)
+                _chatBubble(
+                  turn.role == ChatRole.user ? tr('Tu') : 'AIVEXUS',
+                  turn.content,
+                  fromUser: turn.role == ChatRole.user,
+                ),
+              if (_busy) ...[
+                const SizedBox(height: 8),
+                const LinearProgressIndicator(),
+              ],
+              if (_error case final error?)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    tr(error),
+                    style: const TextStyle(color: Colors.orangeAccent),
+                  ),
+                ),
+              if (controller?.lastError case final error?)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    error,
+                    style: const TextStyle(color: Colors.orangeAccent),
+                  ),
+                ),
+              if (status == 'generated' && receipt != null) ...[
+                const SizedBox(height: 14),
+                Text(receipt['title'] as String,
+                    style: Theme.of(context).textTheme.titleMedium),
+                for (final item in receipt['requirements'] as List)
+                  Text(item as String),
+                const SizedBox(height: 12),
+                Text(tr('File generati')),
+                for (final path in receipt['paths'] as List)
+                  SelectableText(path as String),
+                const SizedBox(height: 12),
+                Text(tr('Modello dichiarato')),
+                SelectableText(
+                    receipt['provenance']['reportedModel'] as String),
+                const SizedBox(height: 8),
+                const Text('SHA-256'),
+                SelectableText(receipt['sourceSha256'] as String),
+                if (verificationLabel != null) ...[
+                  const SizedBox(height: 12),
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(tr(verificationLabel)),
+                  ),
+                ],
+                if (id != null)
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      if (verificationStatus == null || canAdvance)
+                        OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : () => _run(() =>
+                                  _readVerification(id, advance: canAdvance)),
+                          child: Text(tr(verificationStatus == 'ready'
+                              ? 'Verifica applicazione'
+                              : 'Aggiorna verifica')),
+                        ),
+                      if (verificationStatus == 'verified') ...[
+                        OutlinedButton(
+                          onPressed: _busy ? null : () => _openPreview(id),
+                          child: Text(tr('Anteprima')),
+                        ),
+                        OutlinedButton(
+                          onPressed: _busy ? null : () => _openSources(id),
+                          child: Text(tr('Sorgenti')),
+                        ),
+                        Link(
+                          uri: _generationResource('download', id),
+                          target: LinkTarget.blank,
+                          builder: (context, followLink) =>
+                              OutlinedButton.icon(
+                            onPressed: _busy ? null : followLink,
+                            icon: const Icon(Icons.download_outlined),
+                            label: Text(tr('Scarica ZIP')),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+              ],
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  if (id != null && status == null && _pendingPrompt != null)
+                    FilledButton(
+                      onPressed: _busy ? null : _submit,
+                      child: Text(tr('Riprova invio')),
+                    ),
+                  if (id != null && !_terminalStates.contains(status))
+                    OutlinedButton(
+                      onPressed: _busy
+                          ? null
+                          : () => _run(() => _readStatus(id)),
+                      child: Text(tr('Aggiorna stato')),
+                    ),
+                  if (_terminalStates.contains(status) ||
+                      (status == null && _pendingPrompt != null))
+                    OutlinedButton(
+                      onPressed: _busy ? null : _reset,
+                      child: Text(tr('Nuova generazione')),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Text(
+                tr('La chat permette di discutere il progetto. Le richieste successive non modificano automaticamente i sorgenti già generati.'),
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('web_generator_chat_input'),
+                  controller: _chatInput,
+                  enabled: controller != null && !controller.isBusy,
+                  maxLines: 4,
+                  minLines: 1,
+                  textInputAction: TextInputAction.newline,
+                  decoration: InputDecoration(
+                    hintText: tr('Scrivi all’IA…'),
+                    filled: true,
+                    fillColor: const Color(0xFF1B2533),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                key: const Key('web_generator_send_chat'),
+                tooltip: tr('Invia messaggio'),
+                onPressed: controller == null || controller.isBusy
+                    ? null
+                    : _sendChatMessage,
+                icon: controller?.isBusy == true
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.send_rounded),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     String tr(String label) => WorkshopWebLanguageScope.tr(context, label);
     final id = _generationId;
     final receipt = _receipt;
-    final status = receipt?['status'];
+    final status = receipt?['status'] as String?;
     final state = switch (status) {
       'generating' => 'Generazione in corso',
       'generated' => 'Sorgenti generati',
@@ -307,7 +708,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       'interrupted' => 'Generazione interrotta',
       _ => null,
     };
-    final verificationStatus = _verification?['status'];
+    final verificationStatus = _verification?['status'] as String?;
     final verificationLabel = switch (verificationStatus) {
       'checks_missing' =>
         'Crea una nuova generazione per ottenere un piano di verifica.',
@@ -322,125 +723,34 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     final canAdvance = {'ready', 'dispatching', 'submitted', 'importing'}
         .contains(verificationStatus);
     return Scaffold(
-      appBar: AppBar(title: Text(tr('Genera applicazione'))),
+      appBar: AppBar(title: Text(tr('AIVEXUS Studio'))),
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: ListView(
-              padding: const EdgeInsets.all(24),
-              children: [
-                if (id == null || _pendingPrompt != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: TextField(
-                      controller: _prompt,
-                      readOnly: _busy || id != null,
-                      minLines: 3,
-                      maxLines: 8,
-                      maxLength: 1200,
-                      onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        labelText: tr('Descrivi l’applicazione'),
-                        border: const OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                if (_busy) const LinearProgressIndicator(),
-                if (_error case final error?) Text(tr(error)),
-                if (state != null)
-                  Semantics(liveRegion: true, child: Text(tr(state))),
-                if (status == 'generated' && receipt != null) ...[
-                  const SizedBox(height: 16),
-                  Text(receipt['title'] as String,
-                      style: Theme.of(context).textTheme.headlineSmall),
-                  for (final item in receipt['requirements'] as List)
-                    Text(item as String),
-                  const SizedBox(height: 16),
-                  Text(tr('File generati')),
-                  for (final path in receipt['paths'] as List)
-                    SelectableText(path as String),
-                  const SizedBox(height: 16),
-                  Text(tr('Modello dichiarato')),
-                  SelectableText(
-                      receipt['provenance']['reportedModel'] as String),
-                  const SizedBox(height: 8),
-                  const Text('SHA-256'),
-                  SelectableText(receipt['sourceSha256'] as String),
-                  if (id != null) ...[
-                    const SizedBox(height: 16),
-                    if (verificationLabel != null)
-                      Semantics(
-                          liveRegion: true, child: Text(tr(verificationLabel))),
-                    Wrap(
-                      spacing: 12,
-                      children: [
-                        if (verificationStatus == null || canAdvance)
-                          OutlinedButton(
-                            onPressed: _busy
-                                ? null
-                                : () => _run(() =>
-                                    _readVerification(id, advance: canAdvance)),
-                            child: Text(tr(verificationStatus == 'ready'
-                                ? 'Verifica applicazione'
-                                : 'Aggiorna verifica')),
-                          ),
-                        if (verificationStatus == 'verified') ...[
-                          OutlinedButton(
-                            onPressed: _busy ? null : () => _openPreview(id),
-                            child: Text(tr('Anteprima')),
-                          ),
-                          OutlinedButton(
-                            onPressed: _busy ? null : () => _openSources(id),
-                            child: Text(tr('Sorgenti')),
-                          ),
-                          Link(
-                            uri: _generationResource('download', id),
-                            target: LinkTarget.blank,
-                            builder: (context, followLink) =>
-                                OutlinedButton.icon(
-                              onPressed: _busy ? null : followLink,
-                              icon: const Icon(Icons.download_outlined),
-                              label: Text(tr('Scarica ZIP')),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ],
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    if (id == null ||
-                        (status == null && _pendingPrompt != null))
-                      FilledButton(
-                        onPressed: _busy ||
-                                (_pendingPrompt == null &&
-                                    _prompt.text.trim().isEmpty)
-                            ? null
-                            : _submit,
-                        child:
-                            Text(tr(id == null ? 'Genera' : 'Riprova invio')),
-                      ),
-                    if (id != null && !_terminalStates.contains(status))
-                      OutlinedButton(
-                        onPressed:
-                            _busy ? null : () => _run(() => _readStatus(id)),
-                        child: Text(tr('Aggiorna stato')),
-                      ),
-                    if (_terminalStates.contains(status) ||
-                        (status == null && _pendingPrompt != null))
-                      OutlinedButton(
-                        onPressed: _busy ? null : _reset,
-                        child: Text(tr('Nuova generazione')),
-                      ),
-                  ],
-                ),
-              ],
-            ),
+        child: WorkshopWebGeneratorWorkspace(
+          showIntro: id == null,
+          platform: _selectedPlatform,
+          onPlatformChanged: _selectPlatform,
+          intro: _firstPromptEditor(tr),
+          projectTitle: receipt?['title'] is String
+              ? receipt!['title'] as String
+              : null,
+          generationStatus: state == null ? null : tr(state),
+          previewUri: id != null && verificationStatus == 'verified'
+              ? _generationResource('preview', id)
+              : null,
+          onOpenPreview: id != null && verificationStatus == 'verified'
+              ? () => _openPreview(id)
+              : null,
+          onOpenSources: id != null && verificationStatus == 'verified'
+              ? () => _openSources(id)
+              : null,
+          composer: _conversationPane(
+            tr: tr,
+            id: id,
+            receipt: receipt,
+            status: status,
+            verificationStatus: verificationStatus,
+            verificationLabel: verificationLabel,
+            canAdvance: canAdvance,
           ),
         ),
       ),

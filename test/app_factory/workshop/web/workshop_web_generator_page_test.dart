@@ -100,17 +100,31 @@ void main() {
         MaterialApp(home: WorkshopWebGeneratorPage(client: client)));
     await tester.pumpAndSettle();
     expect(requests, 0);
-    await tester.enterText(find.byType(TextField), prompt);
+    expect(find.byKey(const Key('web_generator_first_prompt')), findsOneWidget);
+    expect(find.byKey(const Key('web_preview_platform_web')), findsNothing);
+    await tester.tap(find.byKey(const Key('web_platform_picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('web_platform_option_android')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const Key('web_generator_first_prompt')), prompt);
     await tester.pump();
     await tester.tap(find.text('Genera'));
     await tester.pumpAndSettle();
     expect(find.text('Generazione in corso'), findsOneWidget);
     expect(requests, 1);
+    expect(find.byKey(const Key('web_generator_first_prompt')), findsNothing);
+    expect(find.byKey(const Key('web_preview_platform_android')), findsOneWidget);
 
     final preferences = await SharedPreferences.getInstance();
     expect(
         preferences.getString('aivexus.web.lastGeneration.v1'), generationId);
-    expect(preferences.getKeys(), {'aivexus.web.lastGeneration.v1'});
+    expect(preferences.getKeys(), {
+      'aivexus.web.lastGeneration.v1',
+      'aivexus.web.generationPreviewPlatform.v1',
+    });
+    expect(preferences.getString('aivexus.web.generationPreviewPlatform.v1'),
+        'android');
 
     await tester.pumpWidget(const SizedBox());
     await tester.pumpWidget(
@@ -118,6 +132,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(requests, 3);
     expect(verificationPosts, 0);
+    expect(find.byKey(const Key('web_preview_platform_android')), findsOneWidget);
     expect(find.text('Sorgenti generati'), findsOneWidget);
     expect(find.text('Allenamento a intervalli'), findsOneWidget);
     expect(find.text('timer.mjs'), findsOneWidget);
@@ -125,10 +140,14 @@ void main() {
     expect(find.text(prompt), findsNothing);
     expect(find.text('Scarica ZIP'), findsNothing);
 
+    await tester.ensureVisible(find.text('Verifica applicazione'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Verifica applicazione'));
     await tester.pumpAndSettle();
     expect(verificationPosts, 1);
     expect(find.text('Verifica in coda o in esecuzione'), findsOneWidget);
+    await tester.ensureVisible(find.text('Aggiorna verifica'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Aggiorna verifica'));
     await tester.pumpAndSettle();
     expect(verificationPosts, 2);
@@ -137,6 +156,8 @@ void main() {
     expect(download.uri?.path, '/api/cantiere/proposals/download');
     expect(download.uri?.queryParameters, {'generationId': generationId});
     expect(find.text('Anteprima'), findsOneWidget);
+    await tester.ensureVisible(find.text('Sorgenti'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Sorgenti'));
     await tester.pumpAndSettle();
     expect(find.text('Sorgenti verificati'), findsOneWidget);

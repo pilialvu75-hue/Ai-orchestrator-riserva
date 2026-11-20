@@ -74,6 +74,12 @@ final class WorkshopWebLanguageScope
 
 const Map<String, Map<String, String>> _translations = {
   'fr': {
+    'Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.': 'Décrivez votre application et modifiez le texte librement avant de l’envoyer.',
+    'Piattaforma': 'Plateforme',
+    'La piattaforma cambia il formato dell’anteprima Web; non crea un pacchetto nativo.': 'La plateforme adapte l’aperçu Web ; aucun paquet natif n’est créé.',
+    'Scrivi all’IA…': 'Écrivez à l’IA…',
+    'Invia messaggio': 'Envoyer le message',
+    'Tu': 'Vous',
     'Self-Test Cloud': 'Test automatique Cloud',
     'Self-Test in corso…': 'Test Cloud en cours…',
     'Esegui Self-Test Cloud': 'Exécuter le test Cloud',
@@ -210,6 +216,12 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Inférence Cloud / AUTO',
   },
   'en': {
+    'Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.': 'Describe your application. You can edit the text before sending it.',
+    'Piattaforma': 'Platform',
+    'La piattaforma cambia il formato dell’anteprima Web; non crea un pacchetto nativo.': 'The platform changes the Web preview format; it does not build a native package.',
+    'Scrivi all’IA…': 'Message the AI…',
+    'Invia messaggio': 'Send message',
+    'Tu': 'You',
 
     'Titolo': 'Title',
     'Tipo progetto': 'Project type',
@@ -306,6 +318,12 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Cloud / AUTO inference',
   },
   'es': {
+    'Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.': 'Describe tu aplicación. Puedes editar el texto antes de enviarlo.',
+    'Piattaforma': 'Plataforma',
+    'La piattaforma cambia il formato dell’anteprima Web; non crea un pacchetto nativo.': 'La plataforma adapta la vista Web; no crea un paquete nativo.',
+    'Scrivi all’IA…': 'Escribe a la IA…',
+    'Invia messaggio': 'Enviar mensaje',
+    'Tu': 'Tú',
 
     'Titolo': 'Título',
     'Tipo progetto': 'Tipo de proyecto',

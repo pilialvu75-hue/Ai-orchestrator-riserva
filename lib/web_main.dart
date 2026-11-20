@@ -213,7 +213,9 @@ class _WorkshopWebHomeState extends State<WorkshopWebHome> {
                   navigator.push(MaterialPageRoute<void>(
                     builder: (_) => WorkshopWebLanguageScope(
                       language: widget.language,
-                      child: const WorkshopWebGeneratorPage(),
+                      child: WorkshopWebGeneratorPage(
+                        modelPreference: widget.modelPreference,
+                      ),
                     ),
                   ));
                 },
