@@ -99,12 +99,28 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $release = Join-Path $PWD 'build\windows\x64\runner\Release'
+          $searchRoots = @()
+          if ($env:VCToolsRedistDir -and (Test-Path $env:VCToolsRedistDir)) {
+            $searchRoots += $env:VCToolsRedistDir
+          }
+          $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path $vswhere) {
+            $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+            if ($vs) {
+              $searchRoots += (Join-Path $vs 'VC\Redist\MSVC')
+            }
+          }
           foreach ($dll in @('msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll')) {
             $dest = Join-Path $release $dll
             if (Test-Path -LiteralPath $dest -PathType Leaf) { continue }
-            $candidate = Get-ChildItem -Path $env:VCToolsRedistDir -Filter $dll -File -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match '\\x64\\' } |
-              Select-Object -First 1
+            $candidate = $null
+            foreach ($root in $searchRoots) {
+              if (-not (Test-Path $root)) { continue }
+              $candidate = Get-ChildItem -Path $root -Filter $dll -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\x64\\' } |
+                Select-Object -First 1
+              if ($candidate) { break }
+            }
             if (-not $candidate) {
               throw "Missing Visual C++ runtime for self-contained Store package: $dll"
             }
