@@ -135,6 +135,9 @@ L'email amministrativa **non viene mai codificata nel repository** né
 restituita dalle API. L'Access identity dell'owner e la propria
 configurazione email privata devono corrispondere: nessun browser header,
 cookie, JSON, o autoproclamato ruolo `admin` è prova di autorità.
+Quando è configurata l'email dell'owner, prevale sul vecchio `sub`:
+non possono esserci due amministratori per errore. In sua assenza il
+precedente `sub` resta valido, senza necessità di migrazione.
 Senza corrispondenza esatta il ruolo è `standard`. Il segreto/variabile
 va configurato direttamente in Cloudflare Pages Production, non in chat.
 
