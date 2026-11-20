@@ -1,0 +1,292 @@
+name: AIVEXUS Windows CUDA unsigned owner QA beta
+
+on:
+  # Explicit owner request is necessary: never publish from an ordinary main push.
+  push:
+    branches:
+      - release-request/windows-cuda-unsigned-beta
+    paths:
+      - 'release-requests/windows-cuda-unsigned-beta.txt'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-cuda-unsigned-owner-beta.yml'
+      - 'test/scripts/test_windows_cuda_unsigned_owner_beta.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-cuda-unsigned-owner-beta-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contract-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 -m unittest discover -s test/scripts -p 'test_windows_cuda_unsigned_owner_beta.py'
+
+  publish-unsigned-owner-beta:
+    # Only a reviewed main SHA; no PR build can publish.
+    if: >-
+      github.actor == 'pilialvu75-hue' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/release-request/windows-cuda-unsigned-beta'
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    timeout-minutes: 90
+    steps:
+      - name: Checkout explicit unsigned QA request
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate reviewed main and release request
+        id: source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $mainSha = gh api "repos/$env:GITHUB_REPOSITORY/commits/main" --jq '.sha'
+          if ($LASTEXITCODE -ne 0 -or $mainSha -notmatch '^[0-9a-f]{40}$') {
+            throw 'Cannot resolve current reviewed main commit.'
+          }
+          $request = 'release-requests/windows-cuda-unsigned-beta.txt'
+          if (-not (Test-Path -LiteralPath $request -PathType Leaf)) {
+            throw 'Explicit unsigned owner QA release request is absent.'
+          }
+          $lines = @(Get-Content -LiteralPath $request)
+          if ($lines.Count -ne 3 -or
+              $lines[0] -cne 'channel=windows-cuda-unsigned-beta' -or
+              $lines[1] -cne "main_sha=$mainSha" -or
+              $lines[2] -cne 'owner_accepts_unsigned=true') {
+            throw 'Owner request must target exact reviewed main and expressly allow unsigned QA.'
+          }
+          Write-Warning 'UNSIGNED OWNER QA ONLY. Do not assume publisher identity or trusted Windows binaries.'
+          "main_sha=$mainSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host 'Owner-authorized source commit verified.'
+
+      - name: Checkout authorized source and native submodules
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.source.outputs.main_sha }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+
+      - name: Stamp NEW updater-detectable Windows beta version
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $versionLine = Select-String -Path 'pubspec.yaml' -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)(?:\+\d+)?\s*$' | Select-Object -First 1
+          if (-not $versionLine) { throw 'Invalid pubspec version.' }
+          $base = $versionLine.Matches[0].Groups[1].Value
+          $build = 220000 + [int]$env:GITHUB_RUN_NUMBER
+          $tag = "v$base-beta+$build"
+          # A release that does not exist is the normal path. Do NOT invoke
+          # the old GitHub CLI lookup under ErrorActionPreference=Stop: exits 1
+          # for 404 and a PowerShell native-command error can abort this job.
+          # Only an authenticated HTTP 404 authorizes creation; an API/auth
+          # failure must never be misread as "free to publish".
+          $encodedTag = [Uri]::EscapeDataString($tag)
+          $releaseUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$encodedTag"
+          $releaseLookup = Invoke-WebRequest -Method Get -Uri $releaseUri -SkipHttpErrorCheck -Headers @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          if ($releaseLookup.StatusCode -eq 200) {
+            throw "Release $tag already exists; refusing overwrite."
+          }
+          if ($releaseLookup.StatusCode -ne 404) {
+            throw "GitHub release lookup failed with HTTP $($releaseLookup.StatusCode)."
+          }
+          $releaseVersion = "$base+$build"
+          $pubspec = Get-Content 'pubspec.yaml' -Raw
+          $updated = $pubspec -replace '(?m)^version:\s*.*$', "version: $releaseVersion"
+          if ($updated -eq $pubspec) { throw 'Version stamp failed.' }
+          Set-Content -Path 'pubspec.yaml' -Value $updated -Encoding utf8
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$releaseVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Restore locked dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze Computer Use
+        run: flutter analyze --no-fatal-infos lib/features/computer_use test/features/computer_use
+
+      - name: Test interactive QA flag and Computer Use
+        run: >-
+          flutter test --reporter expanded
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+          --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=true
+          test/features/computer_use
+
+      - name: Build AIVEXUS Windows with Computer Use, CUDA and ChatGPT local test menu
+        run: >-
+          flutter build windows --release
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=true
+          --dart-define=AIVEXUS_WINDOWS_CUDA_QA=true
+          --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=true
+
+      - name: Package ChatGPT Desktop local MCP adapter in application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          $toolsDir = Join-Path $releaseDir 'mcp-tools'
+          New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
+          $source = Join-Path $PWD 'scripts\chatgpt_bridge\aivexus_mcp.ps1'
+          $dest = Join-Path $toolsDir 'aivexus_mcp.ps1'
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw 'Missing ChatGPT MCP adapter; refusing an incomplete beta.'
+          }
+          Copy-Item -LiteralPath $source -Destination $dest
+          if (-not (Test-Path -LiteralPath $dest -PathType Leaf)) {
+            throw 'ChatGPT MCP adapter was not packaged.'
+          }
+          $tokens = $null
+          $parseErrors = $null
+          [Management.Automation.Language.Parser]::ParseFile($dest, [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) {
+            throw "Packaged ChatGPT MCP adapter syntax errors: $($parseErrors.Count)"
+          }
+
+      - name: Test authenticated local ChatGPT bridge
+        shell: pwsh
+        run: flutter test test/core/diagnostics/chatgpt_bridge/
+
+      - name: Bundle and audit pinned ASUS CUDA engine (Beta only)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\bundle_windows_cuda_runtime.ps1') -ReleaseDir $dir
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned CUDA bundle download failed.' }
+          & (Join-Path $PWD 'tool\test_windows_cuda_bundle.ps1') -ReleaseDir $dir
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned CUDA dependencies failed audit.' }
+
+      - name: Verify bundled LOCAL inference
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $dir
+          if ($LASTEXITCODE -ne 0) { throw 'LOCAL runtime bundle failed.' }
+          & (Join-Path $PWD 'tool\patch_windows_bundle_win7.ps1') -ReleaseDir $dir
+          if ($LASTEXITCODE -ne 0) { throw 'Windows compatibility bundle failed.' }
+          if (-not (Test-Path (Join-Path $dir 'ai_orchestrator.exe'))) { throw 'Missing app EXE.' }
+          if (-not (Test-Path (Join-Path $dir 'data'))) { throw 'Missing Flutter data.' }
+
+      - name: Compile Windows recovery helper for unsigned QA
+        id: recovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path $csc)) { throw 'Missing legacy .NET Framework compiler.' }
+          $dir = Join-Path $PWD 'build\windows\computer-use-beta'
+          New-Item $dir -ItemType Directory -Force | Out-Null
+          $exe = Join-Path $dir 'AivexusRecovery.exe'
+          $manifest = Join-Path $PWD 'tool\windows_rollback\recovery.manifest'
+          $source = Join-Path $PWD 'tool\windows_rollback\AivexusRecovery.cs'
+          & $csc /nologo /target:exe /r:System.Windows.Forms.dll "/win32manifest:$manifest" "/out:$exe" $source
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) {
+            throw 'Could not compile Windows 8.1 recovery helper.'
+          }
+          "helper=$exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Prepare Inno Setup with existing installation identity
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $iscc) {
+            $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($compiler) { $iscc = $compiler.Source }
+          }
+          if (-not $iscc) { throw 'Missing Inno Setup compiler.' }
+          $redist = $null
+          if ($env:VCToolsRedistDir) {
+            $redist = Get-ChildItem $env:VCToolsRedistDir -Filter vc_redist.x64.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $redist) {
+            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            if (Test-Path $vswhere) {
+              $visualStudio = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+              if ($visualStudio) {
+                $redist = Get-ChildItem (Join-Path $visualStudio 'VC\Redist\MSVC') -Filter vc_redist.x64.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+              }
+            }
+          }
+          if (-not $redist) { throw 'Missing verified VC++ 2022 redistributable.' }
+          $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          $outDir = Join-Path $PWD 'build\windows\computer-use-beta'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          @(
+            "#define AivexusRecoveryHelper `"${{ steps.recovery.outputs.helper }}`"",
+            "#define AppVersion `"${{ steps.version.outputs.version }}`"",
+            "#define ReleaseDir `"$dir`"",
+            "#define VCRedistPath `"$($redist.FullName)`"",
+            "#define OutputDir `"$outDir`""
+          ) | Set-Content 'windows\installer\ci_generated.iss' -Encoding ascii
+          "iscc=$iscc" | Out-File $env:GITHUB_OUTPUT -Append
+          "out_dir=$outDir" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: Produce clearly labeled unsigned Windows Setup.exe with verified recovery helper
+        id: installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & '${{ steps.package.outputs.iscc }}' (Join-Path $PWD 'windows\installer\ai_orchestrator.iss')
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned QA Setup compilation failed.' }
+          $exe = Join-Path '${{ steps.package.outputs.out_dir }}' 'AI-Orchestrator-Setup-x64.exe'
+          if (-not (Test-Path $exe) -or (Get-Item $exe).Length -lt 1048576) {
+            throw 'Missing or implausible Setup.exe.'
+          }
+          $sig = Get-AuthenticodeSignature -LiteralPath $exe
+          if ($sig.Status -eq 'Valid') {
+            throw 'Unexpected signed setup from unsigned QA path. Review provenance.'
+          }
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $digest = "$exe.sha256"
+          "$sha  AI-Orchestrator-Setup-x64.exe" | Set-Content $digest -Encoding ascii
+          "exe=$exe" | Out-File $env:GITHUB_OUTPUT -Append
+          "digest=$digest" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: Publish explicitly owner-authorized unsigned Windows QA Beta to GitHub updater
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = '${{ steps.version.outputs.tag }}'
+          gh release create $tag '${{ steps.installer.outputs.exe }}' '${{ steps.installer.outputs.digest }}' --repo $env:GITHUB_REPOSITORY --target '${{ steps.source.outputs.main_sha }}' --title "AIVEXUS Windows CUDA UNSIGNED owner QA $tag" --notes "UNSIGNED owner-only QA binaries; public GitHub prerelease asset. Same AIVEXUS updater identity with rollback recovery helper. ASUS RTX 4060 CUDA + Vulkan/CPU fallback, Computer Use and ChatGPT local bridge menu. Only install on owner-approved Windows PC with Smart App Control disabled. SHA-256 checks integrity, NOT publisher identity. Back up settings; physical GPU and rollback verification pending. No Android installer." --prerelease
+          if ($LASTEXITCODE -ne 0) { throw 'Release creation failed.' }
+          $release = gh release view $tag --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
+          $names = @($release.assets | ForEach-Object { $_.name })
+          if ($names -notcontains 'AI-Orchestrator-Setup-x64.exe' -or $names -notcontains 'AI-Orchestrator-Setup-x64.exe.sha256') {
+            throw 'Missing installer or checksum in published release.'
+          }
+
