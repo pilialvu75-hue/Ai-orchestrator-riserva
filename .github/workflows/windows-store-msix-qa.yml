@@ -94,6 +94,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'CUDA dependency closure failed.' }
           & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir $release
           if ($LASTEXITCODE -ne 0) { throw 'LOCAL GGUF bundle gate failed.' }
+      - name: Bundle Visual C++ runtime files for packaged desktop app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = Join-Path $PWD 'build\windows\x64\runner\Release'
+          foreach ($dll in @('msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll')) {
+            $dest = Join-Path $release $dll
+            if (Test-Path -LiteralPath $dest -PathType Leaf) { continue }
+            $candidate = Get-ChildItem -Path $env:VCToolsRedistDir -Filter $dll -File -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Select-Object -First 1
+            if (-not $candidate) {
+              throw "Missing Visual C++ runtime for self-contained Store package: $dll"
+            }
+            Copy-Item -LiteralPath $candidate.FullName -Destination $dest
+          }
       - name: Package and unpack-verify unsigned Store MSIX candidate
         shell: pwsh
         run: |
