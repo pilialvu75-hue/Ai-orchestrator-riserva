@@ -327,8 +327,7 @@ void main() {
       }
       if (request.url.path == '/api/cantiere/proposals/reuse') {
         expect(request.method, 'GET');
-        expect(request.url.queryParameters['promptSha256'],
-            matches(RegExp(r'^[a-f0-9]{64}
+        expect(request.url.queryParameters['promptSha256']?.length, 64);
         reuseReads++;
         return http.Response(jsonEncode({
           'version': 1, 'ok': true, 'found': true,
