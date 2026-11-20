@@ -20,6 +20,9 @@ import {
 import { previewWebApplication } from './web_application_preview.mjs';
 
 const MAX_JSON_BYTES = 2048;
+// Generation prompts may be up to 8000 graphemes including multibyte text.
+// All non-generation operations keep their existing strict 2 KiB cap.
+const MAX_GENERATION_JSON_BYTES = 49152;
 const OPERATIONS = new Set([
   'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
   'generate_app', 'generation_status',
@@ -245,7 +248,7 @@ export function createAuthenticatedWebProjectOperation({
       }
     }
 
-    const parsed = await readJson(request, operation === 'generate_app' ? 8192 : MAX_JSON_BYTES);
+    const parsed = await readJson(request, operation === 'generate_app' ? MAX_GENERATION_JSON_BYTES : MAX_JSON_BYTES);
     if (!parsed.ok) return reject(parsed.status, parsed.reason);
 
     let result;
