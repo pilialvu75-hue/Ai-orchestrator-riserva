@@ -683,7 +683,7 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
     }),
     env: runnerEnv,
   });
-  assert.equal((await advance(otherToken)).status, 404);
+  assert.equal((await advance(otherToken)).status, 403);
   assert.equal((await body(await advance(token))).status, 'submitted');
   assert.equal(archiveReads, 0);
   const recovered = await readExecutionStatus({
