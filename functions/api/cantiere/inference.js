@@ -299,7 +299,9 @@ async function callRoute(route, request) {
   if (!apiKey) return { ok: false, status: 503, failureKind: 'binding_missing' };
 
   const params = request.selfTest ? selfTestGenerationFor(route) : request;
-  for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {
+  // Prototype builder requests are deliberately one-shot, preserving trial credits.
+  const attemptsAllowed = request.builderManual ? 1 : MAX_ROUTE_ATTEMPTS;
+  for (let attempt = 0; attempt < attemptsAllowed; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 80000);
     try {
@@ -337,7 +339,7 @@ async function callRoute(route, request) {
 
       if (!response.ok) {
         if (
-          attempt + 1 < MAX_ROUTE_ATTEMPTS &&
+          attempt + 1 < attemptsAllowed &&
           isTransientStatus(response.status)
         ) {
           const delay = retryDelayMs(response, attempt);
@@ -467,10 +469,16 @@ export function createWebBuilderInference(env) {
       if (!route) return { ok: false, failureKind: 'not_free_authorized' };
       // An explicit manual choice NEVER falls back to a route that may
       // consume billable credits. Only this exact no-cost-trial NIM is called.
-      return callRoute(route, {
+      const result = await callRoute(route, {
         env, messages, maxTokens: 4096, temperature: 0.2, topP: 0.9,
-        selfTest: false,
+        selfTest: false, builderManual: true,
       });
+      if (!result.ok) return result;
+      // A provider that omits the served model must not be falsely attested.
+      return {
+        ...result,
+        reportedModel: result.reportedModel ?? 'not_reported_by_provider',
+      };
     }
     if (!cloudflareFree) return { ok: false, failureKind: 'free_builder_unavailable' };
     const result = await ai.run(model, {
