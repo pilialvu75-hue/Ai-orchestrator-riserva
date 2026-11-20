@@ -29,9 +29,13 @@ class WindowsUpdateManager extends UpdateManager {
     required AndroidIntentHandler intentHandler,
     required String currentVersion,
     WindowsUpdateInstallerPort? windowsInstaller,
+    bool? storeManagedMsix,
     Future<Directory> Function()? temporaryDirectoryProvider,
     Dio? dio,
-  })  : _windowsComparator = comparator,
+  })  : _storeManagedMsix = storeManagedMsix ??
+            const bool.fromEnvironment('AIVEXUS_WINDOWS_STORE_MSIX',
+                defaultValue: false),
+        _windowsComparator = comparator,
         _windowsPreferences = preferences,
         _windowsCurrentVersion =
             comparator.normalize(currentVersion) ?? currentVersion,
@@ -56,6 +60,9 @@ class WindowsUpdateManager extends UpdateManager {
   static const String _updatesDirectoryName = 'app_updates';
   static const String _windowsDirectoryName = 'windows';
 
+  // Store-managed MSIX must never launch an Inno/GitHub EXE over its package.
+  // This gate is disabled in existing EXE releases and injectable in tests.
+  final bool _storeManagedMsix;
   final VersionComparator _windowsComparator;
   final SharedPreferences _windowsPreferences;
   final WindowsUpdateInstallerPort _windowsInstaller;
@@ -71,6 +78,7 @@ class WindowsUpdateManager extends UpdateManager {
     bool checkOnStartup = true,
     Duration interval = const Duration(hours: 12),
   }) async {
+    if (_storeManagedMsix) return;
     if (checkOnStartup) {
       await checkForUpdates();
     } else {
@@ -92,6 +100,7 @@ class WindowsUpdateManager extends UpdateManager {
   Future<void> checkForUpdates({
     bool allowCachedFallback = true,
   }) async {
+    if (_storeManagedMsix) return;
     await super.checkForUpdates(allowCachedFallback: allowCachedFallback);
     await _restorePendingInstaller();
   }
@@ -99,15 +108,20 @@ class WindowsUpdateManager extends UpdateManager {
   /// Keeps the legacy public method name so existing UI/settings code remains
   /// source compatible while Windows downloads Setup.exe instead of an APK.
   @override
-  Future<bool> downloadLatestApk() => _downloadLatestWindowsInstaller();
+  Future<bool> downloadLatestApk() => _storeManagedMsix
+      ? Future<bool>.value(false)
+      : _downloadLatestWindowsInstaller();
 
   /// Keeps the legacy public method name so the existing update dialog can
   /// launch the Windows installer without platform-specific UI branches.
   @override
-  Future<bool> prepareInstallIntent() => _prepareWindowsInstall();
+  Future<bool> prepareInstallIntent() => _storeManagedMsix
+      ? Future<bool>.value(false)
+      : _prepareWindowsInstall();
 
   @override
   Future<bool> forceUpdate() async {
+    if (_storeManagedMsix) return false;
     if (_windowsDownloadInProgress || _windowsInstallInProgress) {
       return false;
     }
@@ -125,6 +139,7 @@ class WindowsUpdateManager extends UpdateManager {
 
   @override
   Future<void> refreshDiagnostics() async {
+    if (_storeManagedMsix) return;
     final path = _windowsPreferences.getString(_prefPendingPath);
     if (path == null || path.isEmpty) return;
     await _restorePendingInstaller();
