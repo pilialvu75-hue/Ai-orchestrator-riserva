@@ -74,6 +74,13 @@ final class WorkshopWebLanguageScope
 
 const Map<String, Map<String, String>> _translations = {
   'fr': {
+    'Quota generazioni non disponibile': 'Quota de générations indisponible',
+    'Generazioni disponibili': 'Générations disponibles',
+    'personali': 'personnelles',
+    'globali': 'globales',
+    'Prossimo recupero quota': 'Prochaine disponibilité',
+    'Ricarica quota': 'Actualiser le quota',
+    'Quota interna AIVEXUS; non include i Neurons Cloudflare.': 'Quota interne AIVEXUS ; n\'inclut pas les Neurons Cloudflare.',
     'Il prompt supera la dimensione massima consentita. Riduci il testo.': 'La description dépasse la taille maximale autorisée. Raccourcissez le texte.',
     'Prompt non valido o troppo lungo. Controlla il testo.': 'Description invalide ou trop longue. Vérifiez le texte.',
     'Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.': 'Décrivez votre application et modifiez le texte librement avant de l’envoyer.',
@@ -218,6 +225,13 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Inférence Cloud / AUTO',
   },
   'en': {
+    'Quota generazioni non disponibile': 'Generation quota unavailable',
+    'Generazioni disponibili': 'Available generations',
+    'personali': 'personal',
+    'globali': 'global',
+    'Prossimo recupero quota': 'Next quota recovery',
+    'Ricarica quota': 'Refresh quota',
+    'Quota interna AIVEXUS; non include i Neurons Cloudflare.': 'AIVEXUS quota only; excludes Cloudflare Neurons.',
     'Il prompt supera la dimensione massima consentita. Riduci il testo.': 'The prompt exceeds the maximum request size. Shorten the text.',
     'Prompt non valido o troppo lungo. Controlla il testo.': 'Invalid or overly long prompt. Check the text.',
     'Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.': 'Describe your application. You can edit the text before sending it.',
@@ -322,6 +336,13 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Cloud / AUTO inference',
   },
   'es': {
+    'Quota generazioni non disponibile': 'Cuota de generaciones no disponible',
+    'Generazioni disponibili': 'Generaciones disponibles',
+    'personali': 'personales',
+    'globali': 'globales',
+    'Prossimo recupero quota': 'Próxima recuperación',
+    'Ricarica quota': 'Actualizar cuota',
+    'Quota interna AIVEXUS; non include i Neurons Cloudflare.': 'Solo cuota de AIVEXUS; no incluye los Neurons de Cloudflare.',
     'Il prompt supera la dimensione massima consentita. Riduci il testo.': 'La descripción supera el tamaño máximo permitido. Acorta el texto.',
     'Prompt non valido o troppo lungo. Controlla il testo.': 'La descripción no es válida o es demasiado larga. Revisa el texto.',
     'Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.': 'Describe tu aplicación. Puedes editar el texto antes de enviarlo.',

@@ -23,6 +23,15 @@ void main() {
     var verifyReads = 0;
     var verifyPosts = 0;
     final client = MockClient((request) async {
+      if (request.url.path == '/api/cantiere/proposals/quota') {
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true,
+          'scope': 'aivexus_reservations',
+          'remaining': 10, 'userRemaining': 10, 'userLimit': 10,
+          'globalRemaining': 36, 'globalLimit': 36,
+          'nextAvailableAt': null,
+        }), 200);
+      }
       if (request.url.path == '/api/cantiere/proposals/generate') {
         if (request.method == 'POST') {
           generationPosts++;
@@ -94,7 +103,19 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pumpAndSettle();
     expect(verifyPosts, 1);
+    // The left pane is lazily scrollable; the quota meter adds one row
+    // above the generated-artifact controls.
+    await tester.scrollUntilVisible(
+      find.text('Applicazione verificata'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Applicazione verificata'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Scarica ZIP'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Scarica ZIP'), findsOneWidget);
 
     // No duplicate generation, repair or runner dispatch after completion.

@@ -1,6 +1,9 @@
 import { validateWebApplicationChecks } from './web_application_checks.mjs';
 import { WEB_RUNNER_TICKET as GENERATION_ID } from './web_runner_envelope.mjs';
 export const MAX_WEB_APP_PROMPT_CHARACTERS = 8000;
+export const WEB_APP_USER_DAILY_LIMIT = 10;
+export const WEB_APP_GLOBAL_DAILY_LIMIT = 36;
+const QUOTA_WINDOW_SECONDS = 86400;
 
 const FILE_PATH = /^(?:[a-z0-9][a-z0-9_-]*\/){0,3}[a-z0-9][a-z0-9_-]*\.(?:html|css|js|mjs|json|txt|md)$/;
 const INSTRUCTION = `Generate an original, self-contained browser application matching the user's brief.
@@ -18,13 +21,57 @@ const CLAIM = `INSERT INTO web_app_generations
   (owner_subject, generation_id, prompt_sha256, status)
   SELECT ?1, ?2, ?3, 'generating' WHERE NOT EXISTS (
     SELECT 1 FROM web_app_generations WHERE owner_subject = ?1 AND created_at >= unixepoch() - 86400
-    LIMIT 1 OFFSET 5
+    LIMIT 1 OFFSET ${WEB_APP_USER_DAILY_LIMIT - 1}
   ) AND NOT EXISTS (
     SELECT 1 FROM web_app_generations WHERE created_at >= unixepoch() - 86400
-    LIMIT 1 OFFSET 23
+    LIMIT 1 OFFSET ${WEB_APP_GLOBAL_DAILY_LIMIT - 1}
   )
   ON CONFLICT(owner_subject, generation_id) DO NOTHING
   RETURNING generation_id`;
+// Same rolling 24-hour window and same D1 table as the atomic claim gate.
+// Count all reservations including failed attempts, since inference may use
+// free AI resources even when the generated source is not valid.
+const QUOTA = `SELECT
+ (SELECT COUNT(*) FROM web_app_generations
+  WHERE owner_subject = ?1 AND created_at >= unixepoch() - ${QUOTA_WINDOW_SECONDS}) AS userUsed,
+ (SELECT COUNT(*) FROM web_app_generations
+  WHERE created_at >= unixepoch() - ${QUOTA_WINDOW_SECONDS}) AS globalUsed,
+ (SELECT MIN(created_at) FROM web_app_generations
+  WHERE owner_subject = ?1 AND created_at >= unixepoch() - ${QUOTA_WINDOW_SECONDS}) AS oldestUser,
+ (SELECT MIN(created_at) FROM web_app_generations
+  WHERE created_at >= unixepoch() - ${QUOTA_WINDOW_SECONDS}) AS oldestGlobal`;
+
+export async function readWebApplicationQuota({ db, ownerSubject }) {
+  if (typeof ownerSubject !== 'string' || !ownerSubject) {
+    return { ok: false, reason: 'invalid_request' };
+  }
+  const row = await db.prepare(QUOTA).bind(ownerSubject).first();
+  if (!row) return { ok: false, reason: 'storage_unavailable' };
+  const userUsed = Number(row.userUsed);
+  const globalUsed = Number(row.globalUsed);
+  const oldestUser = row.oldestUser === null ? null : Number(row.oldestUser);
+  const oldestGlobal = row.oldestGlobal === null ? null : Number(row.oldestGlobal);
+  if (![userUsed, globalUsed].every(n => Number.isSafeInteger(n) && n >= 0) ||
+      (oldestUser !== null && !Number.isSafeInteger(oldestUser)) ||
+      (oldestGlobal !== null && !Number.isSafeInteger(oldestGlobal))) {
+    return { ok: false, reason: 'storage_inconsistent' };
+  }
+  const userRemaining = Math.max(0, WEB_APP_USER_DAILY_LIMIT - userUsed);
+  const globalRemaining = Math.max(0, WEB_APP_GLOBAL_DAILY_LIMIT - globalUsed);
+  const remaining = Math.min(userRemaining, globalRemaining);
+  const waitUntil = remaining !== 0 ? null : Math.max(
+    userRemaining === 0 && oldestUser !== null ? oldestUser + QUOTA_WINDOW_SECONDS : 0,
+    globalRemaining === 0 && oldestGlobal !== null ? oldestGlobal + QUOTA_WINDOW_SECONDS : 0,
+  );
+  return {
+    ok: true, userLimit: WEB_APP_USER_DAILY_LIMIT, userUsed, userRemaining,
+    globalLimit: WEB_APP_GLOBAL_DAILY_LIMIT, globalUsed, globalRemaining,
+    remaining, windowSeconds: QUOTA_WINDOW_SECONDS,
+    nextAvailableAt: waitUntil ? new Date(waitUntil * 1000).toISOString() : null,
+    scope: 'aivexus_reservations',
+  };
+}
+
 const READ = `SELECT CASE WHEN status = 'generating' AND unixepoch() - created_at >= 180
     THEN 'interrupted' ELSE status END AS status,
     prompt_sha256 AS promptSha256, result_json AS resultJson
