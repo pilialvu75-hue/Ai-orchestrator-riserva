@@ -1,3 +1,10 @@
+import { createCloudflareAccessPrincipalResolver } from
+  '../../../scripts/web/cloudflare_access_principal_resolver.mjs';
+import { existingWebOwnerSubject } from
+  '../../../scripts/web/web_owner_role.mjs';
+import { activeWebCustomerGrant } from
+  '../../../scripts/web/web_client_invitations.mjs';
+
 const CAPABILITIES = new Set([
   'orchestration',
   'architecture_reasoning',
@@ -514,6 +521,38 @@ export async function onRequest(context) {
         'Cache-Control': 'no-store',
       },
     });
+  }
+
+  // Customer enrollment is opt-in and fails closed. Invited customers may
+  // create their own app through the D1-metered generate endpoint, but cannot
+  // consume raw provider API calls or owner-only large NVIDIA trials.
+  if (context.env.AIVEXUS_WEB_CLIENT_ACCESS_ENABLED === 'true') {
+    const request = context.request;
+    const expectedOrigin = context.env.AIVEXUS_WEB_ORIGIN;
+    if (request.headers.get('origin') !== expectedOrigin ||
+        new URL(request.url).origin !== expectedOrigin ||
+        request.headers.get('sec-fetch-site') === 'cross-site') {
+      return error('origin_forbidden', 403);
+    }
+    const resolver = createCloudflareAccessPrincipalResolver({
+      expectedIssuer: context.env.AIVEXUS_WEB_ACCESS_ISSUER,
+      expectedAudience: context.env.AIVEXUS_WEB_ACCESS_AUDIENCE,
+    });
+    const verified = await resolver.resolve(request).catch(() => null);
+    if (!verified?.ok) return error('access_denied', 401);
+    const owner = existingWebOwnerSubject({
+      principal: verified.principal,
+      configuredSubject: context.env.AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT,
+      configuredEmail: context.env.AIVEXUS_WEB_OWNER_EMAIL,
+    });
+    if (!owner) {
+      const permitted = await activeWebCustomerGrant({
+        db: context.env.AIVEXUS_WEB_D1,
+        principal: verified.principal,
+      }).catch(() => false);
+      if (!permitted) return error('client_access_required', 403);
+      return error('client_inference_not_enabled', 403);
+    }
   }
 
   const contentType = context.request.headers.get('content-type') || '';
