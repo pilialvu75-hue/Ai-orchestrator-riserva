@@ -25,7 +25,7 @@ on:
         required: false
         default: false
       android_computer_use_qa:
-        description: 'Opt in to Android Computer Use QA (beta only; gesture scope Car Jam)'
+        description: 'Opt in to Android Computer Use QA (beta only; user-selected app gestures)'
         type: boolean
         required: false
         default: false
