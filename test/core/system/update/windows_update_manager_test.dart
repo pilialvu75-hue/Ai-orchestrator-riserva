@@ -257,4 +257,36 @@ void main() {
     expect(restored.state.value.latestManifest?.version, manifest.version);
     restored.stopBackgroundChecks();
   });
+
+  test('Store MSIX never checks for or launches the GitHub EXE installer',
+      () async {
+    final store = WindowsUpdateManager(
+      updateChecker: updateChecker,
+      comparator: const VersionComparator(),
+      preferences: preferences,
+      intentHandler: intentHandler,
+      currentVersion: '1.0.16.1000',
+      storeManagedMsix: true,
+      windowsInstaller: installer,
+      temporaryDirectoryProvider: () async => tempDirectory,
+    );
+    try {
+      await store.startBackgroundChecks();
+      await store.checkForUpdates();
+      store.state.value = store.state.value.copyWith(
+        status: UpdateStatus.updateAvailable,
+        latestManifest: verifiedManifest(version: '1.0.16.200001'),
+      );
+      expect(await store.downloadLatestApk(), isFalse);
+      expect(await store.prepareInstallIntent(), isFalse);
+      expect(await store.forceUpdate(), isFalse);
+      await store.refreshDiagnostics();
+      expect(installer.downloadCalls, 0);
+      expect(installer.verifyCalls, 0);
+      expect(installer.launchCalls, 0);
+      expect(preferences.getString('update_windows_pending_path'), isNull);
+    } finally {
+      store.stopBackgroundChecks();
+    }
+  });
 }
