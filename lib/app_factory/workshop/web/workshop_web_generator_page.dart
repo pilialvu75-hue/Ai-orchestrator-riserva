@@ -354,7 +354,13 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       if (_generationId == null) {
         final priorId = await _findReusableVerifiedGeneration(prompt);
         if (priorId != null) {
-          final prior = await _call(priorId);
+          Map<String, dynamic>? prior;
+          try {
+            prior = await _call(priorId);
+          } catch (_) {
+            // The verified-reuse cache is optional; fresh generation remains
+            // available if a stale lookup cannot be reopened.
+          }
           if (prior != null && prior['status'] == 'generated') {
             final savedPrior =
                 await (await _preferences).setString(_storageKey, priorId);
