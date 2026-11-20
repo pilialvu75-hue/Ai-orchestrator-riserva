@@ -24,6 +24,11 @@ on:
         type: boolean
         required: false
         default: false
+      android_computer_use_qa:
+        description: 'Opt in to Android Computer Use QA (beta only; gesture scope Car Jam)'
+        type: boolean
+        required: false
+        default: false
 
 # MODIFICA 1: Ampliati i permessi per permettere a CodeQL di scrivere i report nella scheda Security
 permissions:
@@ -421,6 +426,20 @@ jobs:
           echo "enabled=$resolved" >> "$GITHUB_OUTPUT"
           echo "HYBRID consent release gate: $resolved ($RELEASE_CHANNEL)"
 
+      - name: Resolve owner-only Android Computer Use beta QA
+        id: android_computer_use
+        shell: bash
+        env:
+          OWNER_OPT_IN: ${{ github.event_name == 'workflow_dispatch' && inputs.android_computer_use_qa || false }}
+          RELEASE_CHANNEL: ${{ steps.version.outputs.channel }}
+        run: |
+          set -euo pipefail
+          if [[ "$OWNER_OPT_IN" == 'true' ]]; then
+            [[ "$RELEASE_CHANNEL" == 'beta' ]] || { echo "Android CU QA only on manual beta"; exit 1; }
+            [[ "$GITHUB_ACTOR" == 'pilialvu75-hue' ]] || { echo "Android CU QA owner only"; exit 1; }
+          fi
+          echo "enabled=$OWNER_OPT_IN" >> "$GITHUB_OUTPUT"
+
       - name: Generate build README/manual (IT)
         run: |
           set -euo pipefail
@@ -452,6 +471,7 @@ jobs:
             --build-number="${{ steps.version.outputs.version_code }}" \
             --dart-define=AI_ORCHESTRATOR_COMMIT_SHA="${GITHUB_SHA}" \
             --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="${{ steps.hybrid_gate.outputs.enabled }}" \
+            --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA="${{ steps.android_computer_use.outputs.enabled }}" \
             2>&1 | tee release_apk_build.log
 
       - name: Build signed release AAB
@@ -469,6 +489,7 @@ jobs:
             --build-number="${{ steps.version.outputs.version_code }}" \
             --dart-define=AI_ORCHESTRATOR_COMMIT_SHA="${GITHUB_SHA}" \
             --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA="${{ steps.hybrid_gate.outputs.enabled }}" \
+            --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA="${{ steps.android_computer_use.outputs.enabled }}" \
             2>&1 | tee release_aab_build.log
 
       - name: Report native compiler cache statistics
