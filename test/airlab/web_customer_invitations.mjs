@@ -85,6 +85,7 @@ test('existing owner creates/list/revokes invitations; invited Access client is 
     configuredOwnerSubject: 'owner-subject',
     configuredOwnerEmail: 'owner@example.test',
     fetchImpl: auth.fetchImpl, clientAccessEnabled: true,
+    enrollmentPaused: false,
   };
   const call = (op, token, method = 'GET', body, headers) =>
     createWebCustomerAccessHandler({ ...opts, operation: op })(request({
@@ -180,7 +181,7 @@ test('expired and spoofed invites never authorize access; flags default closed',
   const alice = await auth.sign({ sub: 'alice-sub', email: 'alice@example.test' });
   const opts = { db, accessIssuer: issuer, accessAudience: audience,
     expectedOrigin: origin, configuredOwnerSubject: 'owner-subject',
-    fetchImpl: auth.fetchImpl };
+    fetchImpl: auth.fetchImpl, enrollmentPaused: false };
   const handler = operation => createWebCustomerAccessHandler({
     ...opts, operation, clientAccessEnabled: false,
   });
@@ -227,6 +228,7 @@ test('accepted client cannot directly use raw AI broker or owner-only trials', a
     operation, db, accessIssuer: issuer, accessAudience: audience,
     expectedOrigin: origin, configuredOwnerSubject: 'owner-subject',
     fetchImpl: auth.fetchImpl, clientAccessEnabled: true,
+    enrollmentPaused: false,
   });
   const invite = await parse(await access('create')(request({
     token: owner, path: '/api/cantiere/access/invitations', method: 'POST',
@@ -261,5 +263,41 @@ test('accepted client cannot directly use raw AI broker or owner-only trials', a
   assert.equal(r.status, 403);
   const output = await r.json();
   assert.equal(output.error?.code, 'owner_required');
+  sqlite.close();
+});
+
+
+test('customer service is paused and all protected app operations require owner', async () => {
+  const { db, sqlite } = fixture();
+  const auth = await signedAccess();
+  const owner = await auth.sign({ sub: 'owner-subject', email: 'owner@example.test' });
+  const customer = await auth.sign({ sub: 'customer-subject', email: 'customer@example.test' });
+  const opts = { db, accessIssuer: issuer, accessAudience: audience,
+    expectedOrigin: origin, configuredOwnerSubject: 'owner-subject',
+    fetchImpl: auth.fetchImpl };
+  for (const op of ['create', 'claim', 'revoke']) {
+    const reply = await createWebCustomerAccessHandler({ ...opts, operation: op })(
+      request({ token: owner, path: '/api/cantiere/access/' + op,
+        method: 'POST', body: op === 'create'
+          ? { email: 'customer@example.test', expiresDays: 2 }
+          : { invitationId: '11111111-1111-4111-8111-111111111111' },
+      }));
+    assert.equal(reply.status, 403);
+    assert.equal((await reply.json()).error, 'client_service_paused');
+  }
+  const status = await parse(await createWebCustomerAccessHandler({
+    ...opts, operation: 'status', clientAccessEnabled: true,
+  })(request({ token: owner, path: '/api/cantiere/access/status' })));
+  assert.equal(status.role, 'owner');
+  assert.equal(status.customerService, 'paused');
+  assert.equal(status.clientEnabled, false);
+  const noAccess = await createAuthenticatedWebProjectOperation({
+    operation: 'generation_quota', expectedOrigin: origin,
+    accessIssuer: issuer, accessAudience: audience,
+    adminSubject: 'owner-subject', db, fetchImpl: auth.fetchImpl,
+    clientAccessEnabled: true, ownerOnly: true,
+  })(request({ token: customer, path: '/api/cantiere/proposals/quota' }));
+  assert.equal(noAccess.status, 403);
+  assert.equal((await noAccess.json()).error, 'owner_required');
   sqlite.close();
 });
