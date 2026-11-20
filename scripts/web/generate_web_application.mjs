@@ -89,6 +89,29 @@ export async function readWebApplicationQuota({ db, ownerSubject, adminSubject }
   };
 }
 
+// A verified project is a reusable snapshot of the *same owner's* exact
+// request. Returning its existing generation id avoids a new inference call,
+// a new reservation and redundant verification; it is not a cross-user cache
+// and it does not imply that Module Library packages are already available.
+const VERIFIED_REUSE = `SELECT g.generation_id AS generationId
+  FROM web_app_generations g
+  INNER JOIN web_app_verifications v
+    ON v.owner_subject = g.owner_subject AND v.generation_id = g.generation_id
+  WHERE g.owner_subject = ?1 AND g.prompt_sha256 = ?2
+    AND g.status = 'generated' AND v.status = 'verified'
+    AND v.source_json IS NOT NULL AND v.zip_bytes IS NOT NULL
+  ORDER BY g.created_at DESC LIMIT 1`;
+
+export async function findVerifiedWebApplicationReuse({ db, ownerSubject, promptSha256 }) {
+  if (typeof ownerSubject !== 'string' || !ownerSubject ||
+      typeof promptSha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(promptSha256)) {
+    return { ok: false, reason: 'invalid_request' };
+  }
+  const row = await db.prepare(VERIFIED_REUSE).bind(ownerSubject, promptSha256).first();
+  return { ok: true, found: !!row, ...(row ? { generationId: row.generationId } : {}) };
+}
+
 const READ = `SELECT CASE WHEN status = 'generating' AND unixepoch() - created_at >= 180
     THEN 'interrupted' ELSE status END AS status,
     prompt_sha256 AS promptSha256, result_json AS resultJson
