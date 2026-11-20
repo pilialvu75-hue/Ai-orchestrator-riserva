@@ -8,6 +8,7 @@ export function onRequest({ request, env }) {
     accessIssuer: env.AIVEXUS_WEB_ACCESS_ISSUER,
     accessAudience: env.AIVEXUS_WEB_ACCESS_AUDIENCE,
     db: env.AIVEXUS_WEB_D1,
+    clientAccessEnabled: env.AIVEXUS_WEB_CLIENT_ACCESS_ENABLED === 'true',
     bucket: env.AIVEXUS_WEB_ARTIFACTS,
     runner: {
       token: env.AIVEXUS_COUNTER_GITHUB_TOKEN,
