@@ -1,5 +1,7 @@
 export 'package:ai_orchestrator/core/voice/read_aloud_transport.dart' show TtsAudioSink;
 import 'dart:async';
+import 'package:flutter/services.dart';
+import 'package:ai_orchestrator/core/voice/voice_tts_preference.dart';
 
 import 'package:ai_orchestrator/core/voice/android_pcm_tts_audio_sink.dart';
 import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
@@ -156,6 +158,7 @@ final class IsolatedKokoroVoiceEngine
   int _queuedRequestSequence = 0;
   bool _liveSequenceActive = false;
   bool _liveTimelinePrepared = false;
+  bool _androidSpeaking = false;
 
   @override
   void beginLiveSpeechSequence() {
@@ -203,7 +206,7 @@ final class IsolatedKokoroVoiceEngine
   bool get isListening => _delegate.isListening;
 
   @override
-  bool get isSpeaking => _audioSink.isPlaying;
+  bool get isSpeaking => _androidSpeaking || _audioSink.isPlaying;
 
   ReadAloudSink? get _readAloudSink {
     final sink = _audioSink;
@@ -256,7 +259,9 @@ final class IsolatedKokoroVoiceEngine
     if (_disposed) return base;
 
     final assets = await _assetsProvider();
-    return _withTtsAvailability(base, assets != null);
+    final androidSelected = await VoiceTtsPreference.read() == TtsBackend.androidSystem;
+    final androidReady = androidSelected && await VoiceTtsPreference.hasOfflineVoice();
+    return _withTtsAvailability(base, assets != null || androidReady);
   }
 
   @override
@@ -296,6 +301,29 @@ final class IsolatedKokoroVoiceEngine
   Future<void> speak(String text) async {
     final sanitized = text.trim();
     if (_disposed || sanitized.isEmpty) return;
+
+    // System TTS executes in Android's installed engine, without constructing
+    // a second ONNX model beside the resident LLM. It is selected only by
+    // an explicit, persisted Android-only user preference.
+    if (await VoiceTtsPreference.read() == TtsBackend.androidSystem) {
+      if (_disposed) return;
+      _androidSpeaking = true;
+      try {
+        final language = detectTtsLanguage(sanitized, _languageCode());
+        final completed = await VoiceTtsPreference.channel.invokeMethod<bool>(
+          'speak', <String, Object>{'text': sanitized, 'language': language},
+        );
+        if (completed != true && !_disposed) {
+          logEvent(_tag, '[TTS_FAIL] reason=android_system_not_completed');
+        }
+      } on PlatformException catch (error) {
+        logEvent(_tag, '[TTS_FAIL] reason=android_system_${error.code}');
+        rethrow;
+      } finally {
+        _androidSpeaking = false;
+      }
+      return;
+    }
 
     if (_requestBusy) {
       if (_activeRequestGeneration == _lifecycleGeneration) {
@@ -493,6 +521,13 @@ final class IsolatedKokoroVoiceEngine
     _lifecycleGeneration++;
     _liveSequenceActive = false;
     _liveTimelinePrepared = false;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        await VoiceTtsPreference.channel.invokeMethod<bool>('stop');
+      } on PlatformException { /* Optional Android system voice. */ }
+      on MissingPluginException { /* Unsupported older engine. */ }
+      _androidSpeaking = false;
+    }
 
     try {
       final readAloud = _readAloudSink;
