@@ -5,5 +5,4 @@
     android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
     android:notificationTimeout="100"
-    android:description="@string/computer_use_accessibility_description"
-    android:settingsActivity="com.aiorchestrator.MainActivity" />
+    android:description="@string/computer_use_accessibility_description" />
