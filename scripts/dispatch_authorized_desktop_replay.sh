@@ -51,14 +51,23 @@ for channel in stable beta nightly dev; do
   # Encode '+' in REST paths explicitly: never mistake a GitHub CLI
   # lookup failure for an absent release, and verify the immutable tag SHA.
   candidate_path="${candidate//+/%2B}"
+  echo "Checking published release candidate $candidate against authorized source SHA"
   release_json="$(gh api "repos/$repo/releases/tags/$candidate_path" 2>/dev/null || true)"
-  [ -n "$release_json" ] || continue
+  if [ -z "$release_json" ]; then
+    echo "Candidate REST release lookup unavailable"; continue
+  fi
   prerelease="$(jq -r '.prerelease' <<< "$release_json")"
   published="$(jq -r '.published_at // empty' <<< "$release_json")"
-  [ "$prerelease" = "$expected_pre" ] && [ -n "$published" ] || continue
-  [ "$(jq -r '.tag_name' <<< "$release_json")" = "$candidate" ] || continue
+  if [ "$prerelease" != "$expected_pre" ] || [ -z "$published" ]; then
+    echo "Candidate prerelease flag or publication timestamp mismatch"; continue
+  fi
+  if [ "$(jq -r '.tag_name' <<< "$release_json")" != "$candidate" ]; then
+    echo "Candidate tag name mismatch"; continue
+  fi
   candidate_sha="$(gh api "repos/$repo/git/ref/tags/$candidate_path" --jq '.object.sha' 2>/dev/null || true)"
-  [ "$candidate_sha" = "$expected_sha" ] || continue
+  if [ "$candidate_sha" != "$expected_sha" ]; then
+    echo "Candidate immutable tag SHA mismatch or git-ref lookup unavailable"; continue
+  fi
   [ -z "$matching_tag" ] || { echo 'More than one matching authorized tag' >&2; exit 1; }
   matching_tag="$candidate"
 done
