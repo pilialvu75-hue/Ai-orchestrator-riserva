@@ -297,4 +297,80 @@ void main() {
     expect(find.textContaining('Generazioni disponibili: 0'), findsOneWidget);
     expect(find.byKey(const Key('web_generator_quota_next')), findsOneWidget);
   });
+
+
+  testWidgets('verified same-owner prompt reopens previous app without AI generation',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1150, 920);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+
+    const oldId = '11111111-1111-4111-8111-111111111111';
+    const prompt = 'Una app per catalogare le mie letture';
+    int generationPosts = 0;
+    int reuseReads = 0;
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/cantiere/proposals/quota') {
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true,
+          'scope': 'aivexus_reservations',
+          'remaining': 9, 'userRemaining': 9, 'userLimit': 10,
+          'globalRemaining': 70, 'globalLimit': 72,
+          'nextAvailableAt': null,
+        }), 200);
+      }
+      if (request.url.path == '/api/cantiere/proposals/reuse') {
+        expect(request.method, 'GET');
+        expect(request.url.queryParameters['promptSha256'],
+            RegExp(r'^[a-f0-9]{64}$'));
+        reuseReads++;
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true, 'found': true,
+          'generationId': oldId,
+        }), 200);
+      }
+      if (request.url.path == '/api/cantiere/proposals/generate') {
+        if (request.method == 'POST') generationPosts++;
+        expect(request.method, 'GET');
+        expect(request.url.queryParameters['generationId'], oldId);
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true,
+          'status': 'generated',
+          'generationId': oldId,
+          'title': 'Catalogo libri',
+          'requirements': ['Aprire e cercare libri'],
+          'paths': ['index.html'],
+          'sourceSha256': 'a' * 64,
+          'provenance': {
+            'reportedModel': '@cf/google/gemma-4-26b-a4b-it',
+          },
+        }), 200);
+      }
+      expect(request.url.path, '/api/cantiere/proposals/verify');
+      expect(request.method, 'GET');
+      return http.Response(jsonEncode({
+        'version': 1, 'ok': true,
+        'status': 'verified', 'generationId': oldId,
+        'sourceSha256': 'a' * 64,
+        'zipSha256': 'b' * 64,
+      }), 200);
+    });
+    await tester.pumpWidget(
+      MaterialApp(home: WorkshopWebGeneratorPage(client: client)),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('web_generator_first_prompt')), prompt);
+    await tester.pump();
+    await tester.tap(find.text('Genera'));
+    await tester.pumpAndSettle();
+    expect(reuseReads, 1);
+    expect(generationPosts, 0);
+    expect(find.byKey(const Key('web_generator_reused_verified')), findsOneWidget);
+    expect(find.text('Catalogo libri'), findsOneWidget);
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString('aivexus.web.lastGeneration.v1'), oldId);
+  });
 }
