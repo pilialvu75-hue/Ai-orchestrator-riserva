@@ -563,7 +563,7 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
   assert.ok(zip.length > 0);
   assert.equal(objectWrites, 1);
   assert.equal(objectReads, 1);
-  assert.equal((await download(otherToken)).status, 404);
+  assert.equal((await download(otherToken)).status, 403);
   assert.equal(objectReads, 1);
   const response = await download(token);
   assert.equal(response.status, 200);
@@ -843,10 +843,10 @@ test('Pages generates and persists sources through the dedicated free route', as
     assert.equal((await (await submit(token, bad)).json()).status, 'failed');
     assert.equal(prompts.filter(value => value === prompt).length, 1);
   }
-  // Four additional recorded reservations bring the owner to nine attempts.
+  // Sixty-six recorded reservations bring the owner to 71 attempts (of 72).
   // These rows do not trigger inference in this test fixture.
   const quotaSeed = sqlite.prepare("INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status) VALUES (?, ?, ?, 'failed')");
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 66; i++) {
     quotaSeed.run(subject, crypto.randomUUID(), digest);
   }
   const competing = await Promise.all(Array.from({ length: 3 }, () => submit(token,
