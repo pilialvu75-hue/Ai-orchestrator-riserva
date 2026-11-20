@@ -18,6 +18,8 @@ import { onRequest as approveProposal } from
   '../../functions/api/cantiere/proposals/approve.js';
 import { onRequest as generateApplication } from
   '../../functions/api/cantiere/proposals/generate.js';
+import { onRequest as quotaApplication } from
+  '../../functions/api/cantiere/proposals/quota.js';
 import { onRequest as ordinaryInference } from '../../functions/api/cantiere/inference.js';
 import { onRequest as cloudCapabilities } from '../../functions/api/cantiere/capabilities.js';
 import { createAuthenticatedWebProjectOperation } from
@@ -832,6 +834,12 @@ test('Pages generates and persists sources through the dedicated free route', as
     assert.equal((await (await submit(token, bad)).json()).status, 'failed');
     assert.equal(prompts.filter(value => value === prompt).length, 1);
   }
+  // Four additional recorded reservations bring the owner to nine attempts.
+  // These rows do not trigger inference in this test fixture.
+  const quotaSeed = sqlite.prepare("INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status) VALUES (?, ?, ?, 'failed')");
+  for (let i = 0; i < 4; i++) {
+    quotaSeed.run(subject, crypto.randomUUID(), digest);
+  }
   const competing = await Promise.all(Array.from({ length: 3 }, () => submit(token,
     { generationId: crypto.randomUUID(), prompt: 'Una scheda per annotare libri.' })));
   assert.deepEqual(competing.map(response => response.status).sort(), [200, 429, 429]);
@@ -939,4 +947,74 @@ test('app generation accepts structured 8000-character and Unicode briefs within
 
   const records = sqlite.prepare('SELECT COUNT(*) AS count FROM web_app_generations').get().count;
   assert.equal(records, 2);
+});
+
+
+test('authenticated quota exposes exact personal/global counts and next available slot', async t => {
+  const { db, sqlite } = sqliteD1(t, ['006_web_app_generations.sql']);
+  const signing = await signer();
+  const iat = Math.floor(Date.now() / 1000) - 10;
+  const token = await signing.sign({ iat, nbf: iat, exp: iat + 300 });
+  const another = await signing.sign({ iat, nbf: iat, exp: iat + 300, sub: 'third-owner' });
+  const env = {
+    AIVEXUS_WEB_ORIGIN: origin,
+    AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_D1: db,
+  };
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(String(url), issuer + '/cdn-cgi/access/certs');
+    return Response.json({ keys: [signing.jwk] });
+  });
+  const read = (assertion, path = '/api/cantiere/proposals/quota', method = 'GET') =>
+    quotaApplication({
+      request: webRequest(assertion, null, {
+        path, method, requestOrigin: null,
+      }),
+      env,
+    });
+
+  assert.equal((await read(null)).status, 401);
+  assert.equal((await read(token, '/api/cantiere/proposals/quota?foo=bar')).status, 400);
+  assert.equal((await read(token, undefined, 'POST')).status, 405);
+  const empty = await body(await read(token));
+  assert.deepEqual(empty, {
+    version: 1, ok: true,
+    userLimit: 10, userUsed: 0, userRemaining: 10,
+    globalLimit: 36, globalUsed: 0, globalRemaining: 36,
+    remaining: 10, windowSeconds: 86400, nextAvailableAt: null,
+    scope: 'aivexus_reservations',
+  });
+
+  const seed = sqlite.prepare(
+    "INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status, created_at) VALUES (?, ?, ?, 'failed', unixepoch())");
+  for (let i = 0; i < 10; i++) seed.run(subject, crypto.randomUUID(), digest);
+  for (let i = 0; i < 26; i++) seed.run('other-owner', crypto.randomUUID(), digest);
+  const full = await body(await read(token));
+  assert.equal(full.userUsed, 10);
+  assert.equal(full.globalUsed, 36);
+  assert.equal(full.userRemaining, 0);
+  assert.equal(full.globalRemaining, 0);
+  assert.equal(full.remaining, 0);
+  assert.equal(full.scope, 'aivexus_reservations');
+  assert.equal(typeof full.nextAvailableAt, 'string');
+  const recovery = Date.parse(full.nextAvailableAt);
+  assert.ok(recovery > Date.now() + 86000 * 1000);
+  assert.ok(recovery <= Date.now() + 86400 * 1000);
+  assert.doesNotMatch(JSON.stringify(full), /other-owner|access-subject/);
+
+  const unrelated = await body(await read(another));
+  assert.equal(unrelated.userRemaining, 10);
+  assert.equal(unrelated.globalRemaining, 0);
+  assert.equal(unrelated.remaining, 0);
+
+  // The rolling window clears expired rows without requiring a midnight reset.
+  sqlite.prepare(
+    'UPDATE web_app_generations SET created_at = unixepoch() - 86401 WHERE owner_subject = ?'
+  ).run(subject);
+  const partial = await body(await read(token));
+  assert.equal(partial.userRemaining, 10);
+  assert.equal(partial.globalRemaining, 10);
+  assert.equal(partial.remaining, 10);
+  assert.equal(partial.nextAvailableAt, null);
 });
