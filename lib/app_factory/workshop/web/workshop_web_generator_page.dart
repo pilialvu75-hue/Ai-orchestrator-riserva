@@ -35,6 +35,7 @@ class WorkshopWebGeneratorPage extends StatefulWidget {
 }
 
 class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
+  static const _maxFirstPromptCharacters = 8000;
   static const _storageKey = 'aivexus.web.lastGeneration.v1';
   static const _platformStorageKey = 'aivexus.web.generationPreviewPlatform.v1';
   static final _idPattern = RegExp(
@@ -370,6 +371,16 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         result['error'] == 'generation_not_found') {
       return null;
     }
+    if (prompt != null && response.statusCode == 413 &&
+        result['error'] == 'request_too_large') {
+      throw const _GeneratorRequestException(
+          'Il prompt supera la dimensione massima consentita. Riduci il testo.');
+    }
+    if (prompt != null && response.statusCode == 400 &&
+        result['error'] == 'invalid_request') {
+      throw const _GeneratorRequestException(
+          'Prompt non valido o troppo lungo. Controlla il testo.');
+    }
     if (response.statusCode == 429 &&
         result['error'] == 'generation_quota_exceeded') {
       throw const _GeneratorRequestException(
@@ -490,7 +501,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                   minLines: null,
                   maxLines: null,
                   expands: true,
-                  maxLength: 1200,
+                  maxLength: _maxFirstPromptCharacters,
                   textAlignVertical: TextAlignVertical.top,
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
