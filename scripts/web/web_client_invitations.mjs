@@ -47,7 +47,7 @@ export async function createWebClientInvitation({ db, ownerSubject, email, expir
   const recipient = normalizedEmail(email);
   if (!ownerSubject || !recipient || !Number.isInteger(expiresDays) ||
       expiresDays < 1 || expiresDays > 30) {
-    return { ok: false, error: 'invalid_request', status: 400 };
+    return { ok: false, error: 'invalid_request', httpStatus: 400 };
   }
   const id = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
@@ -63,7 +63,7 @@ export async function createWebClientInvitation({ db, ownerSubject, email, expir
         AND status != 'revoked' AND expires_at > unixepoch())`)
     .bind(id, ownerSubject, recipient, expiresDays * 86400).run();
   if (changes(saved) !== 1) return {
-    ok: false, error: 'invitation_conflict_or_limit', status: 409,
+    ok: false, error: 'invitation_conflict_or_limit', httpStatus: 409,
   };
   return { ok: true, invitationId: id, recipientEmail: recipient,
     status: 'pending', expiresAt: new Date(expiresAt * 1000).toISOString() };
@@ -91,14 +91,14 @@ export async function listWebClientInvitations({ db, ownerSubject }) {
 
 export async function revokeWebClientInvitation({ db, ownerSubject, invitationId }) {
   if (!ID.test(invitationId ?? '')) {
-    return { ok: false, error: 'invalid_request', status: 400 };
+    return { ok: false, error: 'invalid_request', httpStatus: 400 };
   }
   const saved = await db.prepare(`UPDATE web_client_invitations
     SET status = 'revoked'
     WHERE owner_subject = ?1 AND invitation_id = ?2
       AND status != 'revoked'`).bind(ownerSubject, invitationId).run();
   return changes(saved) === 1 ? { ok: true, status: 'revoked' } :
-    { ok: false, error: 'invitation_not_found', status: 404 };
+    { ok: false, error: 'invitation_not_found', httpStatus: 404 };
 }
 
 export async function claimWebClientInvitation({ db, principal, invitationId }) {
@@ -106,7 +106,7 @@ export async function claimWebClientInvitation({ db, principal, invitationId }) 
   if (!ID.test(invitationId ?? '') || !email ||
       principal?.verifiedBy !== 'cloudflare-access-jwt' ||
       typeof principal?.subject !== 'string' || !principal.subject) {
-    return { ok: false, error: 'invalid_request', status: 400 };
+    return { ok: false, error: 'invalid_request', httpStatus: 400 };
   }
   // The signed Access email AND opaque ID must match. One successful claim
   // atomically binds this invitation to the signed Access subject.
@@ -117,7 +117,7 @@ export async function claimWebClientInvitation({ db, principal, invitationId }) 
       AND status = 'pending' AND expires_at > unixepoch()
     RETURNING invitation_id AS invitationId, expires_at AS expiresAt`)
     .bind(principal.subject, invitationId, email).first();
-  if (!row) return { ok: false, error: 'invitation_not_found', status: 404 };
+  if (!row) return { ok: false, error: 'invitation_not_found', httpStatus: 404 };
   return { ok: true, status: 'accepted',
     expiresAt: new Date(row.expiresAt * 1000).toISOString() };
 }
@@ -219,8 +219,8 @@ export function createWebCustomerAccessHandler({
           clientEnabled: clientAccessEnabled === true,
           canUseStudio: !!owner || (clientAccessEnabled === true && active) };
       }
-      const { status: responseStatus = 200, ...safe } = output;
-      return result(responseStatus, safe);
+      const { httpStatus = 200, ...safe } = output;
+      return result(httpStatus, safe);
     } catch (_) {
       return deny(503, 'storage_unavailable');
     }
