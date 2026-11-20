@@ -304,31 +304,6 @@ final class IsolatedKokoroVoiceEngine
     final sanitized = text.trim();
     if (_disposed || sanitized.isEmpty) return;
 
-    // System TTS executes in Android's installed engine, without constructing
-    // a second ONNX model beside the resident LLM. It is selected only by
-    // an explicit, persisted Android-only user preference.
-    if (await VoiceTtsPreference.read() == TtsBackend.androidSystem) {
-      if (_disposed) return;
-      _usingSystemTts = true;
-      _androidSpeaking = true;
-      try {
-        final language = detectTtsLanguage(sanitized, _languageCode());
-        final completed = await VoiceTtsPreference.channel.invokeMethod<bool>(
-          'speak', <String, Object>{'text': sanitized, 'language': language},
-        );
-        if (completed != true && !_disposed) {
-          logEvent(_tag, '[TTS_FAIL] reason=android_system_not_completed');
-        }
-      } on PlatformException catch (error) {
-        logEvent(_tag, '[TTS_FAIL] reason=android_system_${error.code}');
-        rethrow;
-      } finally {
-        _androidSpeaking = false;
-      }
-      return;
-    }
-
-    _usingSystemTts = false;
     if (_requestBusy) {
       if (_activeRequestGeneration == _lifecycleGeneration) {
         // Repeated taps without an intervening Stop still do not launch
@@ -361,7 +336,31 @@ final class IsolatedKokoroVoiceEngine
     final finished = Completer<void>();
     _requestFinished = finished;
     try {
-      await _speakRequest(sanitized, generation);
+      // Claim the request before any asynchronous preference/platform access.
+      // Both TTS backends share the same no-overlap and Stop/Replay contract.
+      final backend = await VoiceTtsPreference.read();
+      if (_disposed || generation != _lifecycleGeneration) return;
+      _usingSystemTts = backend == TtsBackend.androidSystem;
+      if (_usingSystemTts) {
+        _androidSpeaking = true;
+        try {
+          final language = detectTtsLanguage(sanitized, _languageCode());
+          final completed = await VoiceTtsPreference.channel.invokeMethod<bool>(
+            'speak', <String, Object>{'text': sanitized, 'language': language},
+          );
+          if (completed != true && !_disposed &&
+              generation == _lifecycleGeneration) {
+            logEvent(_tag, '[TTS_FAIL] reason=android_system_not_completed');
+          }
+        } on PlatformException catch (error) {
+          logEvent(_tag, '[TTS_FAIL] reason=android_system_${error.code}');
+          rethrow;
+        } finally {
+          _androidSpeaking = false;
+        }
+      } else {
+        await _speakRequest(sanitized, generation);
+      }
     } finally {
       _requestBusy = false;
       _activeRequestGeneration = -1;
@@ -525,7 +524,8 @@ final class IsolatedKokoroVoiceEngine
     _lifecycleGeneration++;
     _liveSequenceActive = false;
     _liveTimelinePrepared = false;
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    if (_usingSystemTts && !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android) {
       try {
         await VoiceTtsPreference.channel.invokeMethod<bool>('stop');
       } on PlatformException { /* Optional Android system voice. */ }
