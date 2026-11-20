@@ -73,6 +73,8 @@ test('Chromium detects a syntax error and passes the same real DOM checks after 
     assert.equal(options.headers.Authorization, 'Bearer local-placeholder');
     const request = JSON.parse(options.body);
     assert.equal(request.model, model);
+    assert.equal(request.max_completion_tokens, 6144);
+    assert.deepEqual(request.response_format, { type: 'json_object' });
     const input = JSON.parse(request.messages.at(-1).content);
     assert.equal(input.diagnosis, 'javascript_error');
     assert.deepEqual(input.source, broken);
