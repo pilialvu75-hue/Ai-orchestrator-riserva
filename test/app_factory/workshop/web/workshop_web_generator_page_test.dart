@@ -307,6 +307,8 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
 
+    final preferencesAtStart = await SharedPreferences.getInstance();
+    await preferencesAtStart.remove('aivexus.web.lastGeneration.v1');
     const oldId = '11111111-1111-4111-8111-111111111111';
     const prompt = 'Una app per catalogare le mie letture';
     int generationPosts = 0;
@@ -361,11 +363,18 @@ void main() {
       MaterialApp(home: WorkshopWebGeneratorPage(client: client)),
     );
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('web_generator_first_prompt')), findsOneWidget);
     await tester.enterText(
       find.byKey(const Key('web_generator_first_prompt')), prompt);
-    await tester.pump();
-    await tester.tap(find.text('Genera'));
     await tester.pumpAndSettle();
+    expect(
+      tester.widget<FilledButton>(
+        find.byKey(const Key('web_generator_submit_first_prompt'))).onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.byKey(const Key('web_generator_submit_first_prompt')));
+    await tester.pumpAndSettle();
+    expect(generationPosts, 0);
     expect(reuseReads, 1);
     expect(generationPosts, 0);
     expect(find.byKey(const Key('web_generator_reused_verified')), findsOneWidget);
