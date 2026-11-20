@@ -196,6 +196,15 @@ flutter {
 // Bundled on-device labeler: no network/model download at inference time.
 // Android minSdk 28 already exceeds ML Kit's supported minimum.
 dependencies {
+    // posthog_flutter 5.16.0 declares a floating native Android SDK range.
+    // Current Gradle resolution breaks its Kotlin API (feature flags/rrweb).
+    // Pin a known 3.x SDK pending a coordinated upstream plugin upgrade.
+    constraints {
+        implementation('com.posthog:posthog-android') {
+            version { strictly '3.42.1' }
+            because 'Avoid incompatible floating PostHog Android SDK resolution'
+        }
+    }
     implementation 'com.google.mlkit:image-labeling:17.0.9'
     // Bundled Latin-script OCR (IT/FR/EN); no first-use model download.
     implementation 'com.google.mlkit:text-recognition:16.0.1'
