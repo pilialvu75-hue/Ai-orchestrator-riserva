@@ -20,6 +20,8 @@ import { onRequest as generateApplication } from
   '../../functions/api/cantiere/proposals/generate.js';
 import { onRequest as quotaApplication } from
   '../../functions/api/cantiere/proposals/quota.js';
+import { onRequest as reuseApplication } from
+  '../../functions/api/cantiere/proposals/reuse.js';
 import { onRequest as ordinaryInference } from '../../functions/api/cantiere/inference.js';
 import { onRequest as cloudCapabilities } from '../../functions/api/cantiere/capabilities.js';
 import { createAuthenticatedWebProjectOperation } from
@@ -1114,4 +1116,73 @@ test('only server-declared Cloudflare Access administrator can generate beyond s
   assert.equal(quota.userLimit, 64);
   assert.equal(quota.userRemaining, 53);
   assert.equal(quota.globalLimit, 72);
+});
+
+
+test('verified same-owner project reuse does not invoke AI or consume quota', async t => {
+  const { db, sqlite } = sqliteD1(t, [
+    '006_web_app_generations.sql', '007_web_app_verifications.sql',
+  ]);
+  const signing = await signer();
+  const iat = Math.floor(Date.now() / 1000) - 10;
+  const token = await signing.sign({ iat, nbf: iat, exp: iat + 300 });
+  const stranger = await signing.sign({
+    iat, nbf: iat, exp: iat + 300, sub: 'stranger-subject',
+  });
+  const env = {
+    AIVEXUS_WEB_ORIGIN: origin,
+    AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_D1: db,
+  };
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(String(url), issuer + '/cdn-cgi/access/certs');
+    return Response.json({ keys: [signing.jwk] });
+  });
+  const promptHash = createHash('sha256').update('App verificata').digest('hex');
+  const id = crypto.randomUUID();
+  sqlite.prepare(
+    "INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status, result_json) VALUES (?, ?, ?, 'generated', ?)"
+  ).run(subject, id, promptHash, JSON.stringify({
+    source: { title: 'App verificata', requirements: ['Navigabile'],
+      files: [{ path: 'index.html', content: '<main>OK</main>' }] },
+    sourceSha256: digest,
+    provenance: { reportedModel: '@cf/google/gemma-4-26b-a4b-it' },
+    checks: [],
+  }));
+  const path = '/api/cantiere/proposals/reuse?promptSha256=' + promptHash;
+  const read = (assertion, requestPath = path) => reuseApplication({
+    request: webRequest(assertion, undefined, {
+      method: 'GET', requestOrigin: null, path: requestPath,
+    }),
+    env,
+  });
+
+  assert.equal((await read(null)).status, 401);
+  assert.equal((await read(token, '/api/cantiere/proposals/reuse?promptSha256=bad')).status, 400);
+  assert.equal((await body(await read(token))).found, false);
+  const insertVerified = sqlite.prepare(
+    "INSERT INTO web_app_verifications (owner_subject, generation_id, ticket, head_sha, job_sha256, source_sha256, status, run_id, receipt_json, source_json, zip_sha256, zip_bytes) VALUES (?, ?, ?, ?, ?, ?, 'verified', ?, ?, ?, ?, ?)"
+  );
+  insertVerified.run(
+    subject, id, crypto.randomUUID(), 'f'.repeat(40), digest, digest,
+    12345, '{}',
+    JSON.stringify({ title: 'App verificata', requirements: ['Navigabile'],
+      files: [{ path: 'index.html', content: '<main>OK</main>' }] }),
+    digest, Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(18).fill(0)]),
+  );
+  const reused = await body(await read(token));
+  assert.equal(reused.ok, true);
+  assert.equal(reused.found, true);
+  assert.equal(reused.generationId, id);
+  assert.equal((await body(await read(stranger))).found, false);
+  assert.equal((await body(await read(token,
+    '/api/cantiere/proposals/reuse?promptSha256=' + '0'.repeat(64)))).found, false);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_app_generations').get().count, 1);
+  assert.equal((await body(await quotaApplication({
+    request: webRequest(token, undefined, {
+      method: 'GET', requestOrigin: null, path: '/api/cantiere/proposals/quota',
+    }),
+    env,
+  }))).userUsed, 1);
 });
