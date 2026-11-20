@@ -165,7 +165,9 @@ class _WorkshopWebGeneratorWorkspaceState
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  widget.projectTitle ?? _t('Nuova applicazione'),
+                  widget.projectTitle == null
+                      ? _t('Nuova applicazione')
+                      : 'Progetto · ${widget.projectTitle}',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
@@ -183,7 +185,7 @@ class _WorkshopWebGeneratorWorkspaceState
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          label,
+                          '• $label',
                           style: const TextStyle(color: Color(0xFF9CC7F6)),
                         ),
                       ),
@@ -313,7 +315,7 @@ class _WorkshopWebGeneratorWorkspaceState
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
               child: Text(
-                label,
+                '• $label',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.65),
