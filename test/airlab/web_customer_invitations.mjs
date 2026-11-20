@@ -260,6 +260,6 @@ test('accepted client cannot directly use raw AI broker or owner-only trials', a
   });
   assert.equal(r.status, 403);
   const output = await r.json();
-  assert.equal(output.error?.code, 'client_inference_not_enabled');
+  assert.equal(output.error?.code, 'owner_required');
   sqlite.close();
 });
