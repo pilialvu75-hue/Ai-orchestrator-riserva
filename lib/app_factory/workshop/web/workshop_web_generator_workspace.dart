@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_platform_picker.dart';
 import 'package:flutter/material.dart';
 
 /// Web-only presentation around the existing generation / verification flow.
@@ -14,6 +15,8 @@ class WorkshopWebGeneratorWorkspace extends StatefulWidget {
     required this.composer,
     this.intro,
     this.showIntro = false,
+    this.platform,
+    this.onPlatformChanged,
     this.previewUri,
     this.projectTitle,
     this.generationStatus,
@@ -25,6 +28,8 @@ class WorkshopWebGeneratorWorkspace extends StatefulWidget {
   final Widget composer;
   final Widget? intro;
   final bool showIntro;
+  final WorkshopWebTarget? platform;
+  final ValueChanged<WorkshopWebTarget>? onPlatformChanged;
   final Uri? previewUri;
   final String? projectTitle;
   final String? generationStatus;
@@ -39,8 +44,15 @@ class WorkshopWebGeneratorWorkspace extends StatefulWidget {
 
 class _WorkshopWebGeneratorWorkspaceState
     extends State<WorkshopWebGeneratorWorkspace> {
-  bool _mobileViewport = true;
+  WorkshopWebTarget _fallbackPlatform = WorkshopWebTarget.web;
   bool _compactPreview = false;
+
+  WorkshopWebTarget get _currentPlatform => widget.platform ?? _fallbackPlatform;
+
+  void _selectPlatform(WorkshopWebTarget target) {
+    widget.onPlatformChanged?.call(target);
+    if (widget.platform == null) setState(() => _fallbackPlatform = target);
+  }
 
   static const _translations = <String, Map<String, String>>{
     'en': {
@@ -58,6 +70,8 @@ class _WorkshopWebGeneratorWorkspaceState
           'The preview will be usable after generation and verification.',
       'Anteprima verificata': 'Verified preview',
       'In attesa di un’app verificata': 'Waiting for a verified app',
+      'La cornice cambia; l’app eseguita resta Web.':
+          'The frame changes; the running app is still Web.',
     },
     'fr': {
       'Spazio di lavoro': 'Espace de travail',
@@ -75,6 +89,8 @@ class _WorkshopWebGeneratorWorkspaceState
           'L’aperçu sera utilisable après la génération et la vérification.',
       'Anteprima verificata': 'Aperçu vérifié',
       'In attesa di un’app verificata': 'En attente d’une application vérifiée',
+      'La cornice cambia; l’app eseguita resta Web.':
+          'Le cadre change ; l’application reste Web.',
     },
     'es': {
       'Spazio di lavoro': 'Espacio de trabajo',
@@ -92,6 +108,8 @@ class _WorkshopWebGeneratorWorkspaceState
           'La vista previa estará disponible tras la generación y verificación.',
       'Anteprima verificata': 'Vista previa verificada',
       'In attesa di un’app verificata': 'Esperando una aplicación verificada',
+      'La cornice cambia; l’app eseguita resta Web.':
+          'El marco cambia; la aplicación sigue siendo Web.',
     },
   };
 
@@ -261,21 +279,18 @@ class _WorkshopWebGeneratorWorkspaceState
           ),
           const Divider(height: 1),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Wrap(
-              spacing: 8,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ChoiceChip(
-                  label: Text(_t('Telefono')),
-                  avatar: const Icon(Icons.smartphone, size: 18),
-                  selected: _mobileViewport,
-                  onSelected: (_) => setState(() => _mobileViewport = true),
+                WorkshopWebPlatformPicker(
+                  selected: _currentPlatform,
+                  onChanged: _selectPlatform,
                 ),
-                ChoiceChip(
-                  label: Text(_t('Desktop')),
-                  avatar: const Icon(Icons.desktop_windows_outlined, size: 18),
-                  selected: !_mobileViewport,
-                  onSelected: (_) => setState(() => _mobileViewport = false),
+                const SizedBox(height: 6),
+                Text(
+                  _t('La cornice cambia; l’app eseguita resta Web.'),
+                  style: const TextStyle(fontSize: 11, color: Colors.white54),
                 ),
               ],
             ),
@@ -283,20 +298,28 @@ class _WorkshopWebGeneratorWorkspaceState
           Expanded(
             child: LayoutBuilder(
               builder: (context, size) {
-                final maxWidth = math.max(180.0, size.maxWidth - 28);
-                final width = _mobileViewport
-                    ? math.min(382.0, maxWidth)
-                    : maxWidth;
-                final height = math.max(180.0, size.maxHeight - 28);
+                final target = _currentPlatform;
+                final isPhone = target.isPhone;
+                final availableWidth = math.max(180.0, size.maxWidth - 28);
+                final availableHeight = math.max(180.0, size.maxHeight - 28);
+                final width = isPhone
+                    ? math.min(
+                        target == WorkshopWebTarget.ios ? 390.0 : 375.0,
+                        math.min(availableWidth, availableHeight / 1.8),
+                      )
+                    : availableWidth;
+                final height = isPhone
+                    ? math.min(availableHeight, width * 1.96)
+                    : availableHeight;
                 return Center(
                   child: Container(
+                    key: Key('web_preview_platform_' + target.name),
                     width: width,
                     height: height,
-                    padding: EdgeInsets.all(_mobileViewport ? 9 : 4),
+                    padding: EdgeInsets.all(isPhone ? 8 : 4),
                     decoration: BoxDecoration(
                       color: const Color(0xFF232831),
-                      borderRadius: BorderRadius.circular(
-                          _mobileViewport ? 30 : 14),
+                      borderRadius: BorderRadius.circular(isPhone ? 34 : 14),
                       border: Border.all(
                         color: const Color(0xFF414956),
                         width: 2,
@@ -310,11 +333,17 @@ class _WorkshopWebGeneratorWorkspaceState
                       ],
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(
-                          _mobileViewport ? 22 : 10),
-                      child: previewReady
-                          ? WorkshopWebPreviewFrame(uri: widget.previewUri!)
-                          : _emptyPreview(),
+                      borderRadius: BorderRadius.circular(isPhone ? 27 : 10),
+                      child: Column(
+                        children: [
+                          _platformChrome(target),
+                          Expanded(
+                            child: previewReady
+                                ? WorkshopWebPreviewFrame(uri: widget.previewUri!)
+                                : _emptyPreview(),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -333,6 +362,73 @@ class _WorkshopWebGeneratorWorkspaceState
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  /// Decorative device/window chrome only. All app taps and navigation happen
+  /// inside the sandboxed, interactive Web iframe below this header.
+  Widget _platformChrome(WorkshopWebTarget target) {
+    if (target.isPhone) {
+      return SizedBox(
+        height: 27,
+        child: ColoredBox(
+          color: const Color(0xFF192331),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (target == WorkshopWebTarget.ios)
+                Container(
+                  width: 72,
+                  height: 15,
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                )
+              else ...[
+                const Icon(Icons.circle, size: 7, color: Colors.white54),
+                const SizedBox(width: 7),
+                const Icon(Icons.wifi, size: 13, color: Colors.white70),
+                const SizedBox(width: 7),
+                const Icon(Icons.battery_full, size: 14, color: Colors.white70),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      height: 34,
+      color: const Color(0xFF202A37),
+      child: Row(
+        children: [
+          const SizedBox(width: 12),
+          if (target == WorkshopWebTarget.macos) ...[
+            for (final color in [
+              const Color(0xFFFF6258),
+              const Color(0xFFFFBE2F),
+              const Color(0xFF28C840),
+            ]) ...[
+              Container(
+                width: 11,
+                height: 11,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+            ],
+          ] else
+            Icon(target.icon, size: 17, color: const Color(0xFFD6E6FB)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'AIVEXUS · ' + target.label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
         ],
       ),
     );
