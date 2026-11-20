@@ -19,6 +19,9 @@ void main() {
     expect(service, contains('clearTarget()'));
     expect(service, contains('TARGET_CHANGED_OR_EXPIRED'));
     expect(service, contains('excludedPackages'));
+    expect(service, contains('typeInSelectedEditable'));
+    expect(service, contains('focused.isPassword'));
+    expect(service, contains('ACTION_SET_TEXT'));
     expect(service, contains('dispatchGesture('));
     expect(service, contains('INVALID_COORDINATES'));
     expect(service, isNot(contains('performGlobalAction(')));
@@ -30,6 +33,7 @@ void main() {
     ).readAsStringSync();
     expect(bridge, contains('findInstalledApps'));
     expect(bridge, contains('launchInstalledApp'));
+    expect(bridge, contains('typeTargetText'));
     expect(bridge, contains('recentVisibleLauncherPackages'));
     expect(bridge, contains('call.method == "swipeTarget"'));
     expect(bridge, isNot(contains('call.method == "swipeGame"')));
@@ -56,6 +60,8 @@ void main() {
     expect(lab, contains('swipeTarget'));
     expect(lab, contains('selectForegroundTarget'));
     expect(lab, contains('Cerca e apri app'));
+    expect(lab, contains('Inserisci testo nel campo attivo'));
+    expect(lab, contains('Salvataggio non verificato'));
     expect(lab, contains('onPanUpdate'));
     expect(lab, contains('Acquisisci tra 4 secondi'));
   });
