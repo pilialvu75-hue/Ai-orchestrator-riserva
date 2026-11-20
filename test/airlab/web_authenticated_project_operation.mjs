@@ -712,7 +712,7 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
     }),
     env: { ...env, AIVEXUS_WEB_ARTIFACTS: undefined },
   });
-  assert.equal((await downloadFromD1(otherToken)).status, 404);
+  assert.equal((await downloadFromD1(otherToken)).status, 403);
   const d1Response = await downloadFromD1(token);
   assert.equal(d1Response.status, 200);
   assert.deepEqual(Buffer.from(await d1Response.arrayBuffer()), zip);
