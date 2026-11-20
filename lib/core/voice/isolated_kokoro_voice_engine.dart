@@ -1,5 +1,7 @@
 export 'package:ai_orchestrator/core/voice/read_aloud_transport.dart' show TtsAudioSink;
 import 'dart:async';
+import 'package:flutter/services.dart';
+import 'package:ai_orchestrator/core/voice/voice_tts_preference.dart';
 
 import 'package:ai_orchestrator/core/voice/android_pcm_tts_audio_sink.dart';
 import 'package:ai_orchestrator/core/voice/read_aloud_transport.dart';
@@ -156,6 +158,8 @@ final class IsolatedKokoroVoiceEngine
   int _queuedRequestSequence = 0;
   bool _liveSequenceActive = false;
   bool _liveTimelinePrepared = false;
+  bool _androidSpeaking = false;
+  bool _usingSystemTts = false;
 
   @override
   void beginLiveSpeechSequence() {
@@ -203,7 +207,7 @@ final class IsolatedKokoroVoiceEngine
   bool get isListening => _delegate.isListening;
 
   @override
-  bool get isSpeaking => _audioSink.isPlaying;
+  bool get isSpeaking => _androidSpeaking || _audioSink.isPlaying;
 
   ReadAloudSink? get _readAloudSink {
     final sink = _audioSink;
@@ -211,7 +215,7 @@ final class IsolatedKokoroVoiceEngine
   }
 
   @override
-  bool get supportsRealReadAloudControls => _readAloudSink != null;
+  bool get supportsRealReadAloudControls => _readAloudSink != null && !_usingSystemTts;
 
   @override
   void setNextReadAloudPosition(Duration position) {
@@ -222,8 +226,9 @@ final class IsolatedKokoroVoiceEngine
   }
 
   @override
-  ReadAloudSnapshot get readAloudSnapshot =>
-      _readAloudSink?.snapshot ?? const ReadAloudSnapshot();
+  ReadAloudSnapshot get readAloudSnapshot => _usingSystemTts
+      ? const ReadAloudSnapshot()
+      : _readAloudSink?.snapshot ?? const ReadAloudSnapshot();
 
   @override
   Future<void> pauseReadAloud() async {
@@ -256,7 +261,9 @@ final class IsolatedKokoroVoiceEngine
     if (_disposed) return base;
 
     final assets = await _assetsProvider();
-    return _withTtsAvailability(base, assets != null);
+    final androidSelected = await VoiceTtsPreference.read() == TtsBackend.androidSystem;
+    final androidReady = androidSelected && await VoiceTtsPreference.hasOfflineVoice();
+    return _withTtsAvailability(base, assets != null || androidReady);
   }
 
   @override
@@ -329,7 +336,31 @@ final class IsolatedKokoroVoiceEngine
     final finished = Completer<void>();
     _requestFinished = finished;
     try {
-      await _speakRequest(sanitized, generation);
+      // Claim the request before any asynchronous preference/platform access.
+      // Both TTS backends share the same no-overlap and Stop/Replay contract.
+      final backend = await VoiceTtsPreference.read();
+      if (_disposed || generation != _lifecycleGeneration) return;
+      _usingSystemTts = backend == TtsBackend.androidSystem;
+      if (_usingSystemTts) {
+        _androidSpeaking = true;
+        try {
+          final language = detectTtsLanguage(sanitized, _languageCode());
+          final completed = await VoiceTtsPreference.channel.invokeMethod<bool>(
+            'speak', <String, Object>{'text': sanitized, 'language': language},
+          );
+          if (completed != true && !_disposed &&
+              generation == _lifecycleGeneration) {
+            logEvent(_tag, '[TTS_FAIL] reason=android_system_not_completed');
+          }
+        } on PlatformException catch (error) {
+          logEvent(_tag, '[TTS_FAIL] reason=android_system_${error.code}');
+          rethrow;
+        } finally {
+          _androidSpeaking = false;
+        }
+      } else {
+        await _speakRequest(sanitized, generation);
+      }
     } finally {
       _requestBusy = false;
       _activeRequestGeneration = -1;
@@ -493,6 +524,14 @@ final class IsolatedKokoroVoiceEngine
     _lifecycleGeneration++;
     _liveSequenceActive = false;
     _liveTimelinePrepared = false;
+    if (_usingSystemTts && !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        await VoiceTtsPreference.channel.invokeMethod<bool>('stop');
+      } on PlatformException { /* Optional Android system voice. */ }
+      on MissingPluginException { /* Unsupported older engine. */ }
+      _androidSpeaking = false;
+    }
 
     try {
       final readAloud = _readAloudSink;
