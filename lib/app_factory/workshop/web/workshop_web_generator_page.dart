@@ -81,6 +81,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         sessionId: 'web-generator-${const Uuid().v4()}',
       );
     }
+    _chatController?.addListener(_onChatControllerChanged);
     _restore();
   }
 
@@ -89,8 +90,13 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     if (widget.client == null) _client.close();
     _prompt.dispose();
     _chatInput.dispose();
+    _chatController?.removeListener(_onChatControllerChanged);
     _chatController?.dispose();
     super.dispose();
+  }
+
+  void _onChatControllerChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _restore() async {
@@ -483,8 +489,6 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
             children: [
               if (firstPrompt.isNotEmpty)
                 _chatBubble(tr('Tu'), firstPrompt, fromUser: true),
-              if (receipt?['title'] is String && firstPrompt.isEmpty)
-                _chatBubble(tr('Progetto'), receipt!['title'] as String),
               for (final turn in _chatTurns)
                 _chatBubble(
                   turn.role == ChatRole.user ? tr('Tu') : 'AIVEXUS',
