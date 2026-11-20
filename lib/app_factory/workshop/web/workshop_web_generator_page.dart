@@ -69,6 +69,8 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   String? _error;
   Map<String, dynamic>? _receipt;
   Map<String, dynamic>? _verification;
+  Map<String, dynamic>? _quota;
+  bool _quotaLoading = false;
   bool _busy = true;
 
   // UI-only, bounded follow-up to the existing idempotent generator + verify
@@ -95,6 +97,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     }
     _chatController?.addListener(_onChatControllerChanged);
     _restore();
+    _refreshQuota();
   }
 
   @override
@@ -116,6 +119,113 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     if (!mounted) return;
     setState(() => _selectedPlatform = platform);
     await (await _preferences).setString(_platformStorageKey, platform.name);
+  }
+
+  Future<void> _refreshQuota() async {
+    if (_quotaLoading || !mounted) return;
+    setState(() => _quotaLoading = true);
+    try {
+      final response = await _client
+          .get(Uri.base.resolve('/api/cantiere/proposals/quota'))
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        throw const FormatException('Quota unavailable');
+      }
+      final body = jsonDecode(utf8.decode(response.bodyBytes));
+      if (body is! Map<String, dynamic> ||
+          body['version'] != 1 ||
+          body['ok'] != true ||
+          body['scope'] != 'aivexus_reservations' ||
+          body['remaining'] is! int ||
+          body['userRemaining'] is! int ||
+          body['userLimit'] is! int ||
+          body['globalRemaining'] is! int ||
+          body['globalLimit'] is! int ||
+          (body['nextAvailableAt'] != null &&
+              body['nextAvailableAt'] is! String)) {
+        throw const FormatException('Invalid generation quota response');
+      }
+      if (mounted) setState(() => _quota = body);
+    } catch (_) {
+      // Quota telemetry must never prevent generation or repair. The server
+      // remains authoritative, even if status cannot be loaded.
+      if (mounted) setState(() => _quota = null);
+    } finally {
+      if (mounted) setState(() => _quotaLoading = false);
+    }
+  }
+
+  Widget _quotaMeter(String Function(String) tr) {
+    final quota = _quota;
+    final int? remaining = quota?['remaining'] as int?;
+    final int? userRemaining = quota?['userRemaining'] as int?;
+    final int? userLimit = quota?['userLimit'] as int?;
+    final int? globalRemaining = quota?['globalRemaining'] as int?;
+    final int? globalLimit = quota?['globalLimit'] as int?;
+    String? nextAvailable;
+    final rawNext = quota?['nextAvailableAt'];
+    if (remaining == 0 && rawNext is String) {
+      final at = DateTime.tryParse(rawNext)?.toLocal();
+      if (at != null) {
+        String two(int n) => n.toString().padLeft(2, '0');
+        nextAvailable = two(at.day) + '/' + two(at.month) + ' ' +
+            two(at.hour) + ':' + two(at.minute);
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Semantics(
+        liveRegion: true,
+        child: Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 3,
+          children: [
+            const Icon(Icons.toll_outlined, size: 17, color: Color(0xFF9AC9FF)),
+            Text(
+              remaining == null
+                  ? tr('Quota generazioni non disponibile')
+                  : tr('Generazioni disponibili') + ': ' + remaining.toString() +
+                    ' · ' + tr('personali') + ' ' + userRemaining.toString() +
+                    '/' + userLimit.toString() +
+                    ' · ' + tr('globali') + ' ' + globalRemaining.toString() +
+                    '/' + globalLimit.toString(),
+              key: const Key('web_generator_quota_meter'),
+              style: const TextStyle(
+                color: Color(0xFFCAE1FB),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (nextAvailable != null)
+              Text(
+                tr('Prossimo recupero quota') + ': ' + nextAvailable,
+                key: const Key('web_generator_quota_next'),
+                style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
+              ),
+            Tooltip(
+              message: tr('Ricarica quota'),
+              child: IconButton(
+                key: const Key('web_generator_quota_refresh'),
+                icon: _quotaLoading
+                    ? const SizedBox(
+                        width: 15, height: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh, size: 18),
+                onPressed: _quotaLoading ? null : _refreshQuota,
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+              ),
+            ),
+            Text(
+              tr('Quota interna AIVEXUS; non include i Neurons Cloudflare.'),
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _restore() async {
@@ -226,6 +336,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       setState(() => _receipt = result);
       if (result?['status'] == 'generated') await _readVerification(id);
     });
+    await _refreshQuota();
   }
 
   Future<void> _readStatus(String id) async {
@@ -492,7 +603,8 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                 tr('La piattaforma cambia il formato dell’anteprima Web; non crea un pacchetto nativo.'),
                 style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
-              const SizedBox(height: 16),
+              _quotaMeter(tr),
+              const SizedBox(height: 8),
               Expanded(
                 child: TextField(
                   key: const Key('web_generator_first_prompt'),
@@ -591,6 +703,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _quotaMeter(tr),
               if (firstPrompt.isNotEmpty)
                 _chatBubble(tr('Tu'), firstPrompt, fromUser: true),
               for (final turn in _chatTurns)
