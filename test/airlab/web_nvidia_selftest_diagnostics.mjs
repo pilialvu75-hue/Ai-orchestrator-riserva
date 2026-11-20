@@ -5,7 +5,7 @@ import test from 'node:test';
 // Load the actual Pages Function as ESM without executing any network call.
 // This suite uses only fake credentials and mocked HTTP responses.
 const source = await readFile('functions/api/cantiere/inference.js', 'utf8');
-const { onRequest } = await import(
+const { onRequestBroker: onRequest } = await import(
   'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
 );
 
