@@ -165,6 +165,7 @@ jobs:
             test/core/runtime/inference/hybrid_local_step_coordinator_test.dart \
             test/core/runtime/inference/hybrid_local_runtime_step_bridge_test.dart \
             test/core/runtime/inference/hybrid_local_continuation_service_test.dart \
+            test/core/runtime/inference/hybrid_switch_decision_policy_test.dart \
             test/features/chat/data/repositories/chat_repository_gated_cloud_integration_test.dart \
             test/features/chat/presentation/hybrid_cloud_chat_consent_gateway_test.dart \
             test/features/settings/presentation/hybrid_cloud_consent_settings_page_test.dart
