@@ -31,6 +31,12 @@ void main() {
           'nextAvailableAt': null,
         }), 200);
       }
+      if (request.url.path == '/api/cantiere/proposals/reuse') {
+        expect(request.method, 'GET');
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true, 'found': false,
+        }), 200);
+      }
       requests++;
       if (request.url.path == '/api/cantiere/proposals/source') {
         expect(request.method, 'GET');
@@ -201,6 +207,11 @@ void main() {
           'nextAvailableAt': null,
         }), 200);
       }
+      if (request.url.path == '/api/cantiere/proposals/reuse') {
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true, 'found': false,
+        }), 200);
+      }
       expect(request.method, 'POST');
       expect(request.url.path, '/api/cantiere/proposals/generate');
       sentPrompt = (jsonDecode(request.body) as Map)['prompt'] as String;
@@ -248,6 +259,11 @@ void main() {
           'remaining': 0, 'userRemaining': 0, 'userLimit': 10,
           'globalRemaining': 12, 'globalLimit': 36,
           'nextAvailableAt': next.toIso8601String(),
+        }), 200);
+      }
+      if (request.url.path == '/api/cantiere/proposals/reuse') {
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true, 'found': false,
         }), 200);
       }
       expect(request.url.path, '/api/cantiere/proposals/generate');
