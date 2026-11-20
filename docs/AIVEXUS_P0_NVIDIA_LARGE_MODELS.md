@@ -96,6 +96,15 @@ All six eligibility conditions must be met:
 6. `/api/cantiere/models` must confirm `builderAvailable:true` for the
    exact route. The catalogue signals route authorization, not live credit balance.
 
+**NVIDIA API Trial Terms restrict the trial to internal testing and evaluation,
+and explicitly prohibit using the trial API service or its generated content
+in production without a separate subscription/license** (NVIDIA API Trial
+Terms, sections 1.2–1.4, checked 20 Nov 2026). Being the AIVEXUS owner or
+having a free account does not override those terms. Until NVIDIA's actual
+account-specific entitlement is independently checked, these 500B+ models
+must be limited to private experimentation and cannot power the offered
+client app-building service or produce customer-delivered artifacts.
+
 **Both new controls are OFF by default.** An operator must independently
 verify the specific account's free-trial terms before enabling them. No
 provider credentials, URLs or untrusted models enter the Flutter app.
