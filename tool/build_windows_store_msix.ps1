@@ -7,6 +7,7 @@ param(
   [Parameter(Mandatory)][string] $IdentityName,
   [Parameter(Mandatory)][string] $Publisher,
   [Parameter(Mandatory)][string] $PublisherDisplayName,
+  [Parameter(Mandatory)][string] $DisplayName,
   [Parameter(Mandatory)][string] $Version
 )
 $ErrorActionPreference = 'Stop'
@@ -16,8 +17,8 @@ if ($IdentityName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{1,100}$') {
 if ($Publisher -notmatch '^CN=.+$' -or $Publisher.Length -gt 256) {
   throw 'MSIX Publisher must be the exact Partner Center subject, beginning with CN=.'
 }
-if ([string]::IsNullOrWhiteSpace($PublisherDisplayName)) {
-  throw 'MSIX publisher display name is required.'
+if ([string]::IsNullOrWhiteSpace($PublisherDisplayName) -or [string]::IsNullOrWhiteSpace($DisplayName)) {
+  throw 'Both Store product display name and publisher display name are required.'
 }
 if ($Version -notmatch '^([0-9]+)\.([0-9]+)\.([0-9]+)\.0$') {
   throw 'Microsoft Store version must have four numeric segments and end in .0.'
@@ -88,6 +89,7 @@ try {
 $escapedIdentity = [Security.SecurityElement]::Escape($IdentityName)
 $escapedPublisher = [Security.SecurityElement]::Escape($Publisher)
 $escapedPublisherDisplay = [Security.SecurityElement]::Escape($PublisherDisplayName)
+$escapedDisplayName = [Security.SecurityElement]::Escape($DisplayName)
 $manifest = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -97,7 +99,7 @@ $manifest = @"
   <Identity Name="$escapedIdentity" Publisher="$escapedPublisher"
             Version="$Version" ProcessorArchitecture="x64" />
   <Properties>
-    <DisplayName>AI Orchestrator</DisplayName>
+    <DisplayName>$escapedDisplayName</DisplayName>
     <PublisherDisplayName>$escapedPublisherDisplay</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -109,7 +111,7 @@ $manifest = @"
   <Applications>
     <Application Id="Aivexus" Executable="ai_orchestrator.exe"
                  EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements DisplayName="AI Orchestrator"
+      <uap:VisualElements DisplayName="$escapedDisplayName"
                           Description="AIVEXUS offline-first AI Orchestrator"
                           BackgroundColor="transparent"
                           Square150x150Logo="Assets\Square150x150Logo.png"
