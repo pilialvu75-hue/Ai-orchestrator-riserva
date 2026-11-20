@@ -8,6 +8,8 @@ export function onRequest({ request, env }) {
     accessIssuer: env.AIVEXUS_WEB_ACCESS_ISSUER,
     accessAudience: env.AIVEXUS_WEB_ACCESS_AUDIENCE,
     db: env.AIVEXUS_WEB_D1,
+    adminSubject: env.AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT,
+    ownerEmail: env.AIVEXUS_WEB_OWNER_EMAIL,
     ownerOnly: true,
     clientAccessEnabled: false,
   });
