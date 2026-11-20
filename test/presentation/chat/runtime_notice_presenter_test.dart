@@ -44,6 +44,10 @@ void main() {
     );
     await tester.enterText(find.byKey(composerKey), 'Posso ancora scrivere');
     expect(find.text('Posso ancora scrivere'), findsOneWidget);
+    // The fake async test must release the six-second notice timer before
+    // teardown, just like a new chat request clears the runtime notice.
+    presenter.update(chatContext, null);
+    await tester.pumpAndSettle();
   });
 
   testWidgets('repeated notices expire once and leave the composer usable', (
