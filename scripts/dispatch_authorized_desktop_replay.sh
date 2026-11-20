@@ -48,9 +48,16 @@ for channel in stable beta nightly dev; do
     candidate="v$version_name-$channel+$code"
     expected_pre=true
   fi
-  prerelease="$(gh release view "$candidate" --repo "$repo" --json isPrerelease --jq '.isPrerelease' 2>/dev/null || true)"
-  [ "$prerelease" = "$expected_pre" ] || continue
-  candidate_sha="$(gh api "repos/$repo/git/ref/tags/$candidate" --jq '.object.sha' 2>/dev/null || true)"
+  # Encode '+' in REST paths explicitly: never mistake a GitHub CLI
+  # lookup failure for an absent release, and verify the immutable tag SHA.
+  candidate_path="${candidate//+/%2B}"
+  release_json="$(gh api "repos/$repo/releases/tags/$candidate_path" 2>/dev/null || true)"
+  [ -n "$release_json" ] || continue
+  prerelease="$(jq -r '.prerelease' <<< "$release_json")"
+  published="$(jq -r '.published_at // empty' <<< "$release_json")"
+  [ "$prerelease" = "$expected_pre" ] && [ -n "$published" ] || continue
+  [ "$(jq -r '.tag_name' <<< "$release_json")" = "$candidate" ] || continue
+  candidate_sha="$(gh api "repos/$repo/git/ref/tags/$candidate_path" --jq '.object.sha' 2>/dev/null || true)"
   [ "$candidate_sha" = "$expected_sha" ] || continue
   [ -z "$matching_tag" ] || { echo 'More than one matching authorized tag' >&2; exit 1; }
   matching_tag="$candidate"
