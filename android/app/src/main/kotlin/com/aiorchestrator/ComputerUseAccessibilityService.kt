@@ -19,7 +19,13 @@ class ComputerUseAccessibilityService : AccessibilityService() {
 
         fun isReady(): Boolean = active != null
 
-        fun tapGame(x: Int, y: Int, callback: (Boolean, String) -> Unit) {
+        fun tapGame(x: Int, y: Int, callback: (Boolean, String) -> Unit) =
+            gestureGame(x, y, x, y, callback)
+
+        fun gestureGame(
+            x: Int, y: Int, endX: Int, endY: Int,
+            callback: (Boolean, String) -> Unit,
+        ) {
             Handler(Looper.getMainLooper()).post {
                 val service = active
                 if (service == null) {
@@ -32,13 +38,28 @@ class ComputerUseAccessibilityService : AccessibilityService() {
                     return@post
                 }
                 val metrics = service.resources.displayMetrics
-                if (x < 0 || y < 0 || x >= metrics.widthPixels || y >= metrics.heightPixels) {
+                val valid = x in 0 until metrics.widthPixels &&
+                    y in 0 until metrics.heightPixels &&
+                    endX in 0 until metrics.widthPixels &&
+                    endY in 0 until metrics.heightPixels
+                if (!valid) {
                     callback(false, "INVALID_COORDINATES")
                     return@post
                 }
-                val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+                val distance = kotlin.math.hypot(
+                    (endX - x).toDouble(), (endY - y).toDouble(),
+                )
+                if (distance > maxOf(metrics.widthPixels, metrics.heightPixels) * 0.65) {
+                    callback(false, "GESTURE_TOO_LONG")
+                    return@post
+                }
+                val path = Path().apply {
+                    moveTo(x.toFloat(), y.toFloat())
+                    if (endX != x || endY != y) lineTo(endX.toFloat(), endY.toFloat())
+                }
+                val duration = if (endX == x && endY == y) 80L else 260L
                 val gesture = GestureDescription.Builder()
-                    .addStroke(GestureDescription.StrokeDescription(path, 0, 80))
+                    .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
                     .build()
                 val accepted = service.dispatchGesture(
                     gesture,
