@@ -2,7 +2,8 @@ import { validateWebApplicationChecks } from './web_application_checks.mjs';
 import { WEB_RUNNER_TICKET as GENERATION_ID } from './web_runner_envelope.mjs';
 export const MAX_WEB_APP_PROMPT_CHARACTERS = 8000;
 export const WEB_APP_USER_DAILY_LIMIT = 10;
-export const WEB_APP_GLOBAL_DAILY_LIMIT = 36;
+export const WEB_APP_ADMIN_DAILY_LIMIT = 64;
+export const WEB_APP_GLOBAL_DAILY_LIMIT = 72;
 const QUOTA_WINDOW_SECONDS = 86400;
 
 const FILE_PATH = /^(?:[a-z0-9][a-z0-9_-]*\/){0,3}[a-z0-9][a-z0-9_-]*\.(?:html|css|js|mjs|json|txt|md)$/;
@@ -21,13 +22,27 @@ const CLAIM = `INSERT INTO web_app_generations
   (owner_subject, generation_id, prompt_sha256, status)
   SELECT ?1, ?2, ?3, 'generating' WHERE NOT EXISTS (
     SELECT 1 FROM web_app_generations WHERE owner_subject = ?1 AND created_at >= unixepoch() - 86400
-    LIMIT 1 OFFSET ${WEB_APP_USER_DAILY_LIMIT - 1}
+    LIMIT 1 OFFSET ?4
   ) AND NOT EXISTS (
     SELECT 1 FROM web_app_generations WHERE created_at >= unixepoch() - 86400
-    LIMIT 1 OFFSET ${WEB_APP_GLOBAL_DAILY_LIMIT - 1}
+    LIMIT 1 OFFSET ?5
   )
   ON CONFLICT(owner_subject, generation_id) DO NOTHING
   RETURNING generation_id`;
+// Admin privileges require an exact match against a trusted *server-side*
+// Cloudflare Access subject. Never infer admin role from browser headers or a
+// URL and never turn off the global free-tier budget gate.
+function generationLimits(ownerSubject, adminSubject) {
+  const admin = typeof adminSubject === 'string' &&
+    adminSubject.length > 0 && adminSubject.length <= 256 &&
+    adminSubject === ownerSubject;
+  return {
+    admin,
+    userLimit: admin ? WEB_APP_ADMIN_DAILY_LIMIT : WEB_APP_USER_DAILY_LIMIT,
+    globalLimit: WEB_APP_GLOBAL_DAILY_LIMIT,
+  };
+}
+
 // Same rolling 24-hour window and same D1 table as the atomic claim gate.
 // Count all reservations including failed attempts, since inference may use
 // free AI resources even when the generated source is not valid.
@@ -41,10 +56,11 @@ const QUOTA = `SELECT
  (SELECT MIN(created_at) FROM web_app_generations
   WHERE created_at >= unixepoch() - ${QUOTA_WINDOW_SECONDS}) AS oldestGlobal`;
 
-export async function readWebApplicationQuota({ db, ownerSubject }) {
+export async function readWebApplicationQuota({ db, ownerSubject, adminSubject }) {
   if (typeof ownerSubject !== 'string' || !ownerSubject) {
     return { ok: false, reason: 'invalid_request' };
   }
+  const limits = generationLimits(ownerSubject, adminSubject);
   const row = await db.prepare(QUOTA).bind(ownerSubject).first();
   if (!row) return { ok: false, reason: 'storage_unavailable' };
   const userUsed = Number(row.userUsed);
@@ -56,16 +72,17 @@ export async function readWebApplicationQuota({ db, ownerSubject }) {
       (oldestGlobal !== null && !Number.isSafeInteger(oldestGlobal))) {
     return { ok: false, reason: 'storage_inconsistent' };
   }
-  const userRemaining = Math.max(0, WEB_APP_USER_DAILY_LIMIT - userUsed);
-  const globalRemaining = Math.max(0, WEB_APP_GLOBAL_DAILY_LIMIT - globalUsed);
+  const userRemaining = Math.max(0, limits.userLimit - userUsed);
+  const globalRemaining = Math.max(0, limits.globalLimit - globalUsed);
   const remaining = Math.min(userRemaining, globalRemaining);
   const waitUntil = remaining !== 0 ? null : Math.max(
     userRemaining === 0 && oldestUser !== null ? oldestUser + QUOTA_WINDOW_SECONDS : 0,
     globalRemaining === 0 && oldestGlobal !== null ? oldestGlobal + QUOTA_WINDOW_SECONDS : 0,
   );
   return {
-    ok: true, userLimit: WEB_APP_USER_DAILY_LIMIT, userUsed, userRemaining,
-    globalLimit: WEB_APP_GLOBAL_DAILY_LIMIT, globalUsed, globalRemaining,
+    ok: true, userLimit: limits.userLimit, userUsed, userRemaining,
+    globalLimit: limits.globalLimit, globalUsed, globalRemaining,
+    tier: limits.admin ? 'administrator' : 'standard',
     remaining, windowSeconds: QUOTA_WINDOW_SECONDS,
     nextAvailableAt: waitUntil ? new Date(waitUntil * 1000).toISOString() : null,
     scope: 'aivexus_reservations',
@@ -158,7 +175,7 @@ export async function readWebApplicationGeneration({ db, ownerSubject, generatio
   return receipt(generationId, row.status, row.resultJson);
 }
 
-export async function generateWebApplication({ request, ownerSubject, db, infer }) {
+export async function generateWebApplication({ request, ownerSubject, adminSubject, db, infer }) {
   const { generationId, prompt } = request;
   const brief = cleanGenerationPrompt(prompt);
   if (Object.keys(request).length !== 2 || typeof generationId !== 'string' ||
@@ -174,7 +191,11 @@ export async function generateWebApplication({ request, ownerSubject, db, infer 
   }
   if (!infer) return { ok: false, reason: 'generation_unavailable' };
 
-  const claim = await db.prepare(CLAIM).bind(ownerSubject, generationId, promptSha256).first();
+  const limits = generationLimits(ownerSubject, adminSubject);
+  const claim = await db.prepare(CLAIM).bind(
+    ownerSubject, generationId, promptSha256, limits.userLimit - 1,
+    limits.globalLimit - 1,
+  ).first();
   if (!claim) {
     const winner = await db.prepare(READ).bind(ownerSubject, generationId).first();
     if (!winner) return { ok: false, reason: 'generation_quota_exceeded' };
