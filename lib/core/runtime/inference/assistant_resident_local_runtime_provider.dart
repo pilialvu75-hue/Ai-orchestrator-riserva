@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
@@ -145,23 +146,39 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   static String? _bundledServer() {
     final appDir = p.dirname(Platform.resolvedExecutable);
     if (Platform.isWindows) {
-      if (!WindowsLlamaRuntime.isModernWindows(Platform.operatingSystemVersion)) return null;
-      final file = p.join(appDir, 'runtime-modern', 'llama-server.exe');
-      if (File(file).existsSync()) return file;
-      // Owner QA 220005 bundles CUDA independently, without runtime-modern.
-      // Do not silently enter the old CPU process_cli path when a usable
-      // pinned CUDA resident server was actually installed next to the app.
-      // Stable builds never enter this gated route, even if a stale CUDA
-      // directory is left over from a previous beta.
-      if (_defaultCudaQaEnabled()) {
-        final cuda = p.join(appDir, 'runtime-cuda', 'llama-server.exe');
-        if (File(cuda).existsSync()) return cuda;
-      }
-      return null;
+      return bundledWindowsServerFor(
+        appDir,
+        modernWindows: WindowsLlamaRuntime.isModernWindows(
+          Platform.operatingSystemVersion,
+        ),
+        cudaQaEnabled: _defaultCudaQaEnabled(),
+      );
     }
     if (Platform.isMacOS || Platform.isLinux) {
       final file = p.join(appDir, 'llama-server');
       return File(file).existsSync() ? file : null;
+    }
+    return null;
+  }
+
+  /// Resolve the exact locally bundled resident server, without relying on
+  /// PATH, the working directory or another locally installed application.
+  /// The extra QA-only fallback is needed because the unsigned CUDA owner
+  /// release intentionally ships runtime-cuda but not runtime-modern.
+  @visibleForTesting
+  static String? bundledWindowsServerFor(
+    String appDir, {
+    required bool modernWindows,
+    required bool cudaQaEnabled,
+    bool Function(String)? fileExists,
+  }) {
+    if (!modernWindows) return null;
+    final exists = fileExists ?? (String file) => File(file).existsSync();
+    final modern = p.join(appDir, 'runtime-modern', 'llama-server.exe');
+    if (exists(modern)) return modern;
+    if (cudaQaEnabled) {
+      final cuda = p.join(appDir, 'runtime-cuda', 'llama-server.exe');
+      if (exists(cuda)) return cuda;
     }
     return null;
   }
@@ -219,6 +236,9 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     }
     final executable = _unavailable ? null : _executable();
     if (executable == null) {
+      RuntimeEventLog.instance.emit(
+        '[ASSISTANT_LOCAL_ROUTE] backend=process_cli reason=resident_server_missing_or_unavailable',
+      );
       yield* _delegate.streamInference(request: request, cancellationToken: cancellationToken);
       return;
     }
@@ -305,7 +325,11 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     final text = StringBuffer();
     var chunks = 0;
     try {
-      RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] backend=${gpuDevice ?? 'cpu'}');
+      RuntimeEventLog.instance.emit(
+        '[ASSISTANT_LOCAL_ROUTE] backend=${gpuBackend ?? 'resident_cpu'} '
+        'engine=${p.basename(p.dirname(gpuExecutable ?? executable))} '
+        'device=${gpuDevice ?? 'none'}',
+      );
       final output = _runtime.generate(executable: gpuExecutable ?? executable, modelPath: model,
         sessionId: request.sessionId, prompt: metadata.stripFrom(prompt),
         maxTokens: request.maxTokens, temperature: metadata.temperature ?? request.temperature,
