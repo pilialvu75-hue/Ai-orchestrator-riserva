@@ -74,6 +74,7 @@ final class WorkshopWebLanguageScope
 
 const Map<String, Map<String, String>> _translations = {
   'fr': {
+    'Amministratore': 'Administrateur',
     'Quota generazioni non disponibile': 'Quota de générations indisponible',
     'Generazioni disponibili': 'Générations disponibles',
     'personali': 'personnelles',
@@ -225,6 +226,7 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Inférence Cloud / AUTO',
   },
   'en': {
+    'Amministratore': 'Administrator',
     'Quota generazioni non disponibile': 'Generation quota unavailable',
     'Generazioni disponibili': 'Available generations',
     'personali': 'personal',
@@ -336,6 +338,7 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Cloud / AUTO inference',
   },
   'es': {
+    'Amministratore': 'Administrador',
     'Quota generazioni non disponibile': 'Cuota de generaciones no disponible',
     'Generazioni disponibili': 'Generaciones disponibles',
     'personali': 'personales',
