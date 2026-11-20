@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
@@ -69,6 +70,13 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   Map<String, dynamic>? _verification;
   bool _busy = true;
 
+  // UI-only, bounded follow-up to the existing idempotent generator + verify
+  // endpoints. No new generation or repair model call is issued by polling.
+  static const _maximumAutomaticChecks = 90;
+  Timer? _progressTimer;
+  int _automaticChecks = 0;
+  final Set<String> _verificationDispatchAttempts = <String>{};
+
   @override
   void initState() {
     super.initState();
@@ -90,6 +98,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
 
   @override
   void dispose() {
+    _progressTimer?.cancel();
     if (widget.client == null) _client.close();
     _prompt.dispose();
     _chatInput.dispose();
@@ -134,6 +143,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   }
 
   Future<void> _run(Future<void> Function() operation) async {
+    _progressTimer?.cancel();
     setState(() {
       _busy = true;
       _error = null;
@@ -148,8 +158,51 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
             _error = 'Richiesta non completata. Controlla lo stato e riprova.');
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+        // On an error we stop automatically; the existing manual controls
+        // remain available to recover without repeated failing requests.
+        if (_error == null) _scheduleAutomaticProgress();
+      }
     }
+  }
+
+  void _scheduleAutomaticProgress() {
+    _progressTimer?.cancel();
+    final id = _generationId;
+    if (!mounted || _busy || id == null || _error != null ||
+        _automaticChecks >= _maximumAutomaticChecks) {
+      return;
+    }
+
+    final generationStatus = _receipt?['status'];
+    final verifyStatus = _verification?['status'];
+    Future<void> Function()? next;
+    Duration delay = const Duration(seconds: 6);
+
+    if (generationStatus == 'generating' ||
+        (generationStatus == null && _pendingPrompt != null)) {
+      next = () => _readStatus(id);
+    } else if (generationStatus == 'generated') {
+      if (verifyStatus == 'ready' &&
+          !_verificationDispatchAttempts.contains(id)) {
+        // Exactly one automatic dispatch per mounted page and generation.
+        // The server still applies the per-owner idempotent dispatch gate.
+        _verificationDispatchAttempts.add(id);
+        delay = const Duration(milliseconds: 400);
+        next = () => _readVerification(id, advance: true);
+      } else if (verifyStatus == null ||
+          {'dispatching', 'submitted', 'importing'}.contains(verifyStatus)) {
+        next = () => _readVerification(id);
+      }
+    }
+
+    if (next == null) return;
+    _progressTimer = Timer(delay, () {
+      if (!mounted || _generationId != id || _busy) return;
+      _automaticChecks++;
+      _run(next!);
+    });
   }
 
   Future<void> _submit() async {
@@ -187,6 +240,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   }
 
   Future<void> _readVerification(String id, {bool advance = false}) async {
+    if (advance) _verificationDispatchAttempts.add(id);
     final uri = Uri.base.resolve('/api/cantiere/proposals/verify');
     final response = await (advance
             ? _client.post(uri,
@@ -223,12 +277,15 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   }
 
   Future<void> _reset() async {
+    _progressTimer?.cancel();
     await _run(() async {
       await (await _preferences).remove(_storageKey);
       await (await _preferences).remove(_platformStorageKey);
       if (!mounted) return;
       setState(() {
         _selectedPlatform = WorkshopWebTarget.web;
+        _automaticChecks = 0;
+        _verificationDispatchAttempts.clear();
         _generationId = null;
         _pendingPrompt = null;
         _receipt = null;

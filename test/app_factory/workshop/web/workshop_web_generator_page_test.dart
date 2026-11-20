@@ -140,9 +140,9 @@ void main() {
     expect(find.text(prompt), findsNothing);
     expect(find.text('Scarica ZIP'), findsNothing);
 
-    await tester.ensureVisible(find.text('Verifica applicazione'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Verifica applicazione'));
+    // The already-verified generator receipt starts verification without
+    // requiring the user to press the old manual "Verifica applicazione" button.
+    await tester.pump(const Duration(milliseconds: 600));
     await tester.pumpAndSettle();
     expect(verificationPosts, 1);
     expect(find.text('Verifica in coda o in esecuzione'), findsOneWidget);
