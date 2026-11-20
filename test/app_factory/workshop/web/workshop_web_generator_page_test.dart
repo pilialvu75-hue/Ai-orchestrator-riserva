@@ -328,7 +328,64 @@ void main() {
       if (request.url.path == '/api/cantiere/proposals/reuse') {
         expect(request.method, 'GET');
         expect(request.url.queryParameters['promptSha256'],
-            RegExp(r'^[a-f0-9]{64}$'));
+            matches(RegExp(r'^[a-f0-9]{64}
+        reuseReads++;
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true, 'found': true,
+          'generationId': oldId,
+        }), 200);
+      }
+      if (request.url.path == '/api/cantiere/proposals/generate') {
+        if (request.method == 'POST') generationPosts++;
+        expect(request.method, 'GET');
+        expect(request.url.queryParameters['generationId'], oldId);
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true,
+          'status': 'generated',
+          'generationId': oldId,
+          'title': 'Catalogo libri',
+          'requirements': ['Aprire e cercare libri'],
+          'paths': ['index.html'],
+          'sourceSha256': 'a' * 64,
+          'provenance': {
+            'reportedModel': '@cf/google/gemma-4-26b-a4b-it',
+          },
+        }), 200);
+      }
+      expect(request.url.path, '/api/cantiere/proposals/verify');
+      expect(request.method, 'GET');
+      return http.Response(jsonEncode({
+        'version': 1, 'ok': true,
+        'status': 'verified', 'generationId': oldId,
+        'sourceSha256': 'a' * 64,
+        'zipSha256': 'b' * 64,
+      }), 200);
+    });
+    await tester.pumpWidget(
+      MaterialApp(home: WorkshopWebGeneratorPage(client: client)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('web_generator_first_prompt')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('web_generator_first_prompt')), prompt);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<FilledButton>(
+        find.byKey(const Key('web_generator_submit_first_prompt'))).onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.byKey(const Key('web_generator_submit_first_prompt')));
+    await tester.pumpAndSettle();
+    expect(generationPosts, 0, reason: seenRoutes.join(' | '));
+    expect(reuseReads, 1, reason: seenRoutes.join(' | '));
+    expect(generationPosts, 0);
+    expect(find.byKey(const Key('web_generator_reused_verified')), findsOneWidget);
+    expect(find.text('Catalogo libri'), findsOneWidget);
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString('aivexus.web.lastGeneration.v1'), oldId);
+  });
+}
+)));
         reuseReads++;
         return http.Response(jsonEncode({
           'version': 1, 'ok': true, 'found': true,
