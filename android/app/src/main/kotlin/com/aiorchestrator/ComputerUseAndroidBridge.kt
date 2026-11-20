@@ -16,7 +16,6 @@ object ComputerUseAndroidBridge {
                 when (call.method) {
                     "getStatus" -> result.success(mapOf(
                         "accessibilityEnabled" to ComputerUseAccessibilityService.isReady(),
-                        "targetPackage" to "car.parking.jam.solver.puzzle.games",
                     ))
                     "openAccessibilitySettings" -> {
                         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
@@ -24,15 +23,25 @@ object ComputerUseAndroidBridge {
                         context.startActivity(intent)
                         result.success(null)
                     }
-                    "tapGame", "swipeGame" -> {
+                    "clearTarget" -> {
+                        ComputerUseAccessibilityService.clearTarget()
+                        result.success(null)
+                    }
+                    "selectForegroundTarget" -> {
+                        ComputerUseAccessibilityService.selectForegroundTarget { ok, code ->
+                            if (ok) result.success(code)
+                            else result.error(code, "Target not selected", null)
+                        }
+                    }
+                    "tapTarget", "swipeTarget" -> {
                         val x = call.argument<Int>("x")
                         val y = call.argument<Int>("y")
-                        val endX = if (call.method == "swipeGame") call.argument<Int>("endX") else x
+                        val endX = if (call.method == "swipeTarget") call.argument<Int>("endX") else x
                         val endY = if (call.method == "swipeGame") call.argument<Int>("endY") else y
                         if (x == null || y == null || endX == null || endY == null) {
                             result.error("INVALID_COORDINATES", "Coordinates required", null)
                         } else {
-                            ComputerUseAccessibilityService.gestureGame(
+                            ComputerUseAccessibilityService.gestureTarget(
                                 x, y, endX, endY,
                             ) { ok, code ->
                                 if (ok) result.success(code)
