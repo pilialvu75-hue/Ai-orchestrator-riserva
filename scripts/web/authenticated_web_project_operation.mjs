@@ -6,6 +6,7 @@
 // touching D1. Client JSON is only an operation-specific CAS precondition.
 
 import { createCloudflareAccessPrincipalResolver } from './cloudflare_access_principal_resolver.mjs';
+import { existingWebOwnerSubject } from './web_owner_role.mjs';
 import { createWebD1ReservationStore } from './d1_approval_reservation_store.mjs';
 import { approveTrustedWebProposal, revokeTrustedWebApproval, stageTrustedWebCounterProposal } from
   './d1_web_proposal_approval_writer.mjs';
@@ -146,7 +147,7 @@ function zipResponse(bytes, filename) {
  */
 export function createAuthenticatedWebProjectOperation({
   operation, expectedOrigin, accessIssuer, accessAudience, db, bucket, runner,
-  infer, adminSubject, fetchImpl, nowSeconds,
+  infer, adminSubject, ownerEmail, fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
   const readsStatus = operation === 'status';
@@ -200,6 +201,14 @@ export function createAuthenticatedWebProjectOperation({
       return reject(401, 'access_denied');
     }
 
+    // Recognize the existing owner account, not a second admin login.
+    // Standard customers must never inherit the owner's admin/AI privileges.
+    const authorizedOwnerSubject = existingWebOwnerSubject({
+      principal: verified.principal,
+      configuredSubject: adminSubject,
+      configuredEmail: ownerEmail,
+    });
+
     if (downloads) {
       if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
       try {
@@ -252,7 +261,8 @@ export function createAuthenticatedWebProjectOperation({
       if (url.searchParams.size !== 0) return reject(400, 'invalid_request');
       try {
         const result = await readWebApplicationQuota({
-          db, ownerSubject: verified.principal.subject, adminSubject,
+          db, ownerSubject: verified.principal.subject,
+          adminSubject: authorizedOwnerSubject,
         });
         if (!result.ok) return operationFailure(result);
         return respond(200, result);
@@ -285,7 +295,7 @@ export function createAuthenticatedWebProjectOperation({
     try {
       const principal = verified.principal;
       if (operation === 'generate_app') {
-        result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, adminSubject, db, infer });
+        result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, adminSubject: authorizedOwnerSubject, db, infer });
       } else if (operation === 'verify_app') {
         result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'advance') {
