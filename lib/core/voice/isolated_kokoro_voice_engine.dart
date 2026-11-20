@@ -159,6 +159,7 @@ final class IsolatedKokoroVoiceEngine
   bool _liveSequenceActive = false;
   bool _liveTimelinePrepared = false;
   bool _androidSpeaking = false;
+  bool _usingSystemTts = false;
 
   @override
   void beginLiveSpeechSequence() {
@@ -214,7 +215,7 @@ final class IsolatedKokoroVoiceEngine
   }
 
   @override
-  bool get supportsRealReadAloudControls => _readAloudSink != null;
+  bool get supportsRealReadAloudControls => _readAloudSink != null && !_usingSystemTts;
 
   @override
   void setNextReadAloudPosition(Duration position) {
@@ -225,8 +226,9 @@ final class IsolatedKokoroVoiceEngine
   }
 
   @override
-  ReadAloudSnapshot get readAloudSnapshot =>
-      _readAloudSink?.snapshot ?? const ReadAloudSnapshot();
+  ReadAloudSnapshot get readAloudSnapshot => _usingSystemTts
+      ? const ReadAloudSnapshot()
+      : _readAloudSink?.snapshot ?? const ReadAloudSnapshot();
 
   @override
   Future<void> pauseReadAloud() async {
@@ -307,6 +309,7 @@ final class IsolatedKokoroVoiceEngine
     // an explicit, persisted Android-only user preference.
     if (await VoiceTtsPreference.read() == TtsBackend.androidSystem) {
       if (_disposed) return;
+      _usingSystemTts = true;
       _androidSpeaking = true;
       try {
         final language = detectTtsLanguage(sanitized, _languageCode());
@@ -325,6 +328,7 @@ final class IsolatedKokoroVoiceEngine
       return;
     }
 
+    _usingSystemTts = false;
     if (_requestBusy) {
       if (_activeRequestGeneration == _lifecycleGeneration) {
         // Repeated taps without an intervening Stop still do not launch
