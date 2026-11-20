@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_inference_gateway.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
@@ -71,6 +72,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   Map<String, dynamic>? _verification;
   Map<String, dynamic>? _quota;
   bool _quotaLoading = false;
+  bool _reusedVerifiedGeneration = false;
   bool _busy = true;
 
   // UI-only, bounded follow-up to the existing idempotent generator + verify
@@ -324,10 +326,51 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     });
   }
 
+  Future<String?> _findReusableVerifiedGeneration(String prompt) async {
+    final digest = sha256.convert(utf8.encode(prompt.trim())).toString();
+    try {
+      final uri = Uri.base.resolve('/api/cantiere/proposals/reuse')
+          .replace(queryParameters: {'promptSha256': digest});
+      final response = await _client.get(uri).timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return null;
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (data is! Map<String, dynamic> ||
+          data['version'] != 1 ||
+          data['ok'] != true ||
+          data['found'] != true ||
+          data['generationId'] is! String ||
+          !_idPattern.hasMatch(data['generationId'] as String)) return null;
+      return data['generationId'] as String;
+    } catch (_) {
+      // Reuse is strictly optional and cannot block a fresh build.
+      return null;
+    }
+  }
+
   Future<void> _submit() async {
     final prompt = _pendingPrompt ?? _prompt.text.trim();
     if (_busy || prompt.isEmpty) return;
     await _run(() async {
+      if (_generationId == null) {
+        final priorId = await _findReusableVerifiedGeneration(prompt);
+        if (priorId != null) {
+          final prior = await _call(priorId);
+          if (prior != null && prior['status'] == 'generated') {
+            final savedPrior =
+                await (await _preferences).setString(_storageKey, priorId);
+            if (savedPrior && mounted) {
+              setState(() {
+                _generationId = priorId;
+                _pendingPrompt = prompt;
+                _receipt = prior;
+                _reusedVerifiedGeneration = true;
+              });
+              await _readVerification(priorId);
+              return;
+            }
+          }
+        }
+      }
       final id = _generationId ?? const Uuid().v4();
       final saved = await (await _preferences).setString(_storageKey, id);
       if (!saved) {
@@ -405,6 +448,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       setState(() {
         _selectedPlatform = WorkshopWebTarget.web;
         _automaticChecks = 0;
+        _reusedVerifiedGeneration = false;
         _verificationDispatchAttempts.clear();
         _generationId = null;
         _pendingPrompt = null;
@@ -712,6 +756,10 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
             padding: const EdgeInsets.all(16),
             children: [
               _quotaMeter(tr),
+              if (_reusedVerifiedGeneration)
+                Text(tr('App già verificata riutilizzata senza nuova inferenza.'),
+                    key: const Key('web_generator_reused_verified'),
+                    style: const TextStyle(color: Color(0xFF9FD6AE), fontSize: 12)),
               if (firstPrompt.isNotEmpty)
                 _chatBubble(tr('Tu'), firstPrompt, fromUser: true),
               for (final turn in _chatTurns)
