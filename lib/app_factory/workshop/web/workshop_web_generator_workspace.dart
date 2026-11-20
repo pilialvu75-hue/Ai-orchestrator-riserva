@@ -12,6 +12,8 @@ class WorkshopWebGeneratorWorkspace extends StatefulWidget {
   const WorkshopWebGeneratorWorkspace({
     super.key,
     required this.composer,
+    this.intro,
+    this.showIntro = false,
     this.previewUri,
     this.projectTitle,
     this.generationStatus,
@@ -21,6 +23,8 @@ class WorkshopWebGeneratorWorkspace extends StatefulWidget {
   });
 
   final Widget composer;
+  final Widget? intro;
+  final bool showIntro;
   final Uri? previewUri;
   final String? projectTitle;
   final String? generationStatus;
@@ -98,6 +102,12 @@ class _WorkshopWebGeneratorWorkspaceState
 
   @override
   Widget build(BuildContext context) {
+    if (widget.showIntro) {
+      return ColoredBox(
+        color: const Color(0xFF0B0E13),
+        child: widget.intro ?? widget.composer,
+      );
+    }
     return LayoutBuilder(
       builder: (context, size) {
         if (size.maxWidth >= 900) {
@@ -185,7 +195,7 @@ class _WorkshopWebGeneratorWorkspaceState
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          '• $label',
+                          label,
                           style: const TextStyle(color: Color(0xFF9CC7F6)),
                         ),
                       ),
@@ -315,7 +325,7 @@ class _WorkshopWebGeneratorWorkspaceState
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
               child: Text(
-                '• $label',
+                label,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.65),
