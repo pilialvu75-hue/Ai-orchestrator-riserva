@@ -1,3 +1,3 @@
 channel=windows-cuda-unsigned-beta
-main_sha=9736641486a2a899d3abfece421fd9e647b1e5c2
+main_sha=067088780ac100394f3a7d8f93a393b1df691c0b
 owner_accepts_unsigned=true
