@@ -123,9 +123,7 @@ export async function verifyCloudflareAccessAssertion({
       subject: payload.sub, verifiedBy: 'cloudflare-access-jwt',
       // The IdP email is part of the cryptographically verified Access JWT.
       // It is INTERNAL ONLY; API handlers must never serialize the principal.
-      ...(typeof payload.email === 'string' && payload.email.length <= 254 &&
-          /^[^\\s@<>]{1,64}@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$/.test(payload.email) &&
-          !payload.email.includes('..')
+      ...(typeof payload.email === 'string' && payload.email.length <= 254
         ? { email: payload.email } : {}),
     },
   };
