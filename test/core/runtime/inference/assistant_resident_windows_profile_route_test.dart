@@ -133,6 +133,43 @@ void main() {
   });
 
 
+  test('unsigned CUDA QA bundle boots resident without runtime-modern', () async {
+    final temp = await Directory.systemTemp.createTemp('aivexus-cuda-bootstrap-');
+    try {
+      final cudaDir = Directory(p.join(temp.path, 'runtime-cuda'));
+      await cudaDir.create();
+      final cudaServer = File(p.join(cudaDir.path, 'llama-server.exe'));
+      await cudaServer.writeAsString('bundled CUDA executable fixture');
+
+      final qa = AssistantResidentLocalRuntimeProvider.bundledWindowsServerFor(
+        temp.path, modernWindows: true, cudaQaEnabled: true,
+      );
+      expect(p.normalize(qa!), p.normalize(cudaServer.path));
+
+      // Stable and legacy Windows must not auto-open an old CUDA QA bundle.
+      expect(AssistantResidentLocalRuntimeProvider.bundledWindowsServerFor(
+        temp.path, modernWindows: true, cudaQaEnabled: false,
+      ), isNull);
+      expect(AssistantResidentLocalRuntimeProvider.bundledWindowsServerFor(
+        temp.path, modernWindows: false, cudaQaEnabled: true,
+      ), isNull);
+
+      // When the official modern server exists, it remains preferred.
+      final modernDir = Directory(p.join(temp.path, 'runtime-modern'));
+      await modernDir.create();
+      final modernServer = File(p.join(modernDir.path, 'llama-server.exe'));
+      await modernServer.writeAsString('modern server fixture');
+      expect(
+        p.normalize(AssistantResidentLocalRuntimeProvider.bundledWindowsServerFor(
+          temp.path, modernWindows: true, cudaQaEnabled: true,
+        )!),
+        p.normalize(modernServer.path),
+      );
+    } finally {
+      await temp.delete(recursive: true);
+    }
+  });
+
   test('ASUS Windows selects CUDA and passes bounded GPU settings', () async {
     final temp = await Directory.systemTemp.createTemp('aivexus-cuda-route-');
     final runtimeModern = Directory('${temp.path}${Platform.pathSeparator}runtime-modern');

@@ -10,6 +10,15 @@ void main() {
         isNull);
   });
 
+  test('accepts timestamped llama.cpp log prefix without weakening VRAM gate', () {
+    const listing = '''
+2026-11-20 15:30:00.123 INFO CUDA0: NVIDIA GeForce RTX 4060 Laptop GPU (8192 MiB, 6400 MiB free)
+2026-11-20 15:30:00.124 INFO CUDA1: NVIDIA GeForce RTX 4060 Laptop GPU (8192 MiB, 2100 MiB free)
+''';
+    expect(WindowsCudaDevice.select(listing, modelBytes: 2840000000), 'CUDA0');
+    expect(WindowsCudaDevice.select(listing, modelBytes: 6400 * 1024 * 1024), isNull);
+  });
+
   test('unknown devices and unknown memory output fall back safely', () {
     expect(WindowsCudaDevice.select(
         'CUDA0: Intel integrated graphics (8192 MiB, 7000 MiB free)',
