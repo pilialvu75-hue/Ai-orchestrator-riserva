@@ -53,6 +53,8 @@ ComputerUseAdapter _labAdapter() {
 class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   static const MethodChannel _screenVision =
       MethodChannel('com.aiorchestrator/screen_vision');
+  static const MethodChannel _androidGestures =
+      MethodChannel('com.aiorchestrator/computer_use_android');
   static const MethodChannel _macScreen =
       MethodChannel('com.aiorchestrator/computer_use_mac');
   late final ComputerUseAdapter _adapter = _labAdapter();
@@ -70,6 +72,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   bool _projectionStartedByLab = false;
   Timer? _expiryTimer;
   final TextEditingController _textController = TextEditingController();
+  final TextEditingController _appSearchController = TextEditingController();
 
   Uint8List? _frame;
   int _frameWidth = 1;
@@ -85,8 +88,12 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     _expiryTimer?.cancel();
     _gameRunner?.stop();
     _session.stop();
+    if (_isAndroid) {
+      unawaited(_androidGestures.invokeMethod<void>('clearTarget'));
+    }
     unawaited(_releaseProjection());
     _textController.dispose();
+    _appSearchController.dispose();
     super.dispose();
   }
 
@@ -142,6 +149,185 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         setState(() => _message =
             'Scheda Play Store aperta. Installazione sotto il tuo '
             'controllo. Computer Use Android resta in sola osservazione.');
+      }
+    });
+  }
+
+  Future<void> _typeAndroidSelectedText() async {
+    if (!_isAndroid || !_session.isActive || _busy) return;
+    final value = _textController.text;
+    if (value.isEmpty || value.length > 512) return;
+    final consent = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Inserire testo nell’app selezionata?'),
+        content: const Text(
+          'AIVEXUS inserirà il testo nel campo modificabile attualmente '
+          'selezionato. Torna nell’app entro 4 secondi. Non inserire '
+          'password o dati sensibili. Il salvataggio non è automatico.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annulla'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Autorizza inserimento'),
+          ),
+        ],
+      ),
+    );
+    if (consent != true || !mounted) return;
+    final revision = _session.sessionRevision;
+    await _run(() async {
+      setState(() => _message = 'Torna nell’app: inserimento fra 4 secondi.');
+      await Future<void>.delayed(const Duration(seconds: 4));
+      if (!_session.isActive || revision != _session.sessionRevision) return;
+      final outcome = await _androidGestures.invokeMethod<String>(
+        'typeTargetText', <String, String>{'text': value},
+      );
+      if (mounted && revision == _session.sessionRevision) {
+        setState(() => _message = 'Testo inviato al campo selezionato: '
+            '${outcome ?? 'nessun risultato'}. Salvataggio non verificato.');
+      }
+    });
+  }
+
+  Future<void> _findAndOpenAndroidApp() async {
+    if (!_isAndroid || _busy) return;
+    final query = _appSearchController.text.trim();
+    if (query.length < 2) {
+      setState(() => _message = 'Scrivi almeno due caratteri dell’app da aprire.');
+      return;
+    }
+    await _run(() async {
+      final matches = await _androidGestures.invokeListMethod<dynamic>(
+        'findInstalledApps',
+        <String, Object>{'query': query},
+      );
+      if (!mounted) return;
+      final apps = (matches ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((entry) => <String, String>{
+                'label': (entry['label'] ?? '').toString(),
+                'package': (entry['package'] ?? '').toString(),
+              })
+          .where((entry) => entry['package']!.isNotEmpty)
+          .toList();
+      if (apps.isEmpty) {
+        setState(() => _message = 'Nessuna app installata trovata per: $query.');
+        return;
+      }
+      final selected = await showDialog<Map<String, String>>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('Quale app vuoi aprire?'),
+          children: [
+            for (final app in apps)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, app),
+                child: Text(app['label']!),
+              ),
+          ],
+        ),
+      );
+      if (selected == null || !mounted) return;
+      await _androidGestures.invokeMethod<bool>(
+        'launchInstalledApp',
+        <String, Object>{'package': selected['package']!},
+      );
+      if (mounted) {
+        setState(() => _message =
+            'Apertura richiesta: ${selected['label']}. '
+            'L’app non è ancora controllata: selezionala con Acquisisci.');
+      }
+    });
+  }
+
+  Future<void> _openAndroidAccessibilitySettings() async {
+    if (!_isAndroid) return;
+    await _run(() async {
+      await _androidGestures.invokeMethod<void>('openAccessibilitySettings');
+      if (mounted) {
+        setState(() => _message =
+            'In Accessibilità abilita AIVEXUS Computer Use solo se '
+            'vuoi autorizzare i gesti su un’app selezionata.');
+      }
+    });
+  }
+
+  Offset? _androidPanStart;
+  Offset? _androidPanLast;
+
+  Future<void> _tapAndroidGameFrame(TapUpDetails details, double width) async {
+    await _sendAndroidGameGesture(
+      details.localPosition, details.localPosition, width,
+    );
+  }
+
+  Future<void> _sendAndroidGameGesture(
+    Offset start, Offset end, double width,
+  ) async {
+    if (!_isAndroid || !_session.isActive || _busy || _frame == null) return;
+    int imageX(Offset position) =>
+        (position.dx * _frameWidth / width)
+            .floor().clamp(0, _frameWidth - 1);
+    int imageY(Offset position) =>
+        (position.dy * _frameWidth / width)
+            .floor().clamp(0, _frameHeight - 1);
+    final x = imageX(start);
+    final y = imageY(start);
+    final endX = imageX(end);
+    final endY = imageY(end);
+    final swipe = x != endX || y != endY;
+    if (swipe && (end - start).distance < 16) return;
+    final status =
+        await _androidGestures.invokeMapMethod<String, dynamic>('getStatus');
+    if (!mounted) return;
+    if (status?['accessibilityEnabled'] != true) {
+      setState(() => _message =
+          'Abilita prima Computer Use nelle Impostazioni di accessibilità.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(swipe ? 'Scorrimento nell’app selezionata'
+            : 'Tocco nell’app selezionata'),
+        content: Text(
+          'Fra 4 secondi AIVEXUS proverà ${swipe ? 'uno scorrimento' : 'un tocco'} '
+          'da ($x, $y) a ($endX, $endY). Torna subito nell’app acquisita. '
+          'Se nel frattempo cambia la finestra, il gesto sarà bloccato.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annulla'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Autorizzo questo gesto'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final revision = _session.sessionRevision;
+    await _run(() async {
+      setState(() => _message =
+          'Torna nell’app selezionata: gesto fra 4 secondi. STOP annulla.');
+      await Future<void>.delayed(const Duration(seconds: 4));
+      if (!_session.isActive || revision != _session.sessionRevision) return;
+      final outcome = await _androidGestures.invokeMethod<String>(
+        swipe ? 'swipeTarget' : 'tapTarget',
+        <String, Object>{'x': x, 'y': y, 'endX': endX, 'endY': endY},
+      );
+      if (mounted && revision == _session.sessionRevision) {
+        setState(() => _message =
+            'Gesto Android: ${outcome ?? 'nessun risultato'}. '
+            'Verifica il cambiamento nell’app. Per un altro gesto '
+            'acquisisci nuovamente la finestra.');
       }
     });
   }
@@ -465,11 +651,20 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       await Future<void>.delayed(const Duration(seconds: 4));
       if (!_session.isActive ||
           grantRevision != _session.sessionRevision) return;
+      if (_isAndroid) {
+        // Bind exactly the currently foreground external app to ONE gesture.
+        // The native service excludes settings, system UI and the host app.
+        await _androidGestures.invokeMethod<String>(
+          'selectForegroundTarget',
+        );
+      }
       await _refreshFrame();
       if (mounted) {
-        setState(() => _message =
-            'Schermata aggiornata. Torna al laboratorio per scegliere '
-            'la finestra da controllare.');
+        setState(() => _message = _isAndroid
+            ? 'App selezionata. Torna in AIVEXUS, tocca o trascina '
+              'sull’anteprima e conferma il gesto.'
+            : 'Schermata aggiornata. Torna al laboratorio per scegliere '
+              'la finestra da controllare.');
       }
     });
   }
@@ -532,6 +727,9 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     _expiryTimer?.cancel();
     _gameRunner?.stop();
     _session.stop();
+    if (_isAndroid) {
+      unawaited(_androidGestures.invokeMethod<void>('clearTarget'));
+    }
     _selectTargetOnNextTap = false;
     _previousGameScore = null;
     unawaited(_releaseProjection());
@@ -601,6 +799,51 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
           ],
           if (_isAndroid) ...[
             const SizedBox(height: 8),
+            const Text(
+              'Computer Use Android: seleziona l’app che vuoi osservare, '
+              'poi autorizza un tocco o uno scorrimento. '
+              'Per ora non è ancora attivo un agente IA autonomo.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _appSearchController,
+              decoration: const InputDecoration(
+                labelText: 'Cerca un’app installata',
+                hintText: 'Per esempio: Car Jam, Note, Blocco note',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _findAndOpenAndroidApp(),
+            ),
+            FilledButton.icon(
+              onPressed: _busy ? null : _findAndOpenAndroidApp,
+              icon: const Icon(Icons.apps),
+              label: const Text('Cerca e apri app'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _textController,
+              maxLength: 512,
+              decoration: const InputDecoration(
+                labelText: 'Testo da inserire nell’app selezionata',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: !_busy && active ? _typeAndroidSelectedText : null,
+              icon: const Icon(Icons.edit_note),
+              label: const Text('Inserisci testo nel campo attivo'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _openAndroidAccessibilitySettings,
+              icon: const Icon(Icons.accessibility_new),
+              label: const Text('Autorizza tocchi in Accessibilità Android'),
+            ),
+            const Text(
+              'Dopo aver abilitato il servizio, avvia Solo osservazione, '
+              'premi Acquisisci tra 4 secondi e apri l’app da controllare. '
+              'Tocca o trascina sull’anteprima e conferma, poi torna '
+              'nell’app entro 4 secondi per vedere il gesto.',
+            ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _openCarJamPlayStore,
               icon: const Icon(Icons.shop_outlined),
@@ -608,8 +851,8 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
             ),
             const Text(
               'Installazione solo con tua conferma nel Play Store. '
-              'Aivexus Android può osservare il gioco con consenso, '
-              'ma non controllarlo ancora autonomamente.',
+              'Car Jam è solo un’applicazione suggerita per il primo collaudo. '
+              'L’agente autonomo Android non è ancora disponibile.',
             ),
           ],
           const SizedBox(height: 12),
@@ -639,14 +882,14 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                       : null,
                   child: const Text('Aggiorna schermata'),
                 ),
-                if (_isWindows) ...[
+                if (_isWindows || _isAndroid) ...[
                   OutlinedButton(
                     onPressed: !_busy && active
                         ? _captureAfterDelay
                         : null,
                     child: const Text('Acquisisci tra 4 secondi'),
                   ),
-                  OutlinedButton(
+                  if (_isWindows) OutlinedButton(
                     onPressed: !_busy && active
                         ? _readWindowsAccessibility
                         : null,
@@ -787,6 +1030,29 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                   child: GestureDetector(
                     onTapUp: interactive && !_busy
                         ? (details) => _tapFrame(details, box.maxWidth)
+                        : _isAndroid && active && !_busy
+                            ? (details) => _tapAndroidGameFrame(
+                                details, box.maxWidth)
+                            : null,
+                    onPanStart: _isAndroid && active && !_busy
+                        ? (details) {
+                            _androidPanStart = details.localPosition;
+                            _androidPanLast = details.localPosition;
+                          }
+                        : null,
+                    onPanUpdate: _isAndroid && active && !_busy
+                        ? (details) => _androidPanLast = details.localPosition
+                        : null,
+                    onPanEnd: _isAndroid && active && !_busy
+                        ? (_) {
+                            final start = _androidPanStart;
+                            final end = _androidPanLast;
+                            _androidPanStart = null;
+                            _androidPanLast = null;
+                            if (start != null && end != null) {
+                              _sendAndroidGameGesture(start, end, box.maxWidth);
+                            }
+                          }
                         : null,
                     child: Image.memory(
                       _frame!,
