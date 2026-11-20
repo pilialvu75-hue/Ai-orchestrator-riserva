@@ -77,6 +77,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const Key('web_generator_first_prompt')), prompt);
+    await tester.pump(); // apply the enabled submit-button state
     await tester.tap(find.text('Genera'));
     await tester.pumpAndSettle();
 
