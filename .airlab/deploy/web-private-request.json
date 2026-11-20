@@ -3,6 +3,6 @@
   "operation": "deploy_private",
   "confirmation": "DEPLOY_PRIVATE_CANTIERE",
   "environment": "web-private-production",
-  "requestId": "aivexus-web-quota-meter-pr1236-private-20261120",
-  "reason": "Access-protected private AIVEXUS Studio rollout of merged PR #1236: 10 personal and 36 global attempt slots per rolling day, authenticated read-only quota endpoint and UI meter. Web and D1 CI PASS. No paid models, account/secret changes, D1 migration or external Neuron limit change. Preserve Access fail-closed preflight and post-deploy verification."
+  "requestId": "aivexus-web-admin-free-reuse-pr1238-20261120",
+  "reason": "Release merged #1238 to Access-protected private AIVEXUS Studio: signed-JWT admin quota 64/day with shared 72/day free-tier guard and verified same-owner exact prompt project reuse with no new AI call. Web and D1 CI PASS. No new paid plan, provider, secret values, database migration or mobile/desktop code; Cloudflare Access pre/postflight must fail closed. Admin Access subject secret remains opt-in server configuration, never bundled."
 }
