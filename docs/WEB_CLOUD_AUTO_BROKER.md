@@ -171,6 +171,22 @@ incorporati nel documento. Gli import relativi all’interno di un modulo
 JavaScript, i percorsi verso altre pagine e le risorse esterne restano fuori
 dal percorso di anteprima. Lo ZIP conserva tutti i file verificati.
 
+## Modifiche e versioni
+
+La migrazione `008` associa le revisioni allo stesso progetto e conserva
+la versione scelta dal proprietario. Le generazioni esistenti restano radici
+di progetto valide. `POST /api/cantiere/proposals/revisions` riceve un nuovo
+`generationId`, la versione verificata `baseGenerationId` e `instruction`.
+L’operazione applica solo i file cambiati o rimossi che il modello dichiara,
+mantiene i controlli di base e può aggiungere nuovi controlli. La nuova
+versione usa il percorso di verifica e ZIP delle altre generazioni.
+
+`GET /api/cantiere/proposals/revisions?generationId=…` restituisce la
+cronologia dello stesso progetto. `POST /api/cantiere/proposals/select-revision`
+con `generationId` seleziona una versione già verificata senza sovrascrivere i
+file di alcuna versione. I controlli di proprietà valgono su cronologia,
+modifiche e ripristino. Lo storico conserva il testo delle modifiche.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does

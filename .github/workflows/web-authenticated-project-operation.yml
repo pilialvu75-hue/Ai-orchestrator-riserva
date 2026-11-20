@@ -27,6 +27,9 @@ on:
       - 'functions/api/cantiere/proposals/download.js'
       - 'functions/api/cantiere/proposals/source.js'
       - 'functions/api/cantiere/proposals/preview.js'
+      - 'functions/api/cantiere/proposals/revisions.js'
+      - 'functions/api/cantiere/proposals/select-revision.js'
+      - 'scripts/web/d1_web_application_revisions.mjs'
       - 'scripts/web/web_application_preview.mjs'
       - 'scripts/web/d1_web_application_verification.mjs'
       - 'scripts/web/web_application_checks.mjs'
@@ -72,6 +75,9 @@ on:
       - 'functions/api/cantiere/proposals/download.js'
       - 'functions/api/cantiere/proposals/source.js'
       - 'functions/api/cantiere/proposals/preview.js'
+      - 'functions/api/cantiere/proposals/revisions.js'
+      - 'functions/api/cantiere/proposals/select-revision.js'
+      - 'scripts/web/d1_web_application_revisions.mjs'
       - 'scripts/web/web_application_preview.mjs'
       - 'scripts/web/d1_web_application_verification.mjs'
       - 'scripts/web/web_application_checks.mjs'
@@ -118,7 +124,7 @@ jobs:
         run: |
           npx --yes wrangler@4 pages functions build functions --outfile "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           test -s "$RUNNER_TEMP/aivexus-pages-worker.mjs"
-          for route in executions/reserve executions/status executions/download executions/advance proposals/counter proposals/approve proposals/generate proposals/verify proposals/download proposals/source proposals/preview; do
+          for route in executions/reserve executions/status executions/download executions/advance proposals/counter proposals/approve proposals/generate proposals/verify proposals/download proposals/source proposals/preview proposals/revisions proposals/select-revision; do
             grep -Fq "/api/cantiere/$route" "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           done
       - name: Apply Web migrations to local D1
@@ -148,8 +154,9 @@ jobs:
               (SELECT COUNT(*) FROM web_counter_artifacts) AS artifacts,
               (SELECT COUNT(*) FROM web_counter_dispatch) AS dispatches,
               (SELECT COUNT(*) FROM web_app_generations) AS generations,
-              (SELECT COUNT(*) FROM web_app_verifications) AS verifications' \
-            | jq -e '.[0] | .success and (.results == [{"migrations":7,"approvals":0,"reservations":0,"journal":0,"receipts":0,"artifacts":0,"dispatches":0,"generations":0,"verifications":0}])'
+              (SELECT COUNT(*) FROM web_app_verifications) AS verifications,
+              (SELECT COUNT(*) FROM web_app_project_selection) AS selected_versions' \
+            | jq -e '.[0] | .success and (.results == [{"migrations":8,"approvals":0,"reservations":0,"journal":0,"receipts":0,"artifacts":0,"dispatches":0,"generations":0,"verifications":0,"selected_versions":0}])'
       - name: Regression for verified Access JWT and D1 reservations
         run: |
           node --test test/airlab/web_access_jwt_verifier.mjs

@@ -18,10 +18,60 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     const prompt = 'Un allenamento a intervalli';
     String? generationId;
+    String? revisionId;
     var requests = 0;
     var verificationPosts = 0;
     final client = MockClient((request) async {
       requests++;
+      if (request.url.path == '/api/cantiere/proposals/revisions') {
+        if (request.method == 'POST') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['baseGenerationId'], generationId);
+          expect(body['instruction'], 'Aggiungi il tema scuro');
+          revisionId = body['generationId'] as String;
+          return http.Response(
+              jsonEncode({
+                'version': 1,
+                'ok': true,
+                'generationId': revisionId,
+                'status': 'generating',
+              }),
+              200);
+        }
+        expect(request.url.queryParameters, {'generationId': revisionId});
+        return http.Response(
+            jsonEncode({
+              'version': 1,
+              'ok': true,
+              'projectId': generationId,
+              'activeGenerationId': generationId,
+              'revisions': [
+                {
+                  'generationId': revisionId,
+                  'revision': 2,
+                  'instruction': 'Aggiungi il tema scuro'
+                },
+                {
+                  'generationId': generationId,
+                  'revision': 1,
+                  'verificationStatus': 'verified'
+                },
+              ],
+            }),
+            200);
+      }
+      if (request.url.path == '/api/cantiere/proposals/select-revision') {
+        expect(request.method, 'POST');
+        expect(jsonDecode(request.body), {'generationId': generationId});
+        return http.Response(
+            jsonEncode({
+              'version': 1,
+              'ok': true,
+              'projectId': generationId,
+              'activeGenerationId': generationId,
+            }),
+            200);
+      }
       if (request.url.path == '/api/cantiere/proposals/source') {
         expect(request.method, 'GET');
         expect(request.url.queryParameters, {'generationId': generationId});
@@ -79,6 +129,17 @@ void main() {
             200);
       }
       expect(request.method, 'GET');
+      if (revisionId != null &&
+          request.url.queryParameters['generationId'] == revisionId) {
+        return http.Response(
+            jsonEncode({
+              'version': 1,
+              'ok': true,
+              'status': 'generating',
+              'generationId': revisionId,
+            }),
+            200);
+      }
       expect(request.url.queryParameters, {'generationId': generationId});
       expect(request.body, isEmpty);
       return http.Response(
@@ -141,5 +202,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Sorgenti verificati'), findsOneWidget);
     expect(find.text('<h1>Intervalli</h1>'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Modifica applicazione'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Aggiungi il tema scuro');
+    await tester.pump();
+    await tester.tap(find.text('Crea versione'));
+    await tester.pumpAndSettle();
+    expect(find.text('Generazione in corso'), findsOneWidget);
+    expect(preferences.getString('aivexus.web.lastGeneration.v1'), revisionId);
+    await tester.tap(find.text('Versioni'));
+    await tester.pumpAndSettle();
+    expect(find.text('Versione 2'), findsOneWidget);
+    await tester.tap(find.text('Versione 1'));
+    await tester.pumpAndSettle();
+    expect(find.text('Applicazione verificata'), findsOneWidget);
+    expect(
+        preferences.getString('aivexus.web.lastGeneration.v1'), generationId);
   });
 }

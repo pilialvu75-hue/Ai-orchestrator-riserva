@@ -12,15 +12,16 @@ local dependencies only, no package installation, secrets or external network re
 Keep the application compact enough to return all source within the response limit.`;
 
 // Count reservations atomically before inference, including failed attempts.
-const CLAIM = `INSERT INTO web_app_generations
-  (owner_subject, generation_id, prompt_sha256, status)
-  SELECT ?1, ?2, ?3, 'generating' WHERE NOT EXISTS (
+export const WEB_GENERATION_QUOTA_AVAILABLE = `NOT EXISTS (
     SELECT 1 FROM web_app_generations WHERE owner_subject = ?1 AND created_at >= unixepoch() - 86400
     LIMIT 1 OFFSET 5
   ) AND NOT EXISTS (
     SELECT 1 FROM web_app_generations WHERE created_at >= unixepoch() - 86400
     LIMIT 1 OFFSET 23
-  )
+  )`;
+const CLAIM = `INSERT INTO web_app_generations
+  (owner_subject, generation_id, prompt_sha256, status)
+  SELECT ?1, ?2, ?3, 'generating' WHERE ${WEB_GENERATION_QUOTA_AVAILABLE}
   ON CONFLICT(owner_subject, generation_id) DO NOTHING
   RETURNING generation_id`;
 const READ = `SELECT CASE WHEN status = 'generating' AND unixepoch() - created_at >= 180
@@ -45,17 +46,17 @@ function cleanText(value, max) {
   return text && text.length <= max ? text : null;
 }
 
-function parseResponse(output) {
+export function parseWebModelJson(output) {
   if (typeof output !== 'string') return null;
   const fenced = /^```(?:json)?\s*\n([\s\S]+)\n```$/i.exec(output);
   try { return JSON.parse(fenced ? fenced[1] : output); } catch (_) { return null; }
 }
 
 export function parseGeneratedWebApplication(output) {
-  return normalizeSource(parseResponse(output));
+  return normalizeWebApplicationSource(parseWebModelJson(output));
 }
 
-function normalizeSource(parsed) {
+export function normalizeWebApplicationSource(parsed) {
 
   const title = cleanText(parsed?.title, 100);
   if (!title || !Array.isArray(parsed.requirements) || parsed.requirements.length < 1 ||
@@ -79,7 +80,7 @@ function normalizeSource(parsed) {
   return { title, requirements, files };
 }
 
-function receipt(generationId, status, saved) {
+export function webApplicationGenerationReceipt(generationId, status, saved) {
   if (status !== 'generated') return { ok: true, generationId, status };
   const { source, sourceSha256, provenance } = JSON.parse(saved);
   return {
@@ -93,7 +94,7 @@ export async function readWebApplicationGeneration({ db, ownerSubject, generatio
   if (!GENERATION_ID.test(generationId ?? '')) return { ok: false, reason: 'invalid_request' };
   const row = await db.prepare(READ).bind(ownerSubject, generationId).first();
   if (!row) return { ok: false, reason: 'generation_not_found' };
-  return receipt(generationId, row.status, row.resultJson);
+  return webApplicationGenerationReceipt(generationId, row.status, row.resultJson);
 }
 
 export async function generateWebApplication({ request, ownerSubject, db, infer }) {
@@ -108,7 +109,7 @@ export async function generateWebApplication({ request, ownerSubject, db, infer 
   const previous = await db.prepare(READ).bind(ownerSubject, generationId).first();
   if (previous) {
     if (previous.promptSha256 !== promptSha256) return { ok: false, reason: 'generation_conflict' };
-    return receipt(generationId, previous.status, previous.resultJson);
+    return webApplicationGenerationReceipt(generationId, previous.status, previous.resultJson);
   }
   if (!infer) return { ok: false, reason: 'generation_unavailable' };
 
@@ -119,21 +120,25 @@ export async function generateWebApplication({ request, ownerSubject, db, infer 
     if (winner.promptSha256 !== promptSha256) {
       return { ok: false, reason: 'generation_conflict' };
     }
-    return receipt(generationId, winner.status, winner.resultJson);
+    return webApplicationGenerationReceipt(generationId, winner.status, winner.resultJson);
   }
 
-  let resultJson = null;
   const inference = await infer([
     { role: 'system', content: INSTRUCTION },
     { role: 'user', content: brief },
   ]).catch(() => ({ ok: false }));
-  const reply = inference.ok ? parseResponse(inference.text) : null;
-  const source = normalizeSource(reply);
+  const reply = inference.ok ? parseWebModelJson(inference.text) : null;
+  const source = normalizeWebApplicationSource(reply);
+  const checks = validateWebApplicationChecks(reply?.checks);
+  return saveWebApplicationCandidate({ db, ownerSubject, generationId, source, checks, inference });
+}
+
+export async function saveWebApplicationCandidate({ db, ownerSubject, generationId, source, checks, inference }) {
+  let resultJson = null;
   if (source) {
     const { model, reportedModel, provider, routeId, tokensGenerated } = inference;
     const provenance = { model, reportedModel, provider, routeId, tokensGenerated };
     const sourceSha256 = await sha256Text(JSON.stringify(source));
-    const checks = validateWebApplicationChecks(reply?.checks);
     const serialized = JSON.stringify({ source, sourceSha256, provenance, checks });
     if (encoder.encode(serialized).byteLength <= 65536) resultJson = serialized;
   }
@@ -142,7 +147,7 @@ export async function generateWebApplication({ request, ownerSubject, db, infer 
   if (!written) {
     const row = await db.prepare(READ).bind(ownerSubject, generationId).first();
     if (!row) return { ok: false, reason: 'storage_unavailable' };
-    return receipt(generationId, row.status, row.resultJson);
+    return webApplicationGenerationReceipt(generationId, row.status, row.resultJson);
   }
-  return receipt(generationId, status, resultJson);
+  return webApplicationGenerationReceipt(generationId, status, resultJson);
 }
