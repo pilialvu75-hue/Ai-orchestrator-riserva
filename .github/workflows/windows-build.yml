@@ -2,6 +2,12 @@ name: Build Windows Desktop
 
 on:
   workflow_dispatch:
+    inputs:
+      include_cuda_candidate:
+        description: "Bundle the pinned CUDA runtime in the Windows QA artifact"
+        required: false
+        default: false
+        type: boolean
   pull_request:
   # Release checkpoint requires all five CI workflows for the exact main SHA.
   # Do not skip desktop builds when a commit changes only tests, docs, or generated code.
@@ -104,6 +110,14 @@ jobs:
       - name: Build Windows release
         shell: pwsh
         run: flutter build windows --release
+
+      - name: Bundle and audit pinned Windows CUDA runtime
+        if: github.event_name == 'workflow_dispatch' && inputs.include_cuda_candidate || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feat/windows-cuda-resident-engine-20261119')
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\bundle_windows_cuda_runtime.ps1') -ReleaseDir $releaseDir
+          & (Join-Path $PWD 'tool\test_windows_cuda_bundle.ps1') -ReleaseDir $releaseDir
 
       - name: Verify bundled Windows GGUF inference
         shell: pwsh
