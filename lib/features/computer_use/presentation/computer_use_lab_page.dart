@@ -53,6 +53,8 @@ ComputerUseAdapter _labAdapter() {
 class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   static const MethodChannel _screenVision =
       MethodChannel('com.aiorchestrator/screen_vision');
+  static const MethodChannel _androidGestures =
+      MethodChannel('com.aiorchestrator/computer_use_android');
   static const MethodChannel _macScreen =
       MethodChannel('com.aiorchestrator/computer_use_mac');
   late final ComputerUseAdapter _adapter = _labAdapter();
@@ -142,6 +144,71 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         setState(() => _message =
             'Scheda Play Store aperta. Installazione sotto il tuo '
             'controllo. Computer Use Android resta in sola osservazione.');
+      }
+    });
+  }
+
+  Future<void> _openAndroidAccessibilitySettings() async {
+    if (!_isAndroid) return;
+    await _run(() async {
+      await _androidGestures.invokeMethod<void>('openAccessibilitySettings');
+      if (mounted) {
+        setState(() => _message =
+            'In Accessibilità abilita AIVEXUS Computer Use solo se '
+            'vuoi autorizzare i tocchi di prova su Car Jam.');
+      }
+    });
+  }
+
+  Future<void> _tapAndroidGameFrame(TapUpDetails details, double width) async {
+    if (!_isAndroid || !_session.isActive || _busy || _frame == null) return;
+    final x = (details.localPosition.dx * _frameWidth / width)
+        .floor().clamp(0, _frameWidth - 1);
+    final y = (details.localPosition.dy * _frameWidth / width)
+        .floor().clamp(0, _frameHeight - 1);
+    final status =
+        await _androidGestures.invokeMapMethod<String, dynamic>('getStatus');
+    if (status?['accessibilityEnabled'] != true || !mounted) {
+      setState(() => _message =
+          'Abilita prima Computer Use nelle Impostazioni di accessibilità.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Un tocco di prova su Car Jam'),
+        content: Text(
+          'Fra 4 secondi AIVEXUS proverà un singolo tocco in posizione '
+          '($x, $y). Passa subito a Car Jam Solver. Nessun tocco sarà '
+          'inviato ad altre applicazioni. Premi Annulla per non procedere.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annulla'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Autorizzo questo tocco'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final revision = _session.sessionRevision;
+    await _run(() async {
+      setState(() => _message =
+          'Passa ora a Car Jam: tocco fra 4 secondi. STOP annulla.');
+      await Future<void>.delayed(const Duration(seconds: 4));
+      if (!_session.isActive || revision != _session.sessionRevision) return;
+      final outcome = await _androidGestures.invokeMethod<String>(
+        'tapGame',
+        <String, Object>{'x': x, 'y': y},
+      );
+      if (mounted && revision == _session.sessionRevision) {
+        setState(() => _message =
+            'Tocco Android: ${outcome ?? 'nessun risultato'}. '
+            'Controlla visivamente se il gioco è cambiato.');
       }
     });
   }
@@ -601,6 +668,21 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
           ],
           if (_isAndroid) ...[
             const SizedBox(height: 8),
+            const Text(
+              'Computer Use Android: osserva il gioco, quindi prova '
+              'un solo tocco con autorizzazione esplicita. '
+              'Per ora nessun agente IA autonomo.',
+            ),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _openAndroidAccessibilitySettings,
+              icon: const Icon(Icons.accessibility_new),
+              label: const Text('Autorizza tocchi in Accessibilità Android'),
+            ),
+            const Text(
+              'Dopo aver abilitato il servizio, avvia Solo osservazione, '
+              'acquisisci Car Jam tra 4 secondi e tocca la sua anteprima. '
+              'Torna al gioco entro 4 secondi per vedere il tocco.',
+            ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _openCarJamPlayStore,
               icon: const Icon(Icons.shop_outlined),
@@ -639,14 +721,14 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                       : null,
                   child: const Text('Aggiorna schermata'),
                 ),
-                if (_isWindows) ...[
+                if (_isWindows || _isAndroid) ...[
                   OutlinedButton(
                     onPressed: !_busy && active
                         ? _captureAfterDelay
                         : null,
                     child: const Text('Acquisisci tra 4 secondi'),
                   ),
-                  OutlinedButton(
+                  if (_isWindows) OutlinedButton(
                     onPressed: !_busy && active
                         ? _readWindowsAccessibility
                         : null,
@@ -787,7 +869,10 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
                   child: GestureDetector(
                     onTapUp: interactive && !_busy
                         ? (details) => _tapFrame(details, box.maxWidth)
-                        : null,
+                        : _isAndroid && active && !_busy
+                            ? (details) => _tapAndroidGameFrame(
+                                details, box.maxWidth)
+                            : null,
                     child: Image.memory(
                       _frame!,
                       fit: BoxFit.fill,
