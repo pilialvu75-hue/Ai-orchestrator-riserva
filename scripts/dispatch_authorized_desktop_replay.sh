@@ -31,7 +31,7 @@ jq -e --arg repo "$repo" --arg sha "$expected_sha" '
   exit 1
 }
 run_number="$(jq -r '.run_number' <<< "$source_run")"
-code="$((100000 + run_number))"
+code="$((500000 + run_number))"
 version_name="$(gh api "repos/$repo/contents/pubspec.yaml?ref=$expected_sha" --jq '.content' |
   base64 -d | sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)(\+[0-9]+)?[[:space:]]*$/\1/p' | head -n 1)"
 [[ "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {

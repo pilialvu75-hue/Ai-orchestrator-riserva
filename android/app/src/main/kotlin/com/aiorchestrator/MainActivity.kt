@@ -29,6 +29,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
 
     private var resourceTelemetry: ResourceTelemetry? = null
+    private var systemTtsBridge: AndroidSystemTtsBridge? = null
 
     private val channelName = "com.aiorchestrator/android_intents"
     private val sherpaVoiceChannelName = "com.aiorchestrator/sherpa_onnx_voice"
@@ -72,6 +73,8 @@ class MainActivity : FlutterActivity() {
         VideoStoryboardBridge.register(flutterEngine)
         PcmReadAloudBridge.register(applicationContext, flutterEngine)
         LiveAudioDiagnosticsBridge.register(flutterEngine)
+        systemTtsBridge?.close()
+        systemTtsBridge = AndroidSystemTtsBridge(applicationContext, flutterEngine)
         registerIntentChannel(flutterEngine)
         registerSherpaVoiceChannels(flutterEngine)
         registerMlcNativeChannel(flutterEngine)
@@ -87,6 +90,8 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         resourceTelemetry?.close()
         resourceTelemetry = null
+        systemTtsBridge?.close()
+        systemTtsBridge = null
         releaseVoiceAudioFocus()
         super.onDestroy()
     }
