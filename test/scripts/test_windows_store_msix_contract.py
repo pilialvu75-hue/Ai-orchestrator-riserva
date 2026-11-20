@@ -38,7 +38,7 @@ class WindowsStoreMsixContractTest(unittest.TestCase):
         self.assertIn("runtime-cuda\\ggml-cuda.dll", PACKAGER)
 
     def test_store_identity_and_version_are_explicit(self):
-        self.assertIn("Partner Center product identity", PACKAGER)
+        self.assertIn("reserved Partner Center product name", PACKAGER)
         self.assertIn("CN=", PACKAGER)
         self.assertIn("AIVEXUS.QA", WORKFLOW)
         self.assertIn("Real Store Product identity required", WORKFLOW)
