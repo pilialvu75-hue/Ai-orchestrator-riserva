@@ -87,6 +87,9 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     _expiryTimer?.cancel();
     _gameRunner?.stop();
     _session.stop();
+    if (_isAndroid) {
+      unawaited(_androidGestures.invokeMethod<void>('clearTarget'));
+    }
     unawaited(_releaseProjection());
     _textController.dispose();
     super.dispose();
@@ -155,7 +158,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       if (mounted) {
         setState(() => _message =
             'In Accessibilità abilita AIVEXUS Computer Use solo se '
-            'vuoi autorizzare i tocchi di prova su Car Jam.');
+            'vuoi autorizzare i gesti su un’app selezionata.');
       }
     });
   }
@@ -196,12 +199,12 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(swipe ? 'Scorrimento di prova su Car Jam'
-            : 'Tocco di prova su Car Jam'),
+        title: Text(swipe ? 'Scorrimento nell’app selezionata'
+            : 'Tocco nell’app selezionata'),
         content: Text(
           'Fra 4 secondi AIVEXUS proverà ${swipe ? 'uno scorrimento' : 'un tocco'} '
-          'da ($x, $y) a ($endX, $endY). Passa subito a Car Jam Solver. '
-          'Non verrà inviato alcun gesto ad altre applicazioni.',
+          'da ($x, $y) a ($endX, $endY). Torna subito nell’app acquisita. '
+          'Se nel frattempo cambia la finestra, il gesto sarà bloccato.',
         ),
         actions: [
           TextButton(
@@ -219,17 +222,18 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     final revision = _session.sessionRevision;
     await _run(() async {
       setState(() => _message =
-          'Passa a Car Jam: gesto fra 4 secondi. STOP annulla.');
+          'Torna nell’app selezionata: gesto fra 4 secondi. STOP annulla.');
       await Future<void>.delayed(const Duration(seconds: 4));
       if (!_session.isActive || revision != _session.sessionRevision) return;
       final outcome = await _androidGestures.invokeMethod<String>(
-        swipe ? 'swipeGame' : 'tapGame',
+        swipe ? 'swipeTarget' : 'tapTarget',
         <String, Object>{'x': x, 'y': y, 'endX': endX, 'endY': endY},
       );
       if (mounted && revision == _session.sessionRevision) {
         setState(() => _message =
             'Gesto Android: ${outcome ?? 'nessun risultato'}. '
-            'Verifica sul gioco il cambiamento effettivo.');
+            'Verifica il cambiamento nell’app. Per un altro gesto '
+            'acquisisci nuovamente la finestra.');
       }
     });
   }
@@ -553,11 +557,20 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       await Future<void>.delayed(const Duration(seconds: 4));
       if (!_session.isActive ||
           grantRevision != _session.sessionRevision) return;
+      if (_isAndroid) {
+        // Bind exactly the currently foreground external app to ONE gesture.
+        // The native service excludes settings, system UI and the host app.
+        await _androidGestures.invokeMethod<String>(
+          'selectForegroundTarget',
+        );
+      }
       await _refreshFrame();
       if (mounted) {
-        setState(() => _message =
-            'Schermata aggiornata. Torna al laboratorio per scegliere '
-            'la finestra da controllare.');
+        setState(() => _message = _isAndroid
+            ? 'App selezionata. Torna in AIVEXUS, tocca o trascina '
+              'sull’anteprima e conferma il gesto.'
+            : 'Schermata aggiornata. Torna al laboratorio per scegliere '
+              'la finestra da controllare.');
       }
     });
   }
@@ -620,6 +633,9 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     _expiryTimer?.cancel();
     _gameRunner?.stop();
     _session.stop();
+    if (_isAndroid) {
+      unawaited(_androidGestures.invokeMethod<void>('clearTarget'));
+    }
     _selectTargetOnNextTap = false;
     _previousGameScore = null;
     unawaited(_releaseProjection());
@@ -690,9 +706,9 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
           if (_isAndroid) ...[
             const SizedBox(height: 8),
             const Text(
-              'Computer Use Android: osserva il gioco, quindi prova '
-              'un solo tocco con autorizzazione esplicita. '
-              'Per ora nessun agente IA autonomo.',
+              'Computer Use Android: seleziona l’app che vuoi osservare, '
+              'poi autorizza un tocco o uno scorrimento. '
+              'Per ora non è ancora attivo un agente IA autonomo.',
             ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _openAndroidAccessibilitySettings,
@@ -701,9 +717,9 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
             ),
             const Text(
               'Dopo aver abilitato il servizio, avvia Solo osservazione, '
-              'acquisisci Car Jam tra 4 secondi. Tocca o trascina '
-              'sull’anteprima, conferma, poi torna al gioco entro '
-              '4 secondi per vedere il gesto.',
+              'premi Acquisisci tra 4 secondi e apri l’app da controllare. '
+              'Tocca o trascina sull’anteprima e conferma, poi torna '
+              'nell’app entro 4 secondi per vedere il gesto.',
             ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _openCarJamPlayStore,
@@ -712,8 +728,8 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
             ),
             const Text(
               'Installazione solo con tua conferma nel Play Store. '
-              'Aivexus Android può osservare il gioco con consenso, '
-              'ma non controllarlo ancora autonomamente.',
+              'Car Jam è solo un’applicazione suggerita per il primo collaudo. '
+              'L’agente autonomo Android non è ancora disponibile.',
             ),
           ],
           const SizedBox(height: 12),
