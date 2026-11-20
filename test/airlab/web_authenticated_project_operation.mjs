@@ -386,7 +386,7 @@ test('Pages routes reserve once and recover status for the verified owner', asyn
     projectId, expectedRevision: 1, expectedSpecSha256: digest,
   }));
   assert.equal(approval.status, 200);
-  assert.equal((await send(otherToken)).status, 409);
+  assert.equal((await send(otherToken)).status, 403);
   assert.equal(f.reservations.size, 0);
 
   const first = await body(await send(token));
@@ -413,7 +413,7 @@ test('Pages routes reserve once and recover status for the verified owner', asyn
   assert.equal((await status(token, '?projectId=x&projectId=y')).status, 400);
   assert.equal(f.prepares, prepared);
   assert.deepEqual(await body(await status(otherToken)), {
-    version: 1, ok: false, error: 'execution_not_found',
+    version: 1, ok: false, error: 'owner_required',
   });
   assert.deepEqual(await body(await status(token)), {
     version: 1, ok: true, revision: 1, status: 'reserved',
@@ -525,7 +525,7 @@ test('Pages stages and approves a counter, then serves only its verified ZIP to 
   assert.equal((await reserve(token)).status, 409);
 
   const approval = { projectId, expectedRevision: 1, expectedSpecSha256: proposal.specSha256 };
-  assert.equal((await approve(otherToken, approval)).status, 409);
+  assert.equal((await approve(otherToken, approval)).status, 403);
   assert.equal((await approve(token, { ...approval, expectedSpecSha256: digest })).status, 409);
   assert.equal((await approve(token, approval)).status, 200);
   assert.equal((await body(await stage(token, { projectId }))).status, 'approved');
@@ -816,11 +816,11 @@ test('Pages generates and persists sources through the dedicated free route', as
   assert.deepEqual(result.paths, ['index.html', 'timer.mjs']);
   assert.deepEqual(await (await submit(token, first)).json(), result);
   assert.deepEqual(await (await status(token, `generationId=${first.generationId}`)).json(), result);
-  assert.equal((await status(otherToken, `generationId=${first.generationId}`)).status, 404);
+  assert.equal((await status(otherToken, `generationId=${first.generationId}`)).status, 403);
   assert.equal((await status(token, `generationId=${first.generationId}&prompt=unexpected`)).status, 400);
   assert.equal((await status(null, `generationId=${first.generationId}`)).status, 401);
   assert.equal((await submit(token, { ...first, prompt: 'Un altro prompt' })).status, 409);
-  assert.equal((await submit(otherToken, first, { ...env, AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'false' })).status, 503);
+  assert.equal((await submit(otherToken, first, { ...env, AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'false' })).status, 403);
   assert.deepEqual(prompts, [first.prompt]);
 
   const hashes = new Set([result.sourceSha256]);
@@ -1243,7 +1243,7 @@ test('verified same-owner project reuse does not invoke AI or consume quota', as
   assert.equal(reused.ok, true);
   assert.equal(reused.found, true);
   assert.equal(reused.generationId, id);
-  assert.equal((await body(await read(stranger))).found, false);
+  assert.equal((await read(stranger)).status, 403);
   assert.equal((await body(await read(token,
     '/api/cantiere/proposals/reuse?promptSha256=' + '0'.repeat(64)))).found, false);
   assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_app_generations').get().count, 1);
