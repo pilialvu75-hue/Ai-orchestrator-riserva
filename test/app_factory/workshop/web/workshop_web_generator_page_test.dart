@@ -227,4 +227,58 @@ void main() {
     expect(sentPrompt, prompt);
     expect(find.text('Generazione in corso'), findsOneWidget);
   });
+
+
+  testWidgets('quota rejection shows remaining zero and a recovery time',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1120, 900);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+
+    int quotaReads = 0;
+    int generationPosts = 0;
+    final next = DateTime.now().toUtc().add(const Duration(minutes: 45));
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/cantiere/proposals/quota') {
+        quotaReads++;
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true, 'scope': 'aivexus_reservations',
+          'remaining': 0, 'userRemaining': 0, 'userLimit': 10,
+          'globalRemaining': 12, 'globalLimit': 36,
+          'nextAvailableAt': next.toIso8601String(),
+        }), 200);
+      }
+      expect(request.url.path, '/api/cantiere/proposals/generate');
+      expect(request.method, 'POST');
+      generationPosts++;
+      return http.Response(
+        jsonEncode({'version': 1, 'ok': false, 'error': 'generation_quota_exceeded'}),
+        429,
+      );
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(home: WorkshopWebGeneratorPage(client: client)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Generazioni disponibili: 0'), findsOneWidget);
+    expect(find.byKey(const Key('web_generator_quota_next')), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('web_generator_first_prompt')),
+      'Crea un esempio con tre menu.',
+    );
+    await tester.pump();
+    await tester.tap(find.text('Genera'));
+    await tester.pumpAndSettle();
+
+    expect(generationPosts, 1);
+    expect(quotaReads, greaterThanOrEqualTo(2));
+    expect(find.text('Limite di generazione raggiunto. Riprova più tardi.'),
+        findsOneWidget);
+    expect(find.textContaining('Generazioni disponibili: 0'), findsOneWidget);
+    expect(find.byKey(const Key('web_generator_quota_next')), findsOneWidget);
+  });
 }
