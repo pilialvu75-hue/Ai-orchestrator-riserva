@@ -217,8 +217,12 @@ export async function generateWebApplication({ request, ownerSubject, adminSubje
     return receipt(generationId, previous.status, previous.resultJson);
   }
   if (!infer) return { ok: false, reason: 'generation_unavailable' };
+  // Trial credits are reserved for the signed Access administrator only.
+  // Deny before D1 quota reservation even when the route itself is enabled.
+  const isAdmin = typeof adminSubject === 'string' && adminSubject.length > 0 &&
+    ownerSubject === adminSubject;
   // Reject inaccessible or non-approved trial routes BEFORE the D1 reservation.
-  if (isManual && infer.supportsBuilderRoute?.(builderRouteId) !== true) {
+  if (isManual && (!isAdmin || infer.supportsBuilderRoute?.(builderRouteId) !== true)) {
     return { ok: false, reason: 'generation_model_unavailable' };
   }
 
