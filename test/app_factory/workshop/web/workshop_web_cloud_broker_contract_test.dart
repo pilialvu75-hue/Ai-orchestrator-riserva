@@ -78,7 +78,16 @@ void main() {
     // No concrete provider endpoint, key or model is a browser/source default.
     expect(inference, isNot(contains('api.openai.com')));
     expect(inference, isNot(contains('openrouter.ai')));
-    expect(inference, isNot(contains('integrate.api.nvidia.com')));
+    // The new builder has a *server-side* exact NVIDIA trial allowlist.
+    // The endpoint must never be supplied by the browser as a selectable
+    // upstream URL; explicit route ids are validated on this server.
+    expect(inference, contains('NVIDIA_TRIAL_ENDPOINT'));
+    expect(inference, contains('route.endpoint !== NVIDIA_TRIAL_ENDPOINT'));
+    final browser = File(
+      'lib/app_factory/workshop/web/workshop_web_generator_page.dart',
+    ).readAsStringSync();
+    expect(browser, isNot(contains('integrate.api.nvidia.com')));
+    expect(browser, isNot(contains('apiKeySecret')));
     expect(inference, isNot(contains('sk-')));
   });
 

@@ -74,6 +74,12 @@ final class WorkshopWebLanguageScope
 
 const Map<String, Map<String, String>> _translations = {
   'fr': {
+    'Generazione NVIDIA riservata all’amministratore verificato: uso Gemma 4.': 'Génération NVIDIA réservée à l\'administrateur vérifié : utilisation de Gemma 4.',
+    'Motore predefinito: Gemma 4 (Cloudflare).': 'Moteur par défaut : Gemma 4 (Cloudflare).',
+    'Il modello scelto riguarda la chat; il generatore usa Gemma 4.': 'Le modèle sélectionné concerne le chat ; le générateur utilise Gemma 4.',
+    'Modello NVIDIA non autorizzato per generare app: uso Gemma 4.': 'Modèle NVIDIA non autorisé pour générer des apps : utilisation de Gemma 4.',
+    'Generazione con modello NVIDIA di prova autorizzato.': 'Génération avec le modèle d\'essai NVIDIA autorisé.',
+    'Il modello NVIDIA non è disponibile gratuitamente per il generatore.': 'Le modèle NVIDIA n\'est pas disponible gratuitement pour le générateur.',
     'App già verificata riutilizzata senza nuova inferenza.': 'Application déjà vérifiée réutilisée sans nouvel appel à l’IA.',
     'Amministratore': 'Administrateur',
     'Quota generazioni non disponibile': 'Quota de générations indisponible',
@@ -227,6 +233,12 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Inférence Cloud / AUTO',
   },
   'en': {
+    'Generazione NVIDIA riservata all’amministratore verificato: uso Gemma 4.': 'NVIDIA generation is limited to the verified administrator: using Gemma 4.',
+    'Motore predefinito: Gemma 4 (Cloudflare).': 'Default engine: Gemma 4 (Cloudflare).',
+    'Il modello scelto riguarda la chat; il generatore usa Gemma 4.': 'The selected model applies to chat; the generator uses Gemma 4.',
+    'Modello NVIDIA non autorizzato per generare app: uso Gemma 4.': 'NVIDIA model not approved for app generation: using Gemma 4.',
+    'Generazione con modello NVIDIA di prova autorizzato.': 'Generating with an approved NVIDIA trial model.',
+    'Il modello NVIDIA non è disponibile gratuitamente per il generatore.': 'The NVIDIA model is not available free of charge for the generator.',
     'App già verificata riutilizzata senza nuova inferenza.': 'Previously verified app reused without another AI call.',
     'Amministratore': 'Administrator',
     'Quota generazioni non disponibile': 'Generation quota unavailable',
@@ -340,6 +352,12 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Cloud / AUTO inference',
   },
   'es': {
+    'Generazione NVIDIA riservata all’amministratore verificato: uso Gemma 4.': 'Generación NVIDIA reservada al administrador verificado: se utiliza Gemma 4.',
+    'Motore predefinito: Gemma 4 (Cloudflare).': 'Motor predeterminado: Gemma 4 (Cloudflare).',
+    'Il modello scelto riguarda la chat; il generatore usa Gemma 4.': 'El modelo seleccionado corresponde al chat; el generador utiliza Gemma 4.',
+    'Modello NVIDIA non autorizzato per generare app: uso Gemma 4.': 'Modelo NVIDIA no autorizado para generar apps: se utiliza Gemma 4.',
+    'Generazione con modello NVIDIA di prova autorizzato.': 'Generando con un modelo de prueba NVIDIA autorizado.',
+    'Il modello NVIDIA non è disponibile gratuitamente per il generatore.': 'El modelo NVIDIA no está disponible gratis para el generador.',
     'App già verificata riutilizzata senza nuova inferenza.': 'Aplicación ya verificada reutilizada sin otra llamada a la IA.',
     'Amministratore': 'Administrador',
     'Quota generazioni non disponibile': 'Cuota de generaciones no disponible',

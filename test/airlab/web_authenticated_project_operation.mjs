@@ -23,6 +23,9 @@ import { onRequest as quotaApplication } from
 import { onRequest as reuseApplication } from
   '../../functions/api/cantiere/proposals/reuse.js';
 import { onRequest as ordinaryInference } from '../../functions/api/cantiere/inference.js';
+import { createWebBuilderInference, listWebBuilderLargeModels } from
+  '../../functions/api/cantiere/inference.js';
+import { generateWebApplication } from '../../scripts/web/generate_web_application.mjs';
 import { onRequest as cloudCapabilities } from '../../functions/api/cantiere/capabilities.js';
 import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
@@ -1185,4 +1188,142 @@ test('verified same-owner project reuse does not invoke AI or consume quota', as
     }),
     env,
   }))).userUsed, 1);
+});
+
+
+test('large NVIDIA trial never spends a generation quota before free-entitlement verification', async () => {
+  const id = crypto.randomUUID();
+  const trial = {
+    id: 'kimi-k26-orchestrator',
+    endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+    model: 'moonshotai/kimi-k2.6',
+    apiKeySecret: 'AIVEXUS_NIM_TEST_KEY',
+    selfTestFree: true,
+    manualOnly: true,
+    builderFreeVerified: true,
+  };
+  const env = {
+    AIVEXUS_WEB_BUILDER_AI: { run: async () => {
+      throw new Error('Cloudflare builder must never be called');
+    } },
+    AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
+    CANTIERE_CLOUD_ROUTES_JSON: JSON.stringify({ orchestration: [trial] }),
+    AIVEXUS_NIM_TEST_KEY: 'dummy-credential',
+  };
+  const infer = createWebBuilderInference(env);
+  let reads = 0;
+  let writes = 0;
+  const db = {
+    prepare(query) {
+      return {
+        bind() {
+          return {
+            async first() {
+              if (query.includes('SELECT CASE WHEN status')) {
+                reads++;
+                return null;
+              }
+              writes++;
+              throw new Error('D1 reservation must not occur for unapproved trial');
+            },
+          };
+        },
+      };
+    },
+  };
+  const request = {
+    generationId: id,
+    prompt: 'Crea una piccola app con due pulsanti',
+    builderRouteId: trial.id,
+  };
+  const blocked = await generateWebApplication({
+    request, ownerSubject: 'signed-user', db, infer,
+  });
+  assert.deepEqual(blocked, { ok: false, reason: 'generation_model_unavailable' });
+  assert.equal(reads, 1);
+  assert.equal(writes, 0);
+  assert.equal(listWebBuilderLargeModels(env).find(r => r.routeId === trial.id).available, false);
+
+  // A synthetic self-test being free is insufficient for a full builder job.
+  env.AIVEXUS_WEB_BUILDER_NIM_FREE_VERIFIED = 'true';
+  const routeNotApproved = createWebBuilderInference(env);
+  assert.equal(routeNotApproved.supportsBuilderRoute(trial.id), true);
+  const normalUserDenied = await generateWebApplication({
+    request, ownerSubject: 'signed-user',
+    adminSubject: 'different-signed-admin',
+    db, infer: routeNotApproved,
+  });
+  assert.deepEqual(normalUserDenied,
+    { ok: false, reason: 'generation_model_unavailable' });
+  assert.equal(writes, 0);
+  delete trial.builderFreeVerified;
+  env.CANTIERE_CLOUD_ROUTES_JSON = JSON.stringify({ orchestration: [trial] });
+  assert.equal(createWebBuilderInference(env).supportsBuilderRoute(trial.id), false);
+
+  // No arbitrary paid or mismatched model is eligible.
+  trial.builderFreeVerified = true;
+  trial.endpoint = 'https://example.com/paid/completions';
+  env.CANTIERE_CLOUD_ROUTES_JSON = JSON.stringify({ orchestration: [trial] });
+  assert.equal(createWebBuilderInference(env).supportsBuilderRoute(trial.id), false);
+  trial.endpoint = 'https://integrate.api.nvidia.com/v1/chat/completions';
+  trial.model = 'unapproved/giant-model';
+  env.CANTIERE_CLOUD_ROUTES_JSON = JSON.stringify({ orchestration: [trial] });
+  assert.equal(createWebBuilderInference(env).supportsBuilderRoute(trial.id), false);
+});
+
+test('free-verified NVIDIA 1T builder uses exactly one trial request and reports provenance', async t => {
+  const model = 'moonshotai/kimi-k2.6';
+  const endpoint = 'https://integrate.api.nvidia.com/v1/chat/completions';
+  const trial = {
+    id: 'kimi-k26-orchestrator',
+    model,
+    endpoint,
+    apiKeySecret: 'AIVEXUS_NIM_TEST_KEY',
+    selfTestFree: true,
+    manualOnly: true,
+    builderFreeVerified: true,
+  };
+  const env = {
+    CANTIERE_CLOUD_ROUTES_JSON: JSON.stringify({ orchestration: [trial] }),
+    AIVEXUS_NIM_TEST_KEY: 'placeholder-test-only',
+    AIVEXUS_WEB_BUILDER_NIM_FREE_VERIFIED: 'true',
+  };
+  const infer = createWebBuilderInference(env);
+  assert.ok(infer);
+  assert.equal(infer.supportsBuilderRoute(trial.id), true);
+  assert.equal(infer.supportsBuilderRoute('other-paid-provider'), false);
+  assert.equal(listWebBuilderLargeModels(env).find(r => r.routeId === trial.id).available, true);
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls++;
+    assert.equal(String(url), endpoint);
+    assert.equal(options.method, 'POST');
+    const request = JSON.parse(options.body);
+    assert.equal(request.model, model);
+    assert.equal(request.max_tokens, 4096);
+    assert.equal(request.stream, false);
+    assert.equal(request.messages.at(-1).role, 'user');
+    return new Response(JSON.stringify({
+      model, choices: [{
+        finish_reason: 'stop',
+        message: { content: JSON.stringify({
+          title: 'Contatore NVIDIA',
+          requirements: ['Un pulsante incrementa il conteggio'],
+          files: [{ path: 'index.html', content: '<button id="count">0</button>' }],
+          checks: [{ action: 'text', selector: '#count', value: '0' }],
+        }) },
+      }],
+      usage: { completion_tokens: 100 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  });
+  const result = await infer([
+    { role: 'system', content: 'Return a single JSON object.' },
+    { role: 'user', content: 'Crea contatore.' },
+  ], trial.id);
+  assert.equal(result.ok, true);
+  assert.equal(result.model, model);
+  assert.equal(result.reportedModel, model);
+  assert.equal(result.provider, 'NVIDIA NIM');
+  assert.equal(result.routeId, trial.id);
+  assert.equal(calls, 1);
 });

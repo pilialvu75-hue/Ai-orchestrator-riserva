@@ -199,9 +199,13 @@ export async function readWebApplicationGeneration({ db, ownerSubject, generatio
 }
 
 export async function generateWebApplication({ request, ownerSubject, adminSubject, db, infer }) {
-  const { generationId, prompt } = request;
+  const { generationId, prompt, builderRouteId } = request;
   const brief = cleanGenerationPrompt(prompt);
-  if (Object.keys(request).length !== 2 || typeof generationId !== 'string' ||
+  const isManual = builderRouteId !== undefined;
+  if (Object.keys(request).length !== (isManual ? 3 : 2) ||
+      (isManual && (typeof builderRouteId !== 'string' ||
+        !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(builderRouteId))) ||
+      typeof generationId !== 'string' ||
       !GENERATION_ID.test(generationId) || !brief || !brief.isWellFormed()) {
     return { ok: false, reason: 'invalid_request' };
   }
@@ -213,6 +217,14 @@ export async function generateWebApplication({ request, ownerSubject, adminSubje
     return receipt(generationId, previous.status, previous.resultJson);
   }
   if (!infer) return { ok: false, reason: 'generation_unavailable' };
+  // Trial credits are reserved for the signed Access administrator only.
+  // Deny before D1 quota reservation even when the route itself is enabled.
+  const isAdmin = typeof adminSubject === 'string' && adminSubject.length > 0 &&
+    ownerSubject === adminSubject;
+  // Reject inaccessible or non-approved trial routes BEFORE the D1 reservation.
+  if (isManual && (!isAdmin || infer.supportsBuilderRoute?.(builderRouteId) !== true)) {
+    return { ok: false, reason: 'generation_model_unavailable' };
+  }
 
   const limits = generationLimits(ownerSubject, adminSubject);
   const claim = await db.prepare(CLAIM).bind(
@@ -232,7 +244,7 @@ export async function generateWebApplication({ request, ownerSubject, adminSubje
   const inference = await infer([
     { role: 'system', content: INSTRUCTION },
     { role: 'user', content: brief },
-  ]).catch(() => ({ ok: false }));
+  ], isManual ? builderRouteId : null).catch(() => ({ ok: false }));
   const reply = inference.ok ? parseResponse(inference.text) : null;
   const source = normalizeSource(reply);
   if (source) {

@@ -115,6 +115,9 @@ function parseRoutes(env) {
         // Large trial models can be selected explicitly without being
         // silently used by AUTO/failover before a separate authorization.
         manualOnly: row.manualOnly === true,
+        // Separate from short synthetic selfTestFree: this requires an
+        // explicit, account-verified zero-cost allowance for builder calls.
+        builderFreeVerified: row.builderFreeVerified === true,
       });
     }
     if (valid.length > 0) result[capability] = valid;
@@ -296,7 +299,9 @@ async function callRoute(route, request) {
   if (!apiKey) return { ok: false, status: 503, failureKind: 'binding_missing' };
 
   const params = request.selfTest ? selfTestGenerationFor(route) : request;
-  for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {
+  // Prototype builder requests are deliberately one-shot, preserving trial credits.
+  const attemptsAllowed = request.builderManual ? 1 : MAX_ROUTE_ATTEMPTS;
+  for (let attempt = 0; attempt < attemptsAllowed; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 80000);
     try {
@@ -334,7 +339,7 @@ async function callRoute(route, request) {
 
       if (!response.ok) {
         if (
-          attempt + 1 < MAX_ROUTE_ATTEMPTS &&
+          attempt + 1 < attemptsAllowed &&
           isTransientStatus(response.status)
         ) {
           const delay = retryDelayMs(response, attempt);
@@ -410,15 +415,76 @@ async function callRoute(route, request) {
   return { ok: false, status: 502, failureKind: 'upstream_unknown' };
 }
 
+// Only these exact already-known NVIDIA prototype routes may ever be used
+// by the app generator. Their separate trial entitlement is neither permanent
+// nor implied by having a valid API key or a passing synthetic self-test.
+const LARGE_NIM_BUILDER_ROUTES = Object.freeze({
+  'nemotron-ultra-orchestrator': 'nvidia/nemotron-3-ultra-550b-a55b',
+  'kimi-k26-orchestrator': 'moonshotai/kimi-k2.6',
+  'deepseek-v41-flash-orchestrator': 'deepseek-ai/deepseek-v4.1-flash',
+});
+const NVIDIA_TRIAL_ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
+
+function approvedLargeNimBuilderRoute(env, routeId) {
+  if (env.AIVEXUS_WEB_BUILDER_NIM_FREE_VERIFIED !== 'true') return null;
+  if (typeof routeId !== 'string' ||
+      !Object.hasOwn(LARGE_NIM_BUILDER_ROUTES, routeId)) return null;
+  const routes = parseRoutes(env).orchestration ?? [];
+  const matches = routes.filter(route => route.id === routeId);
+  if (matches.length !== 1) return null;
+  const route = matches[0];
+  if (route.model !== LARGE_NIM_BUILDER_ROUTES[routeId] ||
+      route.endpoint !== NVIDIA_TRIAL_ENDPOINT ||
+      !route.manualOnly || !route.selfTestFree ||
+      !route.builderFreeVerified) return null;
+  return route;
+}
+
+// Sanitized availability, no provider URL, keys, or cross-provider fallback.
+export function listWebBuilderLargeModels(env) {
+  return Object.keys(LARGE_NIM_BUILDER_ROUTES).map(routeId => ({
+    routeId,
+    model: LARGE_NIM_BUILDER_ROUTES[routeId],
+    available: approvedLargeNimBuilderRoute(env, routeId) !== null,
+  }));
+}
+
 // The Pages binding is assigned by the deploy operator on Workers Free. This
 // model is available only on the authenticated generator, with no fallback.
 export function createWebBuilderInference(env) {
   const ai = env.AIVEXUS_WEB_BUILDER_AI;
-  if (env.AIVEXUS_WEB_BUILDER_FREE_ENABLED !== 'true' || typeof ai?.run !== 'function') return null;
+  const cloudflareFree = env.AIVEXUS_WEB_BUILDER_FREE_ENABLED === 'true' &&
+    typeof ai?.run === 'function';
+  const largeModelsAvailable = Object.keys(LARGE_NIM_BUILDER_ROUTES).some(
+    id => approvedLargeNimBuilderRoute(env, id) !== null,
+  );
+  if (!cloudflareFree && !largeModelsAvailable) return null;
   const model = '@cf/google/gemma-4-26b-a4b-it';
-  return async function infer(input) {
+
+  const infer = async function builderInfer(input, builderRouteId = null) {
     const messages = validateMessages(input, 70000, 72000);
     if (!messages) return { ok: false };
+    if (builderRouteId !== null) {
+      const route = approvedLargeNimBuilderRoute(env, builderRouteId);
+      if (!route) return { ok: false, failureKind: 'not_free_authorized' };
+      // An explicit manual choice NEVER falls back to a route that may
+      // consume billable credits. Only this exact no-cost-trial NIM is called.
+      // Kimi/DeepSeek hosted previews prescribe different sampling. Keep
+      // full 4096-token builder output while honoring their known defaults.
+      const sampling = selfTestGenerationFor(route);
+      const result = await callRoute(route, {
+        env, messages, maxTokens: 4096,
+        temperature: sampling.temperature, topP: sampling.topP,
+        selfTest: false, builderManual: true,
+      });
+      if (!result.ok) return result;
+      // A provider that omits the served model must not be falsely attested.
+      return {
+        ...result,
+        reportedModel: result.reportedModel ?? 'not_reported_by_provider',
+      };
+    }
+    if (!cloudflareFree) return { ok: false, failureKind: 'free_builder_unavailable' };
     const result = await ai.run(model, {
       messages, max_tokens: 4096, temperature: 0.2, top_p: 0.9, stream: false, store: false,
     });
@@ -433,6 +499,10 @@ export function createWebBuilderInference(env) {
     return { ok: true, text: text.trim(), model, reportedModel, provider: 'Cloudflare Workers AI',
       routeId: 'builder-free', tokensGenerated: Number.isSafeInteger(tokens) && tokens >= 0 ? tokens : null };
   };
+  // Called BEFORE reserving a D1 attempt: a disabled trial cannot burn quota.
+  infer.supportsBuilderRoute = id =>
+    id === null ? cloudflareFree : approvedLargeNimBuilderRoute(env, id) !== null;
+  return infer;
 }
 
 export async function onRequest(context) {
