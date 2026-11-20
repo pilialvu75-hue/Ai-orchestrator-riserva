@@ -370,6 +370,13 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       }
       return null;
     }
+    if (_quota?['tier'] != 'administrator') {
+      if (mounted) {
+        setState(() => _builderNotice =
+            'Generazione NVIDIA riservata all’amministratore verificato: uso Gemma 4.');
+      }
+      return null;
+    }
     try {
       final response = await _client
           .get(Uri.base.resolve('/api/cantiere/models'))
