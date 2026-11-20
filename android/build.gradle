@@ -10,6 +10,11 @@ allprojects {
     // require compileSdk 36+ (e.g. activity-ktx:1.12.4, core-ktx:1.18.0).
     configurations.all {
         resolutionStrategy {
+            // posthog_flutter 5.16.0 declares an open native range
+            // [3.34.3,4.0.0]. Latest native 3.x may remove Kotlin symbols
+            // used by the pinned Flutter plugin, breaking Android builds.
+            // Pin the native Android SDK to its compatible range floor.
+            force 'com.posthog:posthog-android:3.34.3'
             force 'org.jetbrains.kotlin:kotlin-stdlib:2.1.21'
             force 'org.jetbrains.kotlin:kotlin-reflect:2.1.21'
             force 'androidx.activity:activity:1.8.2'
