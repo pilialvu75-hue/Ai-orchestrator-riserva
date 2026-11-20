@@ -55,7 +55,7 @@ test('verification rejects generated paths that escape the project before runnin
 });
 
 const executable = process.env.AIVEXUS_WEB_CHROMIUM;
-test('Chromium detects a syntax error and passes the same real DOM checks after repair', { skip: !executable, timeout: 20000 }, async t => {
+test('Chromium detects a syntax error and passes the same real DOM checks after repair', { skip: !executable, timeout: 50000 }, async t => {
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${'0'.repeat(32)}/ai/v1/chat/completions`;
   const model = '@cf/google/gemma-4-26b-a4b-it';
   const env = {
@@ -100,7 +100,7 @@ test('Chromium detects a syntax error and passes the same real DOM checks after 
   await assert.rejects(packageVerifiedWebApplication({ ...result, source: broken }), /changed/);
 });
 
-test('Chromium keeps generated application requests away from services on the host', { skip: !executable, timeout: 20000 }, async t => {
+test('Chromium keeps generated application requests away from services on the host', { skip: !executable, timeout: 50000 }, async t => {
   let requests = 0;
   const canary = createServer((request, response) => {
     requests++;

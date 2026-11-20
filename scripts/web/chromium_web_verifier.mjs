@@ -117,7 +117,7 @@ function browserCheck({ action, selector, value }) {
 }
 
 export function createChromiumWebVerifier({ executable }) {
-  return async function verify({ assets, checks }) {
+  async function verifyOnce({ assets, checks }) {
     if (!executable) return { status: 'unavailable', diagnosis: 'browser_not_configured' };
     const profile = await mkdtemp(join(tmpdir(), 'aivexus-web-test-'));
     let exited;
@@ -217,5 +217,10 @@ export function createChromiumWebVerifier({ executable }) {
         await rm(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
       }
     }
+  }
+  return async function verify(input) {
+    const result = await verifyOnce(input);
+    if (result.diagnosis === 'browser_startup_failed') return verifyOnce(input);
+    return result;
   };
 }
