@@ -72,7 +72,10 @@ class _RecordingResident extends ResidentCompletionRuntime {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('Windows Qwen2.5 3B uses exactly the canonical Self-Test CLI', () async {
+  test('Windows Qwen2.5 3B uses resident inference instead of forced CLI', () async {
+    final temp = await Directory.systemTemp.createTemp('aivexus-qwen-resident-');
+    final model = File(p.join(temp.path, 'qwen.gguf'));
+    await model.writeAsBytes(<int>[71, 71, 85, 70], flush: true);
     final cli = _RecordingCli();
     final resident = _RecordingResident();
     final provider = AssistantResidentLocalRuntimeProvider(
@@ -83,55 +86,62 @@ void main() {
     );
     try {
       final responses = await provider.streamInference(
-        request: const InferenceRequest(
+        request: InferenceRequest(
           sessionId: 'windows-qwen',
           prompt: 'Rispondi OK',
           modelId: 'qwen2_5_3b_instruct',
-          modelPath: 'not-opened-by-resident.gguf',
+          modelPath: model.path,
           maxTokens: 16,
           temperature: 0,
         ),
         cancellationToken: CancellationToken(),
       ).toList();
-      expect(cli.calls, 1);
-      expect(resident.calls, 0);
+      expect(cli.calls, 0);
+      expect(resident.calls, 1);
       expect(responses.last.isFinal, isTrue);
       expect(responses.last.isError, isFalse);
-      expect(responses.last.text, 'CLI');
+      expect(responses.last.text, 'RESIDENT');
     } finally {
       await provider.dispose();
+      await temp.delete(recursive: true);
     }
   });
 
-  test('Assistant chat decorator preserves the Qwen CLI final response',
+  test('Assistant chat decorator preserves resident Qwen completion',
       () async {
+    final temp = await Directory.systemTemp.createTemp('aivexus-chat-resident-');
+    final model = File(p.join(temp.path, 'qwen.gguf'));
+    await model.writeAsBytes(<int>[71, 71, 85, 70], flush: true);
     final cli = _RecordingCli();
     final resident = _RecordingResident();
-    final assistant = AssistantWebContinuationLocalRuntimeProvider(
-      delegate: AssistantResidentLocalRuntimeProvider(
-        delegate: cli,
-        runtime: resident,
-        executable: () => 'fake-llama-server',
-        isWindowsHost: () => true,
-      ),
+    final provider = AssistantResidentLocalRuntimeProvider(
+      delegate: cli,
+      runtime: resident,
+      executable: () => 'fake-llama-server',
+      isWindowsHost: () => true,
     );
-    final responses = await assistant.streamInference(
-      request: const InferenceRequest(
-        sessionId: 'chat-route',
-        prompt: 'ciao',
-        modelId: 'qwen2_5_3b_instruct',
-        modelPath: 'canonical-cli-only.gguf',
-        maxTokens: 16,
-      ),
-      cancellationToken: CancellationToken(),
-    ).toList();
-    expect(cli.calls, 1);
-    expect(resident.calls, 0);
-    expect(responses.last.isFinal, isTrue);
-    expect(responses.last.isError, isFalse);
-    expect(responses.last.text, 'CLI');
+    final assistant = AssistantWebContinuationLocalRuntimeProvider(delegate: provider);
+    try {
+      final responses = await assistant.streamInference(
+        request: InferenceRequest(
+          sessionId: 'chat-route',
+          prompt: 'ciao',
+          modelId: 'qwen2_5_3b_instruct',
+          modelPath: model.path,
+          maxTokens: 16,
+        ),
+        cancellationToken: CancellationToken(),
+      ).toList();
+      expect(cli.calls, 0);
+      expect(resident.calls, 1);
+      expect(responses.last.isFinal, isTrue);
+      expect(responses.last.isError, isFalse);
+      expect(responses.last.text, 'RESIDENT');
+    } finally {
+      await provider.dispose();
+      await temp.delete(recursive: true);
+    }
   });
-
 
   test('ASUS Windows selects CUDA and passes bounded GPU settings', () async {
     final temp = await Directory.systemTemp.createTemp('aivexus-cuda-route-');
@@ -306,7 +316,10 @@ void main() {
     }
   });
 
-  test('Windows imported Qwen2.5 GGUF name also uses CLI', () async {
+  test('Windows imported Qwen2.5 GGUF also uses resident engine', () async {
+    final temp = await Directory.systemTemp.createTemp('aivexus-qwen-import-');
+    final model = File(p.join(temp.path, 'qwen-import.gguf'));
+    await model.writeAsBytes(<int>[71, 71, 85, 70], flush: true);
     final cli = _RecordingCli();
     final resident = _RecordingResident();
     final provider = AssistantResidentLocalRuntimeProvider(
@@ -317,21 +330,22 @@ void main() {
     );
     try {
       final responses = await provider.streamInference(
-        request: const InferenceRequest(
+        request: InferenceRequest(
           sessionId: 'windows-qwen-import',
           prompt: 'ciao',
           modelId: 'qwen2.5-3b-instruct-q4_k_m.gguf',
-          modelPath: 'canonical-cli-only.gguf',
+          modelPath: model.path,
           maxTokens: 16,
         ),
         cancellationToken: CancellationToken(),
       ).toList();
-      expect(cli.calls, 1);
-      expect(resident.calls, 0);
+      expect(cli.calls, 0);
+      expect(resident.calls, 1);
       expect(responses.last.isFinal, isTrue);
-      expect(responses.last.text, 'CLI');
+      expect(responses.last.text, 'RESIDENT');
     } finally {
       await provider.dispose();
+      await temp.delete(recursive: true);
     }
   });
 
