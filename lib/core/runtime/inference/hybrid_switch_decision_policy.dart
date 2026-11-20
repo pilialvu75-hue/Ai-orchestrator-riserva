@@ -9,7 +9,7 @@ enum HybridDecisionReason {
   cloudNotAuthorized,
   cloudUnavailable,
   preferQuality,
-  localCompletesSooner,
+  fasterCandidate,
   switchCostOutweighsGain,
   preserveOngoingSentence,
   continueCurrent,
@@ -85,13 +85,13 @@ abstract final class HybridSwitchDecisionPolicy {
               : !cloudAuthorized ? HybridDecisionReason.cloudNotAuthorized
               : HybridDecisionReason.cloudUnavailable);
     }
-    if (!localReady) {
-      return const HybridSwitchDecision(
-          HybridExecutionTarget.cloud, HybridDecisionReason.continueCurrent);
-    }
     if (handoffPoint == HybridHandoffPoint.midSentence) {
       return HybridSwitchDecision(
           current, HybridDecisionReason.preserveOngoingSentence);
+    }
+    if (!localReady) {
+      return const HybridSwitchDecision(
+          HybridExecutionTarget.cloud, HybridDecisionReason.continueCurrent);
     }
     if (local == null || cloud == null || !local.isValid || !cloud.isValid) {
       return HybridSwitchDecision(
@@ -114,12 +114,12 @@ abstract final class HybridSwitchDecisionPolicy {
     if (gainCloudMs >= minimumUsefulLatencyGainMs &&
         cloud.batteryPressure < severeBatteryPressure) {
       return const HybridSwitchDecision(
-          HybridExecutionTarget.cloud, HybridDecisionReason.localCompletesSooner);
+          HybridExecutionTarget.cloud, HybridDecisionReason.fasterCandidate);
     }
     if (gainCloudMs <= -minimumUsefulLatencyGainMs &&
         local.batteryPressure < severeBatteryPressure) {
       return const HybridSwitchDecision(
-          HybridExecutionTarget.local, HybridDecisionReason.localCompletesSooner);
+          HybridExecutionTarget.local, HybridDecisionReason.fasterCandidate);
     }
     return HybridSwitchDecision(
         current, HybridDecisionReason.switchCostOutweighsGain);
