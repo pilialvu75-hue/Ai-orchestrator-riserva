@@ -93,7 +93,14 @@ disponibili per il funzionamento ordinario del Cantiere, ma non per il test.
 ## Generazione sorgenti Web
 
 La Pages Function `POST /api/cantiere/proposals/generate` applica il gate
-Access/D1 del Cantiere. Accetta `generationId` (UUID v4) e `prompt`. Il retry
+Access/D1 del Cantiere. Accetta `generationId` (UUID v4) e `prompt`.
+Il primo prompt accetta fino a **8.000 caratteri percepiti dall’utente**
+(inclusi caratteri Unicode composti); soltanto l’operazione di generazione
+ammette JSON di richiesta fino a **48 KiB**. Le altre operazioni Web
+conservano il limite di 2 KiB. Il limite maggiore permette specifiche
+strutturate, ma non cambia i 4.096 token massimi di risposta del generatore:
+per app molto ampie saranno comunque necessari incrementi successivi.
+ Il retry
 dello stesso identificativo con lo stesso prompt restituisce lo stato o la
 ricevuta precedente. `GET` sullo stesso percorso con `generationId` restituisce
 la ricevuta del proprietario senza richiedere di nuovo il prompt. Il browser
