@@ -104,7 +104,7 @@ If the route is not approved, the client explicitly informs the user and
 uses the preexisting free Cloudflare Gemma builder. A deliberately submitted
 but unapproved builder alias is refused by the authenticated endpoint
 **before D1 reserves an attempt**. An approved manual trial makes at most
-**one NVIDIA request**, with no hidden paid-provider fallback or retries.
+**one NVIDIA inference POST**, with no hidden paid-provider fallback or additional inference attempts. If the provider responds with HTTP 202, the existing bounded status polling may issue GET requests without resubmitting inference.
 If a trial expires, immediately turn off one or both server switches.
 
 The original prompt validation, D1 quotas, source checks, verification,
