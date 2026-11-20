@@ -10,7 +10,8 @@ export function onRequest({ request, env }) {
     accessIssuer: env.AIVEXUS_WEB_ACCESS_ISSUER,
     accessAudience: env.AIVEXUS_WEB_ACCESS_AUDIENCE,
     db: env.AIVEXUS_WEB_D1,
-    clientAccessEnabled: env.AIVEXUS_WEB_CLIENT_ACCESS_ENABLED === 'true',
+    ownerOnly: true,
+    clientAccessEnabled: false,
     bucket: env.AIVEXUS_WEB_ARTIFACTS ?? createD1WebCounterArtifactStore(env.AIVEXUS_WEB_D1),
   })(request);
 }
