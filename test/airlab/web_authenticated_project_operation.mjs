@@ -1045,3 +1045,73 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   assert.equal(partial.remaining, 10);
   assert.equal(partial.nextAvailableAt, null);
 });
+
+
+test('only server-declared Cloudflare Access administrator can generate beyond standard cap', async t => {
+  const { db, sqlite } = sqliteD1(t, ['006_web_app_generations.sql']);
+  const signing = await signer();
+  const iat = Math.floor(Date.now() / 1000) - 10;
+  const token = await signing.sign({ iat, nbf: iat, exp: iat + 300 });
+  let inferenceCalls = 0;
+  const env = {
+    AIVEXUS_WEB_ORIGIN: origin,
+    AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
+    AIVEXUS_WEB_BUILDER_AI: {
+      async run() {
+        inferenceCalls++;
+        return {
+          model: '@cf/google/gemma-4-26b-a4b-it',
+          choices: [{
+            finish_reason: 'stop',
+            message: { content: JSON.stringify({
+              title: 'Admin app',
+              requirements: ['Una pagina leggibile'],
+              files: [{ path: 'index.html', content: '<main>Admin app</main>' }],
+            }) },
+          }],
+          usage: { completion_tokens: 80 },
+        };
+      },
+    },
+  };
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(String(url), issuer + '/cdn-cgi/access/certs');
+    return Response.json({ keys: [signing.jwk] });
+  });
+  const seed = sqlite.prepare(
+    "INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status) VALUES (?, ?, ?, 'failed')"
+  );
+  for (let i = 0; i < 10; i++) {
+    seed.run(subject, crypto.randomUUID(), digest);
+  }
+  const payload = { generationId: crypto.randomUUID(), prompt: 'App semplice con un menu' };
+  const send = bindings => generateApplication({
+    request: webRequest(token, payload, { path: '/api/cantiere/proposals/generate' }),
+    env: bindings,
+  });
+  // A browser cannot claim the admin identity: it must match a server-side
+  // value and the *signed* Access sub.
+  assert.equal((await send({ ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: undefined })).status, 429);
+  assert.equal((await send({ ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: 'someone-else' })).status, 429);
+  assert.equal(inferenceCalls, 0);
+  const accepted = await send(env);
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).status, 'generated');
+  assert.equal(inferenceCalls, 1);
+  const quotaResponse = await quotaApplication({
+    request: webRequest(token, null, {
+      method: 'GET', requestOrigin: null, path: '/api/cantiere/proposals/quota',
+    }),
+    env,
+  });
+  const quota = await body(quotaResponse);
+  assert.equal(quota.tier, 'administrator');
+  assert.equal(quota.userUsed, 11);
+  assert.equal(quota.userLimit, 64);
+  assert.equal(quota.userRemaining, 53);
+  assert.equal(quota.globalLimit, 72);
+});
