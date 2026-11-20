@@ -137,6 +137,12 @@ jobs:
           --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=true
           test/features/computer_use
 
+      - name: Verify Windows CUDA resident bootstrap and device selection
+        run: >-
+          flutter test --reporter expanded
+          test/core/runtime/inference/assistant_resident_windows_profile_route_test.dart
+          test/native/runtime/windows/windows_cuda_device_test.dart
+
       - name: Build AIVEXUS Windows with Computer Use, CUDA and ChatGPT local test menu
         run: >-
           flutter build windows --release
