@@ -8,6 +8,7 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_checkpoint
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_counter_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_customer_access_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_tools_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
@@ -160,6 +161,659 @@ class WorkshopWebHome extends StatefulWidget {
 
 class _WorkshopWebHomeState extends State<WorkshopWebHome> {
   int _selectedIndex = 0;
+  bool _inviteOpened = false;
+
+  void _openCustomerAccess({String? invitationId}) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => WorkshopWebLanguageScope(
+        language: widget.language,
+        child: WorkshopWebCustomerAccessPage(invitationId: invitationId),
+      ),
+    ));
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _inviteOpened) return;
+      final invite = Uri.base.queryParameters['invite'];
+      if (invite != null &&
+          RegExp(r'^[a-f0-9-]{36}
+
+  void _openCloudTools(int initialTab) {
+    Navigator.of(context).pop(); // close the hamburger drawer
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => WorkshopWebCloudToolsPage(
+          initialTab: initialTab,
+          language: widget.language,
+          preference: widget.modelPreference,
+          cloudHealth: widget.cloudHealth,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      drawer: Drawer(
+        child: SafeArea(
+          child: ListView(
+            children: <Widget>[
+              const DrawerHeader(
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Text('Aivexus Web', style: TextStyle(fontSize: 24)),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.monitor_heart_outlined),
+                title: Text(widget.language.text('Stato')),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  setState(() => _selectedIndex = 0);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.handyman_outlined),
+                title: Text(widget.language.text('Cantiere')),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  setState(() => _selectedIndex = 1);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.code_outlined),
+                title: Text(widget.language.text('Genera applicazione')),
+                onTap: () {
+                  final navigator = Navigator.of(context);
+                  navigator.pop();
+                  navigator.push(MaterialPageRoute<void>(
+                    builder: (_) => WorkshopWebLanguageScope(
+                      language: widget.language,
+                      child: WorkshopWebGeneratorPage(
+                        modelPreference: widget.modelPreference,
+                      ),
+                    ),
+                  ));
+                },
+              ),
+              ListTile(
+                key: const Key('web_drawer_customer_access'),
+                leading: const Icon(Icons.group_add_outlined),
+                title: Text(widget.language.text('Accessi clienti')),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _openCustomerAccess();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.exposure_outlined),
+                title: Text(widget.language.text('Contatore Web')),
+                onTap: () {
+                  final navigator = Navigator.of(context);
+                  navigator.pop();
+                  navigator.push(MaterialPageRoute<void>(
+                    builder: (_) => const WorkshopWebCounterPage(),
+                  ));
+                },
+              ),
+              const Divider(),
+              ListTile(
+                key: const Key('web_drawer_self_test'),
+                leading: const Icon(Icons.science_outlined),
+                title: Text(widget.language.text('Self-Test Cloud')),
+                onTap: () => _openCloudTools(0),
+              ),
+              ListTile(
+                key: const Key('web_drawer_model_picker'),
+                leading: const Icon(Icons.memory_outlined),
+                title: Text(widget.language.text('Scelta modello')),
+                subtitle: Text(widget.modelPreference.routeId ?? 'AUTO'),
+                onTap: () => _openCloudTools(1),
+              ),
+              ListTile(
+                key: const Key('web_drawer_diagnostics'),
+                leading: const Icon(Icons.fact_check_outlined),
+                title: Text(widget.language.text('Diagnostica')),
+                onTap: () => _openCloudTools(2),
+              ),
+            ],
+          ),
+        ),
+      ),
+      appBar: AppBar(
+        title: const Text('Aivexus Web'),
+        actions: <Widget>[
+          PopupMenuButton<String>(
+            key: const Key('aivexus_web_language_selector'),
+            tooltip: widget.language.text('Lingua'),
+            onSelected: widget.language.select,
+            itemBuilder: (context) => <PopupMenuEntry<String>>[
+              for (final code in WorkshopWebLanguage.codes)
+                CheckedPopupMenuItem<String>(
+                  value: code,
+                  checked: code == widget.language.code,
+                  child: Text(WorkshopWebLanguage.names[code]!),
+                ),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Icon(Icons.language),
+                  const SizedBox(width: 6),
+                  Text(widget.language.code.toUpperCase()),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: <Widget>[
+          WorkshopWebShell(
+            checkpointStore: widget.checkpointStore,
+            cloudHealth: widget.cloudHealth,
+          ),
+          WorkshopWebProjectsPage(
+            controller: widget.chatController,
+            storage: widget.projectStorage,
+          ),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) {
+          setState(() => _selectedIndex = index);
+        },
+        destinations: <NavigationDestination>[
+          NavigationDestination(
+            icon: Icon(Icons.monitor_heart_outlined),
+            selectedIcon: Icon(Icons.monitor_heart),
+            label: widget.language.text('Stato'),
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.forum_outlined),
+            selectedIcon: Icon(Icons.forum),
+            label: widget.language.text('Cantiere'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class WorkshopWebChatPage extends StatefulWidget {
+  const WorkshopWebChatPage({
+    super.key,
+    required this.controller,
+    required this.conversationStorage,
+    required this.restoredConversation,
+    required this.browserAudio,
+  });
+
+  final WorkshopChatController controller;
+  final WorkshopWebConversationStorage conversationStorage;
+  final List<ChatTurn> restoredConversation;
+  final WorkshopWebBrowserAudio browserAudio;
+
+  @override
+  State<WorkshopWebChatPage> createState() => _WorkshopWebChatPageState();
+}
+
+class _WorkshopWebChatPageState extends State<WorkshopWebChatPage> {
+  final TextEditingController _inputController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  late final List<ChatTurn> _transcript;
+  bool _voiceListening = false;
+  String _voicePrefix = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _transcript = List<ChatTurn>.of(widget.restoredConversation);
+    widget.controller.addListener(_handleControllerChanged);
+    if (_transcript.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant WorkshopWebChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_handleControllerChanged);
+      widget.controller.addListener(_handleControllerChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_handleControllerChanged);
+    widget.browserAudio.stopSpeaking();
+    unawaited(widget.browserAudio.stopDictation());
+    _inputController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _handleControllerChanged() {
+    if (!mounted) return;
+    setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+  }
+
+  Future<void> _send() async {
+    final message = _inputController.text.trim();
+    if (message.isEmpty || widget.controller.isBusy) return;
+
+    _inputController.clear();
+    FocusScope.of(context).unfocus();
+
+    setState(() {
+      _transcript.add(ChatTurn(role: ChatRole.user, content: message));
+    });
+    await widget.conversationStorage.save(_transcript);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+
+    final response = await widget.controller.send(message);
+    if (!mounted) return;
+
+    if (response != null) {
+      setState(() => _transcript.add(response));
+      await widget.conversationStorage.save(_transcript);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+  }
+
+  Future<void> _showPromptHistory() async {
+    final prompts = _transcript
+        .where((turn) => turn.role == ChatRole.user)
+        .map((turn) => turn.content.trim())
+        .where((text) => text.isNotEmpty)
+        .toList(growable: false)
+        .reversed
+        .toList(growable: false);
+    if (prompts.isEmpty) return;
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            children: <Widget>[
+              const ListTile(
+                leading: Icon(Icons.history),
+                title: Text('Prompt precedenti'),
+                subtitle: Text('Tocca un prompt per riportarlo nel campo testo.'),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: prompts.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final prompt = prompts[index];
+                    return ListTile(
+                      leading: const Icon(Icons.north_west, size: 18),
+                      title: Text(
+                        prompt,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () => Navigator.of(context).pop(prompt),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted || selected == null) return;
+    _inputController.value = TextEditingValue(
+      text: selected,
+      selection: TextSelection.collapsed(offset: selected.length),
+    );
+  }
+
+  Future<void> _toggleDictation() async {
+    if (_voiceListening) {
+      await widget.browserAudio.stopDictation();
+      if (mounted) setState(() => _voiceListening = false);
+      return;
+    }
+
+    _voicePrefix = _inputController.text.trim();
+    await widget.browserAudio.startDictation(
+      onResult: (text, isFinal) {
+        if (!mounted) return;
+        final combined = <String>[
+          if (_voicePrefix.isNotEmpty) _voicePrefix,
+          text.trim(),
+        ].where((part) => part.isNotEmpty).join(' ');
+        setState(() {
+          _inputController.value = TextEditingValue(
+            text: combined,
+            selection: TextSelection.collapsed(offset: combined.length),
+          );
+          if (isFinal) _voiceListening = false;
+        });
+      },
+      onStateChanged: (listening) {
+        if (mounted) setState(() => _voiceListening = listening);
+      },
+      onError: (message) {
+        if (!mounted) return;
+        setState(() => _voiceListening = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      },
+    );
+  }
+
+  void _scrollToBottom() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final hasPromptHistory =
+        _transcript.any((turn) => turn.role == ChatRole.user);
+
+    return SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Column(
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 16, 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Aivexus',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.white54,
+                              letterSpacing: 1.1,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Cantiere',
+                            style: TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          SizedBox(height: 6),
+                          Text(
+                            'Conversazione operativa via Cloud / AUTO. '
+                            'La cronologia resta salvata nel browser; le modifiche reali '
+                            'al repository restano dietro i gate di approvazione.',
+                            style: TextStyle(
+                              color: Colors.white60,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton.filledTonal(
+                      onPressed: hasPromptHistory ? _showPromptHistory : null,
+                      tooltip: 'Recupera prompt precedenti',
+                      icon: const Icon(Icons.history),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _transcript.isEmpty
+                    ? const _EmptyConversation()
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        itemCount: _transcript.length,
+                        itemBuilder: (context, index) {
+                          final turn = _transcript[index];
+                          return _MessageBubble(
+                            turn: turn,
+                            onSpeak: turn.role == ChatRole.assistant &&
+                                    widget.browserAudio.canSpeak
+                                ? () => widget.browserAudio.speak(turn.content)
+                                : null,
+                          );
+                        },
+                      ),
+              ),
+              if (controller.hasError)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: _StatusNotice(
+                    icon: Icons.error_outline,
+                    text: controller.lastError!,
+                  ),
+                ),
+              if (controller.lastRuntimeNotice != null &&
+                  controller.lastRuntimeNotice!.trim().isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: _StatusNotice(
+                    icon: Icons.info_outline,
+                    text: controller.lastRuntimeNotice!,
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    if (controller.lastModel != null &&
+                        controller.lastModel!.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text(
+                          'Modello: ${controller.lastModel}',
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    TextField(
+                      controller: _inputController,
+                      enabled: !controller.isBusy,
+                      minLines: 1,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.newline,
+                      decoration: InputDecoration(
+                        border: const OutlineInputBorder(),
+                        hintText: 'Descrivi cosa vuoi costruire…',
+                        suffixIcon: IconButton(
+                          onPressed: controller.isBusy ||
+                                  !widget.browserAudio.canDictate
+                              ? null
+                              : _toggleDictation,
+                          tooltip: _voiceListening
+                              ? 'Ferma dettatura'
+                              : 'Dettatura vocale',
+                          icon: Icon(
+                            _voiceListening ? Icons.mic_off : Icons.mic_none,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      onPressed: controller.isBusy ? null : _send,
+                      icon: controller.isBusy
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.send_outlined),
+                      label: Text(
+                        controller.isBusy ? 'Cantiere al lavoro…' : 'Invia',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyConversation extends StatelessWidget {
+  const _EmptyConversation();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(32),
+        child: Text(
+          'Il broker Cloud / AUTO è pronto.\n'
+          'Scrivi oppure usa il microfono per iniziare una conversazione con il Cantiere.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white54,
+            height: 1.5,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({
+    required this.turn,
+    this.onSpeak,
+  });
+
+  final ChatTurn turn;
+  final VoidCallback? onSpeak;
+
+  @override
+  Widget build(BuildContext context) {
+    final isUser = turn.role == ChatRole.user;
+    final label = switch (turn.role) {
+      ChatRole.user => 'Tu',
+      ChatRole.assistant => 'Cantiere',
+      ChatRole.system => 'Sistema',
+    };
+
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 620),
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isUser
+              ? Theme.of(context).colorScheme.primaryContainer
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (onSpeak != null)
+                  IconButton(
+                    onPressed: onSpeak,
+                    tooltip: 'Ascolta risposta',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.volume_up_outlined, size: 19),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            SelectableText(
+              turn.content,
+              style: const TextStyle(height: 1.4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusNotice extends StatelessWidget {
+  const _StatusNotice({
+    required this.icon,
+    required this.text,
+  });
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(icon, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(height: 1.35),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+, caseSensitive: false).hasMatch(invite)) {
+        _inviteOpened = true;
+        _openCustomerAccess(invitationId: invite);
+      }
+    });
+  }
+
 
   void _openCloudTools(int initialTab) {
     Navigator.of(context).pop(); // close the hamburger drawer
