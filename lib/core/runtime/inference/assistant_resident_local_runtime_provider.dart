@@ -165,14 +165,6 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   @override
   String get lifecycleRuntimeStateName => _delegate.lifecycleRuntimeStateName;
 
-  static bool _needsQwen25CliRecovery(String? modelId) {
-    final id = modelId?.trim().toLowerCase() ?? '';
-    return id == 'qwen2_5_3b_instruct' ||
-        id == 'qwen2.5-3b-instruct' ||
-        id.startsWith('qwen2.5-3b-instruct-') ||
-        id.startsWith('qwen2_5_3b_instruct-');
-  }
-
   Future<void> dispose() async {
     _lifecycle?.dispose();
     _lifecycle = null;
@@ -182,24 +174,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   @override
   TokenStream streamInference({required InferenceRequest request,
       required CancellationToken cancellationToken}) async* {
-    // The current ASUS regression is specific to Qwen2.5 3B: Settings
-    // verifies it using the CLI, while Assistant can hang in the resident
-    // server. Route just that model to the known CLI path. Do not widen this
-    // into a blanket policy for other models: the real resident TinyLlama
-    // smoke test (cache, cancellation and token cap) must remain intact.
-    if (_isWindowsHost() &&
-        _needsQwen25CliRecovery(request.modelId)) {
-      RuntimeEventLog.instance.emit(
-        '[ASSISTANT_LOCAL_ROUTE] backend=process_cli '
-        'reason=qwen25_windows_chat_recovery '
-        'model_id=${request.modelId ?? 'none'}',
-      );
-      yield* _delegate.streamInference(
-        request: request,
-        cancellationToken: cancellationToken,
-      );
-      return;
-    }
+    // Qwen uses the same resident CUDA/Vulkan/CPU selection as other
+    // LOCAL models. Ordinary failure recovery below still falls back to CLI.
     final executable = _unavailable ? null : _executable();
     if (executable == null) {
       yield* _delegate.streamInference(request: request, cancellationToken: cancellationToken);
