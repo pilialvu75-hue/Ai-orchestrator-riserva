@@ -981,18 +981,45 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   assert.deepEqual(empty, {
     version: 1, ok: true,
     userLimit: 10, userUsed: 0, userRemaining: 10,
-    globalLimit: 36, globalUsed: 0, globalRemaining: 36,
+    globalLimit: 72, globalUsed: 0, globalRemaining: 72,
+    tier: 'standard',
     remaining: 10, windowSeconds: 86400, nextAvailableAt: null,
     scope: 'aivexus_reservations',
   });
 
+  // Admin role is computed only from signed Cloudflare Access subject and
+  // an exact server-side identity setting, not from a browser-provided flag.
+  const adminEnv = { ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject };
+  const adminResponse = await quotaApplication({
+    request: webRequest(token, null, {
+      method: 'GET', path: '/api/cantiere/proposals/quota',
+      requestOrigin: null,
+    }),
+    env: adminEnv,
+  });
+  const adminQuota = await body(adminResponse);
+  assert.equal(adminQuota.tier, 'administrator');
+  assert.equal(adminQuota.userLimit, 64);
+  assert.equal(adminQuota.globalLimit, 72);
+  assert.equal(adminQuota.remaining, 64);
+  const nonAdminResponse = await quotaApplication({
+    request: webRequest(another, null, {
+      method: 'GET', path: '/api/cantiere/proposals/quota',
+      requestOrigin: null,
+    }),
+    env: adminEnv,
+  });
+  const nonAdminQuota = await body(nonAdminResponse);
+  assert.equal(nonAdminQuota.tier, 'standard');
+  assert.equal(nonAdminQuota.userLimit, 10);
+
   const seed = sqlite.prepare(
     "INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status, created_at) VALUES (?, ?, ?, 'failed', unixepoch())");
   for (let i = 0; i < 10; i++) seed.run(subject, crypto.randomUUID(), digest);
-  for (let i = 0; i < 26; i++) seed.run('other-owner', crypto.randomUUID(), digest);
+  for (let i = 0; i < 62; i++) seed.run('other-owner', crypto.randomUUID(), digest);
   const full = await body(await read(token));
   assert.equal(full.userUsed, 10);
-  assert.equal(full.globalUsed, 36);
+  assert.equal(full.globalUsed, 72);
   assert.equal(full.userRemaining, 0);
   assert.equal(full.globalRemaining, 0);
   assert.equal(full.remaining, 0);
