@@ -112,9 +112,15 @@ generazione interrotta resta identificabile senza avviare un secondo job.
 Per abilitare nuove generazioni serve la migrazione `006`, il piano Workers Free
 verificato dall'operatore, `AIVEXUS_WEB_BUILDER_FREE_ENABLED=true` e il binding
 Pages Workers AI `AIVEXUS_WEB_BUILDER_AI`. Il generatore richiama il modello
-`@cf/google/gemma-4-26b-a4b-it` tramite il binding. D1 ammette sei tentativi per
-identità e 24 complessivi in 24 ore, inclusi gli esiti falliti. AUTO e il
-catalogo diagnostico continuano a usare le proprie configurazioni.
+`@cf/google/gemma-4-26b-a4b-it` tramite il binding. D1 ammette fino a **10 tentativi
+per identità e 36 complessivi nelle ultime 24 ore**, inclusi gli esiti falliti:
+una richiesta valida può aver consumato inferenza gratuita anche senza sorgenti validi.
+Il nuovo `GET /api/cantiere/proposals/quota` è protetto da Cloudflare Access e
+restituisce i tentativi personali/globali residui e, in caso di blocco, il
+momento UTC del prossimo recupero (senza dati personali degli altri utenti).
+Il contatore misura solo la quota **interna AIVEXUS**, non i Neurons disponibili
+nell'account Cloudflare: il limite esterno Workers AI gratuito resta indipendente.
+AUTO e il catalogo diagnostico mantengono le loro configurazioni.
 Lo stato `generated` conferma il salvataggio dei sorgenti. Test, anteprima ed
 esportazione appartengono ai passaggi successivi.
 
