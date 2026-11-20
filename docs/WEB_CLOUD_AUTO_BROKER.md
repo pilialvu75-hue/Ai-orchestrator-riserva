@@ -112,14 +112,33 @@ generazione interrotta resta identificabile senza avviare un secondo job.
 Per abilitare nuove generazioni serve la migrazione `006`, il piano Workers Free
 verificato dall'operatore, `AIVEXUS_WEB_BUILDER_FREE_ENABLED=true` e il binding
 Pages Workers AI `AIVEXUS_WEB_BUILDER_AI`. Il generatore richiama il modello
-`@cf/google/gemma-4-26b-a4b-it` tramite il binding. D1 ammette fino a **10 tentativi
-per identità e 36 complessivi nelle ultime 24 ore**, inclusi gli esiti falliti:
+`@cf/google/gemma-4-26b-a4b-it` tramite il binding. D1 ammette **10 tentativi
+per identità ordinaria, 64 per l'amministratore verificato, e 72 complessivi
+nelle ultime 24 ore** (limite globale non bypassabile), inclusi gli esiti falliti:
 una richiesta valida può aver consumato inferenza gratuita anche senza sorgenti validi.
 Il nuovo `GET /api/cantiere/proposals/quota` è protetto da Cloudflare Access e
 restituisce i tentativi personali/globali residui e, in caso di blocco, il
 momento UTC del prossimo recupero (senza dati personali degli altri utenti).
 Il contatore misura solo la quota **interna AIVEXUS**, non i Neurons disponibili
 nell'account Cloudflare: il limite esterno Workers AI gratuito resta indipendente.
+L'identità privilegiata è abilitata **solo** se la variabile privata di Pages
+`AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT` contiene esattamente il campo `sub`
+di un JWT Cloudflare Access verificato; nessun cookie, email, header o flag Web
+fornito dall'utente conferisce privilegi. In assenza della configurazione si
+applica il limite normale. Il valore va impostato direttamente nei segreti di
+Cloudflare Pages, mai nella chat o in Git. Il budget globale 72 resta un
+limite prudente per il piano gratuito, **non una garanzia** di ottenere 72
+chiamate: Workers AI Free dispone di 10.000 Neurons per account al giorno,
+condivisi da tutti i prodotti; verificare il piano Free e il consumo effettivo.
+
+`GET /api/cantiere/proposals/reuse?promptSha256=<64-hex>` riutilizza la stessa
+**generazione già verificata dello stesso subject**, se esiste nel D1.
+Questo evita nuove chiamate IA e nuove prenotazioni; non autorizza
+l'esecuzione di file non verificati e non condivide progetti tra identità.
+Il lookup risponde `found:false` senza bloccare la generazione ordinaria
+se non esiste un progetto verificato corrispondente. È una cache di progetti,
+non la Libreria modulare certificata, che richiede pacchetti esportabili.
+
 AUTO e il catalogo diagnostico mantengono le loro configurazioni.
 Lo stato `generated` conferma il salvataggio dei sorgenti. Test, anteprima ed
 esportazione appartengono ai passaggi successivi.

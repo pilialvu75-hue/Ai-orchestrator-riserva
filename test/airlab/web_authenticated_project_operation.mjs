@@ -20,6 +20,8 @@ import { onRequest as generateApplication } from
   '../../functions/api/cantiere/proposals/generate.js';
 import { onRequest as quotaApplication } from
   '../../functions/api/cantiere/proposals/quota.js';
+import { onRequest as reuseApplication } from
+  '../../functions/api/cantiere/proposals/reuse.js';
 import { onRequest as ordinaryInference } from '../../functions/api/cantiere/inference.js';
 import { onRequest as cloudCapabilities } from '../../functions/api/cantiere/capabilities.js';
 import { createAuthenticatedWebProjectOperation } from
@@ -981,18 +983,45 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   assert.deepEqual(empty, {
     version: 1, ok: true,
     userLimit: 10, userUsed: 0, userRemaining: 10,
-    globalLimit: 36, globalUsed: 0, globalRemaining: 36,
+    globalLimit: 72, globalUsed: 0, globalRemaining: 72,
+    tier: 'standard',
     remaining: 10, windowSeconds: 86400, nextAvailableAt: null,
     scope: 'aivexus_reservations',
   });
 
+  // Admin role is computed only from signed Cloudflare Access subject and
+  // an exact server-side identity setting, not from a browser-provided flag.
+  const adminEnv = { ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject };
+  const adminResponse = await quotaApplication({
+    request: webRequest(token, null, {
+      method: 'GET', path: '/api/cantiere/proposals/quota',
+      requestOrigin: null,
+    }),
+    env: adminEnv,
+  });
+  const adminQuota = await body(adminResponse);
+  assert.equal(adminQuota.tier, 'administrator');
+  assert.equal(adminQuota.userLimit, 64);
+  assert.equal(adminQuota.globalLimit, 72);
+  assert.equal(adminQuota.remaining, 64);
+  const nonAdminResponse = await quotaApplication({
+    request: webRequest(another, null, {
+      method: 'GET', path: '/api/cantiere/proposals/quota',
+      requestOrigin: null,
+    }),
+    env: adminEnv,
+  });
+  const nonAdminQuota = await body(nonAdminResponse);
+  assert.equal(nonAdminQuota.tier, 'standard');
+  assert.equal(nonAdminQuota.userLimit, 10);
+
   const seed = sqlite.prepare(
     "INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status, created_at) VALUES (?, ?, ?, 'failed', unixepoch())");
   for (let i = 0; i < 10; i++) seed.run(subject, crypto.randomUUID(), digest);
-  for (let i = 0; i < 26; i++) seed.run('other-owner', crypto.randomUUID(), digest);
+  for (let i = 0; i < 62; i++) seed.run('other-owner', crypto.randomUUID(), digest);
   const full = await body(await read(token));
   assert.equal(full.userUsed, 10);
-  assert.equal(full.globalUsed, 36);
+  assert.equal(full.globalUsed, 72);
   assert.equal(full.userRemaining, 0);
   assert.equal(full.globalRemaining, 0);
   assert.equal(full.remaining, 0);
@@ -1017,4 +1046,143 @@ test('authenticated quota exposes exact personal/global counts and next availabl
   assert.equal(partial.globalRemaining, 10);
   assert.equal(partial.remaining, 10);
   assert.equal(partial.nextAvailableAt, null);
+});
+
+
+test('only server-declared Cloudflare Access administrator can generate beyond standard cap', async t => {
+  const { db, sqlite } = sqliteD1(t, ['006_web_app_generations.sql']);
+  const signing = await signer();
+  const iat = Math.floor(Date.now() / 1000) - 10;
+  const token = await signing.sign({ iat, nbf: iat, exp: iat + 300 });
+  let inferenceCalls = 0;
+  const env = {
+    AIVEXUS_WEB_ORIGIN: origin,
+    AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_D1: db,
+    AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: subject,
+    AIVEXUS_WEB_BUILDER_AI: {
+      async run() {
+        inferenceCalls++;
+        return {
+          model: '@cf/google/gemma-4-26b-a4b-it',
+          choices: [{
+            finish_reason: 'stop',
+            message: { content: JSON.stringify({
+              title: 'Admin app',
+              requirements: ['Una pagina leggibile'],
+              files: [{ path: 'index.html', content: '<main>Admin app</main>' }],
+            }) },
+          }],
+          usage: { completion_tokens: 80 },
+        };
+      },
+    },
+  };
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(String(url), issuer + '/cdn-cgi/access/certs');
+    return Response.json({ keys: [signing.jwk] });
+  });
+  const seed = sqlite.prepare(
+    "INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status) VALUES (?, ?, ?, 'failed')"
+  );
+  for (let i = 0; i < 10; i++) {
+    seed.run(subject, crypto.randomUUID(), digest);
+  }
+  const payload = { generationId: crypto.randomUUID(), prompt: 'App semplice con un menu' };
+  const send = bindings => generateApplication({
+    request: webRequest(token, payload, { path: '/api/cantiere/proposals/generate' }),
+    env: bindings,
+  });
+  // A browser cannot claim the admin identity: it must match a server-side
+  // value and the *signed* Access sub.
+  assert.equal((await send({ ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: undefined })).status, 429);
+  assert.equal((await send({ ...env, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: 'someone-else' })).status, 429);
+  assert.equal(inferenceCalls, 0);
+  const accepted = await send(env);
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).status, 'generated');
+  assert.equal(inferenceCalls, 1);
+  const quotaResponse = await quotaApplication({
+    request: webRequest(token, null, {
+      method: 'GET', requestOrigin: null, path: '/api/cantiere/proposals/quota',
+    }),
+    env,
+  });
+  const quota = await body(quotaResponse);
+  assert.equal(quota.tier, 'administrator');
+  assert.equal(quota.userUsed, 11);
+  assert.equal(quota.userLimit, 64);
+  assert.equal(quota.userRemaining, 53);
+  assert.equal(quota.globalLimit, 72);
+});
+
+
+test('verified same-owner project reuse does not invoke AI or consume quota', async t => {
+  const { db, sqlite } = sqliteD1(t, [
+    '006_web_app_generations.sql', '007_web_app_verifications.sql',
+  ]);
+  const signing = await signer();
+  const iat = Math.floor(Date.now() / 1000) - 10;
+  const token = await signing.sign({ iat, nbf: iat, exp: iat + 300 });
+  const stranger = await signing.sign({
+    iat, nbf: iat, exp: iat + 300, sub: 'stranger-subject',
+  });
+  const env = {
+    AIVEXUS_WEB_ORIGIN: origin,
+    AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_D1: db,
+  };
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(String(url), issuer + '/cdn-cgi/access/certs');
+    return Response.json({ keys: [signing.jwk] });
+  });
+  const promptHash = createHash('sha256').update('App verificata').digest('hex');
+  const id = crypto.randomUUID();
+  sqlite.prepare(
+    "INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status, result_json) VALUES (?, ?, ?, 'generated', ?)"
+  ).run(subject, id, promptHash, JSON.stringify({
+    source: { title: 'App verificata', requirements: ['Navigabile'],
+      files: [{ path: 'index.html', content: '<main>OK</main>' }] },
+    sourceSha256: digest,
+    provenance: { reportedModel: '@cf/google/gemma-4-26b-a4b-it' },
+    checks: [],
+  }));
+  const path = '/api/cantiere/proposals/reuse?promptSha256=' + promptHash;
+  const read = (assertion, requestPath = path) => reuseApplication({
+    request: webRequest(assertion, undefined, {
+      method: 'GET', requestOrigin: null, path: requestPath,
+    }),
+    env,
+  });
+
+  assert.equal((await read(null)).status, 401);
+  assert.equal((await read(token, '/api/cantiere/proposals/reuse?promptSha256=bad')).status, 400);
+  assert.equal((await body(await read(token))).found, false);
+  const insertVerified = sqlite.prepare(
+    "INSERT INTO web_app_verifications (owner_subject, generation_id, ticket, head_sha, job_sha256, source_sha256, status, run_id, receipt_json, source_json, zip_sha256, zip_bytes) VALUES (?, ?, ?, ?, ?, ?, 'verified', ?, ?, ?, ?, ?)"
+  );
+  insertVerified.run(
+    subject, id, crypto.randomUUID(), 'f'.repeat(40), digest, digest,
+    12345, '{}',
+    JSON.stringify({ title: 'App verificata', requirements: ['Navigabile'],
+      files: [{ path: 'index.html', content: '<main>OK</main>' }] }),
+    digest, Buffer.from([0x50, 0x4b, 0x03, 0x04, ...Array(18).fill(0)]),
+  );
+  const reused = await body(await read(token));
+  assert.equal(reused.ok, true);
+  assert.equal(reused.found, true);
+  assert.equal(reused.generationId, id);
+  assert.equal((await body(await read(stranger))).found, false);
+  assert.equal((await body(await read(token,
+    '/api/cantiere/proposals/reuse?promptSha256=' + '0'.repeat(64)))).found, false);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM web_app_generations').get().count, 1);
+  assert.equal((await body(await quotaApplication({
+    request: webRequest(token, undefined, {
+      method: 'GET', requestOrigin: null, path: '/api/cantiere/proposals/quota',
+    }),
+    env,
+  }))).userUsed, 1);
 });

@@ -12,7 +12,7 @@ import { approveTrustedWebProposal, revokeTrustedWebApproval, stageTrustedWebCou
 import { reserveApprovedWebExecution } from './approved_execution_reservation.mjs';
 import { readWebExecutionZip } from './web_execution_artifact_download.mjs';
 import { handleWebCounterAdvance } from './advance_web_counter.mjs';
-import { generateWebApplication, readWebApplicationGeneration, readWebApplicationQuota } from './generate_web_application.mjs';
+import { generateWebApplication, readWebApplicationGeneration, readWebApplicationQuota, findVerifiedWebApplicationReuse } from './generate_web_application.mjs';
 import {
   advanceWebApplicationVerification, readWebApplicationVerification, readWebApplicationZip,
   readVerifiedWebApplicationSource,
@@ -25,7 +25,7 @@ const MAX_JSON_BYTES = 2048;
 const MAX_GENERATION_JSON_BYTES = 49152;
 const OPERATIONS = new Set([
   'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
-  'generate_app', 'generation_status', 'generation_quota',
+  'generate_app', 'generation_status', 'generation_quota', 'generation_reuse',
   'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
 ]);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
@@ -145,18 +145,19 @@ function zipResponse(bytes, filename) {
  */
 export function createAuthenticatedWebProjectOperation({
   operation, expectedOrigin, accessIssuer, accessAudience, db, bucket, runner,
-  infer, fetchImpl, nowSeconds,
+  infer, adminSubject, fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
   const readsStatus = operation === 'status';
   const downloads = operation === 'download';
   const readsGeneration = operation === 'generation_status';
   const readsQuota = operation === 'generation_quota';
+  const readsReuse = operation === 'generation_reuse';
   const readsVerification = operation === 'verification_status';
   const downloadsApp = operation === 'download_app';
   const previewsApp = operation === 'preview_app';
   const readsSource = operation === 'read_app_source' || previewsApp;
-  const readOnly = readsStatus || downloads || readsGeneration || readsQuota || readsVerification || downloadsApp || readsSource;
+  const readOnly = readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -232,11 +233,25 @@ export function createAuthenticatedWebProjectOperation({
       }
     }
 
+    if (readsReuse) {
+      if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
+      try {
+        const result = await findVerifiedWebApplicationReuse({
+          db, ownerSubject: verified.principal.subject,
+          promptSha256: url.searchParams.get('promptSha256'),
+        });
+        if (!result.ok) return operationFailure(result);
+        return respond(200, result);
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+    }
+
     if (readsQuota) {
       if (url.searchParams.size !== 0) return reject(400, 'invalid_request');
       try {
         const result = await readWebApplicationQuota({
-          db, ownerSubject: verified.principal.subject,
+          db, ownerSubject: verified.principal.subject, adminSubject,
         });
         if (!result.ok) return operationFailure(result);
         return respond(200, result);
@@ -269,7 +284,7 @@ export function createAuthenticatedWebProjectOperation({
     try {
       const principal = verified.principal;
       if (operation === 'generate_app') {
-        result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, db, infer });
+        result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, adminSubject, db, infer });
       } else if (operation === 'verify_app') {
         result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'advance') {
