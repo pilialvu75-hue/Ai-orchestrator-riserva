@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_workspace.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_source_page.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -322,9 +323,25 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     final canAdvance = {'ready', 'dispatching', 'submitted', 'importing'}
         .contains(verificationStatus);
     return Scaffold(
-      appBar: AppBar(title: Text(tr('Genera applicazione'))),
+      appBar: AppBar(title: Text(tr('AIVEXUS Studio'))),
       body: SafeArea(
-        child: Center(
+        child: WorkshopWebGeneratorWorkspace(
+          projectTitle: receipt?['title'] is String
+              ? receipt!['title'] as String
+              : null,
+          generationStatus: state == null ? null : tr(state),
+          verificationStatus:
+              verificationLabel == null ? null : tr(verificationLabel),
+          previewUri: id != null && verificationStatus == 'verified'
+              ? _generationResource('preview', id)
+              : null,
+          onOpenPreview: id != null && verificationStatus == 'verified'
+              ? () => _openPreview(id)
+              : null,
+          onOpenSources: id != null && verificationStatus == 'verified'
+              ? () => _openSources(id)
+              : null,
+          composer: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
             child: ListView(
@@ -342,7 +359,13 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                       onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
                         labelText: tr('Descrivi l’applicazione'),
-                        border: const OutlineInputBorder(),
+                        alignLabelWithHint: true,
+                        filled: true,
+                        fillColor: const Color(0xFF1B2533),
+                        prefixIcon: const Icon(Icons.auto_awesome_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
                       ),
                     ),
                   ),
@@ -441,6 +464,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                 ),
               ],
             ),
+          ),
           ),
         ),
       ),
