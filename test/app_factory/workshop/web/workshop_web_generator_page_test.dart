@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -382,5 +383,133 @@ void main() {
     expect(find.text('Catalogo libri'), findsOneWidget);
     final preferences = await SharedPreferences.getInstance();
     expect(preferences.getString('aivexus.web.lastGeneration.v1'), oldId);
+  });
+
+
+  testWidgets('selected free-verified NVIDIA model is passed only to the builder',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 920);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    const trialId = 'kimi-k26-orchestrator';
+    int reuseReads = 0;
+    int generationPosts = 0;
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/cantiere/proposals/quota') {
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true,
+          'scope': 'aivexus_reservations',
+          'remaining': 10, 'userRemaining': 10, 'userLimit': 10,
+          'globalRemaining': 72, 'globalLimit': 72,
+          'nextAvailableAt': null,
+        }), 200);
+      }
+      if (request.url.path == '/api/cantiere/models') {
+        expect(request.method, 'GET');
+        return http.Response(jsonEncode({
+          'version': 1, 'configStatus': 'configured',
+          'models': [
+            {'routeId': trialId, 'builderAvailable': true},
+          ],
+        }), 200);
+      }
+      if (request.url.path == '/api/cantiere/proposals/reuse') {
+        reuseReads++;
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true, 'found': false,
+        }), 200);
+      }
+      expect(request.url.path, '/api/cantiere/proposals/generate');
+      expect(request.method, 'POST');
+      generationPosts++;
+      final sent = jsonDecode(request.body) as Map;
+      expect(sent['builderRouteId'], trialId);
+      expect(sent['prompt'], 'Crea una app navigabile');
+      return http.Response(jsonEncode({
+        'version': 1, 'ok': true,
+        'generationId': sent['generationId'],
+        'status': 'failed',
+      }), 200);
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: WorkshopWebGeneratorPage(
+        client: client,
+        modelPreference: WorkshopWebModelPreference(routeId: trialId),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('web_generator_first_prompt')),
+      'Crea una app navigabile',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('web_generator_submit_first_prompt')));
+    await tester.pumpAndSettle();
+
+    expect(generationPosts, 1);
+    expect(reuseReads, 0);
+    expect(find.text('Generazione con modello NVIDIA di prova autorizzato.'),
+        findsOneWidget);
+  });
+
+  testWidgets('unapproved selected NVIDIA trial falls back visibly to free Gemma',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 920);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    const trialId = 'deepseek-v41-flash-orchestrator';
+    int generationPosts = 0;
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/cantiere/proposals/quota') {
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true, 'scope': 'aivexus_reservations',
+          'remaining': 10, 'userRemaining': 10, 'userLimit': 10,
+          'globalRemaining': 72, 'globalLimit': 72,
+          'nextAvailableAt': null,
+        }), 200);
+      }
+      if (request.url.path == '/api/cantiere/models') {
+        return http.Response(jsonEncode({
+          'version': 1, 'configStatus': 'configured',
+          'models': [{'routeId': trialId, 'builderAvailable': false}],
+        }), 200);
+      }
+      if (request.url.path == '/api/cantiere/proposals/reuse') {
+        return http.Response(jsonEncode({
+          'version': 1, 'ok': true, 'found': false,
+        }), 200);
+      }
+      expect(request.url.path, '/api/cantiere/proposals/generate');
+      expect(request.method, 'POST');
+      generationPosts++;
+      final sent = jsonDecode(request.body) as Map;
+      expect(sent.containsKey('builderRouteId'), false);
+      return http.Response(jsonEncode({
+        'version': 1, 'ok': true,
+        'generationId': sent['generationId'],
+        'status': 'failed',
+      }), 200);
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: WorkshopWebGeneratorPage(
+        client: client,
+        modelPreference: WorkshopWebModelPreference(routeId: trialId),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('web_generator_first_prompt')),
+      'Crea una piccola app',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('web_generator_submit_first_prompt')));
+    await tester.pumpAndSettle();
+    expect(generationPosts, 1);
+    expect(find.text('Modello NVIDIA non autorizzato per generare app: uso Gemma 4.'),
+        findsOneWidget);
   });
 }
