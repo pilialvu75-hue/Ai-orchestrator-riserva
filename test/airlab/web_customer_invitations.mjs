@@ -154,7 +154,7 @@ test('existing owner creates/list/revokes invitations; invited Access client is 
   assert.equal(aliceQuota.userLimit, 10);
   const ownerQuota = await parse(await gate(quotaRequest(owner)));
   assert.equal(ownerQuota.tier, 'administrator');
-  assert.equal(ownerQuota.userLimit, 64);
+  assert.equal(ownerQuota.userLimit, 72);
 
   assert.equal((await call('revoke', alice, 'POST', {
     invitationId: created.invitationId,
