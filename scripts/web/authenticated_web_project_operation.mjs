@@ -7,6 +7,7 @@
 
 import { createCloudflareAccessPrincipalResolver } from './cloudflare_access_principal_resolver.mjs';
 import { existingWebOwnerSubject } from './web_owner_role.mjs';
+import { activeWebCustomerGrant } from './web_client_invitations.mjs';
 import { createWebD1ReservationStore } from './d1_approval_reservation_store.mjs';
 import { approveTrustedWebProposal, revokeTrustedWebApproval, stageTrustedWebCounterProposal } from
   './d1_web_proposal_approval_writer.mjs';
@@ -147,7 +148,8 @@ function zipResponse(bytes, filename) {
  */
 export function createAuthenticatedWebProjectOperation({
   operation, expectedOrigin, accessIssuer, accessAudience, db, bucket, runner,
-  infer, adminSubject, ownerEmail, fetchImpl, nowSeconds,
+  infer, adminSubject, ownerEmail, clientAccessEnabled = false,
+  fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
   const readsStatus = operation === 'status';
@@ -208,6 +210,21 @@ export function createAuthenticatedWebProjectOperation({
       configuredSubject: adminSubject,
       configuredEmail: ownerEmail,
     });
+
+    // Opt-in customer rollout: Cloudflare Access authentication alone is
+    // insufficient. Only owner or unexpired D1 customer grants can access
+    // builder operations. Revocation takes effect on the next HTTP request.
+    if (clientAccessEnabled === true && !authorizedOwnerSubject) {
+      let granted;
+      try {
+        granted = await activeWebCustomerGrant({
+          db, principal: verified.principal,
+        });
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+      if (!granted) return reject(403, 'client_access_required');
+    }
 
     if (downloads) {
       if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
