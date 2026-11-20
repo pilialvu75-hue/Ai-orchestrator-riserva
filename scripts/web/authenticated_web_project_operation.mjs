@@ -149,7 +149,7 @@ function zipResponse(bytes, filename) {
 export function createAuthenticatedWebProjectOperation({
   operation, expectedOrigin, accessIssuer, accessAudience, db, bucket, runner,
   infer, adminSubject, ownerEmail, clientAccessEnabled = false,
-  fetchImpl, nowSeconds,
+  ownerOnly = false, fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
   const readsStatus = operation === 'status';
@@ -210,6 +210,13 @@ export function createAuthenticatedWebProjectOperation({
       configuredSubject: adminSubject,
       configuredEmail: ownerEmail,
     });
+
+    // Private Studio phase: signed Access *owner* has all supported
+    // application privileges. A previously accepted client or any other
+    // Access login is not an owner. Deny before touching D1 or provider AI.
+    if (ownerOnly && !authorizedOwnerSubject) {
+      return reject(403, 'owner_required');
+    }
 
     // Opt-in customer rollout: Cloudflare Access authentication alone is
     // insufficient. Only owner or unexpired D1 customer grants can access
