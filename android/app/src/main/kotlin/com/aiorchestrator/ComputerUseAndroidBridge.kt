@@ -37,7 +37,7 @@ object ComputerUseAndroidBridge {
                         val x = call.argument<Int>("x")
                         val y = call.argument<Int>("y")
                         val endX = if (call.method == "swipeTarget") call.argument<Int>("endX") else x
-                        val endY = if (call.method == "swipeGame") call.argument<Int>("endY") else y
+                        val endY = if (call.method == "swipeTarget") call.argument<Int>("endY") else y
                         if (x == null || y == null || endX == null || endY == null) {
                             result.error("INVALID_COORDINATES", "Coordinates required", null)
                         } else {
