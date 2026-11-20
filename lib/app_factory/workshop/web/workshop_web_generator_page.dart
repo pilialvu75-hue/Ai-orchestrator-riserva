@@ -62,6 +62,18 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
 
   Future<void> _restore() async {
     await _run(() async {
+      final requested = Uri.base.queryParameters['generationId'];
+      if (requested != null && _idPattern.hasMatch(requested)) {
+        final receipt = await _call(requested);
+        if (receipt != null && mounted) {
+          setState(() {
+            _generationId = requested;
+            _receipt = receipt;
+          });
+          if (receipt['status'] == 'generated') await _readVerification(requested);
+          return;
+        }
+      }
       final stored = (await _preferences).getString(_storageKey);
       if (stored == null || !_idPattern.hasMatch(stored) || !mounted) return;
       setState(() => _generationId = stored);
