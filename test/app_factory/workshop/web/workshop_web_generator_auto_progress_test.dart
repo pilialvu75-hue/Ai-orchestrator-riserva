@@ -103,7 +103,19 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pumpAndSettle();
     expect(verifyPosts, 1);
+    // The left pane is lazily scrollable; the quota meter adds one row
+    // above the generated-artifact controls.
+    await tester.scrollUntilVisible(
+      find.text('Applicazione verificata'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Applicazione verificata'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Scarica ZIP'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Scarica ZIP'), findsOneWidget);
 
     // No duplicate generation, repair or runner dispatch after completion.
