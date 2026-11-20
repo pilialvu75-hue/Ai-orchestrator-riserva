@@ -1,12 +1,12 @@
 {
-  "version": "1.0.12+115",
-  "versionName": "1.0.12+115",
-  "versionCode": 12,
-  "channel": "stable",
+  "version": "1.0.16-beta+104805",
+  "versionName": "1.0.16-beta+104805",
+  "versionCode": 104805,
+  "channel": "beta",
   "min_supported": "1.0.0",
-  "apk_url": "https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/releases/download/v1.0.12+115/app-release.apk",
-  "apkUrl": "https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/releases/download/v1.0.12+115/app-release.apk",
-  "changelog": "v1.0.12+115 – OTA latest-release sync hardening and local runtime watchdog/recovery diagnostics improvements.",
+  "apk_url": "https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/releases/download/v1.0.16-beta%2B104805/app-release.apk",
+  "apkUrl": "https://github.com/pilialvu75-hue/Ai-orchestrator-riserva/releases/download/v1.0.16-beta%2B104805/app-release.apk",
+  "changelog": "AIVEXUS 1.0.16 beta 104805 — checkpoint H51 integrato; continuità HYBRID sperimentale non ancora attiva nella Chat.",
   "forceUpdate": false,
   "critical": false
 }
