@@ -64,6 +64,7 @@ class MainActivity : FlutterActivity() {
         ProcessExitDiagnostics.register(this, flutterEngine)
         BackgroundDownloads.register(this, flutterEngine)
         ScreenVisionBridge.register(this, flutterEngine)
+        ComputerUseAndroidBridge.register(this, flutterEngine)
         // Image LOCAL now auto-registers through CantiereLocalImageVisionPlugin.
         // Do NOT register legacy LocalImageVisionBridge on the same channel.
         // Separate local OCR channel; leaves Library image-labeling plugin intact.
