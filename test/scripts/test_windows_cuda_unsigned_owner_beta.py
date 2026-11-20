@@ -49,6 +49,19 @@ class UnsignedWindowsOwnerQa(unittest.TestCase):
         self.assertIn("requireSha256: true", UPDATER)
         self.assertNotIn("gh release upload", W)
 
+    def test_powershell_cuda_gate_does_not_read_stale_native_exit_code(self):
+        # PowerShell .ps1 invocations do not establish a new LASTEXITCODE.
+        # A successful bundle was previously rejected after the last Flutter command.
+        start = W.index("      - name: Bundle and audit pinned ASUS CUDA engine")
+        end = W.index("      - name: Compile Windows recovery helper", start)
+        block = W[start:end]
+        self.assertIn("bundle_windows_cuda_runtime.ps1", block)
+        self.assertIn("test_windows_cuda_bundle.ps1", block)
+        self.assertIn("test_windows_llama_bundle.ps1", block)
+        self.assertIn("patch_windows_bundle_win7.ps1", block)
+        self.assertNotIn("if ($LASTEXITCODE -ne 0)", block)
+        self.assertIn("PowerShell scripts throw on error", block)
+
     def test_owner_release_can_never_run_from_pull_request(self):
         self.assertIn("github.event_name == 'push'", W)
         self.assertIn("if: github.event_name == 'pull_request'", W)
