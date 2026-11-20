@@ -56,13 +56,25 @@ function connectDebugger(url) {
 
 async function debuggerPage(profile, chrome) {
   const deadline = Date.now() + 12000;
+  let created = false;
   while (Date.now() < deadline && chrome.exitCode === null) {
     try {
       const info = await readFile(join(profile, 'DevToolsActivePort'), 'utf8');
       const [port] = info.trim().split(/\r?\n/);
       if (!/^\d{2,5}$/.test(port)) throw new Error('invalid debugger port');
-      const list = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) });
-      const [page] = (await list.json()).filter(item => item.type === 'page' && item.url === 'about:blank');
+      const debuggerOrigin = `http://127.0.0.1:${port}`;
+      const list = await fetch(`${debuggerOrigin}/json/list`, { signal: AbortSignal.timeout(1000) });
+      let page = (await list.json()).find(item => item.type === 'page' && item.url === 'about:blank');
+      if (!page && !created) {
+        const response = await fetch(`${debuggerOrigin}/json/new?about:blank`, {
+          method: 'PUT', signal: AbortSignal.timeout(1000),
+        });
+        if (response.ok) {
+          created = true;
+          page = await response.json();
+        }
+      }
+      if (page?.type !== 'page' || page.url !== 'about:blank') throw new Error('blank debugger target missing');
       const url = new URL(page.webSocketDebuggerUrl);
       if (url.protocol === 'ws:' && url.hostname === '127.0.0.1' && url.port === port) return url;
     } catch (_) {
@@ -72,12 +84,19 @@ async function debuggerPage(profile, chrome) {
   throw new Error('browser startup failed');
 }
 
-function chromiumEnvironment() {
-  const env = {};
+function chromiumEnvironment(profile) {
+  const env = { XDG_CONFIG_HOME: join(profile, 'config'), XDG_CACHE_HOME: join(profile, 'cache') };
   for (const name of ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'LANG']) {
     if (process.env[name]) env[name] = process.env[name];
   }
   return env;
+}
+
+function readStartupCategory(text) {
+  if (/crashpad|crash reporter/i.test(text)) return 'browser_crash_reporter_failed';
+  if (/no usable sandbox|namespace sandbox|sandbox initialization/i.test(text)) return 'browser_sandbox_unavailable';
+  if (/cannot open shared object|error while loading shared libraries/i.test(text)) return 'browser_library_missing';
+  return null;
 }
 
 function browserCheck({ action, selector, value }) {
@@ -111,10 +130,18 @@ export function createChromiumWebVerifier({ executable }) {
         '--no-first-run', '--no-default-browser-check', '--proxy-server=http://aivexus-blocked.invalid:9',
         '--proxy-bypass-list=<-loopback>',
         '--host-resolver-rules=MAP * ~NOTFOUND', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
-        'about:blank'], { stdio: 'ignore', env: chromiumEnvironment(), windowsHide: true });
+        'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], env: chromiumEnvironment(profile), windowsHide: true });
+      let startupCategory = null;
+      chrome.stderr.setEncoding('utf8');
+      chrome.stderr.on('data', text => { startupCategory ??= readStartupCategory(text); });
       const startupFailed = new Promise((_, reject) => chrome.once('error', reject));
       exited = new Promise(resolve => chrome.once('close', resolve));
-      debuggerClient = connectDebugger(await Promise.race([debuggerPage(profile, chrome), startupFailed]));
+      try {
+        debuggerClient = connectDebugger(await Promise.race([debuggerPage(profile, chrome), startupFailed]));
+      } catch (error) {
+        failureDiagnosis = startupCategory ?? failureDiagnosis;
+        throw error;
+      }
       failureDiagnosis = 'browser_debugger_failed';
       const client = debuggerClient;
       let appError = false;
