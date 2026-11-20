@@ -469,8 +469,12 @@ export function createWebBuilderInference(env) {
       if (!route) return { ok: false, failureKind: 'not_free_authorized' };
       // An explicit manual choice NEVER falls back to a route that may
       // consume billable credits. Only this exact no-cost-trial NIM is called.
+      // Kimi/DeepSeek hosted previews prescribe different sampling. Keep
+      // full 4096-token builder output while honoring their known defaults.
+      const sampling = selfTestGenerationFor(route);
       const result = await callRoute(route, {
-        env, messages, maxTokens: 4096, temperature: 0.2, topP: 0.9,
+        env, messages, maxTokens: 4096,
+        temperature: sampling.temperature, topP: sampling.topP,
         selfTest: false, builderManual: true,
       });
       if (!result.ok) return result;
