@@ -42,6 +42,8 @@ final class ModuleLibraryIntakeSource {
         id: manifest['id']?.toString() ?? path,
         name: manifest['name']?.toString() ?? path,
         status: status,
+        version: manifest['version']?.toString() ?? path.split('/')[2],
+        description: manifest['description']?.toString() ?? '',
       ));
     }
     return List.unmodifiable(entries);
@@ -56,8 +58,10 @@ final class ModuleLibraryIntakeSource {
 }
 
 final class ModuleLibraryIntakeEntry {
-  const ModuleLibraryIntakeEntry({required this.id, required this.name, required this.status});
+  const ModuleLibraryIntakeEntry({required this.id, required this.name, required this.status, this.version = 'Non disponibile', this.description = ''});
   final String id;
   final String name;
   final String status;
+  final String version;
+  final String description;
 }

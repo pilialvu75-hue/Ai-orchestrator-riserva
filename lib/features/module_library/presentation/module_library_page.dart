@@ -541,9 +541,9 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
           Card(
             margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: ListTile(
-              leading: const Icon(Icons.functions),
+              leading: const _AvailabilityDot(available: true),
               title: const Text('Delta Codec'),
-              subtitle: const Text('Modulo sperimentale offline · Tocca per utilizzarlo'),
+              subtitle: const Text('Codifica e decodifica numerica'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
@@ -625,50 +625,75 @@ class _ModuleIndexView extends StatelessWidget {
         return left.title.toLowerCase().compareTo(right.title.toLowerCase());
       });
 
+    final available = sorted.where((item) => item.canReuse);
+    final unavailable = sorted.where((item) => !item.canReuse);
+    final candidates = List<ModuleLibraryIntakeEntry>.of(intake)
+      ..sort((a, b) => _intakeName(a).compareTo(_intakeName(b)));
+    Widget capabilityTile(ModuleCapabilityStatus status) => ListTile(
+      leading: _AvailabilityDot(available: status.canReuse),
+      title: Text(status.title),
+      subtitle: Text(_briefFunction(status)),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => _ModuleCapabilityDetailPage(
+          status: status,
+          curatorLoading: curatorLoading.contains(status.capabilityId),
+          onCurator: () => unawaited(onCurator(status)),
+        ),
+      )),
+    );
     return RefreshIndicator(
       onRefresh: onRefresh,
-      child: ListView.separated(
+      child: ListView(
         padding: const EdgeInsets.all(16),
         physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: sorted.length + 3,
-        separatorBuilder: (_, __) => const Divider(height: 1),
-        itemBuilder: (context, index) {
-          if (index == 0) return _LastUpdatedBanner(updatedAt: updatedAt);
-          if (index == 1) return _ModuleLabCard(run: labRun, loading: labLoading, error: labError, onRun: onRunResearcher, onRefresh: onRefreshLab);
-          if (index == 2) return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Catalogo certificato: ${items.fold<int>(0, (sum, item) => sum + item.certifiedActive)} moduli', style: Theme.of(context).textTheme.titleMedium),
-              Text('Intake non certificato: ${intake.length} moduli (di cui ${intake.where((e) => e.status == 'tested').length} TESTED)'),
-              if (intakeError != null) Text('Intake non disponibile: $intakeError'),
-              for (final entry in intake) ListTile(
-                dense: true,
-                title: Text(entry.name),
-                subtitle: Text('${entry.status.toUpperCase()} — non certificato, non riutilizzabile automaticamente'),
-              ),
-            ],
-          );
-          final status = sorted[index - 3];
-          return ListTile(
-            contentPadding: const EdgeInsets.symmetric(vertical: 6),
-            title: Text('${status.title} (${status.progressLabel})'),
-            subtitle: Text('Funzione: ${_briefFunction(status)}'),
+        children: [
+          for (final status in available) capabilityTile(status),
+          for (final entry in candidates) ListTile(
+            leading: const _AvailabilityDot(available: false),
+            title: Text(_intakeName(entry)),
+            subtitle: Text(_intakeFunction(entry)),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => _ModuleCapabilityDetailPage(
-                    status: status,
-                    curatorLoading: curatorLoading.contains(status.capabilityId),
-                    onCurator: () => unawaited(onCurator(status)),
-                  ),
-                ),
-              );
-            },
-          );
-        },
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text(_intakeName(entry)),
+                content: SingleChildScrollView(child: Text(
+                  'Funzione: ${_intakeFunction(entry)}\n'
+                  'ID: ${entry.id}\n'
+                  'Versione: ${entry.version}\n'
+                  'Stato: ${entry.status.toUpperCase()}\n'
+                  'Certificazione: non certificato\n'
+                  'Riutilizzo automatico nel Cantiere: no',
+                )),
+                actions: [TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Chiudi'),
+                )],
+              ),
+            ),
+          ),
+          for (final status in unavailable) capabilityTile(status),
+          const Divider(),
+          _LastUpdatedBanner(updatedAt: updatedAt),
+          _ModuleLabCard(run: labRun, loading: labLoading, error: labError,
+            onRun: onRunResearcher, onRefresh: onRefreshLab),
+          if (intakeError != null) Text('Intake non disponibile: $intakeError'),
+        ],
       ),
     );
+  }
+
+  String _intakeName(ModuleLibraryIntakeEntry entry) {
+    if (entry.id.startsWith('voice.stt.firstparty.mia')) return 'Mia Voice STT';
+    if (entry.id.startsWith('voice.tts.firstparty.mia')) return 'Mia Voice TTS';
+    return entry.name;
+  }
+
+  String _intakeFunction(ModuleLibraryIntakeEntry entry) {
+    if (entry.id.startsWith('voice.stt.')) return 'Converte la voce in testo.';
+    if (entry.id.startsWith('voice.tts.')) return 'Converte il testo in voce.';
+    return entry.description.isEmpty ? 'Funzione da documentare.' : entry.description;
   }
 
   String _briefFunction(ModuleCapabilityStatus status) {
@@ -686,6 +711,18 @@ class _ModuleIndexView extends StatelessWidget {
     return descriptions[status.capabilityId] ??
         'Fornisce la capacità ${status.title.toLowerCase()}.';
   }
+}
+
+class _AvailabilityDot extends StatelessWidget {
+  const _AvailabilityDot({required this.available});
+  final bool available;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: available ? 'Disponibile' : 'Non disponibile',
+    child: Icon(Icons.circle, size: 14,
+      color: available ? Colors.green : Theme.of(context).colorScheme.error),
+  );
 }
 
 class _ModuleCapabilityDetailPage extends StatelessWidget {
