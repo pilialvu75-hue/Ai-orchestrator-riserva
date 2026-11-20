@@ -3,6 +3,6 @@
   "operation": "deploy_private",
   "confirmation": "DEPLOY_PRIVATE_CANTIERE",
   "environment": "web-private-production",
-  "requestId": "aivexus-web-existing-owner-account-pr1251-20261120",
-  "reason": "Private release of merged PR #1251: existing AIVEXUS owner Cloudflare Access login is recognized through signed JWT identity (legacy subject or privately configured exact owner email, with email precedence). Customers remain standard; no new admin account, customer exposure, paid NVIDIA service, D1 migration or account changes. Maintain fail-closed Access checks and private hosting. Do not embed owner email in repository or response."
+  "requestId": "aivexus-web-sole-owner-no-client-full-free-pr1258-20261120",
+  "reason": "Request protected private release of merged #1258. Existing AIVEXUS Cloudflare Access owner only, all implemented Studio capabilities and internal daily quota 72/72. Customer invitations remain paused, no public client onboarding, no added account, no paid models or NVIDIA activation. Mandatory fail-closed preflight verifies Pages Production has signed owner identity binding and Access variables before any upload; do not expose values. If missing, block release and leave current production untouched."
 }
