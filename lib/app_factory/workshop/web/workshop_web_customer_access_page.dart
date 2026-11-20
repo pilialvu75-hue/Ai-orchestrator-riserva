@@ -27,7 +27,7 @@ class _WorkshopWebCustomerAccessPageState
   bool _busy = false, _ready = false, _enabled = false;
   int _days = 7;
 
-  String t(String value) => WorkshopWebLanguageScope.of(context).text(value);
+  String t(String value) => WorkshopWebLanguageScope.tr(context, value);
 
   @override
   void initState() {
