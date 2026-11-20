@@ -10,6 +10,7 @@ export function onRequest({ request, env }) {
     accessAudience: env.AIVEXUS_WEB_ACCESS_AUDIENCE,
     db: env.AIVEXUS_WEB_D1,
     adminSubject: env.AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT,
+    ownerEmail: env.AIVEXUS_WEB_OWNER_EMAIL,
     infer: request.method === 'POST' ? createWebBuilderInference(env) : null,
   })(request);
 }
