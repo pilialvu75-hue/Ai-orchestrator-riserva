@@ -24,6 +24,17 @@ void main() {
     expect(service, isNot(contains('performGlobalAction(')));
     expect(manifest, contains('android.permission.BIND_ACCESSIBILITY_SERVICE'));
     expect(settings, contains('android:canPerformGestures="true"'));
+    final bridge = File(
+      'android/app/src/main/kotlin/com/aiorchestrator/'
+      'ComputerUseAndroidBridge.kt',
+    ).readAsStringSync();
+    expect(bridge, contains('findInstalledApps'));
+    expect(bridge, contains('launchInstalledApp'));
+    expect(bridge, contains('recentVisibleLauncherPackages'));
+    expect(bridge, contains('call.method == "swipeTarget"'));
+    expect(bridge, isNot(contains('call.method == "swipeGame"')));
+    expect(manifest, contains('android.intent.category.LAUNCHER'));
+    expect(manifest, isNot(contains('QUERY_ALL_PACKAGES')));
   });
 
   test('QA build opt-in is explicit and normal Android releases remain off', () {
@@ -44,6 +55,7 @@ void main() {
     expect(lab, contains('tapTarget'));
     expect(lab, contains('swipeTarget'));
     expect(lab, contains('selectForegroundTarget'));
+    expect(lab, contains('Cerca e apri app'));
     expect(lab, contains('onPanUpdate'));
     expect(lab, contains('Acquisisci tra 4 secondi'));
   });
