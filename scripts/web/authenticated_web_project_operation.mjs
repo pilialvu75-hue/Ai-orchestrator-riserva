@@ -116,6 +116,7 @@ function operationFailure(result) {
   if (reason === 'generation_conflict') return reject(409, 'generation_conflict');
   if (reason === 'generation_quota_exceeded') return reject(429, reason);
   if (reason === 'generation_unavailable') return reject(503, 'generation_unavailable');
+  if (reason === 'generation_model_unavailable') return reject(503, 'generation_model_unavailable');
   if (reason === 'verification_checks_missing') return reject(409, 'verification_checks_missing');
   if (reason === 'verification_payload_too_large') return reject(413, 'verification_payload_too_large');
   if (reason === 'verification_unavailable') return reject(503, 'verification_unavailable');
