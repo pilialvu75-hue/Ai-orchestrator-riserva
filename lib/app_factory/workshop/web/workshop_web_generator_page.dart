@@ -136,6 +136,8 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
           body['version'] != 1 ||
           body['ok'] != true ||
           body['scope'] != 'aivexus_reservations' ||
+          (body['tier'] != null &&
+              body['tier'] != 'administrator' && body['tier'] != 'standard') ||
           body['remaining'] is! int ||
           body['userRemaining'] is! int ||
           body['userLimit'] is! int ||
@@ -181,6 +183,12 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
           spacing: 8,
           runSpacing: 3,
           children: [
+            if (quota?['tier'] == 'administrator')
+              Text(
+                tr('Amministratore'),
+                key: const Key('web_generator_quota_admin'),
+                style: const TextStyle(color: Color(0xFF9AC9FF), fontWeight: FontWeight.bold, fontSize: 12),
+              ),
             const Icon(Icons.toll_outlined, size: 17, color: Color(0xFF9AC9FF)),
             Text(
               remaining == null
