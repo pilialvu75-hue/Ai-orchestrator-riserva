@@ -150,7 +150,8 @@ async function boundedBody(request) {
 
 export function createWebCustomerAccessHandler({
   operation, expectedOrigin, accessIssuer, accessAudience,
-  configuredOwnerSubject, configuredOwnerEmail, db, fetchImpl,
+  configuredOwnerSubject, configuredOwnerEmail, clientAccessEnabled = false,
+  db, fetchImpl,
 } = {}) {
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
@@ -215,7 +216,8 @@ export function createWebCustomerAccessHandler({
       } else {
         const active = owner ? false : await activeWebCustomerGrant({ db, principal });
         output = { ok: true, role: owner ? 'owner' : active ? 'client' : 'uninvited',
-          clientEnabled: false };
+          clientEnabled: clientAccessEnabled === true,
+          canUseStudio: !!owner || (clientAccessEnabled === true && active) };
       }
       const { status: responseStatus = 200, ...safe } = output;
       return result(responseStatus, safe);
