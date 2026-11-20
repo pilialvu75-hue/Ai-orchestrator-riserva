@@ -14,10 +14,16 @@ class VoiceTtsPreference {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
       return TtsBackend.kokoro;
     }
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(key) == 'androidSystem'
-        ? TtsBackend.androidSystem
-        : TtsBackend.kokoro;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(key) == 'androidSystem'
+          ? TtsBackend.androidSystem
+          : TtsBackend.kokoro;
+    } on Object {
+      // Reading a platform preference must not prevent the existing Kokoro
+      // playback on headless tests or during early Flutter initialization.
+      return TtsBackend.kokoro;
+    }
   }
 
   static Future<void> save(TtsBackend value) async {
