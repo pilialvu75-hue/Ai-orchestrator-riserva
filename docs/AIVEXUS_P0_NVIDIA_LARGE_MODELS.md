@@ -79,7 +79,7 @@ Gemma 4 on Workers AI Free remains the default. Desktop/Android Local,
 Cloud and Hybrid are unchanged; manually selected large-model broker routes
 remain excluded from AUTO.
 
-All five server-side eligibility conditions must be met:
+All six eligibility conditions must be met:
 
 1. Confirm NVIDIA trial entitlement and monetary cost zero for **full app
    generation**, not only a short synthetic probe; no billable overages.
@@ -90,8 +90,11 @@ All five server-side eligibility conditions must be met:
    `selfTestFree:true`, and the **separate** `builderFreeVerified:true`.
 4. Cloudflare Pages Production must have
    `AIVEXUS_WEB_BUILDER_NIM_FREE_VERIFIED=true` set server-side.
-5. `/api/cantiere/models` must confirm `builderAvailable:true` for the
-   exact route. The catalogue signals authorization, not live credit balance.
+5. The requester must be the **signed Cloudflare Access administrator**
+   matched against private `AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT` on the server.
+   An unverified admin or tester falls back to the original Gemma builder.
+6. `/api/cantiere/models` must confirm `builderAvailable:true` for the
+   exact route. The catalogue signals route authorization, not live credit balance.
 
 **Both new controls are OFF by default.** An operator must independently
 verify the specific account's free-trial terms before enabling them. No
