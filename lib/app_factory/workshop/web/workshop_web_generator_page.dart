@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_workspace.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_platform_picker.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_source_page.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -34,6 +35,7 @@ class WorkshopWebGeneratorPage extends StatefulWidget {
 
 class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   static const _storageKey = 'aivexus.web.lastGeneration.v1';
+  static const _platformStorageKey = 'aivexus.web.generationPreviewPlatform.v1';
   static final _idPattern = RegExp(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
   );
@@ -56,6 +58,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   final List<ChatTurn> _chatTurns = <ChatTurn>[];
   WorkshopChatController? _chatController;
   bool _firstChatTurn = true;
+  WorkshopWebTarget _selectedPlatform = WorkshopWebTarget.web;
   late final http.Client _client = widget.client ?? http.Client();
   late final Future<SharedPreferences> _preferences =
       SharedPreferences.getInstance();
@@ -99,8 +102,18 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _selectPlatform(WorkshopWebTarget platform) async {
+    if (!mounted) return;
+    setState(() => _selectedPlatform = platform);
+    await (await _preferences).setString(_platformStorageKey, platform.name);
+  }
+
   Future<void> _restore() async {
     await _run(() async {
+      final code = (await _preferences).getString(_platformStorageKey);
+      if (mounted) {
+        setState(() => _selectedPlatform = WorkshopWebTarget.fromCode(code));
+      }
       final requested = Uri.base.queryParameters['generationId'];
       if (requested != null && _idPattern.hasMatch(requested)) {
         final receipt = await _call(requested);
@@ -212,8 +225,10 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   Future<void> _reset() async {
     await _run(() async {
       await (await _preferences).remove(_storageKey);
+      await (await _preferences).remove(_platformStorageKey);
       if (!mounted) return;
       setState(() {
+        _selectedPlatform = WorkshopWebTarget.web;
         _generationId = null;
         _pendingPrompt = null;
         _receipt = null;
@@ -388,7 +403,28 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                 tr('Descrivi la tua applicazione. Puoi modificare il testo prima di inviarlo.'),
                 style: const TextStyle(color: Colors.white70, fontSize: 15),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    tr('Piattaforma'),
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  WorkshopWebPlatformPicker(
+                    selected: _selectedPlatform,
+                    onChanged: _selectPlatform,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                tr('La piattaforma cambia il formato dell’anteprima Web; non crea un pacchetto nativo.'),
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
               Expanded(
                 child: TextField(
                   key: const Key('web_generator_first_prompt'),
@@ -691,6 +727,8 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       body: SafeArea(
         child: WorkshopWebGeneratorWorkspace(
           showIntro: id == null,
+          platform: _selectedPlatform,
+          onPlatformChanged: _selectPlatform,
           intro: _firstPromptEditor(tr),
           projectTitle: receipt?['title'] is String
               ? receipt!['title'] as String
