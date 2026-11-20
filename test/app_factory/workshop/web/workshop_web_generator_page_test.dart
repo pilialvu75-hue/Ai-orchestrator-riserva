@@ -401,7 +401,8 @@ void main() {
         return http.Response(jsonEncode({
           'version': 1, 'ok': true,
           'scope': 'aivexus_reservations',
-          'remaining': 10, 'userRemaining': 10, 'userLimit': 10,
+          'remaining': 10, 'userRemaining': 10, 'userLimit': 64,
+          'tier': 'administrator',
           'globalRemaining': 72, 'globalLimit': 72,
           'nextAvailableAt': null,
         }), 200);
@@ -509,7 +510,7 @@ void main() {
     await tester.tap(find.byKey(const Key('web_generator_submit_first_prompt')));
     await tester.pumpAndSettle();
     expect(generationPosts, 1);
-    expect(find.text('Modello NVIDIA non autorizzato per generare app: uso Gemma 4.'),
+    expect(find.text('Generazione NVIDIA riservata all’amministratore verificato: uso Gemma 4.'),
         findsOneWidget);
   });
 }
