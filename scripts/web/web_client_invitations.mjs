@@ -151,7 +151,7 @@ async function boundedBody(request) {
 export function createWebCustomerAccessHandler({
   operation, expectedOrigin, accessIssuer, accessAudience,
   configuredOwnerSubject, configuredOwnerEmail, clientAccessEnabled = false,
-  db, fetchImpl,
+  enrollmentPaused = true, db, fetchImpl,
 } = {}) {
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
@@ -184,6 +184,19 @@ export function createWebCustomerAccessHandler({
       principal, configuredSubject: configuredOwnerSubject,
       configuredEmail: configuredOwnerEmail,
     });
+    // Customer service has been shelved by the owner. Default closed, and
+    // production wrappers never override it. Keep role status read-only for
+    // existing owner diagnostics; do not query invitation D1 when paused.
+    if (enrollmentPaused && operation !== 'status') {
+      return deny(403, 'client_service_paused');
+    }
+    if (enrollmentPaused) {
+      return result(200, {
+        ok: true, role: owner ? 'owner' : 'uninvited',
+        clientEnabled: false, canUseStudio: !!owner,
+        customerService: 'paused',
+      });
+    }
     if (['create', 'list', 'revoke'].includes(operation) && !owner) {
       return deny(403, 'owner_required');
     }
