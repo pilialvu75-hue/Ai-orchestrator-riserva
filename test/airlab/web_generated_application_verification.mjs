@@ -79,12 +79,15 @@ test('Chromium detects a syntax error and passes the same real DOM checks after 
     assert.equal(input.diagnosis, 'javascript_error');
     assert.deepEqual(input.source, broken);
     return Promise.resolve(Response.json({ model, choices: [
-      { finish_reason: 'stop', message: { content: JSON.stringify(repaired) } },
+      { finish_reason: 'stop', message: { content: JSON.stringify({
+        title: 'Ignored model title', requirements: ['Ignored requirement'], files: [repaired.files[1]],
+      }) } },
     ] }));
   };
   const result = await runWebApplicationVerification({ source: broken, checks, executable, env });
   assert.equal(result.status, 'verified', JSON.stringify(result.attempts));
   assert.equal(calls, 1);
+  assert.deepEqual(result.source, { ...repaired, files: [repaired.files[1], repaired.files[0]] });
   assert.deepEqual(result.attempts.map(attempt => attempt.status), ['code_error', 'passed']);
   assert.notEqual(result.attempts[0].sourceSha256, result.attempts[1].sourceSha256);
   assert.equal(result.attempts[1].repairProvenance.reportedModel, model);
