@@ -313,7 +313,9 @@ void main() {
     const prompt = 'Una app per catalogare le mie letture';
     int generationPosts = 0;
     int reuseReads = 0;
+    final seenRoutes = <String>[];
     final client = MockClient((request) async {
+      seenRoutes.add('${request.method} ${request.url}');
       if (request.url.path == '/api/cantiere/proposals/quota') {
         return http.Response(jsonEncode({
           'version': 1, 'ok': true,
@@ -374,8 +376,8 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('web_generator_submit_first_prompt')));
     await tester.pumpAndSettle();
-    expect(generationPosts, 0);
-    expect(reuseReads, 1);
+    expect(generationPosts, 0, reason: seenRoutes.join(' | '));
+    expect(reuseReads, 1, reason: seenRoutes.join(' | '));
     expect(generationPosts, 0);
     expect(find.byKey(const Key('web_generator_reused_verified')), findsOneWidget);
     expect(find.text('Catalogo libri'), findsOneWidget);
