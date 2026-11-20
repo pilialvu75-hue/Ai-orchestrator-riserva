@@ -72,6 +72,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
   bool _projectionStartedByLab = false;
   Timer? _expiryTimer;
   final TextEditingController _textController = TextEditingController();
+  final TextEditingController _appSearchController = TextEditingController();
 
   Uint8List? _frame;
   int _frameWidth = 1;
@@ -92,6 +93,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
     }
     unawaited(_releaseProjection());
     _textController.dispose();
+    _appSearchController.dispose();
     super.dispose();
   }
 
@@ -147,6 +149,57 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         setState(() => _message =
             'Scheda Play Store aperta. Installazione sotto il tuo '
             'controllo. Computer Use Android resta in sola osservazione.');
+      }
+    });
+  }
+
+  Future<void> _findAndOpenAndroidApp() async {
+    if (!_isAndroid || _busy) return;
+    final query = _appSearchController.text.trim();
+    if (query.length < 2) {
+      setState(() => _message = 'Scrivi almeno due caratteri dell’app da aprire.');
+      return;
+    }
+    await _run(() async {
+      final matches = await _androidGestures.invokeListMethod<dynamic>(
+        'findInstalledApps',
+        <String, Object>{'query': query},
+      );
+      if (!mounted) return;
+      final apps = (matches ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((entry) => <String, String>{
+                'label': (entry['label'] ?? '').toString(),
+                'package': (entry['package'] ?? '').toString(),
+              })
+          .where((entry) => entry['package']!.isNotEmpty)
+          .toList();
+      if (apps.isEmpty) {
+        setState(() => _message = 'Nessuna app installata trovata per: $query.');
+        return;
+      }
+      final selected = await showDialog<Map<String, String>>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('Quale app vuoi aprire?'),
+          children: [
+            for (final app in apps)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, app),
+                child: Text(app['label']!),
+              ),
+          ],
+        ),
+      );
+      if (selected == null || !mounted) return;
+      await _androidGestures.invokeMethod<bool>(
+        'launchInstalledApp',
+        <String, Object>{'package': selected['package']!},
+      );
+      if (mounted) {
+        setState(() => _message =
+            'Apertura richiesta: ${selected['label']}. '
+            'L’app non è ancora controllata: selezionala con Acquisisci.');
       }
     });
   }
@@ -709,6 +762,21 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               'Computer Use Android: seleziona l’app che vuoi osservare, '
               'poi autorizza un tocco o uno scorrimento. '
               'Per ora non è ancora attivo un agente IA autonomo.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _appSearchController,
+              decoration: const InputDecoration(
+                labelText: 'Cerca un’app installata',
+                hintText: 'Per esempio: Car Jam, Note, Blocco note',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _findAndOpenAndroidApp(),
+            ),
+            FilledButton.icon(
+              onPressed: _busy ? null : _findAndOpenAndroidApp,
+              icon: const Icon(Icons.apps),
+              label: const Text('Cerca e apri app'),
             ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _openAndroidAccessibilitySettings,
