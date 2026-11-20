@@ -163,4 +163,44 @@ void main() {
     expect(find.text('Sorgenti verificati'), findsOneWidget);
     expect(find.text('<h1>Intervalli</h1>'), findsOneWidget);
   });
+
+  testWidgets('long structured first prompt is retained and submitted intact',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 950);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+
+    final prompt = 'Requisito: accessibilità e navigazione completa.\n' * 100;
+    expect(prompt.length, greaterThan(1200));
+    expect(prompt.length, lessThan(8000));
+    String? sentPrompt;
+    final client = MockClient((request) async {
+      expect(request.method, 'POST');
+      expect(request.url.path, '/api/cantiere/proposals/generate');
+      sentPrompt = (jsonDecode(request.body) as Map)['prompt'] as String;
+      return http.Response(jsonEncode({
+        'version': 1,
+        'ok': true,
+        'generationId': (jsonDecode(request.body) as Map)['generationId'],
+        'status': 'generating',
+      }), 200);
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(home: WorkshopWebGeneratorPage(client: client)),
+    );
+    await tester.pumpAndSettle();
+    final editor = find.byKey(const Key('web_generator_first_prompt'));
+    expect(tester.widget<TextField>(editor).maxLength, 8000);
+    await tester.enterText(editor, prompt);
+    await tester.pump();
+    expect(tester.widget<TextField>(editor).controller!.text, prompt);
+    await tester.tap(find.text('Genera'));
+    await tester.pumpAndSettle();
+
+    expect(sentPrompt, prompt);
+    expect(find.text('Generazione in corso'), findsOneWidget);
+  });
 }
