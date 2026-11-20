@@ -172,7 +172,9 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
 
-    final prompt = 'Requisito: accessibilità e navigazione completa.\n' * 100;
+    final prompt = List<String>.filled(
+      100, 'Requisito: accessibilità e navigazione completa.',
+    ).join('\n');
     expect(prompt.length, greaterThan(1200));
     expect(prompt.length, lessThan(8000));
     String? sentPrompt;
