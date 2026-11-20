@@ -146,6 +146,7 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
   const model = '@cf/google/gemma-4-26b-a4b-it';
   const env = {
     AIVEXUS_WEB_ORIGIN: origin, AIVEXUS_WEB_ACCESS_ISSUER: issuer, AIVEXUS_WEB_ACCESS_AUDIENCE: audience,
+    AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: 'owner',
     AIVEXUS_WEB_BUILDER_FREE_ENABLED: 'true',
     AIVEXUS_WEB_BUILDER_AI: { async run() { return { model, choices: [{ finish_reason: 'stop', message: {
       content: JSON.stringify({ ...f.source, checks: f.checks }),
@@ -212,7 +213,7 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
   const query = `?generationId=${generationId}`;
   const generated = await (await call(generate, 'generate', owner, { generationId, prompt: 'Un promemoria' })).json();
   assert.equal(generated.status, 'generated');
-  assert.equal((await call(verify, 'verify', stranger, { generationId })).status, 404);
+  assert.equal((await call(verify, 'verify', stranger, { generationId })).status, 403);
   assert.equal((await (await call(verify, 'verify', owner, null, query)).json()).status, 'ready');
   const requests = await Promise.all(Array.from({ length: 5 }, () => call(verify, 'verify', owner, { generationId })));
   const states = await Promise.all(requests.map(response => response.json()));
@@ -229,15 +230,15 @@ test('Pages reserves one verification and serves its verified ZIP only to the ow
   assert.equal(posts, 1);
   assert.equal(downloads, 1);
   assert.equal(result.sourceSha256, generated.sourceSha256);
-  assert.equal((await call(download, 'download', stranger, null, query)).status, 404);
+  assert.equal((await call(download, 'download', stranger, null, query)).status, 403);
   const artifact = await call(download, 'download', owner, null, query);
   assert.equal(artifact.status, 200);
   assert.equal(artifact.headers.get('content-type'), 'application/zip');
   const zip = new Uint8Array(await artifact.arrayBuffer());
   assert.equal(await runnerPayloadSha256(zip), result.zipSha256);
   assert.ok(Buffer.from(zip).includes(Buffer.from(f.source.files[1].content)));
-  assert.equal((await call(readSource, 'source', stranger, null, query)).status, 404);
-  assert.equal((await call(preview, 'preview', stranger, null, query)).status, 404);
+  assert.equal((await call(readSource, 'source', stranger, null, query)).status, 403);
+  assert.equal((await call(preview, 'preview', stranger, null, query)).status, 403);
   const sourceResponse = await call(readSource, 'source', owner, null, query);
   assert.equal(sourceResponse.status, 200);
   assert.equal(sourceResponse.headers.get('cache-control'), 'no-store');

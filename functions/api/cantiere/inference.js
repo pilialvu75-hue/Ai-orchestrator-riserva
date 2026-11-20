@@ -505,7 +505,46 @@ export function createWebBuilderInference(env) {
   return infer;
 }
 
+// PUBLIC Pages entry point. Only the existing owner may spend AI resources.
+// The underlying broker is kept separate for deterministic synthetic tests;
+// no public Pages route exposes the broker directly.
 export async function onRequest(context) {
+  const req = context.request;
+  if (req.method !== 'POST') return onRequestBroker(context);
+  const expectedOrigin = context.env.AIVEXUS_WEB_ORIGIN;
+  if (typeof expectedOrigin !== 'string' || !expectedOrigin ||
+      req.headers.get('origin') !== expectedOrigin ||
+      new URL(req.url).origin !== expectedOrigin ||
+      req.headers.get('sec-fetch-site') === 'cross-site') {
+    return error('origin_forbidden', 403);
+  }
+  let createCloudflareAccessPrincipalResolver, existingWebOwnerSubject;
+  try {
+    [{ createCloudflareAccessPrincipalResolver }, { existingWebOwnerSubject }] =
+      await Promise.all([
+        import('../../../scripts/web/cloudflare_access_principal_resolver.mjs'),
+        import('../../../scripts/web/web_owner_role.mjs'),
+      ]);
+  } catch (_) {
+    return error('access_unavailable', 503);
+  }
+  const resolver = createCloudflareAccessPrincipalResolver({
+    expectedIssuer: context.env.AIVEXUS_WEB_ACCESS_ISSUER,
+    expectedAudience: context.env.AIVEXUS_WEB_ACCESS_AUDIENCE,
+  });
+  const verified = await resolver.resolve(req).catch(() => null);
+  if (!verified?.ok) return error('access_denied', 401);
+  const owner = existingWebOwnerSubject({
+    principal: verified.principal,
+    configuredSubject: context.env.AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT,
+    configuredEmail: context.env.AIVEXUS_WEB_OWNER_EMAIL,
+  });
+  if (!owner) return error('owner_required', 403);
+  return onRequestBroker(context);
+}
+
+// Synthetic-test seam; never map this function to an HTTP route.
+export async function onRequestBroker(context) {
   if (context.request.method !== 'POST') {
     return new Response('Method not allowed.', {
       status: 405,
@@ -514,55 +553,6 @@ export async function onRequest(context) {
         'Cache-Control': 'no-store',
       },
     });
-  }
-
-  // Customer enrollment is opt-in and fails closed. Invited customers may
-  // create their own app through the D1-metered generate endpoint, but cannot
-  // consume raw provider API calls or owner-only large NVIDIA trials.
-  if (context.env.AIVEXUS_WEB_CLIENT_ACCESS_ENABLED === 'true') {
-    // Keep the zero-cost broker's existing data-URL test harness compatible:
-    // load the authenticated customer gate only when client mode is enabled.
-    // Static specifiers are bundled by Cloudflare at build time.
-    let createCloudflareAccessPrincipalResolver;
-    let existingWebOwnerSubject;
-    let activeWebCustomerGrant;
-    try {
-      [{ createCloudflareAccessPrincipalResolver },
-       { existingWebOwnerSubject },
-       { activeWebCustomerGrant }] = await Promise.all([
-        import('../../../scripts/web/cloudflare_access_principal_resolver.mjs'),
-        import('../../../scripts/web/web_owner_role.mjs'),
-        import('../../../scripts/web/web_client_invitations.mjs'),
-      ]);
-    } catch (_) {
-      return error('access_unavailable', 503);
-    }
-    const request = context.request;
-    const expectedOrigin = context.env.AIVEXUS_WEB_ORIGIN;
-    if (request.headers.get('origin') !== expectedOrigin ||
-        new URL(request.url).origin !== expectedOrigin ||
-        request.headers.get('sec-fetch-site') === 'cross-site') {
-      return error('origin_forbidden', 403);
-    }
-    const resolver = createCloudflareAccessPrincipalResolver({
-      expectedIssuer: context.env.AIVEXUS_WEB_ACCESS_ISSUER,
-      expectedAudience: context.env.AIVEXUS_WEB_ACCESS_AUDIENCE,
-    });
-    const verified = await resolver.resolve(request).catch(() => null);
-    if (!verified?.ok) return error('access_denied', 401);
-    const owner = existingWebOwnerSubject({
-      principal: verified.principal,
-      configuredSubject: context.env.AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT,
-      configuredEmail: context.env.AIVEXUS_WEB_OWNER_EMAIL,
-    });
-    if (!owner) {
-      const permitted = await activeWebCustomerGrant({
-        db: context.env.AIVEXUS_WEB_D1,
-        principal: verified.principal,
-      }).catch(() => false);
-      if (!permitted) return error('client_access_required', 403);
-      return error('client_inference_not_enabled', 403);
-    }
   }
 
   const contentType = context.request.headers.get('content-type') || '';
