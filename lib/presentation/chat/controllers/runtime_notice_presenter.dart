@@ -28,6 +28,10 @@ class RuntimeNoticePresenter {
     final controller = messenger.showSnackBar(
       SnackBar(
         content: Text(next, maxLines: 3, overflow: TextOverflow.ellipsis),
+        // Floating snackbars anchor above Scaffold.bottomNavigationBar rather
+        // than covering the chat composer on Windows and mobile.
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         backgroundColor: Theme.of(context).colorScheme.error,
         showCloseIcon: true,
         duration: const Duration(seconds: 6),
