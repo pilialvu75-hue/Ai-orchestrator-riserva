@@ -16,7 +16,6 @@ class UnsignedWindowsOwnerQa(unittest.TestCase):
         self.assertIn("owner_accepts_unsigned=true", W)
         self.assertIn('main_sha=$mainSha', W)
         self.assertIn("ref: ${{ steps.source.outputs.main_sha }}", W)
-        self.assertIn("The", "The")  # test compatibility for Python stdlib runner
         self.assertNotIn("workflow_dispatch:", W)
         self.assertNotIn("secrets.AIVEXUS_WINDOWS_SIGNING", W)
         self.assertNotIn("AivexusTrustedSignedBuild 1", W)
@@ -42,7 +41,6 @@ class UnsignedWindowsOwnerQa(unittest.TestCase):
         self.assertIn("public GitHub prerelease asset", W)
         self.assertIn("SHA-256 checks integrity, NOT publisher identity", W)
         self.assertIn("Get-AuthenticodeSignature", W)
-        self.assertIn("If".lower(), W.lower())
         self.assertIn("AivexusRecoveryHelper", W)
         self.assertIn("SnapshotInstalledVersion", INNO)
         self.assertIn("SignedUninstaller=no", INNO)
@@ -56,7 +54,7 @@ class UnsignedWindowsOwnerQa(unittest.TestCase):
         self.assertIn("if: github.event_name == 'pull_request'", W)
         self.assertIn("permissions:\n  contents: read", W)
         self.assertIn("contents: write", W)
-        self.assertIn("validate", W.lower())
+        self.assertIn("Validate reviewed main and release request", W)
         self.assertNotIn("persist-credentials: true", W)
 
 
