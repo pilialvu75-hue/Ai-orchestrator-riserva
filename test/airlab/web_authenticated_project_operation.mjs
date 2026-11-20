@@ -22,7 +22,7 @@ import { onRequest as quotaApplication } from
   '../../functions/api/cantiere/proposals/quota.js';
 import { onRequest as reuseApplication } from
   '../../functions/api/cantiere/proposals/reuse.js';
-import { onRequest as ordinaryInference } from '../../functions/api/cantiere/inference.js';
+import { onRequestBroker as ordinaryInference } from '../../functions/api/cantiere/inference.js';
 import { createWebBuilderInference, listWebBuilderLargeModels } from
   '../../functions/api/cantiere/inference.js';
 import { generateWebApplication } from '../../scripts/web/generate_web_application.mjs';
