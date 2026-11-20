@@ -6,7 +6,18 @@ abstract final class WindowsCudaDevice {
   static String? select(String listing, {required int modelBytes}) {
     if (modelBytes <= 0) return null;
     final pattern = RegExp(
-      r'^\s*(CUDA\d+):\s*NVIDIA[^\r\n]*\((\d+) MiB, (\d+) MiB free\)\s*$',
+      // llama.cpp may prepend a timestamp/logger prefix to each line. Keep\n      // matching the actual CUDA device label and conservative VRAM values.\n      r'^[^\r\n]*?\b(CUDA\d+):\s*NVIDIA[^\r\n]*\((\d+) MiB,\s*(\d+) MiB free\)\s*
+      multiLine: true,
+    );
+    final requiredMiB = (modelBytes / (1024 * 1024)).ceil() + _requiredHeadroomMiB;
+    for (final match in pattern.allMatches(listing)) {
+      final free = int.tryParse(match.group(3)!);
+      if (free != null && free >= requiredMiB) return match.group(1);
+    }
+    return null;
+  }
+}
+,
       multiLine: true,
     );
     final requiredMiB = (modelBytes / (1024 * 1024)).ceil() + _requiredHeadroomMiB;
