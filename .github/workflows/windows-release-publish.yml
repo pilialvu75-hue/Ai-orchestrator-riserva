@@ -225,6 +225,25 @@ jobs:
         shell: pwsh
         run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }} --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=${{ steps.computer_use_lab.outputs.enabled }}
 
+      - name: Bundle verified modern MiniCPM5 runtime for Computer Use beta
+        if: steps.computer_use_lab.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          & (Join-Path $PWD 'tool\bundle_windows_modern_runtime.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
+          if ($LASTEXITCODE -ne 0) { throw 'Modern MiniCPM5 runtime bundle failed.' }
+
+      - name: Verify modern LOCAL model runtime for Computer Use beta
+        if: steps.computer_use_lab.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN = '1'
+          try {
+            & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
+            if ($LASTEXITCODE -ne 0) { throw 'Modern LOCAL verification failed.' }
+          } finally {
+            Remove-Item Env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN -ErrorAction SilentlyContinue
+          }
+
       - name: Package local ChatGPT adapter for beta only
         if: steps.computer_use_lab.outputs.enabled == 'true'
         shell: pwsh
