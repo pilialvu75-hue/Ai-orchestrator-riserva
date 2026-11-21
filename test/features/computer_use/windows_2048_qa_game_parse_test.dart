@@ -16,6 +16,15 @@ String _encodedPowerShellCommand(String script) {
 }
 
 void main() {
+  test('QA 2048 must report early process exit instead of launch success', () {
+    // Source-level contract: no GUI, model, permission or process is started.
+    final file = File('lib/features/computer_use/windows_computer_use_adapter.dart');
+    final source = file.readAsStringSync();
+    expect(source, contains('QA_GAME_EXITED_EARLY'));
+    expect(source, contains('ProcessStartMode.normal : ProcessStartMode.detached'));
+    expect(source, contains('launched.exitCode.then((_) => true)'));
+  });
+
   test('read-only Windows UIA can enumerate the complete 2048 control tree',
       () {
     // The game has 16 tiles plus HUD, four direction buttons and restart.
