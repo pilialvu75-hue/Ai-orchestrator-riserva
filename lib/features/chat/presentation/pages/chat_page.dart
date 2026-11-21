@@ -1941,6 +1941,10 @@ class _ChatBodyState
     for (final message in messages.reversed) {
       if (message.role != 'assistant') continue;
       final provider = message.provider?.trim() ?? '';
+      if (state is ChatSending && message.isPending &&
+          (provider.isEmpty || provider == 'assistant')) {
+        return 'In attesa';
+      }
       if (provider.isEmpty || provider == 'assistant') continue;
       final label = provider.toLowerCase() == 'local'
           ? 'LOCAL'
