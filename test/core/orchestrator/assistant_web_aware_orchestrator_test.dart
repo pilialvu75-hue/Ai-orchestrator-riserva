@@ -559,7 +559,8 @@ void main() {
       if (request.routeDirective == InferenceRouteDirective.cloudOnly) {
         return Stream<InferenceResponse>.value(
           InferenceResponse.error('Provider temporary failure',
-              providerId: 'gemini'),
+              providerId: 'gemini',
+              errorCode: InferenceErrorCode.cloudProviderUnavailable),
         );
       }
       return Stream<InferenceResponse>.value(
