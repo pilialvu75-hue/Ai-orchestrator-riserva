@@ -25,8 +25,11 @@ class AssistantMessageContent extends StatefulWidget {
 }
 
 class _AssistantMessageContentState extends State<AssistantMessageContent> {
-  static final RegExp _links = RegExp(
-    r'\[([^\]\n]{1,100})\]\((https?:\/\/[^\s()<>{}]+)\)',
+  // Supports both [label](https://example.org) and bare HTTPS URLs in
+  // model/web-search responses. Explicit Markdown always wins over its
+  // embedded URL, so no duplicate recognizers are created.
+  static final RegExp _linksOrUrls = RegExp(
+    r'\[([^\]\n]{1,100})\]\((https?:\/\/[^\s()<>{}]+)\)|(https?:\/\/[^\s<>()\[\]{}]+)',
     caseSensitive: false,
   );
   static final RegExp _heading = RegExp(r'^(#{1,3})\s+(.+)$');
@@ -94,6 +97,7 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
 
   Widget _renderText(String raw) {
     if (!raw.contains('](') &&
+        !raw.contains('://') &&
         !raw.contains('**') &&
         !raw.contains('# ')) {
       return Text(raw, style: widget.style);
@@ -136,9 +140,25 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
             );
       if (heading != null) hasLink = true;
       var cursor = 0;
-      for (final match in _links.allMatches(displayedLine)) {
-        final title = match.group(1)!;
-        final url = match.group(2)!;
+      for (final match in _linksOrUrls.allMatches(displayedLine)) {
+        // Neither fenced blocks nor inline code should launch a browser.
+        if ('`'.allMatches(displayedLine.substring(0, match.start)).length.isOdd) {
+          continue;
+        }
+        final markdown = match.group(2) != null;
+        var url = (match.group(markdown ? 2 : 3) ?? '');
+        if (!markdown) {
+          // Periods and commas at the end of sentences are not URL content.
+          // Preserve them in the visible text after the link.
+          while (url.isNotEmpty &&
+              '.,;:!?'.contains(url[url.length - 1])) {
+            url = url.substring(0, url.length - 1);
+          }
+          final quoteIndex = url.indexOf(RegExp(r'''['"`]+'''));
+          if (quoteIndex >= 0) url = url.substring(0, quoteIndex);
+        }
+        if (url.isEmpty) continue;
+        final title = markdown ? match.group(1)! : url;
         final uri = Uri.tryParse(url);
         if (uri == null ||
             (uri.scheme != 'http' && uri.scheme != 'https') ||
@@ -169,7 +189,8 @@ class _AssistantMessageContentState extends State<AssistantMessageContent> {
           recognizer: tap,
         ));
         hasLink = true;
-        cursor = match.end;
+        // Leave trailing punctuation from bare URLs as ordinary text.
+        cursor = markdown ? match.end : match.start + url.length;
       }
       if (cursor < displayedLine.length) {
         _appendInlineText(spans, displayedLine.substring(cursor), lineStyle);
