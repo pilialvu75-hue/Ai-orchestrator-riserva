@@ -1,0 +1,45 @@
+name: Library development Android consumer
+on:
+  pull_request:
+    paths:
+      - 'tool/cantiere_*'
+      - '.github/workflows/library-development-consumer.yml'
+permissions:
+  contents: read
+jobs:
+  consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Stage real package
+        run: |
+          flutter create --platforms=android --project-name library_consumer "$RUNNER_TEMP/library_consumer"
+          python tool/cantiere_stage_development_module.py --pin utility.llm_generated.adjacent_pairs@0.1.0 --project "$RUNNER_TEMP/library_consumer"
+      - name: Import and exercise module
+        working-directory: ${{ runner.temp }}/library_consumer
+        run: |
+          flutter pub add 'aivexus_adjacent_pairs:{"path":"aivexus_internal_modules/aivexus_adjacent_pairs"}'
+          cat > lib/main.dart <<'EOF'
+          import 'package:flutter/material.dart';
+          import 'package:aivexus_adjacent_pairs/adjacent_pairs.dart';
+          void main() {
+            runApp(MaterialApp(home: Scaffold(body: Text(adjacentPairs([3,-1,0,0]).toString()))));
+          }
+          EOF
+          cat > test/widget_test.dart <<'EOF'
+          import 'package:flutter_test/flutter_test.dart';
+          import 'package:library_consumer/main.dart' as app;
+          void main() {
+            testWidgets('real Library module', (tester) async {
+              app.main();
+              await tester.pumpAndSettle();
+              expect(find.text('[[3, -1], [-1, 0], [0, 0]]'), findsOneWidget);
+            });
+          }
+          EOF
+          flutter test
+          flutter build apk --debug
