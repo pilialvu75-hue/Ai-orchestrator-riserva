@@ -73,7 +73,7 @@ def _canonical_sha256(value: object) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def verify_preview(index: dict, envelope: dict, pin: str) -> dict[str, bytes]:
+def verify_preview(index: dict, envelope: dict, pin: str, *, development: bool = False) -> dict[str, bytes]:
     """Check index-authorized identity, package bytes, policy and every file."""
     _ensure(index.get("schema") == INDEX_SCHEMA and
             index.get("policy") == POLICY and index.get("certified") is False,
@@ -115,9 +115,10 @@ def verify_preview(index: dict, envelope: dict, pin: str) -> dict[str, bytes]:
             any(isinstance(r, dict) and r.get("kind") == "distributionRestriction"
                 and r.get("required") is True for r in requirements),
             "missing mandatory sandbox-use restriction")
-    _ensure(any(isinstance(r, dict) and r.get("kind") == "dependency"
-                and "Node.js" in r.get("description", "") for r in requirements),
-            "Node.js runtime dependency not declared")
+    if not development:
+        _ensure(any(isinstance(r, dict) and r.get("kind") == "dependency"
+                    and "Node.js" in r.get("description", "") for r in requirements),
+                "Node.js runtime dependency not declared")
     integrity = package.get("integrity") or {}
     expected_payload = integrity.get("payload_sha256")
     _ensure(isinstance(expected_payload, str) and _SHA.fullmatch(expected_payload),
@@ -241,11 +242,25 @@ def main() -> int:
                         help="execute allowlisted public API smoke in temporary sandbox")
     parser.add_argument("--list-development", action="store_true",
                         help="discover qualified internal candidates without executing code")
+    parser.add_argument("--development-source", action="store_true",
+                        help="return verified internal source as JSON, without execution")
     args = parser.parse_args()
     try:
         index = _download_json(INDEX_PATH)
         if args.list_development:
             print(json.dumps(discover_development(_download_json(DEVELOPMENT_INDEX_PATH), index), indent=2))
+            return 0
+        if args.development_source:
+            _ensure(not args.probe, "development source cannot execute probes")
+            qualified = discover_development(_download_json(DEVELOPMENT_INDEX_PATH), index)
+            item = next((x for x in qualified if x["pin"] == args.pin), None)
+            _ensure(item is not None, "module not qualified for internal development")
+            envelope = _download_json(item["path"])
+            files = verify_preview(index, envelope, args.pin, development=True)
+            print(json.dumps({"pin": args.pin, "scope": item["scope"],
+                              "package_sha256": item["package_sha256"],
+                              "production_approved": False,
+                              "files": {k: v.decode("utf-8") for k, v in files.items()}}))
             return 0
         item = next((x for x in index.get("packages", []) if x.get("pin") == args.pin), None)
         _ensure(item is not None, "module pin not in experimental index")
