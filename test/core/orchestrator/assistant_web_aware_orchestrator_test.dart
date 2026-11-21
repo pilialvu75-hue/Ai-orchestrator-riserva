@@ -544,6 +544,54 @@ void main() {
     verifyNever(() => webSearch.execute(any()));
   });
 
+  test('HYBRID generic Cloud provider failure resumes LOCAL before output',
+      () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.consentGated).thenReturn(true);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
+    when(() => cloud.recommendProviderFor(
+      any(), enforceAutomaticPolicy: true,
+    )).thenReturn('gemini');
+    final requests = <InferenceRequest>[];
+    when(() => inference.stream(any())).thenAnswer((call) {
+      final request = call.positionalArguments.single as InferenceRequest;
+      requests.add(request);
+      if (request.routeDirective == InferenceRouteDirective.cloudOnly) {
+        return Stream<InferenceResponse>.value(
+          InferenceResponse.error('Provider temporary failure',
+              providerId: 'gemini',
+              errorCode: InferenceErrorCode.cloudProviderUnavailable),
+        );
+      }
+      return Stream<InferenceResponse>.value(
+        InferenceResponse.finalChunk(text: 'Qwen local answer',
+            model: 'qwen2.5-3b', tokensGenerated: 4),
+      );
+    });
+    const prompt = 'Explain Flutter architecture';
+    final evidence = HybridCloudRuntimeSourceEvidence(
+      sessionId: 'generic-cloud-failure', originalQuestion: prompt,
+      baseSystemPrompt: 'Base rules.',
+      originalHistory: const <AiMessage>[],
+    );
+    final output = await build().handleStream(
+      prompt,
+      sessionId: 'generic-cloud-failure',
+      systemPrompt: 'Base rules.',
+      trustedCloudSourceEvidence: evidence,
+    ).toList();
+    expect(output.where((chunk) => chunk.isError), isEmpty);
+    expect(output.last.text, 'Qwen local answer');
+    expect(requests, hasLength(2));
+    expect(requests.last.routeDirective, InferenceRouteDirective.localOnly);
+    expect(requests.last.cloudProviderId, isNull);
+    expect(requests.last.allowWebSearchTool, isFalse);
+    expect(requests.last.trustedCloudSourceEvidence, isNull);
+    expect(output.any((chunk) =>
+        chunk.runtimeNotice == 'hybrid_fallback:provider_unavailable'),
+        isTrue);
+  });
+
   test('HYBRID connectivity failure cannot resume without trusted Chat evidence',
       () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);

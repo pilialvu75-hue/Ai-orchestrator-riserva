@@ -92,6 +92,49 @@ void main() {
   }
 
 
+  test('HYBRID recovers provider network failure using ready LOCAL model',
+      () async {
+    var localCalls = 0;
+    var cloudCalls = 0;
+    final service = buildService(
+      mode: AiRuntimeMode.hybrid,
+      selectedModel: validModel,
+      localRuntimeProvider: FakeLocalRuntimeProvider(
+        streamBuilder: (request, _) async* {
+          localCalls++;
+          yield InferenceResponse.finalChunk(
+            text: 'Risposta locale',
+            tokensGenerated: 2,
+            model: request.modelId,
+          );
+        },
+      ),
+      cloudRuntimeProvider: buildCloudProvider(
+        sendQuery: (_, __) async {
+          cloudCalls++;
+          throw const ServerFailure('network timeout');
+        },
+      ),
+    );
+
+    final chunks = await service.stream(const InferenceRequest(
+      sessionId: 'hybrid-network-failover',
+      prompt: 'Progetta un programma Flutter con database e API',
+    )).toList();
+
+    expect(cloudCalls, greaterThan(0));
+    expect(localCalls, 1);
+    expect(chunks.where((chunk) => chunk.isError), isEmpty);
+    expect(chunks.where((chunk) => chunk.isFinal), hasLength(1));
+    expect(chunks.last.text, 'Risposta locale');
+    expect(
+      chunks.where((chunk) =>
+          chunk.runtimeNotice == 'hybrid_fallback:provider_unavailable' ||
+          chunk.runtimeNotice == 'hybrid_fallback:network_lost'),
+      hasLength(1),
+    );
+  });
+
   test('LOCAL AUTO pre-token load failure tries one compatible GGUF, '
       'preserving approved context, single final and no Cloud', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;

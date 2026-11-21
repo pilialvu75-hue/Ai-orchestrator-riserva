@@ -540,6 +540,12 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                           );
                         }
                       } else {
+                        if (notice.startsWith('hybrid_fallback:')) {
+                          // The failed Cloud provider is no longer answering.
+                          // A later LOCAL final chunk may carry the exact
+                          // model ID; do not persist stale Cloud attribution.
+                          responseProvider = 'LOCAL';
+                        }
                         onRuntimeNotice?.call(notice);
                       }
                       return;
@@ -561,7 +567,8 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                         streamedResponse.clear();
                         streamedResponse.write(merged);
                       }
-                      if ((providerId == null || providerId.isEmpty) &&
+                      if ((providerId == null || providerId.isEmpty ||
+                              responseProvider == 'LOCAL') &&
                           chunk.model != null &&
                           chunk.model!.trim().isNotEmpty) {
                         responseProvider = chunk.model!;

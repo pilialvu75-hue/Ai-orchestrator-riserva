@@ -220,7 +220,15 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         normalized.contains('verify your api key') ||
         normalized.contains('rate limit') ||
         normalized.contains('quota') ||
-        normalized.contains('all providers unavailable');
+        normalized.contains('all providers unavailable') ||
+        normalized.contains('network') ||
+        normalized.contains('connection unavailable') ||
+        normalized.contains('connection failed') ||
+        normalized.contains('connection refused') ||
+        normalized.contains('timed out') ||
+        normalized.contains('timeout') ||
+        normalized.contains('cloud ai request failed') ||
+        normalized.contains('providers are unavailable');
   }
 
   bool shouldPreferCloudFor(InferenceRequest request) {
@@ -454,6 +462,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         message,
         state: InferenceTerminalState.modelUnavailable,
         providerId: lastProvider,
+        errorCode: !consentGated && lastError != null
+            ? InferenceErrorCode.cloudProviderUnavailable
+            : null,
       );
       return;
     }
@@ -463,6 +474,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     yield InferenceResponse.error(
       message,
       providerId: lastProvider,
+      errorCode: !consentGated && lastError != null
+            ? InferenceErrorCode.cloudProviderUnavailable
+            : null,
     );
   }
 

@@ -391,6 +391,10 @@ class OrchestratorStateEngine extends Bloc<ChatEvent, ChatState> {
                     pendingAssistantProvider =
                         cloudProvider;
                   }
+                } else if (normalizedNotice.startsWith('hybrid_fallback:')) {
+                  // A displayed Cloud provider must not remain the active
+                  // executor label once the approved LOCAL continuation starts.
+                  pendingAssistantProvider = 'LOCAL';
                 }
 
                 if (emit.isDone) {

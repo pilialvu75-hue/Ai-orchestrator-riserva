@@ -219,9 +219,10 @@ class Orchestrator {
       );
     }
 
-    // Only a typed consent refusal or approved HTTP transport failure with
-    // trusted Chat provenance may continue locally. Never interpret generic
-    // provider errors, exception text, quota or auth status as network loss.
+    // Only an already consent-gated Cloud request with trusted Chat source
+    // provenance may continue locally. A failed provider, including quota or
+    // authentication, does not authorize another Cloud destination. Local
+    // continuation is permitted before visible answer text, never after it.
     if (_runtimeSettingsService?.runtimeMode == AiRuntimeMode.hybrid &&
         request.routeDirective == InferenceRouteDirective.cloudOnly &&
         trustedCloudSourceEvidence != null &&
@@ -242,8 +243,20 @@ class Orchestrator {
     await for (final chunk in _inferenceService.stream(request)) {
       if (!receivedAnswerText &&
           chunk.isError &&
+          chunk.isFinal &&
+          chunk.terminalState != InferenceTerminalState.cancelled &&
           (chunk.errorCode == InferenceErrorCode.cloudConsentDenied ||
-           chunk.errorCode == InferenceErrorCode.cloudTransportUnavailable)) {
+              chunk.errorCode == InferenceErrorCode.cloudTransportUnavailable ||
+              chunk.errorCode == InferenceErrorCode.cloudProviderUnavailable)) {
+        // A refusal, network failure or exhausted provider is not a
+        // permission to contact a second Cloud provider. Recover locally
+        // through the existing explicit localOnly route.
+        yield InferenceResponse.notice(
+          chunk.errorCode == InferenceErrorCode.cloudTransportUnavailable ||
+                  (chunk.errorMessage ?? '').toLowerCase().contains('network')
+              ? 'hybrid_fallback:network_lost'
+              : 'hybrid_fallback:provider_unavailable',
+        );
         final local = request.copyWith(
           routeDirective: InferenceRouteDirective.localOnly,
           allowCloudProviderFailover: false,

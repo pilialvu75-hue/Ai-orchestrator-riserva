@@ -10,6 +10,33 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('CloudRuntimeProvider', () {
+    test('failed real Cloud request exposes typed provider failure', () async {
+      final provider = CloudRuntimeProvider(
+        sendQuery: (_, __) async {
+          throw const ServerFailure('network timeout');
+        },
+        supportedProviders: () => const <String>['openAi'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([name]) => name ?? 'OpenAI',
+        automaticUseAllowed: (_) => true,
+      );
+
+      final results = await provider
+          .streamInference(
+            request: const InferenceRequest(
+              sessionId: 'typed-cloud-failure',
+              prompt: 'Debug Flutter architecture and database design',
+            ),
+            cancellationToken: CancellationToken(),
+          )
+          .toList();
+
+      expect(results.last.isError, isTrue);
+      expect(results.last.errorCode,
+          InferenceErrorCode.cloudProviderUnavailable);
+      expect(results.last.isFinal, isTrue);
+    });
+
     test('preserves structured history and execution identity metadata', () async {
       AiRequest? captured;
       final provider = CloudRuntimeProvider(
