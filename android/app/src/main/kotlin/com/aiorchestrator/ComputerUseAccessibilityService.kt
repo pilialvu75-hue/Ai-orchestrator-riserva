@@ -19,7 +19,7 @@ class ComputerUseAccessibilityService : AccessibilityService() {
         @Volatile private var active: ComputerUseAccessibilityService? = null
         private var targetPackage: String? = null
         private var targetSinceMs: Long = 0L
-        private const val TARGET_TTL_MS = 60000L
+        private const val TARGET_TTL_MS = 180000L
         private val excludedPackages = setOf(
             "com.android.systemui", "com.android.settings",
             "com.google.android.permissioncontroller",
@@ -56,6 +56,50 @@ class ComputerUseAccessibilityService : AccessibilityService() {
             }
         }
 
+        /**
+         * Resolve a text field without relying exclusively on FOCUS_INPUT.
+         * Samsung Notes and some Compose/WebView editors expose accessibility
+         * focus while a cursor is visible but report no input-focused node.
+         * Never type into password fields, off-package nodes or an ambiguous
+         * selection of multiple editables.
+         */
+        private fun eligibleEditable(node: AccessibilityNodeInfo?, pkg: String): Boolean =
+            node != null && node.packageName?.toString() == pkg &&
+                node.isVisibleToUser && node.isEnabled && node.isEditable &&
+                !node.isPassword &&
+                (node.actionList.any {
+                    it.id == AccessibilityNodeInfo.ACTION_SET_TEXT
+                })
+
+        private fun resolveEditable(
+            root: AccessibilityNodeInfo,
+            pkg: String,
+        ): AccessibilityNodeInfo? {
+            val input = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (eligibleEditable(input, pkg)) return input
+            val a11y = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            if (eligibleEditable(a11y, pkg)) return a11y
+
+            // Fallback only if exactly ONE visible editable node exists.
+            // Do not guess when e.g. title and note body are both editable.
+            val pending = java.util.ArrayDeque<AccessibilityNodeInfo>()
+            pending.add(root)
+            var found: AccessibilityNodeInfo? = null
+            var scanned = 0
+            while (pending.isNotEmpty() && scanned < 256) {
+                val node = pending.removeFirst()
+                scanned++
+                if (eligibleEditable(node, pkg)) {
+                    if (found != null) return null
+                    found = node
+                }
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { pending.add(it) }
+                }
+            }
+            return if (pending.isEmpty()) found else null
+        }
+
         fun typeInSelectedEditable(text: String, callback: (Boolean, String) -> Unit) {
             Handler(Looper.getMainLooper()).post {
                 val service = active
@@ -68,22 +112,40 @@ class ComputerUseAccessibilityService : AccessibilityService() {
                     callback(false, "TARGET_CHANGED_OR_EXPIRED")
                     return@post
                 }
-                // Never type into password fields or a non-editable target.
-                // The owner must first place focus in an ordinary text field.
-                val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-                if (focused == null || !focused.isEditable || focused.isPassword ||
-                    text.isEmpty() || text.length > 512) {
-                    clearTarget()
+                if (text.isEmpty() || text.length > 512) {
+                    callback(false, "INVALID_TEXT")
+                    return@post
+                }
+                val editable = resolveEditable(root, selected)
+                if (editable == null) {
                     callback(false, "EDITABLE_FIELD_REQUIRED")
                     return@post
                 }
-                clearTarget()
                 val args = Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
                 }
-                val ok = focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-                focused.recycle()
-                callback(ok, if (ok) "TEXT_ACTION_SENT" else "TEXT_ACTION_REJECTED")
+                val ok = editable.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                if (!ok) {
+                    callback(false, "TEXT_ACTION_REJECTED")
+                    return@post
+                }
+                // The accessibility tree may lag behind an accepted action.
+                // Verify after a short UI update, without returning note text.
+                Handler(Looper.getMainLooper()).postDelayed({
+                    val after = service.rootInActiveWindow
+                    if (after?.packageName?.toString() != selected) {
+                        callback(false, "TEXT_VERIFICATION_UNAVAILABLE")
+                        return@postDelayed
+                    }
+                    val verifiedNode = resolveEditable(after, selected)
+                    val verified = verifiedNode?.text?.toString() == text
+                    if (verified) {
+                        clearTarget()
+                        callback(true, "TEXT_VERIFIED")
+                    } else {
+                        callback(false, "TEXT_NOT_VERIFIED")
+                    }
+                }, 350L)
             }
         }
 

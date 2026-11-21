@@ -20,7 +20,12 @@ void main() {
     expect(service, contains('TARGET_CHANGED_OR_EXPIRED'));
     expect(service, contains('excludedPackages'));
     expect(service, contains('typeInSelectedEditable'));
-    expect(service, contains('focused.isPassword'));
+    expect(service, contains('TARGET_TTL_MS = 180000L'));
+    expect(service, contains('FOCUS_ACCESSIBILITY'));
+    expect(service, contains('eligibleEditable'));
+    expect(service, contains('TEXT_VERIFIED'));
+    expect(service, contains('TEXT_NOT_VERIFIED'));
+    expect(service, contains('!node.isPassword'));
     expect(service, contains('ACTION_SET_TEXT'));
     expect(service, contains('dispatchGesture('));
     expect(service, contains('INVALID_COORDINATES'));
@@ -61,7 +66,8 @@ void main() {
     expect(lab, contains('selectForegroundTarget'));
     expect(lab, contains('Cerca e apri app'));
     expect(lab, contains('Inserisci testo nel campo attivo'));
-    expect(lab, contains('Salvataggio non verificato'));
+    expect(lab, contains('La selezione dell’app dura 3 minuti'));
+    expect(lab, contains('Conferma il contenuto nell’app'));
     expect(lab, contains('onPanUpdate'));
     expect(lab, contains('Acquisisci tra 4 secondi'));
   });

@@ -188,8 +188,8 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         'typeTargetText', <String, String>{'text': value},
       );
       if (mounted && revision == _session.sessionRevision) {
-        setState(() => _message = 'Testo inviato al campo selezionato: '
-            '${outcome ?? 'nessun risultato'}. Salvataggio non verificato.');
+        setState(() => _message = 'Esito inserimento testo nel campo selezionato: '
+            '${outcome ?? 'nessun risultato'}. Conferma il contenuto nell’app prima di considerarlo salvato.');
       }
     });
   }
@@ -661,7 +661,7 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       await _refreshFrame();
       if (mounted) {
         setState(() => _message = _isAndroid
-            ? 'App selezionata. Torna in AIVEXUS, tocca o trascina '
+            ? 'App selezionata (valida per 3 minuti). Torna in AIVEXUS, tocca o trascina '
               'sull’anteprima e conferma il gesto.'
             : 'Schermata aggiornata. Torna al laboratorio per scegliere '
               'la finestra da controllare.');
@@ -837,6 +837,12 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
               onPressed: _busy ? null : _openAndroidAccessibilitySettings,
               icon: const Icon(Icons.accessibility_new),
               label: const Text('Autorizza tocchi in Accessibilità Android'),
+            ),
+            const Text(
+              'La selezione dell’app dura 3 minuti. Se scade, premi di nuovo '
+              'Acquisisci tra 4 secondi. Il testo viene scritto solo nel '
+              'campo modificabile identificato da Android; con più campi '
+              'ambigui AIVEXUS non sceglie al tuo posto.',
             ),
             const Text(
               'Dopo aver abilitato il servizio, avvia Solo osservazione, '
