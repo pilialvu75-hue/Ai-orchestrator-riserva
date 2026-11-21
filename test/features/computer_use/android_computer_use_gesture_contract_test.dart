@@ -25,7 +25,7 @@ void main() {
     expect(service, contains('eligibleEditable'));
     expect(service, contains('TEXT_VERIFIED'));
     expect(service, contains('TEXT_NOT_VERIFIED'));
-    expect(service, contains('focused.isPassword'));
+    expect(service, contains('!node.isPassword'));
     expect(service, contains('ACTION_SET_TEXT'));
     expect(service, contains('dispatchGesture('));
     expect(service, contains('INVALID_COORDINATES'));
