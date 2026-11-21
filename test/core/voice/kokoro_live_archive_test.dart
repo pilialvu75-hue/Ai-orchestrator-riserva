@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:isolate';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_orchestrator/core/voice/kokoro_assets.dart';
@@ -34,6 +35,17 @@ void main() {
       expect(verified, isNotNull, reason: 'Extracted official payload must remain trusted after verification.');
       expect(verified!.keys, containsAll(['model', 'voices', 'tokens', 'data']));
       expect(await File(verified['model']!).length(), 325560556);
+      // A pre-repack installation must remain usable after upgrading the app.
+      final manifestFile = File('${destination.path}/verified.json');
+      final manifest = jsonDecode(await manifestFile.readAsString())
+          as Map<String, dynamic>;
+      manifest['archiveSha256'] =
+          'c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298';
+      await manifestFile.writeAsString(jsonEncode(manifest));
+      expect(await KokoroAssets.verifyDirectory(destinationPath), isNotNull);
+      // Backward compatibility must not bypass the per-file integrity check.
+      await File(verified['tokens']!).writeAsString('corrupt test payload');
+      expect(await KokoroAssets.verifyDirectory(destinationPath), isNull);
       print('KOKORO_VERIFY_COMPLETE elapsed_ms=${watch.elapsedMilliseconds}');
     } finally {
       await temporary.delete(recursive: true);
