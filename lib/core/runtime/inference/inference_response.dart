@@ -26,6 +26,10 @@ enum InferenceErrorCode {
 
   /// Approved Cloud HTTP transport returned no usable response.
   cloudTransportUnavailable,
+
+  /// A provider request was attempted but all permitted provider routes failed.
+  /// This is a typed transport outcome, never inferred from exception text.
+  cloudProviderUnavailable,
 }
 
 class InferenceResponse {
