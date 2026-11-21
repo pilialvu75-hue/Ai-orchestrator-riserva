@@ -82,7 +82,7 @@ class ComputerUseAccessibilityService : AccessibilityService() {
 
             // Fallback only if exactly ONE visible editable node exists.
             // Do not guess when e.g. title and note body are both editable.
-            val pending = ArrayDeque<AccessibilityNodeInfo>()
+            val pending = java.util.ArrayDeque<AccessibilityNodeInfo>()
             pending.add(root)
             var found: AccessibilityNodeInfo? = null
             var scanned = 0
@@ -129,21 +129,23 @@ class ComputerUseAccessibilityService : AccessibilityService() {
                     callback(false, "TEXT_ACTION_REJECTED")
                     return@post
                 }
-                // ACTION_SET_TEXT only means Android accepted the command.
-                // Re-read the same app and verify content without logging it.
-                val after = service.rootInActiveWindow
-                if (after?.packageName?.toString() != selected) {
-                    callback(false, "TEXT_VERIFICATION_UNAVAILABLE")
-                    return@post
-                }
-                val verifiedNode = resolveEditable(after, selected)
-                val verified = verifiedNode?.text?.toString() == text
-                if (verified) {
-                    clearTarget()
-                    callback(true, "TEXT_VERIFIED")
-                } else {
-                    callback(false, "TEXT_NOT_VERIFIED")
-                }
+                // The accessibility tree may lag behind an accepted action.
+                // Verify after a short UI update, without returning note text.
+                Handler(Looper.getMainLooper()).postDelayed({
+                    val after = service.rootInActiveWindow
+                    if (after?.packageName?.toString() != selected) {
+                        callback(false, "TEXT_VERIFICATION_UNAVAILABLE")
+                        return@postDelayed
+                    }
+                    val verifiedNode = resolveEditable(after, selected)
+                    val verified = verifiedNode?.text?.toString() == text
+                    if (verified) {
+                        clearTarget()
+                        callback(true, "TEXT_VERIFIED")
+                    } else {
+                        callback(false, "TEXT_NOT_VERIFIED")
+                    }
+                }, 350L)
             }
         }
 
