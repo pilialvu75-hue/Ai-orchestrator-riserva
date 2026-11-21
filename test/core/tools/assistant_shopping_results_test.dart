@@ -31,4 +31,37 @@ void main() {
     expect(AssistantShoppingResults.render(const ToolResult(toolId: 'web_search', output: '',
       success: false), followUp: false), contains('Non ho trovato collegamenti verificabili'));
   });
+  test('best offer follow-up keeps pears and place instead of film title', () {
+    const conversation = <ChatTurn>[
+      ChatTurn(role: ChatRole.user,
+          content: "dove posso comprare le père vicino a Châlons en Champagne in promozione?"),
+      ChatTurn(role: ChatRole.assistant, content: 'Le père è un vino'),
+      ChatTurn(role: ChatRole.user, content: 'si esatto'),
+      ChatTurn(role: ChatRole.assistant, content: 'Cerco online'),
+      ChatTurn(role: ChatRole.user, content: 'no, la pera 🍐 frutta'),
+      ChatTurn(role: ChatRole.assistant, content: 'pera (la mela)'),
+    ];
+    final query = AssistantShoppingResults.query("trovami l'offerta migliore", conversation);
+    expect(query, contains('Châlons en Champagne'));
+    expect(query, contains('pera 🍐 frutta'));
+    expect(query, isNot(contains('vino')));
+    expect(query, isNot(contains('mela')));
+  });
+
+  test('generic offer cannot search film title with no product evidence', () {
+    expect(AssistantShoppingResults.query(
+        "trovami l'offerta migliore", const <ChatTurn>[]), isNull);
+    expect(AssistantShoppingResults.query(
+        "trovami l'offerta migliore",
+        const <ChatTurn>[ChatTurn(role: ChatRole.assistant,
+            content: 'Compro un computer a 600 euro')]), isNull);
+    expect(AssistantShoppingResults.query(
+        "trovami l'offerta migliore", const <ChatTurn>[
+          ChatTurn(role: ChatRole.user,
+              content: 'dove compro pere in promozione?'),
+          ChatTurn(role: ChatRole.user,
+              content: 'Cambiamo tema, parliamo di cinema'),
+        ]), isNull);
+  });
+
 }

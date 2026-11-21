@@ -11,6 +11,7 @@ abstract final class AssistantShoppingResults {
           caseSensitive: false).hasMatch(input);
 
   static String? query(String input, List<ChatTurn> context) {
+    if (_isGenericOfferFollowUp(input)) return _contextualOfferQuery(context);
     if (isShoppingRequest(input)) return input;
     if (!RegExp(r'^\s*(?:il\s+)?(?:link|collegamento|url)(?:\s+(?:al sito|del sito|all.offerta|al prodotto|dell.offerta))?\s*[?!.]*\s*$',
         caseSensitive: false).hasMatch(input)) return null;
@@ -22,6 +23,63 @@ abstract final class AssistantShoppingResults {
       }
     }
     return null;
+  }
+
+  /// Generic "best offer" is ambiguous: it may describe a film title.
+  static bool _isGenericOfferFollowUp(String input) {
+    final value = input.toLowerCase().replaceAll('’', "'")
+        .replaceAll(RegExp(r'[.!?]+$'), '').trim();
+    return RegExp(
+      r"^(?:trovami|trova|cercami|cerca|find|search|cherche|trouve)\s+"
+      r"(?:(?:l'|un'|la |il |un |una |the |une )?)"
+      r"(?:migliore |best |meilleure )?"
+      r"(?:offerta|offerte|offer|offers|offre|offres)"
+      r"(?:\s+(?:migliore|migliori|best|meilleure))?$",
+      caseSensitive: false,
+    ).hasMatch(value);
+  }
+
+  /// Only the user's earlier purchase request in this session is evidence.
+  /// Assistant claims and unrelated/new topics must never become a Web query.
+  static String? _contextualOfferQuery(List<ChatTurn> context) {
+    String? clarification;
+    var seenUsers = 0;
+    for (final turn in context.reversed) {
+      if (turn.role != ChatRole.user) continue;
+      if (turn.excludeFromContext) return null;
+      if (++seenUsers > 6) return null;
+      final message = turn.content.trim();
+      if (message.isEmpty || message.length > 350 ||
+          message.contains('\n') || message.contains('\r')) return null;
+      if (_isOriginalShoppingTopic(message)) {
+        return clarification == null ? message : '$message $clarification';
+      }
+      if (RegExp(r'\b(?:frutta|frutto|fruit|fruits|verdura|légume)\b',
+          caseSensitive: false).hasMatch(message) &&
+          message.length <= 90) {
+        clarification ??= message;
+        continue;
+      }
+      if (RegExp(r'^(?:capito|ok|okay|s[iì]|si esatto|yes|oui|'
+          r'cerca (?:su |in )?internet|cerca sul web|'
+          r'cerca online|search the web)[.! ]*$',
+          caseSensitive: false).hasMatch(message)) continue;
+      return null;
+    }
+    return null;
+  }
+
+  static bool _isOriginalShoppingTopic(String input) {
+    final value = input.toLowerCase();
+    final commerce = RegExp(
+      r'\b(?:comprare|acquistare|buy|acheter|compro|compra|'
+      r'cercare|cerco|trova|trovami|find|cherche|prezzi|prix)\b',
+    ).hasMatch(value);
+    final offers = RegExp(
+      r'\b(?:offert[ae]|scont[oi]|promozion[ei]|'
+      r'deals?|offers?|promotion|promotions?|soldes?)\b',
+    ).hasMatch(value);
+    return commerce && offers && !_isGenericOfferFollowUp(input);
   }
 
   static String render(ToolResult result, {required bool followUp}) {
