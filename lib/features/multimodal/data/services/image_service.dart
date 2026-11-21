@@ -32,6 +32,54 @@ class ImageService {
     return xFile == null ? null : File(xFile.path);
   }
 
+  /// Validates a gallery image before it enters the chat composer.
+  /// Read at most 12 header bytes and never log the path or the image data.
+  /// LOCAL and Cloud image pipelines both currently accept at most 8 MB.
+  static Future<String?> validateChatImageFile(File file) async {
+    try {
+      if (!await file.exists()) {
+        return 'Immagine non trovata. Selezionala di nuovo.';
+      }
+      final size = await file.length();
+      if (size == 0) {
+        return 'Immagine vuota. Scegli un altro file.';
+      }
+      if (size > 8 * 1024 * 1024) {
+        return 'Image accetta JPEG, PNG e WebP fino a 8 MB.';
+      }
+
+      final reader = await file.open();
+      final List<int> header;
+      try {
+        header = await reader.read(12);
+      } finally {
+        await reader.close();
+      }
+      final jpeg = header.length >= 3 &&
+          header[0] == 0xff &&
+          header[1] == 0xd8 &&
+          header[2] == 0xff;
+      final png = header.length >= 8 &&
+          header[0] == 0x89 &&
+          header[1] == 0x50 &&
+          header[2] == 0x4e &&
+          header[3] == 0x47 &&
+          header[4] == 0x0d &&
+          header[5] == 0x0a &&
+          header[6] == 0x1a &&
+          header[7] == 0x0a;
+      final webp = header.length >= 12 &&
+          String.fromCharCodes(header.take(4)) == 'RIFF' &&
+          String.fromCharCodes(header.skip(8).take(4)) == 'WEBP';
+      if (!jpeg && !png && !webp) {
+        return 'Formato immagine non riconosciuto. Usa JPEG, PNG o WebP.';
+      }
+      return null;
+    } on FileSystemException {
+      return 'Impossibile leggere la foto scelta. Selezionala di nuovo.';
+    }
+  }
+
   /// Opens the platform camera and returns a capture, or null on cancellation.
   ///
   /// The platform camera picker owns permission/consent. Asking for a second
