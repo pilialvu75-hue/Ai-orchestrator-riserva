@@ -10,6 +10,10 @@ jobs:
   consumer:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [adjacent_pairs, count_in_range, cumulative_max, delta_codec, first_subsequence, fixed_chunks, index_positions, integer_frequencies, interleave_lists, intersection_unique, max_run_length, palindrome_filter, rotate_left, running_product, stable_unique]
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -18,28 +22,15 @@ jobs:
       - name: Stage real package
         run: |
           flutter create --platforms=android --project-name library_consumer "$RUNNER_TEMP/library_consumer"
-          python tool/cantiere_stage_development_module.py --pin utility.llm_generated.adjacent_pairs@0.1.0 --project "$RUNNER_TEMP/library_consumer"
+          python tool/cantiere_stage_development_module.py --pin utility.llm_generated.${{ matrix.module }}@0.1.0 --project "$RUNNER_TEMP/library_consumer"
       - name: Import and exercise module
         working-directory: ${{ runner.temp }}/library_consumer
         run: |
-          flutter pub add 'aivexus_adjacent_pairs:{"path":"aivexus_internal_modules/aivexus_adjacent_pairs"}'
-          cat > lib/main.dart <<'EOF'
-          import 'package:flutter/material.dart';
-          import 'package:aivexus_adjacent_pairs/adjacent_pairs.dart';
-          void main() {
-            runApp(MaterialApp(home: Scaffold(body: Text(adjacentPairs([3,-1,0,0]).toString()))));
-          }
-          EOF
-          cat > test/widget_test.dart <<'EOF'
-          import 'package:flutter_test/flutter_test.dart';
-          import 'package:library_consumer/main.dart' as app;
-          void main() {
-            testWidgets('real Library module', (tester) async {
-              app.main();
-              await tester.pumpAndSettle();
-              expect(find.text('[[3, -1], [-1, 0], [0, 0]]'), findsOneWidget);
-            });
-          }
-          EOF
+          module='${{ matrix.module }}'
+          package="aivexus_$module"
+          flutter pub add "$package:{\"path\":\"aivexus_internal_modules/$package\"}"
+          printf "import 'package:flutter/material.dart';\nimport 'package:%s/%s.dart';\nvoid main() => runApp(const MaterialApp(home: Text('Library consumer')));\n" "$package" "$module" > lib/main.dart
+          cp "aivexus_internal_modules/$package/test/independent_contract_test.dart" test/widget_test.dart
+          flutter pub add --dev test
           flutter test
           flutter build apk --debug
