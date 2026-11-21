@@ -11,9 +11,7 @@ abstract final class AssistantShoppingResults {
           caseSensitive: false).hasMatch(input);
 
   static String? query(String input, List<ChatTurn> context) {
-    if (_isGenericOfferFollowUp(input)) {
-      return _contextualOfferQuery(context);
-    }
+    if (_isGenericOfferFollowUp(input)) return _contextualOfferQuery(context);
     if (isShoppingRequest(input)) return input;
     if (!RegExp(r'^\s*(?:il\s+)?(?:link|collegamento|url)(?:\s+(?:al sito|del sito|all.offerta|al prodotto|dell.offerta))?\s*[?!.]*\s*$',
         caseSensitive: false).hasMatch(input)) return null;
@@ -27,101 +25,45 @@ abstract final class AssistantShoppingResults {
     return null;
   }
 
-  /// Do not search a generic phrase such as "the best offer" without the
-  /// product. It can match a film or another unrelated named entity.
+  /// Generic "best offer" is ambiguous: it may describe a film title.
   static bool _isGenericOfferFollowUp(String input) {
     final value = input.toLowerCase().replaceAll('’', "'")
-        .replaceAll(RegExp(r'[.!?]+
-    final raw = result.metadata['results'];
-    final pages = <String>[];
-    if (result.success && raw is List) {
-      for (final item in raw) {
-        if (item is! Map) continue;
-        final title = item['title'];
-        final link = item['url'];
-        if (title is! String || link is! String) continue;
-        final uri = Uri.tryParse(link.trim());
-        if (uri == null || !['https', 'http'].contains(uri.scheme) ||
-            uri.host.isEmpty || uri.userInfo.isNotEmpty) continue;
-        pages.add('${title.replaceAll(RegExp(r'[\r\n]+'), ' ').trim()}\n${uri.toString()}');
-        if (pages.length == 3) break;
-      }
-    }
-    if (pages.isEmpty) {
-      return 'Non ho trovato collegamenti verificabili per questa ricerca. '
-          'Non posso confermare un prodotto, un prezzo o un’offerta.';
-    }
-    final prefix = followUp
-        ? 'Non posso confermare l’offerta descritta nella risposta precedente. Ecco le pagine restituite dalla ricerca:'
-        : 'Ecco le pagine restituite dalla ricerca. Verifica prezzo, configurazione e disponibilità aprendo i collegamenti:';
-    return '$prefix\n\n${pages.join('\n\n')}';
-  }
-}
-), '').trim();
+        .replaceAll(RegExp(r'[.!?]+$'), '').trim();
     return RegExp(
-      r"^(?:(?:trovami|trova|cercami|cerca|find|search|cherche|trouve)\\s+)"
-      r"(?:(?:l'|un'|la |il |un |una |the |une |la meilleure |le meilleur )?)"
+      r"^(?:trovami|trova|cercami|cerca|find|search|cherche|trouve)\s+"
+      r"(?:(?:l'|un'|la |il |un |una |the |une )?)"
       r"(?:migliore |best |meilleure )?"
       r"(?:offerta|offerte|offer|offers|offre|offres)"
-      r"(?:\\s+(?:migliore|migliori|best|meilleure|moins ch[eè]re))?$",
+      r"(?:\s+(?:migliore|migliori|best|meilleure))?$",
       caseSensitive: false,
     ).hasMatch(value);
   }
 
-  /// Search context must come from a previous *user* shopping request in the
-  /// same chat, never from assistant prose, another session or stale memory.
-  /// Short acknowledgements/corrections are allowed to bridge one topic.
+  /// Only the user's earlier purchase request in this session is evidence.
+  /// Assistant claims and unrelated/new topics must never become a Web query.
   static String? _contextualOfferQuery(List<ChatTurn> context) {
     String? clarification;
-    var userTurns = 0;
+    var seenUsers = 0;
     for (final turn in context.reversed) {
       if (turn.role != ChatRole.user) continue;
       if (turn.excludeFromContext) return null;
-      if (++userTurns > 6) return null;
-      final value = turn.content.trim();
-      if (value.isEmpty || value.length > 350 ||
-          value.contains('\\n') || value.contains('\\r')) return null;
-      if (_isOriginalShoppingTopic(value)) {
-        return clarification == null ? value : '$value $clarification';
+      if (++seenUsers > 6) return null;
+      final message = turn.content.trim();
+      if (message.isEmpty || message.length > 350 ||
+          message.contains('\n') || message.contains('\r')) return null;
+      if (_isOriginalShoppingTopic(message)) {
+        return clarification == null ? message : '$message $clarification';
       }
-      // Clarifications belong to the user's topic, not assistant claims.
-      if (RegExp(r'\\b(?:frutta|frutto|fruit|fruits|verdura|legume|légume)\\b',
-          caseSensitive: false).hasMatch(value) &&
-          value.length <= 90) {
-        clarification ??= value;
+      if (RegExp(r'\b(?:frutta|frutto|fruit|fruits|verdura|légume)\b',
+          caseSensitive: false).hasMatch(message) &&
+          message.length <= 90) {
+        clarification ??= message;
         continue;
       }
       if (RegExp(r'^(?:capito|ok|okay|s[iì]|si esatto|yes|oui|'
           r'cerca (?:su |in )?internet|cerca sul web|'
-          r'cerca online|search the web)[.! ]*
-    final raw = result.metadata['results'];
-    final pages = <String>[];
-    if (result.success && raw is List) {
-      for (final item in raw) {
-        if (item is! Map) continue;
-        final title = item['title'];
-        final link = item['url'];
-        if (title is! String || link is! String) continue;
-        final uri = Uri.tryParse(link.trim());
-        if (uri == null || !['https', 'http'].contains(uri.scheme) ||
-            uri.host.isEmpty || uri.userInfo.isNotEmpty) continue;
-        pages.add('${title.replaceAll(RegExp(r'[\r\n]+'), ' ').trim()}\n${uri.toString()}');
-        if (pages.length == 3) break;
-      }
-    }
-    if (pages.isEmpty) {
-      return 'Non ho trovato collegamenti verificabili per questa ricerca. '
-          'Non posso confermare un prodotto, un prezzo o un’offerta.';
-    }
-    final prefix = followUp
-        ? 'Non posso confermare l’offerta descritta nella risposta precedente. Ecco le pagine restituite dalla ricerca:'
-        : 'Ecco le pagine restituite dalla ricerca. Verifica prezzo, configurazione e disponibilità aprendo i collegamenti:';
-    return '$prefix\n\n${pages.join('\n\n')}';
-  }
-}
-,
-          caseSensitive: false).hasMatch(value)) continue;
-      // A new unrelated request must not inherit an old product.
+          r'cerca online|search the web)[.! ]*$',
+          caseSensitive: false).hasMatch(message)) continue;
       return null;
     }
     return null;
@@ -130,12 +72,12 @@ abstract final class AssistantShoppingResults {
   static bool _isOriginalShoppingTopic(String input) {
     final value = input.toLowerCase();
     final commerce = RegExp(
-      r'\\b(?:comprare|acquistare|buy|acheter|compro|compra|'
-      r'cercare|cerco|trova|trovami|find|cherche|prezzi|prix)\\b',
+      r'\b(?:comprare|acquistare|buy|acheter|compro|compra|'
+      r'cercare|cerco|trova|trovami|find|cherche|prezzi|prix)\b',
     ).hasMatch(value);
     final offers = RegExp(
-      r'\\b(?:offert[ae]|offera|scont[oi]|promozion[ei]|'
-      r'promozione|deals?|offers?|promotion|promotions?|soldes?)\\b',
+      r'\b(?:offert[ae]|scont[oi]|promozion[ei]|'
+      r'deals?|offers?|promotion|promotions?|soldes?)\b',
     ).hasMatch(value);
     return commerce && offers && !_isGenericOfferFollowUp(input);
   }
