@@ -462,7 +462,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
         message,
         state: InferenceTerminalState.modelUnavailable,
         providerId: lastProvider,
-        errorCode: lastError == null ? null : InferenceErrorCode.cloudProviderUnavailable,
+        errorCode: !consentGated && lastError != null
+            ? InferenceErrorCode.cloudProviderUnavailable
+            : null,
       );
       return;
     }
@@ -472,7 +474,9 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     yield InferenceResponse.error(
       message,
       providerId: lastProvider,
-      errorCode: lastError == null ? null : InferenceErrorCode.cloudProviderUnavailable,
+      errorCode: !consentGated && lastError != null
+            ? InferenceErrorCode.cloudProviderUnavailable
+            : null,
     );
   }
 
