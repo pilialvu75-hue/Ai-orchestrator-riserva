@@ -46,7 +46,7 @@ jobs:
             exit 1
           fi
           gh api "repos/$GITHUB_REPOSITORY/contents/pubspec.yaml?ref=main" \
-            --jq '.content' | base64 -d | grep -Eq '^version: 1\.0\.15\+'
+            --jq '.content' | base64 -d | grep -Eq '^version: 1\.0\.(15|16)\+'
 
       - name: Dispatch canonical Android beta workflow
         env:
