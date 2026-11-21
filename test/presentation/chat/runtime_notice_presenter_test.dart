@@ -74,6 +74,35 @@ void main() {
     expect(find.text('Memory error'), findsNothing);
   });
 
+  testWidgets('HYBRID network failover is brief, neutral and above composer',
+      (tester) async {
+    final presenter = RuntimeNoticePresenter();
+    addTearDown(presenter.dispose);
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('it'),
+      home: Scaffold(
+        body: Builder(builder: (value) {
+          context = value;
+          return const TextField();
+        }),
+      ),
+    ));
+
+    presenter.update(context, 'hybrid_fallback:network_lost');
+    await tester.pump();
+    expect(find.text('Rete persa · passaggio a LOCAL'), findsOneWidget);
+    final bar = tester.widget<SnackBar>(find.byType(SnackBar));
+    expect(bar.behavior, SnackBarBehavior.floating);
+    expect(bar.margin?.bottom, greaterThan(0));
+    expect(bar.duration, const Duration(seconds: 3));
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.text('Rete persa · passaggio a LOCAL'), findsNothing);
+    await tester.enterText(find.byType(TextField), 'Nuova domanda');
+    expect(find.text('Nuova domanda'), findsOneWidget);
+  });
+
   testWidgets('new request removes the previous notice', (tester) async {
     final presenter = RuntimeNoticePresenter();
     addTearDown(presenter.dispose);
