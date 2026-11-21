@@ -244,7 +244,10 @@ class Orchestrator {
       if (!receivedAnswerText &&
           chunk.isError &&
           chunk.isFinal &&
-          chunk.terminalState != InferenceTerminalState.cancelled) {
+          chunk.terminalState != InferenceTerminalState.cancelled &&
+          (chunk.errorCode == InferenceErrorCode.cloudConsentDenied ||
+              chunk.errorCode == InferenceErrorCode.cloudTransportUnavailable ||
+              chunk.errorCode == InferenceErrorCode.cloudProviderUnavailable)) {
         // A refusal, network failure or exhausted provider is not a
         // permission to contact a second Cloud provider. Recover locally
         // through the existing explicit localOnly route.
