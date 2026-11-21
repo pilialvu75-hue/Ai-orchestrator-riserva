@@ -1940,7 +1940,7 @@ class _ChatBodyState
         : (state as ChatLoaded).messages;
     for (final message in messages.reversed) {
       if (message.role != 'assistant') continue;
-      final provider = message.provider.trim();
+      final provider = message.provider?.trim() ?? '';
       if (provider.isEmpty || provider == 'assistant') continue;
       final label = provider.toLowerCase() == 'local'
           ? 'LOCAL'
