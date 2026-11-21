@@ -1,0 +1,36 @@
+name: Library development Android consumer
+on:
+  pull_request:
+    paths:
+      - 'tool/cantiere_*'
+      - '.github/workflows/library-development-consumer.yml'
+permissions:
+  contents: read
+jobs:
+  consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [adjacent_pairs, count_in_range, cumulative_max, delta_codec, first_subsequence, fixed_chunks, index_positions, integer_frequencies, interleave_lists, intersection_unique, max_run_length, palindrome_filter, rotate_left, running_product, stable_unique]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Stage real package
+        run: |
+          flutter create --platforms=android --project-name library_consumer "$RUNNER_TEMP/library_consumer"
+          python tool/cantiere_stage_development_module.py --pin utility.llm_generated.${{ matrix.module }}@0.1.0 --project "$RUNNER_TEMP/library_consumer"
+      - name: Import and exercise module
+        working-directory: ${{ runner.temp }}/library_consumer
+        run: |
+          module='${{ matrix.module }}'
+          package="aivexus_$module"
+          flutter pub add "$package:{\"path\":\"aivexus_internal_modules/$package\"}"
+          printf "import 'package:flutter/material.dart';\nimport 'package:%s/%s.dart';\nvoid main() => runApp(const MaterialApp(home: Text('Library consumer')));\n" "$package" "$module" > lib/main.dart
+          cp "aivexus_internal_modules/$package/test/independent_contract_test.dart" test/widget_test.dart
+          flutter pub add --dev test
+          flutter test
+          flutter build apk --debug
