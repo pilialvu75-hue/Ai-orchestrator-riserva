@@ -20,6 +20,24 @@ class RuntimeNoticePresenter {
     _active = null;
     if (next == null) return;
 
+    final isHybridTransition = next.startsWith('hybrid_fallback:');
+    final language = Localizations.localeOf(context).languageCode;
+    final transitionMessage = switch (next) {
+      'hybrid_fallback:network_lost' => switch (language) {
+        'fr' => 'Réseau perdu · passage en LOCAL',
+        'en' => 'Network lost · switching to LOCAL',
+        'es' => 'Red perdida · cambiando a LOCAL',
+        _ => 'Rete persa · passaggio a LOCAL',
+      },
+      'hybrid_fallback:provider_unavailable' => switch (language) {
+        'fr' => 'Fournisseur indisponible · passage en LOCAL',
+        'en' => 'Provider unavailable · switching to LOCAL',
+        'es' => 'Proveedor no disponible · cambiando a LOCAL',
+        _ => 'Provider non disponibile · passaggio a LOCAL',
+      },
+      _ => next,
+    };
+    final lifetime = Duration(seconds: isHybridTransition ? 3 : 6);
     final messenger = ScaffoldMessenger.of(context);
     // A queued snackbar cannot be closed through its controller until visible.
     // Runtime feedback supersedes old transient notifications on this screen.
@@ -27,11 +45,21 @@ class RuntimeNoticePresenter {
     messenger.removeCurrentSnackBar();
     final controller = messenger.showSnackBar(
       SnackBar(
-        content: Text(next, maxLines: 3, overflow: TextOverflow.ellipsis),
-        backgroundColor: Theme.of(context).colorScheme.error,
-        showCloseIcon: true,
-        duration: const Duration(seconds: 6),
-        action: action,
+        content: Text(transitionMessage,
+            maxLines: isHybridTransition ? 2 : 3,
+            overflow: TextOverflow.ellipsis),
+        backgroundColor: isHybridTransition
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : Theme.of(context).colorScheme.error,
+        behavior: isHybridTransition
+            ? SnackBarBehavior.floating
+            : SnackBarBehavior.fixed,
+        margin: isHybridTransition
+            ? const EdgeInsets.fromLTRB(16, 0, 16, 112)
+            : null,
+        showCloseIcon: !isHybridTransition,
+        duration: lifetime,
+        action: isHybridTransition ? null : action,
       ),
     );
     _active = controller;
@@ -42,7 +70,7 @@ class RuntimeNoticePresenter {
       }
     });
     // Bound the lifetime even if SnackBarAction keeps the notice persistent.
-    _expiry = Timer(const Duration(seconds: 6), controller.close);
+    _expiry = Timer(lifetime, controller.close);
   }
 
   void dispose() {
