@@ -91,4 +91,60 @@ void main() {
     expect(find.text('Teiera'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+  testWidgets('bare URLs in search results are tappable without losing punctuation',
+      (tester) async {
+    final opened = <Uri>[];
+    const reply = 'Le pagine restituite dalla ricerca:\\n'
+        'IMDb\\nhttps://www.imdb.com/it/title/tt1924396/\\n\\n'
+        'MYmovies: https://www.mymovies.it/film/2012/thebestoffer/.\\n'
+        'Wikipedia https://en.wikipedia.org/wiki/The_Best_Offer, controlla la fonte.';
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssistantMessageContent(
+          content: reply,
+          style: style,
+          openLink: (uri) async { opened.add(uri); return true; },
+        ),
+      ),
+    ));
+    final rich = tester.widget<Text>(find.byType(Text)).textSpan! as TextSpan;
+    final links = rich.children!.whereType<TextSpan>()
+        .where((span) => span.recognizer is TapGestureRecognizer)
+        .toList();
+    expect(links.map((span) => span.text), <String>[
+      'https://www.imdb.com/it/title/tt1924396/',
+      'https://www.mymovies.it/film/2012/thebestoffer/',
+      'https://en.wikipedia.org/wiki/The_Best_Offer',
+    ]);
+    expect(rich.toPlainText(), contains('thebestoffer/.'));
+    (links[1].recognizer! as TapGestureRecognizer).onTap?.call();
+    await tester.pump();
+    expect(opened, <Uri>[
+      Uri.parse('https://www.mymovies.it/film/2012/thebestoffer/'),
+    ]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('bare links inside fenced and inline code never open',
+      (tester) async {
+    const reply = '~~~\\nhttps://example.org/fenced\\n~~~\\n'
+        'Inline `https://example.org/inline`\\n'
+        'Apri https://example.org/public.';
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: AssistantMessageContent(content: reply, style: style),
+      ),
+    ));
+    final rich = tester.widget<Text>(find.byType(Text)).textSpan! as TextSpan;
+    final links = rich.children!.whereType<TextSpan>()
+        .where((span) => span.recognizer is TapGestureRecognizer)
+        .toList();
+    expect(links.length, 1);
+    expect(links.single.text, 'https://example.org/public');
+    expect(rich.toPlainText(), contains('https://example.org/fenced'));
+    expect(rich.toPlainText(), contains('https://example.org/inline'));
+    expect(tester.takeException(), isNull);
+  });
+
+
 }
