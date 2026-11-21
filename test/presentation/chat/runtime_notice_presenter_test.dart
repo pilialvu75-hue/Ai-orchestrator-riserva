@@ -94,7 +94,8 @@ void main() {
     expect(find.text('Rete persa · passaggio a LOCAL'), findsOneWidget);
     final bar = tester.widget<SnackBar>(find.byType(SnackBar));
     expect(bar.behavior, SnackBarBehavior.floating);
-    expect(bar.margin?.bottom, greaterThan(0));
+    expect(bar.margin, isA<EdgeInsets>());
+    expect((bar.margin! as EdgeInsets).bottom, greaterThan(0));
     expect(bar.duration, const Duration(seconds: 3));
     await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
