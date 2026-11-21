@@ -94,9 +94,9 @@ void main() {
   testWidgets('bare URLs in search results are tappable without losing punctuation',
       (tester) async {
     final opened = <Uri>[];
-    const reply = 'Le pagine restituite dalla ricerca:\\n'
-        'IMDb\\nhttps://www.imdb.com/it/title/tt1924396/\\n\\n'
-        'MYmovies: https://www.mymovies.it/film/2012/thebestoffer/.\\n'
+    const reply = 'Le pagine restituite dalla ricerca:\n'
+        'IMDb\nhttps://www.imdb.com/it/title/tt1924396/\n\n'
+        'MYmovies: https://www.mymovies.it/film/2012/thebestoffer/.\n'
         'Wikipedia https://en.wikipedia.org/wiki/The_Best_Offer, controlla la fonte.';
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -127,8 +127,8 @@ void main() {
 
   testWidgets('bare links inside fenced and inline code never open',
       (tester) async {
-    const reply = '~~~\\nhttps://example.org/fenced\\n~~~\\n'
-        'Inline `https://example.org/inline`\\n'
+    const reply = '~~~\nhttps://example.org/fenced\n~~~\n'
+        'Inline `https://example.org/inline`\n'
         'Apri https://example.org/public.';
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
