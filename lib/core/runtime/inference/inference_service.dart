@@ -1911,6 +1911,10 @@ class InferenceService {
       'local_request_available=${localRequest != null}',
     );
 
+    // A Cloud stream may have already delivered user-visible content.
+    // Restarting its original prompt locally would duplicate or contradict
+    // that content. Only recover at the pre-content boundary.
+    var cloudContentEmitted = false;
     await for (final chunk
         in _cloudRuntimeProvider
             .streamInference(
@@ -1926,12 +1930,23 @@ class InferenceService {
         continue;
       }
 
+      if (!chunk.isError && chunk.text.trim().isNotEmpty) {
+        cloudContentEmitted = true;
+      }
+
       if (chunk.isError) {
+        // A denied disclosure is not a transport failure. Do not silently
+        // reinterpret an explicit privacy refusal as approval to retry.
+        // The local fallback is only safe before any Cloud content was shown.
         if (localRequest != null &&
-            _cloudRuntimeProvider
-                .shouldFallBackToLocal(
-          chunk.errorMessage,
-        )) {
+            !cancellationToken.isCancelled &&
+            !cloudContentEmitted &&
+            chunk.terminalState != InferenceTerminalState.cancelled &&
+            chunk.errorCode != InferenceErrorCode.cloudConsentDenied &&
+            (chunk.errorCode == InferenceErrorCode.cloudTransportUnavailable ||
+                _cloudRuntimeProvider.shouldFallBackToLocal(
+                  chunk.errorMessage,
+                ))) {
           _log(
             'fallback routing '
             'session=${cloudRequest.sessionId} '
@@ -1945,6 +1960,13 @@ class InferenceService {
             'boundary=inference_service.automatic_orchestration '
             'reason=cloud_error_fallback '
             'target=inference_service._streamLocalInference',
+          );
+
+          yield InferenceResponse.notice(
+            chunk.errorCode == InferenceErrorCode.cloudTransportUnavailable ||
+                    (chunk.errorMessage ?? '').toLowerCase().contains('network')
+                ? 'hybrid_fallback:network_lost'
+                : 'hybrid_fallback:provider_unavailable',
           );
 
           final notice =

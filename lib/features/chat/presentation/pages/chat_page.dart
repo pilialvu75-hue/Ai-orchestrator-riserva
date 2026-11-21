@@ -1929,61 +1929,112 @@ class _ChatBodyState
     };
   }
 
-  Widget _buildRuntimeModePill(Color surfaceColor) {
-    return GestureDetector(
-      onTap:
-          _appearanceViewModel
-              .handleSecretPatternClick,
+  // The persisted mode is the user's choice; the executor is the model that
+  // actually replied (or is currently replying), not a routing prediction.
+  String _hybridExecutorCaption(ChatState state) {
+    if (state is! ChatSending && state is! ChatLoaded) {
+      return 'In attesa';
+    }
+    final messages = state is ChatSending
+        ? state.messages
+        : (state as ChatLoaded).messages;
+    for (final message in messages.reversed) {
+      if (message.role != 'assistant') continue;
+      final provider = message.provider?.trim() ?? '';
+      if (state is ChatSending && message.isPending &&
+          (provider.isEmpty || provider == 'assistant')) {
+        return 'In attesa';
+      }
+      if (provider.isEmpty || provider == 'assistant') continue;
+      final label = provider.toLowerCase() == 'local'
+          ? 'LOCAL'
+          : CloudProviderCatalog.definitionFor(provider)?.displayName ??
+              provider;
+      return state is ChatSending ? label : 'Ultimo: $label';
+    }
+    return 'In attesa';
+  }
+
+  Future<void> _setChatRuntimeMode(AiRuntimeMode selected) async {
+    if (_runtimeSettingsService.runtimeMode == selected) return;
+    try {
+      await _runtimeSettingsService.setRuntimeMode(selected);
+      _uiDebugLog(
+        action: 'chat_runtime_mode_changed',
+        sessionId: widget.chatNavigation.sessionId,
+        details: 'mode=${selected.name}',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Impossibile cambiare modalità IA.')),
+      );
+    }
+  }
+
+  Widget _buildRuntimeModePill(Color surfaceColor, ChatState state) {
+    final mode = _runtimeSettingsService.runtimeMode;
+    final subtitle = mode == AiRuntimeMode.hybrid
+        ? _hybridExecutorCaption(state)
+        : null;
+
+    return PopupMenuButton<AiRuntimeMode>(
+      key: const Key('chat-runtime-mode-selector'),
+      tooltip: 'Modalità IA: ${mode.name.toUpperCase()}',
+      enabled: state is! ChatSending,
+      color: surfaceColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      onSelected: (value) => unawaited(_setChatRuntimeMode(value)),
+      itemBuilder: (context) => AiRuntimeMode.values
+          .map((value) => PopupMenuItem<AiRuntimeMode>(
+                value: value,
+                child: Row(children: [
+                  SizedBox(
+                    width: 26,
+                    child: value == mode
+                        ? const Icon(Icons.check,
+                            color: Color(0xFF4ADE80), size: 18)
+                        : null,
+                  ),
+                  Text(value.name.toUpperCase()),
+                ]),
+              ))
+          .toList(),
       child: Container(
-        padding:
-            const EdgeInsets
-                .symmetric(
-          horizontal: 14,
-          vertical: 6,
+        key: const Key('chat-runtime-mode-pill'),
+        constraints: const BoxConstraints(maxWidth: 178),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: surfaceColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white12),
         ),
-        decoration:
-            BoxDecoration(
-          color:
-              surfaceColor,
-          borderRadius:
-              BorderRadius.circular(
-            20,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(mode.name.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  )),
+              if (subtitle != null)
+                Text(subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF4ADE80), fontSize: 10,
+                    )),
+            ]),
           ),
-          border:
-              Border.all(
-            color:
-                Colors.white12,
-          ),
-        ),
-        child: Row(
-          mainAxisSize:
-              MainAxisSize.min,
-          children: [
-            Text(
-              widget
-                  .runtimeModeName
-                  .toUpperCase(),
-              style:
-                  const TextStyle(
-                color:
-                    Colors.white70,
-                fontSize: 13,
-                fontWeight:
-                    FontWeight.w600,
-              ),
-            ),
-            const SizedBox(
-              width: 4,
-            ),
-            const Icon(
-              Icons
-                  .arrow_drop_down,
-              color:
-                  Colors.white38,
-              size: 16,
-            ),
-          ],
-        ),
+          const SizedBox(width: 3),
+          const Icon(Icons.arrow_drop_down,
+              color: Colors.white38, size: 16),
+        ]),
       ),
     );
   }
@@ -2599,7 +2650,7 @@ class _ChatBodyState
             title: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildRuntimeModePill(surfaceColor),
+                _buildRuntimeModePill(surfaceColor, state),
                 if (_runtimeSettingsService.runtimeMode == AiRuntimeMode.local) ...[
                   const SizedBox(width: 6),
                   _buildLocalModelSelector(surfaceColor),
