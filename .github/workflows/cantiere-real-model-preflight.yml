@@ -1,0 +1,44 @@
+name: Cantiere Real Model Four-Role Preflight
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tool/cantiere_real_model_preflight.py'
+      - 'tool/test_cantiere_real_model_preflight.py'
+      - '.github/workflows/cantiere-real-model-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Compile preflight Python scripts
+        run: python3 -m py_compile tool/cantiere_real_model_preflight.py tool/test_cantiere_real_model_preflight.py
+      - name: Verify fail-closed synthetic contracts without network
+        run: python3 -m unittest -v tool.test_cantiere_real_model_preflight
+
+  real-provider-opt-in:
+    if: github.event_name == 'workflow_dispatch'
+    needs: contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Query four real Cantiere model capabilities (authorized manual dispatch only)
+        env:
+          CANTIERE_BROKER_URL: ${{ vars.CANTIERE_BROKER_URL }}
+          CANTIERE_ZERO_COST_ROUTES_VERIFIED: ${{ vars.CANTIERE_ZERO_COST_ROUTES_VERIFIED }}
+          CANTIERE_CF_ACCESS_CLIENT_ID: ${{ secrets.CANTIERE_CF_ACCESS_CLIENT_ID }}
+          CANTIERE_CF_ACCESS_CLIENT_SECRET: ${{ secrets.CANTIERE_CF_ACCESS_CLIENT_SECRET }}
+        run: python3 tool/cantiere_real_model_preflight.py
