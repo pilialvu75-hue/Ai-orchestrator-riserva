@@ -1946,10 +1946,26 @@ class _ChatBodyState
         return 'In attesa';
       }
       if (provider.isEmpty || provider == 'assistant') continue;
+      final downloadedState = context.read<ModelDownloadBloc>().state;
+      final installedModels = downloadedState is ModelsLoaded
+          ? downloadedState.models
+          : <AiModel>[];
+      AiModel? localModel;
+      for (final model in installedModels) {
+        if (provider == model.id ||
+            provider == model.effectiveRuntimeModelId) {
+          localModel = model;
+          break;
+        }
+      }
+      final cloudDefinition = CloudProviderCatalog.definitionFor(provider);
       final label = provider.toLowerCase() == 'local'
           ? 'LOCAL'
-          : CloudProviderCatalog.definitionFor(provider)?.displayName ??
-              provider;
+          : localModel != null
+              ? 'LOCAL · ${localModel.displayName}'
+              : cloudDefinition != null
+                  ? 'CLOUD · ${cloudDefinition.displayName}'
+                  : 'Modello/provider · $provider';
       return state is ChatSending ? label : 'Ultimo: $label';
     }
     return 'In attesa';
