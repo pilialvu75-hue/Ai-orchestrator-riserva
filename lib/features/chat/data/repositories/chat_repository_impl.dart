@@ -561,10 +561,17 @@ class ChatRepositoryImpl implements ChatRepository, VerifiedMemoryActionWriter {
                         streamedResponse.clear();
                         streamedResponse.write(merged);
                       }
-                      if ((providerId == null || providerId.isEmpty) &&
-                          chunk.model != null &&
-                          chunk.model!.trim().isNotEmpty) {
-                        responseProvider = chunk.model!;
+                      // Persist a real LOCAL model from the final inference
+                      // chunk instead of only the generic provider "local".
+                      // Never overwrite specific Cloud provider identities.
+                      final reportedModel = chunk.model?.trim();
+                      if ((providerId == null || providerId.isEmpty ||
+                              providerId == 'local') &&
+                          reportedModel != null &&
+                          reportedModel.isNotEmpty &&
+                          reportedModel.length <= 80 &&
+                          !RegExp(r'[^A-Za-z0-9_.-]').hasMatch(reportedModel)) {
+                        responseProvider = reportedModel;
                       }
                       _log(
                         '[FINAL_RESPONSE] session=$sessionId is_final=true tokens=${chunk.tokensGenerated} provider=$responseProvider',
