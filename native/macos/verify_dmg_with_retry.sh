@@ -15,20 +15,26 @@ if [[ ! -s "$dmg" ]]; then
   exit 1
 fi
 
-for attempt in 1 2 3 4 5; do
+# Shared GitHub macOS runners can hold the disk image service for longer than
+# the original 5 x 2 s window. Back off for EAGAIN only; do not accept a DMG
+# without a real successful hdiutil verify.
+max_attempts=10
+for (( attempt=1; attempt<=max_attempts; attempt++ )); do
   if output="$(hdiutil verify "$dmg" 2>&1)"; then
     printf '%s\n' "$output"
     exit 0
   fi
 
   printf '%s\n' "$output" >&2
-  if [[ "$output" != *"Resource temporarily unavailable"* || "$attempt" -eq 5 ]]; then
+  if [[ "$output" != *"Resource temporarily unavailable"* || "$attempt" -eq "$max_attempts" ]]; then
     echo "DMG verification failed: non-transient error or retries exhausted." >&2
     exit 1
   fi
 
-  echo "macOS disk image service temporarily busy; retrying verification ($attempt/5)." >&2
-  sleep 2
+  delay="$((attempt + 1))"
+  if (( delay > 8 )); then delay=8; fi
+  echo "macOS disk image service temporarily busy; retrying verification ($attempt/$max_attempts) in ${delay}s." >&2
+  sleep "$delay"
 done
 
 exit 1
