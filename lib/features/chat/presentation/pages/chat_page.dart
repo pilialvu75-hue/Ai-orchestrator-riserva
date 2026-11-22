@@ -2309,7 +2309,10 @@ class _ChatBodyState
     const surfaceColor =
         Color(0xFF1E1F20);
 
-    return BlocConsumer<
+    // Scope chat notices to the chat Scaffold, not the desktop shell's outer
+    // Scaffold. This is necessary for snackbars to respect the composer.
+    return ScaffoldMessenger(
+      child: BlocConsumer<
         OrchestratorStateEngine,
         ChatState>(
       listener:
@@ -2521,46 +2524,6 @@ class _ChatBodyState
               ),
             ),
 
-            if (_audioPlayback.isOpen)
-              ChatAudioPlaybackBar(
-                isPlaying: _audioPlayback.isPlaying,
-                isBusy: _audioPlayback.isBusy,
-                onStop: () => unawaited(_audioPlayback.stop()),
-                onRestart: () => unawaited(_audioPlayback.restart()),
-                onClose: _audioPlayback.close,
-                realTransport: _audioPlayback.canSeek,
-                isPaused: _audioPlayback.isPaused,
-                position: _audioPlayback.measuredPlayback.position,
-                buffered: _audioPlayback.measuredPlayback.buffered,
-                complete: _audioPlayback.measuredPlayback.complete,
-                onPause: () => unawaited(_audioPlayback.pause()),
-                onResume: () => unawaited(_audioPlayback.resume()),
-                onBack: () => unawaited(
-                  _audioPlayback.skip(const Duration(seconds: -10)),
-                ),
-                onForward: () => unawaited(
-                  _audioPlayback.skip(const Duration(seconds: 10)),
-                ),
-                onSeek: (position) => unawaited(_audioPlayback.seek(position)),
-              ),
-            ChatInputBar(
-              key: ValueKey(widget.chatNavigation.sessionId),
-              onSend:
-                  _sendFromComposer,
-              isLoading:
-                  isLoading,
-              onStartLiveSession:
-                  widget
-                      .onStartLiveSession,
-              liveSessionEnabled:
-                  widget
-                      .liveSessionEnabled,
-              editingText:
-                  _editingUserMessage
-                      ?.content,
-              onCancelEdit:
-                  _cancelEditingUserMessage,
-            ),
           ],
         );
 
@@ -2918,10 +2881,58 @@ class _ChatBodyState
                       ),
                     ),
 
+          // Reserve the composer as actual Scaffold bottom chrome so floating
+          // snackbars remain above it on Windows, desktop and mobile.
+          bottomNavigationBar: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+            if (_audioPlayback.isOpen)
+              ChatAudioPlaybackBar(
+                isPlaying: _audioPlayback.isPlaying,
+                isBusy: _audioPlayback.isBusy,
+                onStop: () => unawaited(_audioPlayback.stop()),
+                onRestart: () => unawaited(_audioPlayback.restart()),
+                onClose: _audioPlayback.close,
+                realTransport: _audioPlayback.canSeek,
+                isPaused: _audioPlayback.isPaused,
+                position: _audioPlayback.measuredPlayback.position,
+                buffered: _audioPlayback.measuredPlayback.buffered,
+                complete: _audioPlayback.measuredPlayback.complete,
+                onPause: () => unawaited(_audioPlayback.pause()),
+                onResume: () => unawaited(_audioPlayback.resume()),
+                onBack: () => unawaited(
+                  _audioPlayback.skip(const Duration(seconds: -10)),
+                ),
+                onForward: () => unawaited(
+                  _audioPlayback.skip(const Duration(seconds: 10)),
+                ),
+                onSeek: (position) => unawaited(_audioPlayback.seek(position)),
+              ),
+            ChatInputBar(
+              key: ValueKey(widget.chatNavigation.sessionId),
+              onSend:
+                  _sendFromComposer,
+              isLoading:
+                  isLoading,
+              onStartLiveSession:
+                  widget
+                      .onStartLiveSession,
+              liveSessionEnabled:
+                  widget
+                      .liveSessionEnabled,
+              editingText:
+                  _editingUserMessage
+                      ?.content,
+              onCancelEdit:
+                  _cancelEditingUserMessage,
+            ),
+            ],
+          ),
           body:
               chatMainContent,
         );
       },
+      ),
     );
   }
 
