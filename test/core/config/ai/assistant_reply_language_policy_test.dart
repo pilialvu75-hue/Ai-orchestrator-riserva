@@ -135,4 +135,15 @@ void main() {
     expect(italian, contains('write in Italian'));
     expect(italian, isNot(contains('write in French')));
   });
+  test('short stadium query stays in Italian without fake dialogue', () {
+    const question = 'stadio del real madrid';
+    expect(AssistantReplyLanguagePolicy.detect(question), 'Italian');
+    final prompt = AssistantReplyLanguagePolicy.withCurrentTurnHint(
+      systemPrompt: 'Assistant core.', userPrompt: question,
+    );
+    expect(prompt, contains('write in Italian'));
+    expect(prompt, contains('senza simulare turni'));
+    expect(prompt, contains('Non inventare date'));
+  });
+
 }

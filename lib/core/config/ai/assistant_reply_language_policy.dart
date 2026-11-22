@@ -74,6 +74,13 @@ abstract final class AssistantReplyLanguagePolicy {
     final explicitLanguage = _shortTurns[wholeTurn];
     if (explicitLanguage != null) return explicitLanguage;
     if (_shortItalianNamedStatement.hasMatch(wholeTurn)) return 'Italian';
+    // Short Italian stadium searches can lack the words used by the
+    // general multilingual scoring heuristic.
+    if (wholeTurn.startsWith('stadio del ') ||
+        wholeTurn.startsWith('stadio della ') ||
+        wholeTurn.startsWith('stadio di ')) {
+      return 'Italian';
+    }
     final words = RegExp(
       r"[\p{L}]+(?:['’][\p{L}]+)?",
       unicode: true,
@@ -113,6 +120,8 @@ abstract final class AssistantReplyLanguagePolicy {
         'Rispondi interamente in italiano, fin dalla prima parola. '
         'Anche le conferme brevi e le introduzioni devono essere in italiano, '
         'senza formule iniziali inglesi. '
+        'Rispondi direttamente senza simulare turni User:, AI Orchestrator: '
+        'o Assistant:. Non inventare date o eventi non verificati. '
         'Lascia invariati i nomi propri, le citazioni letterali e il codice.';
   }
 }

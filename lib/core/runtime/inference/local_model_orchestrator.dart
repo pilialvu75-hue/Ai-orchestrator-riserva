@@ -94,7 +94,21 @@ class LocalModelOrchestrator {
       // Stability wins for ordinary dialogue; special tasks may justify a
       // model reload, but small capability differences should not.
       if (model.id == preferredId) {
-        result += task == LocalConversationTask.general && !multilingual ? 40 : 7;
+        // Affinity prevents needless reloads but must not let a weak 1B
+        // model dominate a materially stronger *installed and safe* model.
+        result += task == LocalConversationTask.general && !multilingual
+            ? (id.contains('tinyllama') ? 8 : 40)
+            : 7;
+      }
+      if (id.contains('tinyllama')) {
+        // TinyLlama is a last-resort lightweight assistant, not the quality
+        // leader of AUTO when a compatible Qwen 3B/4B is installed.
+        result -= 22;
+      }
+      if (id.contains('qwen3_4b') || id.contains('qwen3-4b')) {
+        // Qwen3 4B is the qualified stronger general-purpose candidate.
+        // Do not change the established Phi/Qwen2.5 switching thresholds.
+        result += 16;
       }
       if (id.contains('qwen')) {
         result += 12;
