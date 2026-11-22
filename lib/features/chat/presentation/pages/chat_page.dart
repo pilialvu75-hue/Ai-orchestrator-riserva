@@ -1963,7 +1963,7 @@ class _ChatBodyState
     if (RegExp(r'^(qwen|phi|llama|tinyllama|gemma|nemotron|deepseek)',
         caseSensitive: false).hasMatch(provider) &&
         provider.length <= 50) {
-      return 'LOCAL · ${provider}';
+      return 'LOCAL · $provider';
     }
     return null;
   }
