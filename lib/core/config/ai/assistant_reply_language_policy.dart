@@ -74,6 +74,56 @@ abstract final class AssistantReplyLanguagePolicy {
     final explicitLanguage = _shortTurns[wholeTurn];
     if (explicitLanguage != null) return explicitLanguage;
     if (_shortItalianNamedStatement.hasMatch(wholeTurn)) return 'Italian';
+    // Common concise Italian search queries have no function words from the
+    // general language scorer: e.g. "stadio del real madrid".
+    if (RegExp(r'^(?:stadio|squadra|partita|allenatore)\\s+(?:del|della|di|dei)\\s+[^\\n]{2,90}
+    final words = RegExp(
+      r"[\p{L}]+(?:['’][\p{L}]+)?",
+      unicode: true,
+    ).allMatches(text).map((match) => match.group(0)!).toList();
+    if (words.isEmpty) return null;
+
+    String? best;
+    var bestScore = 1;
+    var tied = false;
+    for (final entry in _signals.entries) {
+      final score = words.where(entry.value.contains).length;
+      if (score > bestScore) {
+        best = entry.key;
+        bestScore = score;
+        tied = false;
+      } else if (score == bestScore && score > 1) {
+        tied = true;
+      }
+    }
+    return tied ? null : best;
+  }
+
+  static String withCurrentTurnHint({
+    required String systemPrompt,
+    required String userPrompt,
+  }) {
+    final language = detect(userPrompt);
+    if (language == null) return systemPrompt;
+    final baseHint = '$systemPrompt\n\nFor this response, write in $language. '
+        'The latest user message determines the reply language, even when '
+        'earlier messages used another language. Preserve proper names.';
+    if (language != 'Italian') return baseHint;
+    // Small LOCAL models sometimes prefix otherwise-correct Italian answers
+    // with an English acknowledgment. Reinforce the *whole* turn without
+    // rewriting model output or changing the user's stored preferences.
+    return '$baseHint\n'
+        'Rispondi interamente in italiano, fin dalla prima parola. '
+        'Anche le conferme brevi e le introduzioni devono essere in italiano, '
+        'senza formule iniziali inglesi. '
+        'Rispondi direttamente alla domanda: non simulare dialoghi con '
+        'prefissi User:, AI Orchestrator: o Assistant:. '
+        'Se un fatto recente non è verificato, non inventare date o eventi. '
+        'Lascia invariati i nomi propri, le citazioni letterali e il codice.';
+  }
+}
+,
+        caseSensitive: false).hasMatch(wholeTurn)) return 'Italian';
     final words = RegExp(
       r"[\p{L}]+(?:['’][\p{L}]+)?",
       unicode: true,
