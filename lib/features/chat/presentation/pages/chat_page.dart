@@ -1950,8 +1950,29 @@ class _ChatBodyState
     }
   }
 
-  Widget _buildRuntimeModePill(Color surfaceColor) {
+  String? _actualLastResponseBackend(String? source) {
+    final provider = source?.trim();
+    if (provider == null || provider.isEmpty) return null;
+    if (provider == 'local' || provider == 'android_ffi') {
+      return 'LOCAL · modello n/d';
+    }
+    final cloud = CloudProviderCatalog.definitionFor(provider);
+    if (cloud != null) return 'CLOUD · ${cloud.displayName}';
+    // Only display a model identity that the inference response persisted.
+    // Never infer it from an AUTO preference or the active model in Settings.
+    if (RegExp(r'^(qwen|phi|llama|tinyllama|gemma|nemotron|deepseek)',
+        caseSensitive: false).hasMatch(provider) &&
+        provider.length <= 50) {
+      return 'LOCAL · ${provider}';
+    }
+    return null;
+  }
+
+  Widget _buildRuntimeModePill(Color surfaceColor, {
+    String? latestResponseProvider,
+  }) {
     final current = _runtimeSettingsService.runtimeMode;
+    final lastBackend = _actualLastResponseBackend(latestResponseProvider);
     return GestureDetector(
       // Preserve the existing developer-only gesture without making it
       // interfere with the ordinary mode selector.
@@ -1980,19 +2001,26 @@ class _ChatBodyState
                 ))
             .toList(growable: false),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          constraints: const BoxConstraints(maxWidth: 204),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           decoration: BoxDecoration(
             color: surfaceColor,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white12),
           ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(current.name.toUpperCase(),
-                style: const TextStyle(color: Colors.white70,
-                    fontSize: 13, fontWeight: FontWeight.w600)),
-            const SizedBox(width: 4),
-            const Icon(Icons.arrow_drop_down,
-                color: Colors.white38, size: 16),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(current.name.toUpperCase(),
+                  style: const TextStyle(color: Colors.white70,
+                      fontSize: 12, fontWeight: FontWeight.w600)),
+              const SizedBox(width: 4),
+              const Icon(Icons.arrow_drop_down,
+                  color: Colors.white38, size: 16),
+            ]),
+            if (lastBackend != null)
+              Text(lastBackend, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xFF8AB4F8),
+                      fontSize: 10, height: 1.1)),
           ]),
         ),
       ),
@@ -2412,6 +2440,15 @@ class _ChatBodyState
               .debugLabMessages,
         ];
 
+        String? latestResponseProvider;
+        for (final entry in combinedMessages.reversed) {
+          if (entry.role == 'assistant' && !entry.isPending &&
+              entry.content.trim().isNotEmpty) {
+            latestResponseProvider = entry.provider;
+            break;
+          }
+        }
+
         final isLoading =
             state is ChatSending;
 
@@ -2573,7 +2610,8 @@ class _ChatBodyState
             title: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildRuntimeModePill(surfaceColor),
+                _buildRuntimeModePill(surfaceColor,
+                    latestResponseProvider: latestResponseProvider),
                 if (_runtimeSettingsService.runtimeMode == AiRuntimeMode.local) ...[
                   const SizedBox(width: 6),
                   _buildLocalModelSelector(surfaceColor),
