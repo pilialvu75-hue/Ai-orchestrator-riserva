@@ -105,9 +105,9 @@ class LocalModelOrchestrator {
         // leader of AUTO when a compatible Qwen 3B/4B is installed.
         result -= 22;
       }
-      if (id.contains('qwen3') || id.contains('qwen2_5_3b') ||
-          id.contains('qwen2.5-3b')) {
-        // Known general-purpose instruction models used in AIVEXUS QA.
+      if (id.contains('qwen3_4b') || id.contains('qwen3-4b')) {
+        // Qwen3 4B is the qualified stronger general-purpose candidate.
+        // Do not change the established Phi/Qwen2.5 switching thresholds.
         result += 16;
       }
       if (id.contains('qwen')) {
