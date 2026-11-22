@@ -183,4 +183,23 @@ void main() {
     expect(affinity.get('chat-c'), isNull);
   });
 
+  test('AUTO prefers capable Qwen 4B over TinyLlama when RAM allows', () {
+    final tiny = installed('tinyllama_1_1b_chat', 700000000);
+    final capable = installed('qwen3_4b', 2500000000);
+    expect(route('stadio del real madrid',
+      models: [tiny, capable], preferred: tiny)?.id, capable.id);
+    expect(route('stadio del real madrid',
+      models: [tiny, capable], preferred: tiny,
+      android: true)?.id, capable.id);
+    final low = ResourceSample({
+      'availableBytes': 120000000,
+      'thresholdBytes': 350000000,
+      'totalBytes': 8000000000,
+      'lowMemory': true,
+    });
+    expect(route('stadio del real madrid',
+      models: [tiny, capable], preferred: tiny,
+      android: true, memory: low)?.id, tiny.id);
+  });
+
 }
