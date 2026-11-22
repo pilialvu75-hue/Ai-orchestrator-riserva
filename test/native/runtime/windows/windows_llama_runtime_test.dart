@@ -2,6 +2,23 @@ import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dar
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('Code Integrity NTSTATUS is explained without weakening security', () {
+    // 0xC0E90002 as a signed Windows process exit code.
+    final message = WindowsLlamaRuntime.describeProcessFailure(-1058471934);
+    expect(message, contains('0xC0E90002'));
+    expect(message, contains('3077'));
+    expect(message, contains('Smart App Control'));
+    expect(message, contains('Non disattivare'));
+    expect(message, isNot(contains('C:\\Users\\')));
+  });
+
+  test('unknown Windows exits preserve signed and hexadecimal codes', () {
+    final message = WindowsLlamaRuntime.describeProcessFailure(-1);
+    expect(message, contains('-1'));
+    expect(message, contains('0xFFFFFFFF'));
+    expect(message, isNot(contains('3077')));
+  });
+
   test('production prefers bundled helper even with stale modern DLL runtime', () {
     for (final version in [
       'Windows 11 Home 10.0 (Build 22621)',
