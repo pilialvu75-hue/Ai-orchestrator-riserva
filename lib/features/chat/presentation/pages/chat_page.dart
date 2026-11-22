@@ -1929,60 +1929,71 @@ class _ChatBodyState
     };
   }
 
+  Future<void> _switchRuntimeMode(AiRuntimeMode next) async {
+    if (_runtimeSettingsService.runtimeMode == next) return;
+    if (context.read<OrchestratorStateEngine>().state is ChatSending) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Attendi la fine della risposta prima di cambiare modalità.'),
+      ));
+      return;
+    }
+    try {
+      await _runtimeSettingsService.setRuntimeMode(next);
+      // The settings service notifies all runtime-dependent selectors.
+      // This changes the *requested* mode, not the actual provider identity.
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Impossibile cambiare la modalità. Riprova.'),
+        ));
+      }
+    }
+  }
+
   Widget _buildRuntimeModePill(Color surfaceColor) {
+    final current = _runtimeSettingsService.runtimeMode;
     return GestureDetector(
-      onTap:
-          _appearanceViewModel
-              .handleSecretPatternClick,
-      child: Container(
-        padding:
-            const EdgeInsets
-                .symmetric(
-          horizontal: 14,
-          vertical: 6,
+      // Preserve the existing developer-only gesture without making it
+      // interfere with the ordinary mode selector.
+      onLongPress: _appearanceViewModel.handleSecretPatternClick,
+      child: PopupMenuButton<AiRuntimeMode>(
+        key: const Key('chat-runtime-mode-selector'),
+        tooltip: 'Modalità IA: ${current.name.toUpperCase()}',
+        color: surfaceColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
         ),
-        decoration:
-            BoxDecoration(
-          color:
-              surfaceColor,
-          borderRadius:
-              BorderRadius.circular(
-            20,
+        onSelected: (mode) => unawaited(_switchRuntimeMode(mode)),
+        itemBuilder: (context) => AiRuntimeMode.values
+            .map((mode) => PopupMenuItem<AiRuntimeMode>(
+                  value: mode,
+                  child: Row(children: [
+                    SizedBox(
+                      width: 24,
+                      child: current == mode
+                          ? const Icon(Icons.check, size: 18,
+                              color: Color(0xFF4ADE80))
+                          : null,
+                    ),
+                    Text(mode.name.toUpperCase()),
+                  ]),
+                ))
+            .toList(growable: false),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: surfaceColor,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white12),
           ),
-          border:
-              Border.all(
-            color:
-                Colors.white12,
-          ),
-        ),
-        child: Row(
-          mainAxisSize:
-              MainAxisSize.min,
-          children: [
-            Text(
-              widget
-                  .runtimeModeName
-                  .toUpperCase(),
-              style:
-                  const TextStyle(
-                color:
-                    Colors.white70,
-                fontSize: 13,
-                fontWeight:
-                    FontWeight.w600,
-              ),
-            ),
-            const SizedBox(
-              width: 4,
-            ),
-            const Icon(
-              Icons
-                  .arrow_drop_down,
-              color:
-                  Colors.white38,
-              size: 16,
-            ),
-          ],
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(current.name.toUpperCase(),
+                style: const TextStyle(color: Colors.white70,
+                    fontSize: 13, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down,
+                color: Colors.white38, size: 16),
+          ]),
         ),
       ),
     );
