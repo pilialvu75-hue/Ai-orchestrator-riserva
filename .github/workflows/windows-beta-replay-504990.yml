@@ -1,0 +1,40 @@
+name: One-time authorized Windows beta replay 504990
+on:
+  push:
+    branches:
+      - release-request/windows-beta-504990
+    paths:
+      - .github/workflows/windows-beta-replay-504990.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-existing-windows-publisher:
+    if: github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' && github.ref == 'refs/heads/release-request/windows-beta-504990'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate exact authorized Android release and start existing Windows publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          run_id="45010050111"
+          source_sha="7c891a9973373f94d72992161112011839e9e537"
+          tag="v1.0.16-beta+504990"
+
+          test "$(gh api "repos/$repo/actions/runs/$run_id" --jq '.name')" = 'Build & Release APK'
+          test "$(gh api "repos/$repo/actions/runs/$run_id" --jq '.event')" = 'workflow_dispatch'
+          test "$(gh api "repos/$repo/actions/runs/$run_id" --jq '.conclusion')" = 'success'
+          test "$(gh api "repos/$repo/actions/runs/$run_id" --jq '.head_sha')" = "$source_sha"
+          test "$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')" = "$source_sha"
+          gh release view "$tag" --repo "$repo" --json isDraft,assets \
+            --jq 'if (.isDraft == false and ([.assets[].name] | index("app-release.apk")) != null) then "release_valid" else error("Android release is not published with APK") end' \
+            | grep -Fxq release_valid
+
+          gh workflow run windows-release-publish.yml \
+            --repo "$repo" --ref main -f android_run_id="$run_id"
+          echo "Windows publication requested using the repository's existing secure publisher."
