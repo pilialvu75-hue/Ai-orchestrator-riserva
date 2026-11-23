@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:ai_orchestrator/presentation/chat/controllers/runtime_notice_presenter.dart';
+import 'package:ai_orchestrator/features/chat/presentation/widgets/android_keyboard_aware_composer.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -2578,6 +2579,8 @@ class _ChatBodyState
         return Scaffold(
           backgroundColor:
               backgroundColor,
+          // Android chat manages IME displacement in its composer, not the body.
+          resizeToAvoidBottomInset: !Platform.isAndroid,
 
           appBar: AppBar(
             backgroundColor:
@@ -2932,7 +2935,9 @@ class _ChatBodyState
 
           // Reserve the composer as actual Scaffold bottom chrome so floating
           // snackbars remain above it on Windows, desktop and mobile.
-          bottomNavigationBar: Column(
+          bottomNavigationBar: AndroidKeyboardAwareComposer(
+            enabled: Platform.isAndroid,
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
             if (_audioPlayback.isOpen)
@@ -2976,6 +2981,7 @@ class _ChatBodyState
                   _cancelEditingUserMessage,
             ),
             ],
+            ),
           ),
           body:
               chatMainContent,
