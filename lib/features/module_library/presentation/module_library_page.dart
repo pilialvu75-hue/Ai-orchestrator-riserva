@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:ai_orchestrator/app_factory/workshop/workshop_library_github_auth.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_curator_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_github_config.dart';
+import 'package:ai_orchestrator/features/module_library/data/module_library_development_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_intake_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_lab_github_actions_source.dart';
 import 'package:ai_orchestrator/features/module_library/data/module_library_status_repository.dart';
@@ -15,6 +16,7 @@ import 'package:ai_orchestrator/features/module_library/presentation/module_lab_
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:ai_orchestrator/features/module_library/presentation/development_module_detail_page.dart';
 
 typedef ModuleCuratorRunner = Future<ModuleCuratorResult> Function({
   required ModuleCuratorTask task,
@@ -61,6 +63,8 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
   String? _labError;
   List<ModuleCapabilityStatus> _items = const <ModuleCapabilityStatus>[];
   List<ModuleLibraryIntakeEntry> _intake = const <ModuleLibraryIntakeEntry>[];
+  List<ModuleDevelopmentEntry> _development = const <ModuleDevelopmentEntry>[];
+  String? _developmentError;
   String? _intakeError;
   DateTime? _lastUpdatedAt;
 
@@ -158,6 +162,24 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
         _connected = true;
         _loading = false;
       });
+      try {
+        final development = await _repository.loadDevelopment();
+        if (mounted) {
+          setState(() {
+            _development = development;
+            _developmentError = null;
+          });
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            _development = const <ModuleDevelopmentEntry>[];
+            _developmentError = error.toString();
+          });
+        }
+      }
+      // Prefer the small source-bound development index over an expensive
+      // sequential GitHub tree+manifest walk for every historical intake item.
       try {
         final intake = await _repository.loadIntake();
         if (mounted) setState(() { _intake = intake; _intakeError = null; });
@@ -469,6 +491,8 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
       _items = const <ModuleCapabilityStatus>[];
       _intake = const <ModuleLibraryIntakeEntry>[];
       _intakeError = null;
+      _development = const <ModuleDevelopmentEntry>[];
+      _developmentError = null;
       _lastUpdatedAt = null;
       _curatorLoading.clear();
       _healthLoading = false;
@@ -575,6 +599,18 @@ class _ModuleLibraryPageState extends State<ModuleLibraryPage> {
                       items: _items,
                       intake: _intake,
                       intakeError: _intakeError,
+                      development: _development,
+                      developmentError: _developmentError,
+                      onOpenDevelopment: (entry) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => DevelopmentModuleDetailPage(
+                              repository: _repository,
+                              entry: entry,
+                            ),
+                          ),
+                        );
+                      },
                       updatedAt: _lastUpdatedAt,
                       onRefresh: _refresh,
                       curatorLoading: _curatorLoading,
@@ -596,6 +632,9 @@ class _ModuleIndexView extends StatelessWidget {
     required this.items,
     required this.intake,
     required this.intakeError,
+    required this.development,
+    required this.developmentError,
+    required this.onOpenDevelopment,
     required this.updatedAt,
     required this.onRefresh,
     required this.curatorLoading,
@@ -610,6 +649,9 @@ class _ModuleIndexView extends StatelessWidget {
   final List<ModuleCapabilityStatus> items;
   final List<ModuleLibraryIntakeEntry> intake;
   final String? intakeError;
+  final List<ModuleDevelopmentEntry> development;
+  final String? developmentError;
+  final void Function(ModuleDevelopmentEntry) onOpenDevelopment;
   final DateTime? updatedAt;
   final Future<void> Function() onRefresh;
   final Set<String> curatorLoading;
@@ -649,6 +691,38 @@ class _ModuleIndexView extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
           for (final status in available) capabilityTile(status),
+          Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Moduli disponibili per prove nel Cantiere: ${development.length}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Sviluppo interno: codice Dart verificato da consumer indipendente. '
+                  'Non installato sul telefono; finora testato su Linux, '
+                  'non certificato per Android o produzione.',
+                ),
+                if (developmentError != null)
+                  Text('Sincronizzazione sviluppo: $developmentError'),
+                if (developmentError == null && development.isEmpty)
+                  const Text('Nessun modulo di sviluppo disponibile nella Libreria.'),
+                for (final entry in development)
+                  ListTile(
+                    key: ValueKey<String>('dev-module-${entry.pin}'),
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.science_outlined),
+                    title: Text(entry.shortName.replaceAll('_', ' ')),
+                    subtitle: Text(
+                      'QUALIFICATO SVILUPPO · ${entry.targets.join(', ')} · '
+                      'run ${entry.consumerRunId}',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => onOpenDevelopment(entry),
+                  ),
+              ],
+            ),
           for (final entry in candidates) ListTile(
             leading: const _AvailabilityDot(available: false),
             title: Text(_intakeName(entry)),
@@ -1051,7 +1125,7 @@ class _ModuleLabCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final current = run;
     final running = current?.running ?? false;
-    final state = current == null ? 'Nessun run disponibile' : running ? 'Researcher in esecuzione' : 'Ultimo run: ${current!.conclusion ?? current.status}';
+    final state = current == null ? 'Nessun run disponibile' : running ? 'Researcher in esecuzione' : 'Ultimo run: ${current.conclusion ?? current.status}';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
