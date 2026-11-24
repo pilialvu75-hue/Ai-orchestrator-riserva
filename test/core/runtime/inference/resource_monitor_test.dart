@@ -3,8 +3,47 @@ import 'dart:async';
 import 'package:ai_orchestrator/core/runtime/inference/android/native_generation_budget.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('system CPU accepts measured zero and rejects unavailable or invalid data', () {
+    for (final value in [0, 37.5, 100]) {
+      expect(ResourceSample({'systemCpuPercent': value}).systemCpuPercent,
+          value.toDouble());
+    }
+    for (final value in [null, -1, 101, double.nan, double.infinity, '25']) {
+      expect(ResourceSample({'systemCpuPercent': value}).systemCpuPercent,
+          isNull);
+    }
+    expect(ResourceSample({}).systemCpuPercent, isNull);
+    expect(ResourceSample({'rssBytes': 123456}).rssBytes, 123456);
+  });
+
+  test('Windows resource channel returns real RAM fields without inventing Android data',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    const channel = MethodChannel('com.aiorchestrator/resources');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final monitor = ResourceMonitor(logger: (_) {});
+    addTearDown(() {
+      monitor.dispose();
+      messenger.setMockMethodCallHandler(channel, null);
+      debugDefaultTargetPlatformOverride = null;
+    });
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'sample');
+      return {'availableBytes': 4 << 30, 'totalBytes': 16 << 30};
+    });
+    final sample = await monitor.sample();
+    expect(sample?.availableBytes, 4 << 30);
+    expect(sample?.totalBytes, 16 << 30);
+    expect(sample?.thresholdBytes, isNull);
+    expect(sample?.pressure, 'unknown');
+    expect(sample?.critical, isFalse);
+  });
   test('Phi remembers pressure after unloading and uses a smaller next session',
       () async {
     var data = <Object?, Object?>{
