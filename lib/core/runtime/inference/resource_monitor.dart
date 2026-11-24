@@ -15,6 +15,7 @@ class ResourceSample {
         totalBytes = _number(data['totalBytes']),
         thresholdBytes = _number(data['thresholdBytes']),
         rssBytes = _number(data['rssBytes']),
+        systemCpuPercent = _percent(data['systemCpuPercent']),
         nativeHeapBytes = _number(data['nativeHeapBytes']),
         batteryTemperatureDeciC = _number(data['batteryTempDeciC']),
         deviceManufacturer = _text(data['deviceManufacturer']),
@@ -26,6 +27,7 @@ class ResourceSample {
         trimLevel = _number(data['trimLevel']) ?? 0;
 
   final DateTime timestamp;
+  final double? systemCpuPercent;
   final int? availableBytes,
       totalBytes,
       thresholdBytes,
@@ -45,6 +47,11 @@ class ResourceSample {
       : batteryTemperatureDeciC! / 10.0;
   static int? _number(Object? value) =>
       value is num && value.isFinite && value >= 0 ? value.toInt() : null;
+
+  static double? _percent(Object? value) =>
+      value is num && value.isFinite && value >= 0 && value <= 100
+          ? value.toDouble()
+          : null;
 
   static String? _text(Object? value) {
     final text = value is String ? value.trim() : '';
