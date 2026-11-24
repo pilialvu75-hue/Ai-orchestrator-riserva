@@ -178,7 +178,11 @@ class ResourceMonitor extends ChangeNotifier {
       _criticalListeners.remove(listener);
 
   static Future<Map<Object?, Object?>?> _platformSample() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.windows)) {
+      return null;
+    }
     return _channel.invokeMapMethod<Object?, Object?>('sample');
   }
 
