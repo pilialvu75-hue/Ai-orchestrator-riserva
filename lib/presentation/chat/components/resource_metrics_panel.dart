@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 
 class ResourceMetricsPanel extends StatefulWidget {
@@ -54,6 +55,8 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
                 'RAM libera: ${mib(ram?.availableBytes)} / ${mib(ram?.totalBytes)}',
               ),
               Text('Soglia RAM Android: ${mib(ram?.thresholdBytes)}'),
+              if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+                Text('CPU sistema: ${ram?.systemCpuPercent?.toStringAsFixed(1) ?? 'n/d'}${ram?.systemCpuPercent == null ? '' : '%'}'),
               Text('App RSS: ${mib(ram?.rssBytes)}'),
               Text('Heap nativo: ${mib(ram?.nativeHeapBytes)}'),
               Text(
