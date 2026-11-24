@@ -1,6 +1,8 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "startup_trace.h"
@@ -41,6 +43,32 @@ bool FlutterWindow::OnCreate() {
     startup_trace::Mark("27 before RegisterPlugins");
     RegisterPlugins(flutter_controller_->engine());
     startup_trace::Mark("28 after RegisterPlugins");
+
+    // Read-only native RAM sampling; available on Windows 7 and newer.
+    // The engine messenger owns the registered handler.
+    flutter::MethodChannel<flutter::EncodableValue> resources(
+        flutter_controller_->engine()->messenger(),
+        "com.aiorchestrator/resources",
+        &flutter::StandardMethodCodec::GetInstance());
+    resources.SetMethodCallHandler(
+        [](const auto& call, auto result) {
+          if (call.method_name() != "sample") {
+            result->NotImplemented();
+            return;
+          }
+          MEMORYSTATUSEX memory{};
+          memory.dwLength = sizeof(memory);
+          if (!GlobalMemoryStatusEx(&memory)) {
+            result->Error("memory_unavailable", "GlobalMemoryStatusEx failed");
+            return;
+          }
+          flutter::EncodableMap sample;
+          sample[flutter::EncodableValue("availableBytes")] =
+              flutter::EncodableValue(static_cast<int64_t>(memory.ullAvailPhys));
+          sample[flutter::EncodableValue("totalBytes")] =
+              flutter::EncodableValue(static_cast<int64_t>(memory.ullTotalPhys));
+          result->Success(flutter::EncodableValue(sample));
+        });
   }
 
   startup_trace::Mark("29 before SetChildContent");
