@@ -9,6 +9,19 @@ import 'package:flutter/services.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('system CPU accepts measured zero and rejects unavailable or invalid data', () {
+    for (final value in [0, 37.5, 100]) {
+      expect(ResourceSample({'systemCpuPercent': value}).systemCpuPercent,
+          value.toDouble());
+    }
+    for (final value in [null, -1, 101, double.nan, double.infinity, '25']) {
+      expect(ResourceSample({'systemCpuPercent': value}).systemCpuPercent,
+          isNull);
+    }
+    expect(ResourceSample({}).systemCpuPercent, isNull);
+    expect(ResourceSample({'rssBytes': 123456}).rssBytes, 123456);
+  });
+
   test('Windows resource channel returns real RAM fields without inventing Android data',
       () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
