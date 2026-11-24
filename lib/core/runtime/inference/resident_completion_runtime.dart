@@ -100,11 +100,12 @@ class ResidentCompletionRuntime {
     bool rejectTokenLimit = false,
   }) async* {
     if (_busy) throw ResidentRuntimeBusy();
+    // A rejected concurrent call must not clear the active request's data.
+    _lastGenerationMetrics = null;
     if (cancellation.isCancelled) throw StateError('Inference cancelled.');
     _busy = true;
     _idle?.cancel();
     _activeCancellation = cancellation;
-    _lastGenerationMetrics = null;
     cancellation.onCancel(() {
       if (identical(_activeCancellation, cancellation)) unawaited(close());
     });
