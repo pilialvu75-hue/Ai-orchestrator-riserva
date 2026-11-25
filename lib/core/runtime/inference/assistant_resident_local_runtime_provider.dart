@@ -384,6 +384,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
             _gpuUnavailable = true;
           }
           RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] backend=${gpuBackend ?? 'unknown'} status=unavailable action=resident_fallback');
+          if (metricId != null) metrics?.finish(metricId, success: false);
           yield* streamInference(request: request, cancellationToken: cancellationToken);
           return;
         }
