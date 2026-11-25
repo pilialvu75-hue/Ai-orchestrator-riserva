@@ -24,6 +24,92 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  // P0-A: run the same behavioral assertions on the original and fixed
+  // wrapper. Function.apply allows the baseline to compile before the two
+  // optional named callbacks exist; only that missing constructor contract
+  // selects the legacy invocation.
+  for (final directive in [
+    InferenceRouteDirective.runtimeDefault,
+    InferenceRouteDirective.localOnly,
+  ]) {
+    for (final withConsentGate in [false, true]) {
+      test('P0-A LOCAL AUTO restores selection callbacks: '
+          '${directive.name}, consent gate=$withConsentGate', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        const model = AiModel(
+          id: 'gemma_2b',
+          displayName: 'Gemma 2B',
+          fileName: 'gemma.gguf',
+          downloadUrl: 'https://example.com/model.gguf',
+          version: '1.0.0',
+          sizeBytes: 123,
+          description: 'Test model',
+          isDownloaded: true,
+          localPath: '/tmp/gemma.gguf',
+          validationStatus: ModelValidationStatus.validatedOk,
+        );
+        var selectionReads = 0;
+        var catalogueReads = 0;
+        var localCalls = 0;
+        var cloudCalls = 0;
+        final local = _CountingLocalRuntimeProvider(
+          onStream: () => localCalls++,
+        );
+        final cloud = CloudRuntimeProvider(
+          sendQuery: (_, __) async {
+            cloudCalls++;
+            throw StateError('LOCAL must not call Cloud');
+          },
+          supportedProviders: () => const <String>['openAi'],
+          isProviderAvailable: (_) => true,
+          providerDisplayName: ([name]) => name ?? 'OpenAI',
+          automaticUseAllowed: (_) => true,
+        );
+        final arguments = <Symbol, dynamic>{
+          #loadSelectedModel: () async => model,
+          #loadRuntimeMode: () async => AiRuntimeMode.local,
+          #runtimeProvider: local,
+          #cloudRuntimeProvider: cloud,
+          #sessionManager: RuntimeSessionManager(),
+          if (withConsentGate) #hybridConsentCloudRuntimeProvider: cloud,
+        };
+        final automaticArguments = <Symbol, dynamic>{
+          ...arguments,
+          #loadLocalModelSelectionMode: () async {
+            selectionReads++;
+            return LocalModelSelectionMode.automatic;
+          },
+          #loadAvailableLocalModels: () async {
+            catalogueReads++;
+            return <AiModel>[model];
+          },
+        };
+        DirectiveAwareInferenceService service;
+        try {
+          service = Function.apply(
+            DirectiveAwareInferenceService.new, const [], automaticArguments,
+          ) as DirectiveAwareInferenceService;
+        } on NoSuchMethodError {
+          // Pre-fix constructor has no callback parameters.
+          service = Function.apply(
+            DirectiveAwareInferenceService.new, const [], arguments,
+          ) as DirectiveAwareInferenceService;
+        }
+        final chunks = await service.stream(InferenceRequest(
+          sessionId: 'p0-a-${directive.name}-$withConsentGate',
+          prompt: 'Hello',
+          routeDirective: directive,
+        )).toList();
+        expect(selectionReads, 1, reason: 'LOCAL AUTO setting must reach the active delegate');
+        expect(catalogueReads, 1, reason: 'LOCAL AUTO catalogue must reach the active delegate');
+        expect(localCalls, 1);
+        expect(cloudCalls, 0);
+        expect(chunks.last.isError, isFalse);
+      });
+    }
+  }
+
   test('cloudOnly never falls back to the selected local model', () async {
     var selectedModelLoads = 0;
     var cloudCalls = 0;
