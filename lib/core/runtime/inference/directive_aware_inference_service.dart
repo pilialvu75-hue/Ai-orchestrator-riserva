@@ -32,6 +32,8 @@ final class DirectiveAwareInferenceService extends InferenceService {
   DirectiveAwareInferenceService({
     required Future<AiModel?> Function() loadSelectedModel,
     required Future<AiRuntimeMode> Function() loadRuntimeMode,
+    Future<List<AiModel>> Function()? loadAvailableLocalModels,
+    Future<LocalModelSelectionMode> Function()? loadLocalModelSelectionMode,
     required LocalRuntimeProvider runtimeProvider,
     required CloudRuntimeProvider cloudRuntimeProvider,
     CloudRuntimeProvider? hybridConsentCloudRuntimeProvider,
@@ -47,6 +49,8 @@ final class DirectiveAwareInferenceService extends InferenceService {
             : InferenceService(
                 loadSelectedModel: loadSelectedModel,
                 loadRuntimeMode: loadRuntimeMode,
+                loadAvailableLocalModels: loadAvailableLocalModels,
+                loadLocalModelSelectionMode: loadLocalModelSelectionMode,
                 runtimeProvider: runtimeProvider,
                 cloudRuntimeProvider: cloudRuntimeProvider,
                 sessionManager: sessionManager,
@@ -70,6 +74,8 @@ final class DirectiveAwareInferenceService extends InferenceService {
         _localOnlyService = InferenceService(
           loadSelectedModel: loadSelectedModel,
           loadRuntimeMode: () async => AiRuntimeMode.local,
+          loadAvailableLocalModels: loadAvailableLocalModels,
+          loadLocalModelSelectionMode: loadLocalModelSelectionMode,
           runtimeProvider: runtimeProvider,
           cloudRuntimeProvider: cloudRuntimeProvider,
           sessionManager: sessionManager,
@@ -90,6 +96,8 @@ final class DirectiveAwareInferenceService extends InferenceService {
         super(
           loadSelectedModel: loadSelectedModel,
           loadRuntimeMode: loadRuntimeMode,
+          loadAvailableLocalModels: loadAvailableLocalModels,
+          loadLocalModelSelectionMode: loadLocalModelSelectionMode,
           runtimeProvider: runtimeProvider,
           // HYBRID default inference must fail closed; explicit CLOUD is
           // restored through _ordinaryDefaultService when it is selected.
