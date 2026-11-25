@@ -13,7 +13,9 @@ class WindowsGenerationMetrics extends ChangeNotifier {
   ResidentGenerationMetrics? terminal;
   int? get elapsedMs => _clock?.elapsedMilliseconds;
 
-  int begin() {
+  /// A competing request cannot replace a generation already being observed.
+  int? begin() {
+    if (phase == 'preparing' || phase == 'streaming') return null;
     _sequence++;
     _clock = Stopwatch()..start();
     route = null;
