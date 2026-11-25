@@ -19,6 +19,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resident_completion_runtime.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_generation_metrics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -208,10 +209,16 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   @override
   TokenStream streamInference({required InferenceRequest request,
       required CancellationToken cancellationToken}) async* {
+    // Scope presentation telemetry to this attempt. A recursive fallback
+    // obtains a newer id, so the outer finally cannot overwrite it.
+    final metrics = Platform.isWindows ? WindowsGenerationMetrics.instance : null;
+    final metricId = metrics?.begin();
+    try {
     // Use the ordinary resident CUDA/Vulkan/CPU route also for Qwen 2.5 3B.
     // Existing guarded CLI recovery remains available on actual failures.
     final executable = _unavailable ? null : _executable();
     if (executable == null) {
+      if (metricId != null) metrics?.selectRoute(metricId, 'process_cli');
       RuntimeEventLog.instance.emit(
         '[ASSISTANT_LOCAL_ROUTE] backend=process_cli reason=resident_server_missing_or_unavailable',
       );
@@ -306,6 +313,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         'engine=${p.basename(p.dirname(gpuExecutable ?? executable))} '
         'device=${gpuDevice ?? 'none'}',
       );
+      if (metricId != null) metrics?.selectRoute(metricId, gpuBackend ?? 'resident_cpu');
       final output = _runtime.generate(executable: gpuExecutable ?? executable, modelPath: model,
         sessionId: request.sessionId, prompt: metadata.stripFrom(prompt),
         maxTokens: request.maxTokens, temperature: metadata.temperature ?? request.temperature,
@@ -332,6 +340,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           : output;
       await for (final chunk in CompletionOutput.visible(answer)) {
         if (chunk.isEmpty) continue;
+        if (chunks == 0 && metricId != null) metrics?.firstText(metricId);
         text.write(chunk);
         chunks++;
         yield InferenceResponse.token(text: chunk, model: request.modelId);
@@ -339,6 +348,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       if (cancellationToken.isCancelled) throw StateError('Inference cancelled.');
       if (text.toString().trim().isEmpty) throw StateError('No generated text.');
       markRuntimeVerified(model);
+      if (metricId != null) metrics?.finish(metricId, success: true, stats: _runtime.lastGenerationMetrics);
       yield InferenceResponse.finalChunk(text: text.toString(),
           tokensGenerated: (text.length / 4).ceil(), model: request.modelId);
     } catch (error) {
@@ -366,11 +376,15 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           return;
         }
         _unavailable = true;
+        if (metricId != null) metrics?.selectRoute(metricId, 'process_cli');
         RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_CACHE] status=unavailable action=cli_fallback');
         yield* _delegate.streamInference(request: request, cancellationToken: cancellationToken);
       } else {
         yield InferenceResponse.error('Local inference interrupted before completion.');
       }
+    }
+    } finally {
+      if (metricId != null) metrics?.finish(metricId, success: false);
     }
   }
 }
