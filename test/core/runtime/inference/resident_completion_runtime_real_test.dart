@@ -77,14 +77,39 @@ void main() {
       final first = await generate('one', 'Once upon a time');
       expect(runtime.processId, preparedProcess, reason: 'The first real request must reuse the prepared engine.');
       expect(first.trim(), isNotEmpty);
+      final firstMetrics = runtime.lastGenerationMetrics;
+      expect(firstMetrics, isNotNull);
+      expect(firstMetrics!.generatedTokens, greaterThan(0));
+      expect(firstMetrics.generatedTokens, lessThanOrEqualTo(8));
+      expect(firstMetrics.decodeMilliseconds, greaterThan(0));
+      expect(firstMetrics.tokensPerSecond, greaterThan(0));
       expect(cached.first, 0, reason: 'Preparation must not add synthetic conversation tokens.');
       print('Resident cache check: warm request');
       final second = await generate('one', 'Once upon a time$first');
       expect(second.trim(), isNotEmpty);
+      expect(runtime.lastGenerationMetrics, isNotNull);
+      expect(identical(runtime.lastGenerationMetrics, firstMetrics), isFalse);
       expect(cached[1], greaterThan(0));
       print('Resident cache check: new conversation');
       await generate('two', 'Once upon a time');
       expect(cached[2], 0, reason: 'A different conversation must not inherit KV state.');
+      final cancelled = CancellationToken()..cancel();
+      await expectLater(runtime.generate(
+        executable: server!, modelPath: model!, sessionId: 'two',
+        prompt: 'Once upon a time', maxTokens: 8, temperature: 0,
+        topP: 0.9, repeatPenalty: 1.1, threads: 2,
+        cancellation: cancelled,
+      ).join(), throwsStateError);
+      expect(runtime.lastGenerationMetrics, isNull);
+      await generate('two', 'Once upon a time');
+      expect(runtime.lastGenerationMetrics, isNotNull);
+      await expectLater(runtime.generate(
+        executable: server!, modelPath: model!, sessionId: 'two',
+        prompt: 'Once upon a time', maxTokens: 8, temperature: 0,
+        topP: 0.9, repeatPenalty: 1.1, threads: 2, batchSize: 0,
+        cancellation: CancellationToken(),
+      ).join(), throwsArgumentError);
+      expect(runtime.lastGenerationMetrics, isNull);
     } finally { await runtime.close(); }
   }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
 
@@ -134,6 +159,7 @@ void main() {
         rejectTokenLimit: true, cancellation: CancellationToken(),
       ).join(), throwsA(isA<ResidentGenerationLimitReached>()));
       expect(runtime.processId, process);
+      expect(runtime.lastGenerationMetrics, isNull);
       final following = await runtime.generate(
         executable: server!, modelPath: model!, sessionId: 'limit',
         prompt: 'Once upon a time', maxTokens: 8, temperature: 0,
@@ -154,6 +180,7 @@ void main() {
         topP: 0.9, repeatPenalty: 1.1, threads: 2, cancellation: token);
       await expectLater(stream.map((value) { token.cancel(); return value; }).toList(), throwsA(anything));
       expect(token.isCancelled, isTrue);
+      expect(runtime.lastGenerationMetrics, isNull);
     } finally { await runtime.close(); }
   }, skip: skip, timeout: const Timeout(Duration(minutes: 3)));
 }

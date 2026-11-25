@@ -7,6 +7,33 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resident_process_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
+/// Native terminal statistics. Missing or malformed fields remain unknown.
+class ResidentGenerationMetrics {
+  const ResidentGenerationMetrics({
+    this.generatedTokens,
+    this.decodeMilliseconds,
+    this.tokensPerSecond,
+  });
+
+  factory ResidentGenerationMetrics.fromTimings(Object? timings) {
+    final map = timings is Map ? timings : const {};
+    double? nonnegative(Object? value) =>
+        value is num && value.isFinite && value >= 0
+            ? value.toDouble()
+            : null;
+    final count = map['predicted_n'];
+    return ResidentGenerationMetrics(
+      generatedTokens: count is int && count >= 0 ? count : null,
+      decodeMilliseconds: nonnegative(map['predicted_ms']),
+      tokensPerSecond: nonnegative(map['predicted_per_second']),
+    );
+  }
+
+  final int? generatedTokens;
+  final double? decodeMilliseconds;
+  final double? tokensPerSecond;
+}
+
 class ResidentRuntimeBusy implements Exception {}
 
 /// The engine completed transport but exhausted the requested output budget.
@@ -32,6 +59,8 @@ class ResidentCompletionRuntime {
   bool _busy = false;
   CancellationToken? _activeCancellation;
   int? get processId => _process?.pid;
+  ResidentGenerationMetrics? _lastGenerationMetrics;
+  ResidentGenerationMetrics? get lastGenerationMetrics => _lastGenerationMetrics;
 
   /// Load the engine without generating or adding any conversation tokens.
   Future<void> prepare({required String executable, required String modelPath,
@@ -71,6 +100,8 @@ class ResidentCompletionRuntime {
     bool rejectTokenLimit = false,
   }) async* {
     if (_busy) throw ResidentRuntimeBusy();
+    // A rejected concurrent call must not clear the active request's data.
+    _lastGenerationMetrics = null;
     if (cancellation.isCancelled) throw StateError('Inference cancelled.');
     _busy = true;
     _idle?.cancel();
@@ -108,6 +139,7 @@ class ResidentCompletionRuntime {
       }
       var stopped = false;
       var tokenLimitReached = false;
+      ResidentGenerationMetrics? terminalMetrics;
       await for (final line in response.transform(utf8.decoder)
           .transform(const LineSplitter()).timeout(const Duration(minutes: 4))) {
         if (cancellation.isCancelled) throw StateError('Inference cancelled.');
@@ -128,6 +160,7 @@ class ResidentCompletionRuntime {
           stopped = true;
           tokenLimitReached = value['stop_type'] == 'limit';
           final timings = value['timings'];
+          terminalMetrics = ResidentGenerationMetrics.fromTimings(timings);
           if (timings is Map) {
             onPromptUsage?.call((timings['cache_n'] as num?)?.toInt() ?? 0,
                 (timings['prompt_n'] as num?)?.toInt() ?? 0);
@@ -137,6 +170,7 @@ class ResidentCompletionRuntime {
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       if (!stopped) throw StateError('Local inference ended without completion.');
       if (rejectTokenLimit && tokenLimitReached) throw ResidentGenerationLimitReached();
+      _lastGenerationMetrics = terminalMetrics;
     } catch (error) {
       if (error is! ResidentGenerationLimitReached) await close();
       rethrow;
