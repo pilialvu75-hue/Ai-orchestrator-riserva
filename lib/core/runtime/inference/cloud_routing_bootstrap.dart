@@ -189,6 +189,17 @@ abstract final class CloudRoutingBootstrap {
         },
         loadRuntimeMode: () =>
             sl<AiRuntimeSettingsService>().loadRuntimeMode(),
+        loadLocalModelSelectionMode: () =>
+            sl<AiRuntimeSettingsService>().loadLocalModelSelectionMode(),
+        loadAvailableLocalModels: () async {
+          final result = await sl<LocalAiRepository>().getAvailableModels();
+          return result.fold(
+            (failure) => throw StateError(
+              'LOCAL model catalogue unavailable: ${failure.message}',
+            ),
+            (models) => models,
+          );
+        },
         runtimeProvider: assistantLocalRuntimeProvider,
         // Preserve ordinary CLOUD providers (NVIDIA, Mistral, custom, etc.)
         // while routing HYBRID through the exact approved OpenAI/Gemini gate.
