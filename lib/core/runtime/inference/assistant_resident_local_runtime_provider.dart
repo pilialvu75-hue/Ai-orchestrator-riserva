@@ -222,7 +222,19 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       RuntimeEventLog.instance.emit(
         '[ASSISTANT_LOCAL_ROUTE] backend=process_cli reason=resident_server_missing_or_unavailable',
       );
-      yield* _delegate.streamInference(request: request, cancellationToken: cancellationToken);
+      await for (final response in _delegate.streamInference(
+          request: request, cancellationToken: cancellationToken)) {
+        if (metricId != null) {
+          if (!response.isFinal && !response.isError && response.text.isNotEmpty) {
+            metrics?.firstText(metricId);
+          }
+          if (response.isFinal) {
+            metrics?.finish(metricId, success: !response.isError &&
+                response.terminalState == InferenceTerminalState.success);
+          }
+        }
+        yield response;
+      }
       return;
     }
     final preparing = _preparation;
@@ -378,7 +390,19 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         _unavailable = true;
         if (metricId != null) metrics?.selectRoute(metricId, 'process_cli');
         RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_CACHE] status=unavailable action=cli_fallback');
-        yield* _delegate.streamInference(request: request, cancellationToken: cancellationToken);
+        await for (final response in _delegate.streamInference(
+          request: request, cancellationToken: cancellationToken)) {
+        if (metricId != null) {
+          if (!response.isFinal && !response.isError && response.text.isNotEmpty) {
+            metrics?.firstText(metricId);
+          }
+          if (response.isFinal) {
+            metrics?.finish(metricId, success: !response.isError &&
+                response.terminalState == InferenceTerminalState.success);
+          }
+        }
+        yield response;
+      }
       } else {
         yield InferenceResponse.error('Local inference interrupted before completion.');
       }
