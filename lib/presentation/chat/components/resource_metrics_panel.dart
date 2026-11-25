@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_generation_metrics.dart';
 
 class ResourceMetricsPanel extends StatefulWidget {
   const ResourceMetricsPanel({super.key});
@@ -26,9 +27,10 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
       bytes == null ? 'n/d' : '${(bytes / 1048576).round()} MiB';
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: monitor,
+        listenable: Listenable.merge([monitor, WindowsGenerationMetrics.instance]),
         builder: (context, _) {
           final ram = monitor.latest;
+          final generation = WindowsGenerationMetrics.instance;
           final time = ram?.timestamp;
           final sampleTime = time == null
               ? 'n/d'
@@ -58,6 +60,15 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
               if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
                 Text('CPU sistema: ${ram?.systemCpuPercent?.toStringAsFixed(1) ?? 'n/d'}${ram?.systemCpuPercent == null ? '' : '%'}'),
               Text('App RSS: ${mib(ram?.rssBytes)}'),
+              if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) ...[
+                Text('Ultima inferenza LOCAL: ${generation.phase}'),
+                Text('Percorso selezionato: ${generation.route ?? 'n/d'}'),
+                Text('Durata: ${generation.elapsedMs ?? 'n/d'} ms'),
+                Text('Primo testo visibile: ${generation.firstTextMs ?? 'n/d'} ms'),
+                Text('Token nativi: ${generation.terminal?.generatedTokens ?? 'n/d'}'),
+                Text('Token/s nativi: ${generation.terminal?.tokensPerSecond?.toStringAsFixed(2) ?? 'n/d'}'),
+                Text('Decodifica: ${generation.terminal?.decodeMilliseconds?.toStringAsFixed(1) ?? 'n/d'} ms'),
+              ],
               Text('Heap nativo: ${mib(ram?.nativeHeapBytes)}'),
               Text(
                 'Pressione: $pressure',
