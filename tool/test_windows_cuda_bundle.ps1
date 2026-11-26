@@ -15,6 +15,9 @@ if (-not $dumpbin) { throw 'dumpbin is required for the CUDA import audit' }
 
 $pending = [System.Collections.Generic.Queue[System.IO.FileInfo]]::new()
 $pending.Enqueue((Get-Item -LiteralPath $server))
+# CUDA can be loaded dynamically by ggml; audit the backend even if the
+# server's static imports do not lead to it.
+$pending.Enqueue((Get-Item -LiteralPath (Join-Path $target 'ggml-cuda.dll')))
 $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 while ($pending.Count -gt 0) {
   $binary = $pending.Dequeue()

@@ -6,6 +6,8 @@ on:
       - '.github/workflows/windows-release-publish.yml'
       - '.github/workflows/windows-resident-bundle-qa.yml'
       - 'tool/bundle_windows_modern_runtime.ps1'
+      - 'tool/bundle_windows_cuda_runtime.ps1'
+      - 'tool/test_windows_cuda_bundle.ps1'
   workflow_dispatch:
 
 permissions:
@@ -14,12 +16,14 @@ permissions:
 jobs:
   verify-resident-bundle:
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - name: Verify pinned CPU and Vulkan payload and CPU server startup
+      - name: Verify pinned CUDA, Vulkan and CPU payload; CPU startup and CUDA import audit
         shell: pwsh
         run: |
           $releaseDir = Join-Path $env:RUNNER_TEMP 'resident-bundle-qa'
           New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
           & (Join-Path $PWD 'tool\bundle_windows_modern_runtime.ps1') -ReleaseDir $releaseDir
+          & (Join-Path $PWD 'tool\bundle_windows_cuda_runtime.ps1') -ReleaseDir $releaseDir
+          & (Join-Path $PWD 'tool\test_windows_cuda_bundle.ps1') -ReleaseDir $releaseDir
