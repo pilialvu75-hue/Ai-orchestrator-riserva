@@ -14,8 +14,11 @@ class WorkshopWebPreviewFrame extends StatelessWidget {
         tagName: 'iframe',
         onElementCreated: (element) {
           final frame = element as html.IFrameElement;
+          final trustedHost = uri.origin == Uri.base.origin &&
+              uri.path == '/api/cantiere/proposals/view';
           frame
-            ..setAttribute('sandbox', 'allow-scripts')
+            ..setAttribute('sandbox',
+                trustedHost ? 'allow-scripts allow-same-origin' : 'allow-scripts')
             ..setAttribute('referrerpolicy', 'no-referrer')
             ..setAttribute('title', 'Anteprima applicazione AIVEXUS')
             ..style.border = '0'

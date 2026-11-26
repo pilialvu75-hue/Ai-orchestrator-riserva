@@ -22,6 +22,10 @@ def package(data):
         if len(path) > 100 or not PATH.fullmatch(path) or path in entries:
             raise ValueError('Invalid source path')
         entries[path] = file['content'].encode('utf-8')
+    if 'runtime' in data:
+        if 'aivexus-runtime.json' in entries:
+            raise ValueError('Reserved runtime manifest path')
+        entries['aivexus-runtime.json'] = json.dumps(data['runtime'], ensure_ascii=False, separators=(',', ':')).encode('utf-8')
     if 'index.html' not in entries or sum(map(len, entries.values())) > MAX_SOURCE_BYTES:
         raise ValueError('Invalid application source')
 

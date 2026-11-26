@@ -19,6 +19,8 @@ import {
   advanceWebApplicationVerification, readWebApplicationVerification, readWebApplicationZip,
   readVerifiedWebApplicationSource,
 } from './d1_web_application_verification.mjs';
+import { renderWebApplicationPreviewHost } from './web_application_preview_bridge.mjs';
+import { operateWebApplicationRecords } from './d1_web_application_records.mjs';
 import {
   createWebApplicationRevision, readWebApplicationRevisions, selectWebApplicationRevision,
 } from './d1_web_application_revisions.mjs';
@@ -33,6 +35,7 @@ const OPERATIONS = new Set([
   'create_app_revision', 'app_revision_history', 'select_app_revision',
   'generate_app', 'generation_status', 'generation_quota', 'generation_reuse',
   'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
+  'app_records', 'app_preview_host',
 ]);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
@@ -126,6 +129,9 @@ function operationFailure(result) {
   if (reason === 'verification_checks_missing') return reject(409, 'verification_checks_missing');
   if (reason === 'verification_payload_too_large') return reject(413, 'verification_payload_too_large');
   if (reason === 'verification_unavailable') return reject(503, 'verification_unavailable');
+  if (reason === 'collection_not_found') return reject(404, reason);
+  if (reason === 'record_conflict') return reject(409, reason);
+  if (reason === 'invalid_record') return reject(400, reason);
   if (reason === 'storage_unavailable' ||
       reason === 'storage_inconsistent') return reject(503, 'storage_unavailable');
   if (reason === 'approval_required' ||
@@ -164,7 +170,8 @@ export function createAuthenticatedWebProjectOperation({
   const readsVerification = operation === 'verification_status';
   const downloadsApp = operation === 'download_app';
   const previewsApp = operation === 'preview_app';
-  const readsSource = operation === 'read_app_source' || previewsApp;
+  const readsHost = operation === 'app_preview_host';
+  const readsSource = operation === 'read_app_source' || previewsApp || readsHost;
   const readsHistory = operation === 'app_revision_history';
   const readOnly = readsHistory || readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
   const resolver = createCloudflareAccessPrincipalResolver({
@@ -312,6 +319,7 @@ export function createAuthenticatedWebProjectOperation({
         });
         if (!result.ok) return operationFailure(result);
         if (previewsApp) return previewWebApplication(result.source);
+        if (readsHost) return renderWebApplicationPreviewHost(result.generationId);
         return downloadsApp ? zipResponse(result.bytes, 'aivexus-application.zip') : respond(200, result);
       } catch (_) {
         return reject(503, 'storage_unavailable');
@@ -319,7 +327,8 @@ export function createAuthenticatedWebProjectOperation({
     }
 
     const modelInput = operation === 'generate_app' || operation === 'create_app_revision';
-    const parsed = await readJson(request, modelInput ? MAX_GENERATION_JSON_BYTES : MAX_JSON_BYTES);
+    const maxBytes = operation === 'app_records' ? 24576 : modelInput ? MAX_GENERATION_JSON_BYTES : MAX_JSON_BYTES;
+    const parsed = await readJson(request, maxBytes);
     if (!parsed.ok) return reject(parsed.status, parsed.reason);
 
     let result;
@@ -333,6 +342,8 @@ export function createAuthenticatedWebProjectOperation({
         });
       } else if (operation === 'select_app_revision') {
         result = await selectWebApplicationRevision({ request: parsed.value, ownerSubject: principal.subject, db });
+      } else if (operation === 'app_records') {
+        result = await operateWebApplicationRecords({ request: parsed.value, ownerSubject: principal.subject, db });
       } else if (operation === 'verify_app') {
         result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'advance') {

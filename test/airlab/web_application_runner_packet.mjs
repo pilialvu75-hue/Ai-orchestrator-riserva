@@ -11,6 +11,8 @@ import { onRequest as readSource } from '../../functions/api/cantiere/proposals/
 import { onRequest as preview } from '../../functions/api/cantiere/proposals/preview.js';
 import { onRequest as revisions } from '../../functions/api/cantiere/proposals/revisions.js';
 import { onRequest as selectRevision } from '../../functions/api/cantiere/proposals/select-revision.js';
+import { onRequest as records } from '../../functions/api/cantiere/proposals/records.js';
+import { onRequest as view } from '../../functions/api/cantiere/proposals/view.js';
 import { runEncryptedWebApplicationJob } from '../../scripts/web/run_encrypted_web_application_job.mjs';
 import {
   decodeRunnerBase64, decodeWebAppJob, decodeWebAppResult, encodeRunnerBase64,
@@ -28,11 +30,14 @@ async function fixture({ now } = {}) {
   const [runner, pages, authorizationKey] = await Promise.all([
     generateRsa(), generateRsa(), importWebAppAuthorizationKey(authorizationSecret),
   ]);
-  const source = { title: 'Fixture privata', requirements: ['Attiva il promemoria'], files: [
+  const source = { title: 'Spese private', requirements: ['Registra una spesa'], files: [
     { path: 'index.html', content: '<!doctype html><link rel="stylesheet" href="theme.css"><button id="toggle">Attiva</button><output id="state">Spento</output><script src="app.js"></script>' },
-    { path: 'app.js', content: 'document.querySelector("#toggle").onclick = () => { document.querySelector("#state").textContent = "Attivo"; };' },
+    { path: 'app.js', content: `document.querySelector("#toggle").onclick = async () => {
+      await window.aivexusData.request({ action: 'create', collection: 'expenses', recordId: window.aivexusData.newRecordId(), data: { label: 'Treno', cents: 420 } });
+      document.querySelector("#state").textContent = "Attivo";
+    };` },
     { path: 'theme.css', content: 'output { color: rgb(0, 20, 30); }' },
-  ] };
+  ], runtime: { kind: 'records', collections: [{ name: 'expenses', fields: { label: 'text', cents: 'integer' } }] } };
   const checks = [{ action: 'click', selector: '#toggle' }, { action: 'text', selector: '#state', value: 'Attivo' }];
   const resultPublicKeySpki = encodeRunnerBase64(new Uint8Array(await crypto.subtle.exportKey('spki', pages.publicKey)));
   const ticket = crypto.randomUUID();
@@ -51,7 +56,7 @@ test('job recipient and result bytes are bound to an authorized request', async 
   assert.deepEqual(job.source, f.source);
   assert.deepEqual(job.checks, f.checks);
   assert.equal(job.jobSha256, f.jobSha256);
-  assert.doesNotMatch(f.input, /Fixture privata|document/);
+  assert.doesNotMatch(f.input, /Spese private|document/);
   await assert.rejects(decodeWebAppJob({ ...f.job, now: 1901 }), /expired/);
   await assert.rejects(decodeWebAppJob({ ...f.job, now: 970 - 1 }), /expired/);
   await assert.rejects(decodeWebAppJob({ ...f.job, now: 1001, ticket: crypto.randomUUID() }), /authorization/);
@@ -110,7 +115,7 @@ async function temporaryD1(t) {
   }
   const sqlite = new DatabaseSync(':memory:');
   t.after(() => sqlite.close());
-  for (const migration of ['006_web_app_generations.sql', '007_web_app_verifications.sql', '009_web_app_revision_history.sql']) {
+  for (const migration of ['006_web_app_generations.sql', '007_web_app_verifications.sql', '009_web_app_revision_history.sql', '010_web_app_records.sql']) {
     sqlite.exec(readFileSync(new URL('../../scripts/web/sql/' + migration, import.meta.url), 'utf8'));
   }
   return { db: { prepare(sql) {
@@ -259,6 +264,7 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   const zip = new Uint8Array(await artifact.arrayBuffer());
   assert.equal(await runnerPayloadSha256(zip), result.zipSha256);
   assert.ok(Buffer.from(zip).includes(Buffer.from(f.source.files[1].content)));
+  assert.ok(Buffer.from(zip).includes(Buffer.from('aivexus-runtime.json')));
   assert.equal((await call(readSource, 'source', stranger, null, query)).status, 403);
   assert.equal((await call(preview, 'preview', stranger, null, query)).status, 403);
   const sourceResponse = await call(readSource, 'source', owner, null, query);
@@ -267,6 +273,27 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   const source = await sourceResponse.json();
   assert.equal(source.sourceSha256, generated.sourceSha256);
   assert.equal(source.source.files[0].content, f.source.files[1].content);
+  const viewResponse = await call(view, 'view', owner, null, query);
+  assert.equal(viewResponse.status, 200);
+  assert.match(viewResponse.headers.get('content-security-policy'), /frame-src 'self'/);
+  assert.equal((await call(view, 'view', stranger, null, query)).status, 403);
+  const recordId = crypto.randomUUID();
+  const recordCall = (token, generationId, payload) => call(records, 'records', token, {
+    generationId, collection: 'expenses', ...payload,
+  });
+  const createRecord = { action: 'create', recordId, data: { label: 'Treno', cents: 420 } };
+  assert.equal((await recordCall(stranger, generationId, createRecord)).status, 403);
+  const stored = await (await recordCall(owner, generationId, createRecord)).json();
+  assert.equal(stored.record.version, 1);
+  assert.equal((await recordCall(owner, generationId, createRecord)).status, 409);
+  await platform.reopen();
+  const opened = await (await recordCall(owner, generationId, { action: 'list' })).json();
+  assert.deepEqual(opened.records, [{ recordId, version: 1, data: { label: 'Treno', cents: 420 } }]);
+  const change = { action: 'update', recordId, version: 1, data: { label: 'Treno e metro', cents: 570 } };
+  const update = await (await recordCall(owner, generationId, change)).json();
+  assert.equal(update.record.version, 2);
+  assert.equal((await recordCall(owner, generationId, change)).status, 409);
+  assert.equal((await recordCall(owner, generationId, { ...change, data: { label: 'Treno', cents: '570' } })).status, 400);
 
   const generationIds = [generationId];
   for (const instruction of ['Aggiungi un tema', 'Cambia colore', 'Aumenta il contrasto']) {
@@ -288,6 +315,8 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   assert.equal((await call(revisions, 'revisions', stranger, null, finalQuery)).status, 403);
   const history = await (await call(revisions, 'revisions', owner, null, finalQuery)).json();
   assert.equal(history.activeGenerationId, generationIds.at(-1));
+  const revisedRecords = await (await recordCall(owner, generationIds.at(-1), { action: 'list' })).json();
+  assert.deepEqual(revisedRecords.records, [{ recordId, version: 2, data: { label: 'Treno e metro', cents: 570 } }]);
   assert.deepEqual(history.revisions.map(version => version.generationId), generationIds.slice().reverse());
   assert.deepEqual(history.revisions.map(version => version.revision), [4, 3, 2, 1]);
   assert.equal((await call(selectRevision, 'select-revision', stranger, { generationId })).status, 403);
@@ -311,6 +340,15 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
     WHERE owner_subject = 'owner' AND generation_id = ?1 RETURNING generation_id`).bind(generationId).first();
   assert.equal((await call(download, 'download', owner, null, query)).status, 503);
 
+  const otherProjectId = crypto.randomUUID();
+  const otherProject = await call(generate, 'generate', owner, { generationId: otherProjectId, prompt: 'Altre spese' });
+  assert.equal((await otherProject.json()).status, 'generated');
+  const verifyOther = () => call(verify, 'verify', owner, { generationId: otherProjectId });
+  assert.equal((await (await verifyOther()).json()).status, 'submitted');
+  assert.equal((await (await verifyOther()).json()).status, 'verified');
+  assert.deepEqual((await (await recordCall(owner, otherProjectId, { action: 'list' })).json()).records, []);
+  assert.equal((await recordCall(owner, otherProjectId, change)).status, 409);
+
   failDispatch = true;
   const secondId = crypto.randomUUID();
   const second = await call(generate, 'generate', owner, { generationId: secondId, prompt: 'Un altro promemoria' });
@@ -318,5 +356,5 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   const start = () => call(verify, 'verify', owner, { generationId: secondId });
   assert.equal((await (await start()).json()).status, 'review_required');
   assert.equal((await (await start()).json()).status, 'review_required');
-  assert.equal(posts, 5);
+  assert.equal(posts, 6);
 });
