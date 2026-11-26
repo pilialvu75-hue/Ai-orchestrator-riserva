@@ -1612,7 +1612,6 @@ class _ChatBody
 
 class _ChatBodyState
     extends State<_ChatBody> {
-  final _runtimeNoticePresenter = RuntimeNoticePresenter();
 
   static const String _automaticCloudProviderMenuValue = '__automatic__';
   static const String _automaticLocalModelMenuValue = '__automatic_local__';
@@ -1692,7 +1691,6 @@ class _ChatBodyState
   void dispose() {
     _localInferenceLogSubscription?.cancel();
     _audioPlayback.removeListener(_refreshAudio);
-    _runtimeNoticePresenter.dispose();
     _debugLabController
         .removeListener(
       _handleDebugLabVisibilityChanged,
@@ -2358,22 +2356,6 @@ class _ChatBodyState
           widget.scrollToBottom();
         }
 
-        final runtimeMessage =
-            _runtimeMessageForState(
-          state,
-        );
-
-        _runtimeNoticePresenter.update(
-          context,
-          runtimeMessage,
-          action: state is ChatLoaded && state.suggestOpeningSettings
-              ? SnackBarAction(
-                  label: context.l10n.t('settings'),
-                  textColor: Colors.white,
-                  onPressed: widget.onSettings,
-                )
-              : null,
-        );
       },
       builder:
           (context, state) {
@@ -2452,6 +2434,14 @@ class _ChatBodyState
         Widget chatMainContent =
             Column(
           children: [
+            InlineRuntimeNotice(
+              key: ValueKey('runtime-notice-${widget.chatNavigation.sessionId}'),
+              message: _runtimeMessageForState(state),
+              settingsLabel: context.l10n.t('settings'),
+              onSettings: state is ChatLoaded && state.suggestOpeningSettings
+                  ? widget.onSettings
+                  : null,
+            ),
             Expanded(
               child: Stack(
                 children: [
@@ -2930,8 +2920,8 @@ class _ChatBodyState
                       ),
                     ),
 
-          // Reserve the composer as actual Scaffold bottom chrome so floating
-          // snackbars remain above it on Windows, desktop and mobile.
+          // The runtime notice lives at the top of the chat body; keep the
+          // composer independent of notice visibility.
           bottomNavigationBar: AndroidKeyboardAwareComposer(
             enabled: Platform.isAndroid,
             child: Column(
