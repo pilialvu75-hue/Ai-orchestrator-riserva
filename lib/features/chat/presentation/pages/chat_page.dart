@@ -45,6 +45,7 @@ import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_dataso
 import 'package:ai_orchestrator/features/chat/data/services/live_chat_transcript_recorder.dart';
 import 'package:uuid/uuid.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_controller.dart';
+import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_tap_target.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/debug_overlay.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_input_bar.dart';
 import 'package:ai_orchestrator/features/chat/presentation/widgets/chat_session_tile.dart';
@@ -1974,56 +1975,51 @@ class _ChatBodyState
   }) {
     final current = _runtimeSettingsService.runtimeMode;
     final lastBackend = _actualLastResponseBackend(latestResponseProvider);
-    return GestureDetector(
-      // Preserve the existing developer-only gesture without making it
-      // interfere with the ordinary mode selector.
-      onLongPress: _appearanceViewModel.handleSecretPatternClick,
-      child: PopupMenuButton<AiRuntimeMode>(
-        key: const Key('chat-runtime-mode-selector'),
-        tooltip: 'Modalità IA: ${current.name.toUpperCase()}',
-        color: surfaceColor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+    return PopupMenuButton<AiRuntimeMode>(
+      key: const Key('chat-runtime-mode-selector'),
+      tooltip: 'Modalità IA: ${current.name.toUpperCase()}',
+      color: surfaceColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      onSelected: (mode) => unawaited(_switchRuntimeMode(mode)),
+      itemBuilder: (context) => AiRuntimeMode.values
+          .map((mode) => PopupMenuItem<AiRuntimeMode>(
+                value: mode,
+                child: Row(children: [
+                  SizedBox(
+                    width: 24,
+                    child: current == mode
+                        ? const Icon(Icons.check, size: 18,
+                            color: Color(0xFF4ADE80))
+                        : null,
+                  ),
+                  Text(mode.name.toUpperCase()),
+                ]),
+              ))
+          .toList(growable: false),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 204),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: surfaceColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white12),
         ),
-        onSelected: (mode) => unawaited(_switchRuntimeMode(mode)),
-        itemBuilder: (context) => AiRuntimeMode.values
-            .map((mode) => PopupMenuItem<AiRuntimeMode>(
-                  value: mode,
-                  child: Row(children: [
-                    SizedBox(
-                      width: 24,
-                      child: current == mode
-                          ? const Icon(Icons.check, size: 18,
-                              color: Color(0xFF4ADE80))
-                          : null,
-                    ),
-                    Text(mode.name.toUpperCase()),
-                  ]),
-                ))
-            .toList(growable: false),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 204),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          decoration: BoxDecoration(
-            color: surfaceColor,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              Text(current.name.toUpperCase(),
-                  style: const TextStyle(color: Colors.white70,
-                      fontSize: 12, fontWeight: FontWeight.w600)),
-              const SizedBox(width: 4),
-              const Icon(Icons.arrow_drop_down,
-                  color: Colors.white38, size: 16),
-            ]),
-            if (lastBackend != null)
-              Text(lastBackend, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Color(0xFF8AB4F8),
-                      fontSize: 10, height: 1.1)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(current.name.toUpperCase(),
+                style: const TextStyle(color: Colors.white70,
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down,
+                color: Colors.white38, size: 16),
           ]),
-        ),
+          if (lastBackend != null)
+            Text(lastBackend, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Color(0xFF8AB4F8),
+                    fontSize: 10, height: 1.1)),
+        ]),
       ),
     );
   }
@@ -2627,6 +2623,7 @@ class _ChatBodyState
             ),
 
             actions: [
+              DebugLabTapTarget(controller: _debugLabController),
               PopupMenuButton<int>(
                 icon:
                     const Icon(
