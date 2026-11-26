@@ -1612,7 +1612,6 @@ class _ChatBody
 
 class _ChatBodyState
     extends State<_ChatBody> {
-  final _runtimeNoticePresenter = RuntimeNoticePresenter();
 
   static const String _automaticCloudProviderMenuValue = '__automatic__';
   static const String _automaticLocalModelMenuValue = '__automatic_local__';
@@ -1692,7 +1691,6 @@ class _ChatBodyState
   void dispose() {
     _localInferenceLogSubscription?.cancel();
     _audioPlayback.removeListener(_refreshAudio);
-    _runtimeNoticePresenter.dispose();
     _debugLabController
         .removeListener(
       _handleDebugLabVisibilityChanged,
@@ -2358,22 +2356,6 @@ class _ChatBodyState
           widget.scrollToBottom();
         }
 
-        final runtimeMessage =
-            _runtimeMessageForState(
-          state,
-        );
-
-        _runtimeNoticePresenter.update(
-          context,
-          runtimeMessage,
-          action: state is ChatLoaded && state.suggestOpeningSettings
-              ? SnackBarAction(
-                  label: context.l10n.t('settings'),
-                  textColor: Colors.white,
-                  onPressed: widget.onSettings,
-                )
-              : null,
-        );
       },
       builder:
           (context, state) {
@@ -2930,8 +2912,7 @@ class _ChatBodyState
                       ),
                     ),
 
-          // Reserve the composer as actual Scaffold bottom chrome so floating
-          // snackbars remain above it on Windows, desktop and mobile.
+          // Runtime feedback and the composer occupy separate layout rows.
           bottomNavigationBar: AndroidKeyboardAwareComposer(
             enabled: Platform.isAndroid,
             child: Column(
@@ -2959,6 +2940,14 @@ class _ChatBodyState
                 ),
                 onSeek: (position) => unawaited(_audioPlayback.seek(position)),
               ),
+            InlineRuntimeNotice(
+              key: ValueKey('runtime-notice-${widget.chatNavigation.sessionId}'),
+              message: _runtimeMessageForState(state),
+              settingsLabel: context.l10n.t('settings'),
+              onSettings: state is ChatLoaded && state.suggestOpeningSettings
+                  ? widget.onSettings
+                  : null,
+            ),
             ChatInputBar(
               key: ValueKey(widget.chatNavigation.sessionId),
               onSend:
