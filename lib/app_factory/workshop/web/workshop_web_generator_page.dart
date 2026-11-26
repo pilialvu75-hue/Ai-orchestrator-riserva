@@ -9,6 +9,7 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dar
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_joined_app_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_workspace.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_platform_picker.dart';
@@ -458,6 +459,29 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     await _refreshQuota();
   }
 
+  Future<void> _inviteUser(String id) async {
+    await _run(() async {
+      final result = await _revisionCall('invite', {'generationId': id});
+      final token = result['token'];
+      if (token is! String ||
+          !RegExp(r'^[A-Za-z0-9+/]{43}=$').hasMatch(token)) {
+        throw const FormatException('Invalid invitation code');
+      }
+      if (!mounted) return;
+      await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+                title: const Text('Invito per un utente'),
+                content: SelectableText(token),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Chiudi'))
+                ],
+              ));
+    });
+  }
+
   Future<void> _requestRevision(String baseId) async {
     final instruction = await showDialog<String>(
       context: context,
@@ -493,7 +517,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         result['version'] != 1 ||
         result['ok'] != true) {
       throw const _GeneratorRequestException(
-          'Impossibile aggiornare la versione.');
+          'Operazione sul progetto non riuscita.');
     }
     return result;
   }
@@ -1053,6 +1077,11 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                               : 'Aggiorna verifica')),
                         ),
                       if (verificationStatus == 'verified') ...[
+                        if (_verification?['appMemberInvitesEnabled'] == true)
+                          OutlinedButton(
+                            onPressed: _busy ? null : () => _inviteUser(id),
+                            child: Text(tr('Invita un utente')),
+                          ),
                         OutlinedButton(
                           onPressed: _busy ? null : () => _requestRevision(id),
                           child: Text(tr('Modifica applicazione')),
@@ -1194,7 +1223,17 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     final canAdvance = {'ready', 'dispatching', 'submitted', 'importing'}
         .contains(verificationStatus);
     return Scaffold(
-      appBar: AppBar(title: Text(tr('AIVEXUS Studio'))),
+      appBar: AppBar(
+        title: Text(tr('AIVEXUS Studio')),
+        actions: [
+          TextButton(
+            onPressed: _busy ? null : () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const WorkshopWebJoinedAppPage()),
+            ),
+            child: Text(tr('Usa un invito')),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: WorkshopWebGeneratorWorkspace(
           showIntro: id == null,

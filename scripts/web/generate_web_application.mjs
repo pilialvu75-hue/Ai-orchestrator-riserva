@@ -26,6 +26,8 @@ Actions are list, create, update and delete. A list returns records and nextReco
 recordId, version and data. Create takes recordId (from window.aivexusData.newRecordId()) and data. Update needs
 recordId, the last version and the full data. Delete needs recordId and the last version. The request
 returns JSON or rejects with a safe error code. Use only the fields applicable to each action.
+If the app requests the public GitHub repository integration, include integrations: ["github_repository"]
+in runtime and call window.aivexusData.integration("github_repository"). Never place credentials in source.
 Amounts of money should be stored as an integer number of cents. Omit runtime for an offline app.`;
 
 // Count reservations atomically before inference, including failed attempts.

@@ -1,9 +1,13 @@
 import { newWebApplicationRecordId, prependWebApplicationBootstrap } from './web_application_preview_bridge.mjs';
 
-function installFixtureData(collectionNames, newRecordId) {
+function installFixtureData(collectionNames, integrations, newRecordId) {
   const collections = new Map(collectionNames.map(name => [name, new Map()]));
   Object.defineProperty(window, 'aivexusData', { value: Object.freeze({
     newRecordId,
+    async integration(name) {
+      if (!integrations.includes(name)) throw new Error('integration_not_found');
+      return { version: 1, ok: true, repository: { fullName: 'aivexus/preview-fixture', stars: 0 } };
+    },
     async request({ action, collection, recordId, version, data, after }) {
       const records = collections.get(collection);
       if (!records) throw new Error('collection_not_found');
@@ -33,5 +37,5 @@ export function addFixtureWebApplicationData(html, runtime) {
   if (!runtime) return html;
   const names = runtime.collections.map(collection => collection.name);
   return prependWebApplicationBootstrap(html,
-    `(${installFixtureData.toString()})(${JSON.stringify(names)},${newWebApplicationRecordId.toString()})`);
+    `(${installFixtureData.toString()})(${JSON.stringify(names)},${JSON.stringify(runtime.integrations ?? [])},${newWebApplicationRecordId.toString()})`);
 }

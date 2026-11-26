@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_joined_app_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -10,6 +12,38 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/link.dart';
 
 void main() {
+  testWidgets('joins an invited app once and restores only the app ID',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final code = '${'A' * 43}=';
+    const id = '00000000-0000-4000-8000-000000000001';
+    var claims = 0;
+    final client = MockClient((request) async {
+      claims++;
+      expect(request.url.path, '/api/cantiere/proposals/join');
+      expect(jsonDecode(request.body), {'token': code});
+      return http.Response(
+          jsonEncode({'version': 1, 'ok': true, 'generationId': id}), 200);
+    });
+    Widget app() => MaterialApp(home: WorkshopWebJoinedAppPage(client: client));
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), code);
+    await tester.pump();
+    await tester.tap(find.text('Accetta e apri app'));
+    await tester.pumpAndSettle();
+    final frame = tester
+        .widget<WorkshopWebPreviewFrame>(find.byType(WorkshopWebPreviewFrame));
+    expect(frame.uri.queryParameters, {'generationId': id});
+    expect((await SharedPreferences.getInstance()).getKeys(),
+        {'aivexus.web.joinedApp.v1'});
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    expect(find.byType(WorkshopWebPreviewFrame), findsOneWidget);
+    expect(claims, 1);
+  });
+
   testWidgets('submits once and recovers a saved generation without the prompt',
       (tester) async {
     tester.view.devicePixelRatio = 1;

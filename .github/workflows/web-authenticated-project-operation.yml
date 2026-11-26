@@ -36,6 +36,11 @@ on:
       - 'functions/api/cantiere/proposals/select-revision.js'
       - 'functions/api/cantiere/proposals/records.js'
       - 'functions/api/cantiere/proposals/view.js'
+      - 'functions/api/cantiere/proposals/invite.js'
+      - 'functions/api/cantiere/proposals/join.js'
+      - 'functions/api/cantiere/proposals/integration.js'
+      - 'scripts/web/d1_web_application_members.mjs'
+      - 'scripts/web/web_application_integrations.mjs'
       - 'scripts/web/web_application_preview_bridge.mjs'
       - 'scripts/web/web_application_runtime_schema.mjs'
       - 'scripts/web/d1_web_application_records.mjs'
@@ -94,6 +99,11 @@ on:
       - 'functions/api/cantiere/proposals/select-revision.js'
       - 'functions/api/cantiere/proposals/records.js'
       - 'functions/api/cantiere/proposals/view.js'
+      - 'functions/api/cantiere/proposals/invite.js'
+      - 'functions/api/cantiere/proposals/join.js'
+      - 'functions/api/cantiere/proposals/integration.js'
+      - 'scripts/web/d1_web_application_members.mjs'
+      - 'scripts/web/web_application_integrations.mjs'
       - 'scripts/web/web_application_preview_bridge.mjs'
       - 'scripts/web/web_application_runtime_schema.mjs'
       - 'scripts/web/d1_web_application_records.mjs'
@@ -145,7 +155,7 @@ jobs:
         run: |
           npx --yes wrangler@4 pages functions build functions --outfile "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           test -s "$RUNNER_TEMP/aivexus-pages-worker.mjs"
-          for route in access/invitations access/claim access/revoke access/status executions/reserve executions/status executions/download executions/advance proposals/counter proposals/approve proposals/generate proposals/quota proposals/reuse proposals/verify proposals/download proposals/source proposals/preview proposals/revisions proposals/select-revision proposals/records proposals/view; do
+          for route in access/invitations access/claim access/revoke access/status executions/reserve executions/status executions/download executions/advance proposals/counter proposals/approve proposals/generate proposals/quota proposals/reuse proposals/verify proposals/download proposals/source proposals/preview proposals/revisions proposals/select-revision proposals/records proposals/view proposals/invite proposals/join proposals/integration; do
             grep -Fq "/api/cantiere/$route" "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           done
       - name: Apply Web migrations to local D1
@@ -178,8 +188,9 @@ jobs:
               (SELECT COUNT(*) FROM web_app_verifications) AS verifications,
               (SELECT COUNT(*) FROM web_client_invitations) AS client_invitations,
               (SELECT COUNT(*) FROM web_app_project_selection) AS selected_versions,
-              (SELECT COUNT(*) FROM web_app_records) AS app_records' \
-            | jq -e '.[0] | .success and (.results == [{"migrations":10,"approvals":0,"reservations":0,"journal":0,"receipts":0,"artifacts":0,"dispatches":0,"generations":0,"verifications":0,"client_invitations":0,"selected_versions":0,"app_records":0}])'
+              (SELECT COUNT(*) FROM web_app_records) AS app_records,
+              (SELECT COUNT(*) FROM web_app_invites) AS app_invites' \
+            | jq -e '.[0] | .success and (.results == [{"migrations":11,"approvals":0,"reservations":0,"journal":0,"receipts":0,"artifacts":0,"dispatches":0,"generations":0,"verifications":0,"client_invitations":0,"selected_versions":0,"app_records":0,"app_invites":0}])'
       - name: Regression for verified Access JWT and D1 reservations
         run: |
           node --test test/airlab/web_access_jwt_verifier.mjs

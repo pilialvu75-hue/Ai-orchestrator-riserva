@@ -8,11 +8,10 @@ export function onRequest({ request, env }) {
     accessIssuer: env.AIVEXUS_WEB_ACCESS_ISSUER,
     accessAudience: env.AIVEXUS_WEB_ACCESS_AUDIENCE,
     db: env.AIVEXUS_WEB_D1,
-    // Deliberately pause all customer access; this cannot be reenabled by
-    // changing a Pages flag without a reviewed code change.
+    // Preview can only delegate to explicitly enrolled members of a verified app.
     adminSubject: env.AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT,
     ownerEmail: env.AIVEXUS_WEB_OWNER_EMAIL,
-    ownerOnly: true,
+    ownerOnly: env.AIVEXUS_WEB_APP_MEMBERS_ENABLED !== 'true',
     clientAccessEnabled: false,
   })(request);
 }

@@ -256,6 +256,27 @@ cancellazione richiedono la versione del record per rilevare scritture
 concorrenti. I test del runner isolato usano dati temporanei. Il collaudo
 della persistenza usa D1.
 
+## Inviti e integrazioni
+
+La migrazione `011` conserva i record esistenti nella partizione dei loro
+proprietari. Il binding server `AIVEXUS_WEB_APP_MEMBERS_ENABLED=true`
+abilita gli inviti per le app verificate, con le policy Cloudflare Access
+esistenti e la generazione di Studio riservata al proprietario del sito.
+Il proprietario di una versione verificata può creare un codice di invito.
+Il server conserva il digest del codice e accetta un solo utente entro 24 ore.
+L’utente accede tramite il Cloudflare Access esistente e conferma l’invito in
+AIVEXUS. L’app resta privata. Le funzioni di generazione, modifica, sorgenti e
+ZIP rimangono riservate al proprietario. I record appartengono all’utente che
+li scrive, anche quando più utenti aprono il medesimo progetto.
+
+Un manifesto può dichiarare `github_repository`. Il frame richiede soltanto
+quel nome attraverso `window.aivexusData.integration`. Il server legge il
+repository pubblico impostato in `AIVEXUS_WEB_APP_GITHUB_REPOSITORY` e
+restituisce nome completo e stelle. Un eventuale token di sola lettura rimane
+nel binding server `AIVEXUS_WEB_APP_GITHUB_METADATA_TOKEN`. L’app e il browser
+ricevono solo i metadati previsti. Il connettore è indisponibile finché il
+repository non viene configurato.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does
