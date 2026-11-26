@@ -29,6 +29,34 @@ function toRecord(row) {
   return { recordId: row.recordId, version: row.version, data: JSON.parse(row.dataJson) };
 }
 
+export async function exportWebApplicationRecords({ db, ownerSubject, generationId, afterCollection, afterRecordId }) {
+  const hasCursor = afterCollection !== null || afterRecordId !== null;
+  if (!validId(generationId) || (hasCursor &&
+      (!/^[a-z][a-z0-9_]{0,31}$/.test(afterCollection ?? '') || !validId(afterRecordId)))) {
+    return fail('invalid_request');
+  }
+  const access = await resolveWebApplicationAccess({ db, viewerSubject: ownerSubject, generationId });
+  if (!access.ok) return access;
+  const verified = await readVerifiedWebApplicationSource({ db, ownerSubject: access.projectOwner, generationId });
+  if (!verified.ok) return verified;
+  const collections = verified.source.runtime?.collections;
+  if (!collections) return fail('collection_not_found');
+
+  const page = await db.prepare(`SELECT collection_name AS collection, record_id AS recordId,
+    record_version AS version, data_json AS dataJson FROM web_app_records
+    WHERE project_owner = ?1 AND project_id = ?2 AND user_subject = ?3
+      AND (collection_name, record_id) > (?4, ?5)
+    ORDER BY collection_name, record_id LIMIT ?6`)
+    .bind(access.projectOwner, access.projectId, ownerSubject, afterCollection ?? '', afterRecordId ?? '', RECORD_LIMIT + 1)
+    .all();
+  if (!page?.success || !Array.isArray(page.results)) return fail('storage_unavailable');
+  const records = page.results.slice(0, RECORD_LIMIT).map(row => ({ collection: row.collection, ...toRecord(row) }));
+  const last = records.at(-1);
+  const next = page.results.length > RECORD_LIMIT
+    ? { afterCollection: last.collection, afterRecordId: last.recordId } : null;
+  return { ok: true, generationId, collections, records, next };
+}
+
 export async function operateWebApplicationRecords({ db, ownerSubject, request }) {
   if (!validateRequest(request)) return fail('invalid_request');
   const { generationId, action, collection, recordId, version, data, after } = request;

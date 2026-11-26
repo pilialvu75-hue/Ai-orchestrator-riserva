@@ -75,6 +75,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       SharedPreferences.getInstance();
   String? _generationId;
   String? _pendingPrompt;
+  ({String baseId, String instruction, String id})? _pendingRevision;
   String? _error;
   Map<String, dynamic>? _receipt;
   Map<String, dynamic>? _verification;
@@ -486,11 +487,19 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
   Future<void> _requestRevision(String baseId) async {
     final instruction = await showDialog<String>(
       context: context,
-      builder: (_) => const _RevisionInstructionDialog(),
+      builder: (_) => _RevisionInstructionDialog(
+        initialInstruction: _pendingRevision?.baseId == baseId
+            ? _pendingRevision!.instruction
+            : '',
+      ),
     );
     if (!mounted || instruction == null) return;
     await _run(() async {
-      final id = const Uuid().v4();
+      final prior = _pendingRevision;
+      final id = prior != null && prior.baseId == baseId && prior.instruction == instruction
+          ? prior.id
+          : const Uuid().v4();
+      _pendingRevision = (baseId: baseId, instruction: instruction, id: id);
       final result = await _revisionCall('revisions', {
         'generationId': id,
         'baseGenerationId': baseId,
@@ -500,7 +509,9 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         throw const FormatException('Unexpected revised generation');
       }
       await _openGeneration(id);
+      _pendingRevision = null;
     });
+    if (mounted) await _refreshQuota();
   }
 
   Future<Map<String, dynamic>> _revisionCall(
@@ -513,6 +524,12 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
         )
         .timeout(const Duration(seconds: 95));
     final result = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode == 429 &&
+        result is Map<String, dynamic> &&
+        result['error'] == 'generation_quota_exceeded') {
+      throw const _GeneratorRequestException(
+          'Limite di generazione raggiunto. Riprova più tardi.');
+    }
     if (response.statusCode != 200 ||
         result is! Map<String, dynamic> ||
         result['version'] != 1 ||
@@ -1113,6 +1130,16 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                             label: Text(tr('Scarica ZIP')),
                           ),
                         ),
+                        if (receipt['hasRecords'] == true)
+                          Link(
+                            uri: _generationResource('export-records', id),
+                            target: LinkTarget.blank,
+                            builder: (context, followLink) => OutlinedButton.icon(
+                              onPressed: _busy ? null : followLink,
+                              icon: const Icon(Icons.download_outlined),
+                              label: Text(tr('Esporta dati JSON')),
+                            ),
+                          ),
                       ],
                     ],
                   ),
@@ -1278,7 +1305,9 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
 }
 
 class _RevisionInstructionDialog extends StatefulWidget {
-  const _RevisionInstructionDialog();
+  const _RevisionInstructionDialog({required this.initialInstruction});
+
+  final String initialInstruction;
 
   @override
   State<_RevisionInstructionDialog> createState() =>
@@ -1287,17 +1316,26 @@ class _RevisionInstructionDialog extends StatefulWidget {
 
 class _RevisionInstructionDialogState
     extends State<_RevisionInstructionDialog> {
-  String _instruction = '';
+  late String _instruction = widget.initialInstruction;
+  late final _controller = TextEditingController(text: widget.initialInstruction);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Modifica applicazione'),
+        title: Text(WorkshopWebLanguageScope.tr(context, 'Modifica applicazione')),
         content: TextField(
+          controller: _controller,
           autofocus: true,
           maxLength: 1200,
           minLines: 2,
           maxLines: 6,
-          decoration: const InputDecoration(labelText: 'Descrivi la modifica'),
+          decoration: InputDecoration(
+              labelText: WorkshopWebLanguageScope.tr(context, 'Descrivi la modifica')),
           onChanged: (value) => setState(() => _instruction = value.trim()),
         ),
         actions: [
@@ -1308,7 +1346,7 @@ class _RevisionInstructionDialogState
             onPressed: _instruction.isEmpty
                 ? null
                 : () => Navigator.pop(context, _instruction),
-            child: const Text('Crea versione'),
+            child: Text(WorkshopWebLanguageScope.tr(context, 'Crea versione')),
           ),
         ],
       );

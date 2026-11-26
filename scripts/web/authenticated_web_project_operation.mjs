@@ -20,7 +20,7 @@ import {
   readVerifiedWebApplicationSource,
 } from './d1_web_application_verification.mjs';
 import { renderWebApplicationPreviewHost } from './web_application_preview_bridge.mjs';
-import { operateWebApplicationRecords } from './d1_web_application_records.mjs';
+import { exportWebApplicationRecords, operateWebApplicationRecords } from './d1_web_application_records.mjs';
 import { createWebApplicationInvite, joinWebApplication, readMemberWebApplicationSource } from './d1_web_application_members.mjs';
 import { readWebApplicationIntegration } from './web_application_integrations.mjs';
 import { changeWebApplicationRelease, readWebApplicationReleaseHistory, resolveWebApplicationRelease } from './d1_web_application_releases.mjs';
@@ -38,7 +38,7 @@ const OPERATIONS = new Set([
   'create_app_revision', 'app_revision_history', 'select_app_revision',
   'generate_app', 'generation_status', 'generation_quota', 'generation_reuse',
   'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
-  'app_records', 'app_preview_host',
+  'app_records', 'app_records_export', 'app_preview_host',
   'app_invite', 'app_join', 'app_integration',
   'app_release_change', 'app_release_history', 'app_release_launch',
 ]);
@@ -184,7 +184,8 @@ export function createAuthenticatedWebProjectOperation({
   const readsHistory = operation === 'app_revision_history';
   const readsReleases = operation === 'app_release_history';
   const launchesRelease = operation === 'app_release_launch';
-  const readOnly = readsReleases || launchesRelease || readsHistory || readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
+  const exportsRecords = operation === 'app_records_export';
+  const readOnly = exportsRecords || readsReleases || launchesRelease || readsHistory || readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -328,6 +329,29 @@ export function createAuthenticatedWebProjectOperation({
         const result = await resolveWebApplicationRelease({ db, ownerSubject: verified.principal.subject,
           releaseId: url.searchParams.get('releaseId') });
         return result.ok ? renderWebApplicationPreviewHost(result.generationId) : operationFailure(result);
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+    }
+
+    if (exportsRecords) {
+      const { searchParams } = url;
+      const generationId = searchParams.get('generationId');
+      const afterCollection = searchParams.get('afterCollection');
+      const afterRecordId = searchParams.get('afterRecordId');
+      const parameterCount = afterCollection !== null ? 3 : 1;
+      if (!generationId || searchParams.size !== parameterCount) return reject(400, 'invalid_request');
+      try {
+        const records = await exportWebApplicationRecords({ db, ownerSubject: verified.principal.subject,
+          generationId, afterCollection, afterRecordId });
+        if (!records.ok) return operationFailure(records);
+        const response = respond(200, records);
+        response.headers.set('Content-Disposition', 'attachment; filename="aivexus-app-data.json"');
+        if (records.next) {
+          const next = new URLSearchParams({ generationId, ...records.next });
+          response.headers.set('Link', `<${url.pathname}?${next}>; rel="next"`);
+        }
+        return response;
       } catch (_) {
         return reject(503, 'storage_unavailable');
       }

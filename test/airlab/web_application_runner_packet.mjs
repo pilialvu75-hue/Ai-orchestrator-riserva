@@ -12,6 +12,7 @@ import { onRequest as preview } from '../../functions/api/cantiere/proposals/pre
 import { onRequest as revisions } from '../../functions/api/cantiere/proposals/revisions.js';
 import { onRequest as selectRevision } from '../../functions/api/cantiere/proposals/select-revision.js';
 import { onRequest as records } from '../../functions/api/cantiere/proposals/records.js';
+import { onRequest as exportRecords } from '../../functions/api/cantiere/proposals/export-records.js';
 import { onRequest as view } from '../../functions/api/cantiere/proposals/view.js';
 import { onRequest as invite } from '../../functions/api/cantiere/proposals/invite.js';
 import { onRequest as joinApp } from '../../functions/api/cantiere/proposals/join.js';
@@ -452,4 +453,42 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   assert.equal((await (await start()).json()).status, 'review_required');
   assert.equal((await (await start()).json()).status, 'review_required');
   assert.equal(posts, 6);
+  await platform.db.prepare(`WITH RECURSIVE n(i) AS
+    (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 72)
+    INSERT INTO web_app_generations (owner_subject, generation_id, prompt_sha256, status)
+    SELECT 'quota-fixture', 'quota-' || i, lower(hex(zeroblob(32))), 'failed' FROM n RETURNING generation_id`).bind().all();
+  const quota = await call(revisions, 'revisions', owner, { generationId: crypto.randomUUID(),
+    baseGenerationId: generationIds.at(-1), instruction: 'Aggiorna il colore del testo' });
+  assert.equal(quota.status, 429);
+  assert.equal((await quota.json()).error, 'generation_quota_exceeded');
+  assert.equal(modelRevisions, 3);
+
+  const exportQuery = `?generationId=${generationIds.at(-1)}`;
+  assert.equal((await call(exportRecords, 'export-records', outsider, null, exportQuery)).status, 404);
+  assert.equal((await call(exportRecords, 'export-records', owner, null, exportQuery + '&afterCollection=expenses')).status, 400);
+  const added = await platform.db.prepare(`WITH RECURSIVE n(i) AS (
+    SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 50
+  ) INSERT INTO web_app_records (project_owner, project_id, user_subject, collection_name, record_id, record_version, data_json)
+    SELECT 'owner', ?1, 'stranger', 'expenses', printf('00000000-0000-4000-8000-%012d', i), 1, ?2 FROM n
+    RETURNING record_id`).bind(generationId, JSON.stringify({ label: 'Dati demo', cents: 1 })).all();
+  assert.equal(added.results.length, 50);
+  const ownExport = await call(exportRecords, 'export-records', owner, null, exportQuery);
+  assert.equal(ownExport.status, 200);
+  assert.match(ownExport.headers.get('content-disposition'), /^attachment/);
+  assert.equal(ownExport.headers.get('cache-control'), 'no-store');
+  assert.deepEqual((await ownExport.json()).records, [{ collection: 'expenses', recordId,
+    version: 2, data: { label: 'Treno e metro', cents: 570 } }]);
+  const firstExport = await call(exportRecords, 'export-records', stranger, null, exportQuery);
+  const firstPage = await firstExport.json();
+  assert.equal(firstPage.records.length, 50);
+  assert.ok(firstExport.headers.get('link')?.includes('rel="next"'));
+  const after = new URLSearchParams(firstPage.next);
+  const lastExport = await call(exportRecords, 'export-records', stranger, null, `${exportQuery}&${after}`);
+  const lastPage = await lastExport.json();
+  assert.equal(lastPage.records.length, 1);
+  assert.equal(lastPage.next, null);
+  const exportedIds = new Set([...firstPage.records, ...lastPage.records].map(row => row.recordId));
+  assert.equal(exportedIds.size, 51);
+  assert.equal(exportedIds.has(memberId), true);
+  assert.equal(exportedIds.has(recordId), false);
 });

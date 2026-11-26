@@ -206,6 +206,7 @@ export function receipt(generationId, status, saved) {
   return {
     ok: true, generationId, status, sourceSha256, provenance,
     title: source.title, requirements: source.requirements,
+    hasRecords: Boolean(source.runtime?.collections.length),
     paths: source.files.map(file => file.path),
   };
 }

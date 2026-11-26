@@ -74,6 +74,13 @@ final class WorkshopWebLanguageScope
 
 const Map<String, Map<String, String>> _translations = {
   'fr': {
+    'Modifica applicazione': 'Modifier l’application',
+    'Versioni': 'Versions',
+    'Descrivi la modifica': 'Décrivez la modification',
+    'Crea versione': 'Créer une version',
+    'Invita un utente': 'Inviter un utilisateur',
+    'Usa un invito': 'Utiliser une invitation',
+    'Pubblicazione privata': 'Publication privée',
     'Accessi clienti': 'Accès clients',
     'Aggiorna': 'Actualiser',
     'Accesso non autorizzato.': 'Accès non autorisé.',
@@ -120,6 +127,9 @@ const Map<String, Map<String, String>> _translations = {
     'Scrivi all’IA…': 'Écrivez à l’IA…',
     'Invia messaggio': 'Envoyer le message',
     'Tu': 'Vous',
+    'Esporta dati JSON': 'Exporter les données JSON',
+    'Limite di generazione raggiunto. Riprova più tardi.':
+        'Limite de génération atteinte. Réessayez plus tard.',
     'Self-Test Cloud': 'Test automatique Cloud',
     'Self-Test in corso…': 'Test Cloud en cours…',
     'Esegui Self-Test Cloud': 'Exécuter le test Cloud',
@@ -256,6 +266,13 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Inférence Cloud / AUTO',
   },
   'en': {
+    'Modifica applicazione': 'Modify application',
+    'Versioni': 'Versions',
+    'Descrivi la modifica': 'Describe the change',
+    'Crea versione': 'Create version',
+    'Invita un utente': 'Invite a user',
+    'Usa un invito': 'Use an invitation',
+    'Pubblicazione privata': 'Private release',
     'Accessi clienti': 'Customer access',
     'Aggiorna': 'Refresh',
     'Accesso non autorizzato.': 'Access denied.',
@@ -302,6 +319,9 @@ const Map<String, Map<String, String>> _translations = {
     'Scrivi all’IA…': 'Message the AI…',
     'Invia messaggio': 'Send message',
     'Tu': 'You',
+    'Esporta dati JSON': 'Export JSON data',
+    'Limite di generazione raggiunto. Riprova più tardi.':
+        'Generation limit reached. Try again later.',
 
     'Titolo': 'Title',
     'Tipo progetto': 'Project type',
@@ -398,6 +418,13 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Cloud / AUTO inference',
   },
   'es': {
+    'Modifica applicazione': 'Modificar aplicación',
+    'Versioni': 'Versiones',
+    'Descrivi la modifica': 'Describe el cambio',
+    'Crea versione': 'Crear versión',
+    'Invita un utente': 'Invitar a un usuario',
+    'Usa un invito': 'Usar una invitación',
+    'Pubblicazione privata': 'Publicación privada',
     'Accessi clienti': 'Acceso de clientes',
     'Aggiorna': 'Actualizar',
     'Accesso non autorizzato.': 'Acceso no autorizado.',
@@ -444,6 +471,9 @@ const Map<String, Map<String, String>> _translations = {
     'Scrivi all’IA…': 'Escribe a la IA…',
     'Invia messaggio': 'Enviar mensaje',
     'Tu': 'Tú',
+    'Esporta dati JSON': 'Exportar datos JSON',
+    'Limite di generazione raggiunto. Riprova più tardi.':
+        'Límite de generación alcanzado. Inténtalo más tarde.',
 
     'Titolo': 'Título',
     'Tipo progetto': 'Tipo de proyecto',

@@ -30,6 +30,7 @@ on:
       - 'functions/api/cantiere/proposals/reuse.js'
       - 'functions/api/cantiere/proposals/verify.js'
       - 'functions/api/cantiere/proposals/download.js'
+      - 'functions/api/cantiere/proposals/export-records.js'
       - 'functions/api/cantiere/proposals/source.js'
       - 'functions/api/cantiere/proposals/preview.js'
       - 'functions/api/cantiere/proposals/revisions.js'
@@ -96,6 +97,7 @@ on:
       - 'functions/api/cantiere/proposals/reuse.js'
       - 'functions/api/cantiere/proposals/verify.js'
       - 'functions/api/cantiere/proposals/download.js'
+      - 'functions/api/cantiere/proposals/export-records.js'
       - 'functions/api/cantiere/proposals/source.js'
       - 'functions/api/cantiere/proposals/preview.js'
       - 'functions/api/cantiere/proposals/revisions.js'
@@ -161,7 +163,7 @@ jobs:
         run: |
           npx --yes wrangler@4 pages functions build functions --outfile "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           test -s "$RUNNER_TEMP/aivexus-pages-worker.mjs"
-          for route in access/invitations access/claim access/revoke access/status executions/reserve executions/status executions/download executions/advance proposals/counter proposals/approve proposals/generate proposals/quota proposals/reuse proposals/verify proposals/download proposals/source proposals/preview proposals/revisions proposals/select-revision proposals/records proposals/view proposals/invite proposals/join proposals/integration proposals/release proposals/launch; do
+          for route in access/invitations access/claim access/revoke access/status executions/reserve executions/status executions/download executions/advance proposals/counter proposals/approve proposals/generate proposals/quota proposals/reuse proposals/verify proposals/download proposals/export-records proposals/source proposals/preview proposals/revisions proposals/select-revision proposals/records proposals/view proposals/invite proposals/join proposals/integration proposals/release proposals/launch; do
             grep -Fq "/api/cantiere/$route" "$RUNNER_TEMP/aivexus-pages-worker.mjs"
           done
       - name: Apply Web migrations to local D1
