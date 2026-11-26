@@ -13,6 +13,7 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_joined_app
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_workspace.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_platform_picker.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_releases_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_source_page.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -1077,6 +1078,14 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                               : 'Aggiorna verifica')),
                         ),
                       if (verificationStatus == 'verified') ...[
+                        OutlinedButton(
+                          onPressed: _busy ? null : () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => WorkshopWebReleasesPage(generationId: id, client: _client),
+                            ),
+                          ),
+                          child: Text(tr('Pubblicazione privata')),
+                        ),
                         if (_verification?['appMemberInvitesEnabled'] == true)
                           OutlinedButton(
                             onPressed: _busy ? null : () => _inviteUser(id),

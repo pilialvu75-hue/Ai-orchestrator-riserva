@@ -23,6 +23,7 @@ import { renderWebApplicationPreviewHost } from './web_application_preview_bridg
 import { operateWebApplicationRecords } from './d1_web_application_records.mjs';
 import { createWebApplicationInvite, joinWebApplication, readMemberWebApplicationSource } from './d1_web_application_members.mjs';
 import { readWebApplicationIntegration } from './web_application_integrations.mjs';
+import { changeWebApplicationRelease, readWebApplicationReleaseHistory, resolveWebApplicationRelease } from './d1_web_application_releases.mjs';
 import {
   createWebApplicationRevision, readWebApplicationRevisions, selectWebApplicationRevision,
 } from './d1_web_application_revisions.mjs';
@@ -39,6 +40,7 @@ const OPERATIONS = new Set([
   'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
   'app_records', 'app_preview_host',
   'app_invite', 'app_join', 'app_integration',
+  'app_release_change', 'app_release_history', 'app_release_launch',
 ]);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
@@ -137,6 +139,8 @@ function operationFailure(result) {
   if (reason === 'invalid_record') return reject(400, reason);
   if (reason === 'invite_not_found' || reason === 'integration_not_found') return reject(404, reason);
   if (reason === 'integration_unavailable') return reject(503, reason);
+  if (reason === 'release_unavailable') return reject(503, reason);
+  if (reason === 'release_conflict') return reject(409, reason);
   if (reason === 'storage_unavailable' ||
       reason === 'storage_inconsistent') return reject(503, 'storage_unavailable');
   if (reason === 'approval_required' ||
@@ -163,7 +167,7 @@ function zipResponse(bytes, filename) {
  */
 export function createAuthenticatedWebProjectOperation({
   operation, expectedOrigin, accessIssuer, accessAudience, db, bucket, runner,
-  infer, integrationConfig, appMemberInvitesEnabled = false, adminSubject, ownerEmail, clientAccessEnabled = false,
+  infer, integrationConfig, releasesEnabled = false, appMemberInvitesEnabled = false, adminSubject, ownerEmail, clientAccessEnabled = false,
   ownerOnly = false, fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
@@ -178,7 +182,9 @@ export function createAuthenticatedWebProjectOperation({
   const readsHost = operation === 'app_preview_host';
   const readsSource = operation === 'read_app_source' || previewsApp || readsHost;
   const readsHistory = operation === 'app_revision_history';
-  const readOnly = readsHistory || readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
+  const readsReleases = operation === 'app_release_history';
+  const launchesRelease = operation === 'app_release_launch';
+  const readOnly = readsReleases || launchesRelease || readsHistory || readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -315,10 +321,23 @@ export function createAuthenticatedWebProjectOperation({
       }
     }
 
-    if (readsHistory || readsGeneration || readsVerification || downloadsApp || readsSource) {
+    if (launchesRelease) {
+      if (!releasesEnabled) return reject(503, 'release_unavailable');
       if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
       try {
-        const read = previewsApp || readsHost ? readMemberWebApplicationSource : readsHistory ? readWebApplicationRevisions :
+        const result = await resolveWebApplicationRelease({ db, ownerSubject: verified.principal.subject,
+          releaseId: url.searchParams.get('releaseId') });
+        return result.ok ? renderWebApplicationPreviewHost(result.generationId) : operationFailure(result);
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+    }
+
+    if (readsGeneration || readsVerification || downloadsApp || readsSource || readsHistory || readsReleases) {
+      if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
+      try {
+        const read = readsReleases ? readWebApplicationReleaseHistory :
+          previewsApp || readsHost ? readMemberWebApplicationSource : readsHistory ? readWebApplicationRevisions :
           downloadsApp ? readWebApplicationZip : readsSource ? readVerifiedWebApplicationSource :
           readsVerification ? readWebApplicationVerification : readWebApplicationGeneration;
         const result = await read({
@@ -361,6 +380,8 @@ export function createAuthenticatedWebProjectOperation({
         result = await joinWebApplication({ request: parsed.value, ownerSubject: principal.subject, db });
       } else if (operation === 'app_integration') {
         result = await readWebApplicationIntegration({ request: parsed.value, ownerSubject: principal.subject, db, integrationConfig });
+      } else if (operation === 'app_release_change') {
+        result = await changeWebApplicationRelease({ request: parsed.value, ownerSubject: principal.subject, db, releasesEnabled });
       } else if (operation === 'verify_app') {
         result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'advance') {

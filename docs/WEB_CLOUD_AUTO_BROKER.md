@@ -277,6 +277,17 @@ nel binding server `AIVEXUS_WEB_APP_GITHUB_METADATA_TOKEN`. L’app e il browser
 ricevono solo i metadati previsti. Il connettore è indisponibile finché il
 repository non viene configurato.
 
+## Link privati e rollback
+
+La migrazione `012` aggiunge la cronologia delle pubblicazioni private. Il
+proprietario può associare una versione verificata a un URL stabile e poi
+aggiornarla o ripristinare una versione pubblicata in precedenza. Un numero
+di revisione impedisce di sovrascrivere una scelta concorrente. Proprietario
+e invitati aprono l’URL tramite l’Access esistente. L’impostazione server
+`AIVEXUS_WEB_PRIVATE_RELEASES_ENABLED=true` abilita scrittura e apertura dei
+link. Il codice generato resta nel frame isolato. Le pubblicazioni pubbliche
+richiedono un host distinto dal Cantiere protetto.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does

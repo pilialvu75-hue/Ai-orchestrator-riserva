@@ -16,6 +16,8 @@ import { onRequest as view } from '../../functions/api/cantiere/proposals/view.j
 import { onRequest as invite } from '../../functions/api/cantiere/proposals/invite.js';
 import { onRequest as joinApp } from '../../functions/api/cantiere/proposals/join.js';
 import { onRequest as integration } from '../../functions/api/cantiere/proposals/integration.js';
+import { onRequest as releases } from '../../functions/api/cantiere/proposals/release.js';
+import { onRequest as launch } from '../../functions/api/cantiere/proposals/launch.js';
 import { runEncryptedWebApplicationJob } from '../../scripts/web/run_encrypted_web_application_job.mjs';
 import {
   decodeRunnerBase64, decodeWebAppJob, decodeWebAppResult, encodeRunnerBase64,
@@ -140,7 +142,7 @@ async function temporaryD1(t) {
   }
   const sqlite = new DatabaseSync(':memory:');
   t.after(() => sqlite.close());
-  for (const migration of ['006_web_app_generations.sql', '007_web_app_verifications.sql', '009_web_app_revision_history.sql', '010_web_app_records.sql', '011_web_app_private_members.sql']) {
+  for (const migration of ['006_web_app_generations.sql', '007_web_app_verifications.sql', '009_web_app_revision_history.sql', '010_web_app_records.sql', '011_web_app_private_members.sql', '012_web_app_private_releases.sql']) {
     sqlite.exec(readFileSync(new URL('../../scripts/web/sql/' + migration, import.meta.url), 'utf8'));
   }
   return { db: { prepare(sql) {
@@ -215,6 +217,7 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   let modelRevisions = 0;
   let integrationRequests = 0;
   let fixturePrivate = false;
+  let releasesEnabled = false;
   const localFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = localFetch; });
   globalThis.fetch = async (url, opts) => {
@@ -271,7 +274,7 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
       method: body ? 'POST' : 'GET',
       headers: { 'Cf-Access-Jwt-Assertion': token, ...(body ? { Origin: origin, 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
-    }), env: { ...env, AIVEXUS_WEB_D1: platform.db } });
+    }), env: { ...env, AIVEXUS_WEB_D1: platform.db, AIVEXUS_WEB_PRIVATE_RELEASES_ENABLED: String(releasesEnabled) } });
   }
   const generationId = crypto.randomUUID();
   const query = `?generationId=${generationId}`;
@@ -361,6 +364,19 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   fixturePrivate = true;
   assert.equal((await call(integration, 'integration', owner, connector)).status, 503);
   assert.equal(integrationRequests, 2);
+  const releaseId = crypto.randomUUID();
+  const initialRelease = { action: 'publish', releaseId, generationId, expectedRevision: 0 };
+  const releaseQuery = `?releaseId=${releaseId}`;
+  assert.equal((await call(releases, 'release', owner, initialRelease)).status, 503);
+  releasesEnabled = true;
+  assert.equal((await call(releases, 'release', stranger, initialRelease)).status, 403);
+  const released = await Promise.all(Array.from({ length: 4 }, async () =>
+    (await call(releases, 'release', owner, initialRelease)).json()));
+  assert.ok(released.every(event => event.revision === 1), JSON.stringify(released));
+  assert.equal((await call(launch, 'launch', outsider, null, releaseQuery)).status, 404);
+  const initialPage = await call(launch, 'launch', stranger, null, releaseQuery);
+  assert.equal(initialPage.status, 200);
+  assert.ok((await initialPage.text()).includes(generationId));
 
   const generationIds = [generationId];
   for (const instruction of ['Aggiungi un tema', 'Cambia colore', 'Aumenta il contrasto']) {
@@ -386,6 +402,18 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   assert.deepEqual(revisedRecords.records, [{ recordId, version: 2, data: { label: 'Treno e metro', cents: 570 } }]);
   assert.deepEqual(history.revisions.map(version => version.generationId), generationIds.slice().reverse());
   assert.deepEqual(history.revisions.map(version => version.revision), [4, 3, 2, 1]);
+  const updateRelease = { ...initialRelease, generationId: generationIds.at(-1), expectedRevision: 1 };
+  assert.equal((await (await call(releases, 'release', owner, updateRelease)).json()).revision, 2);
+  const updatedPage = await call(launch, 'launch', stranger, null, releaseQuery);
+  assert.ok((await updatedPage.text()).includes(updateRelease.generationId));
+  assert.equal((await call(releases, 'release', owner, { ...updateRelease, generationId: generationIds[1] })).status, 409);
+  const rollback = { ...initialRelease, action: 'rollback', expectedRevision: 2 };
+  assert.equal((await (await call(releases, 'release', owner, rollback)).json()).revision, 3);
+  await platform.reopen();
+  const releaseHistory = await (await call(releases, 'release', owner, null, finalQuery)).json();
+  assert.deepEqual(releaseHistory.history.map(event => event.action), ['rollback', 'publish', 'publish']);
+  const rolledBackPage = await call(launch, 'launch', stranger, null, releaseQuery);
+  assert.ok((await rolledBackPage.text()).includes(generationId));
   assert.equal((await call(selectRevision, 'select-revision', stranger, { generationId })).status, 403);
   assert.equal((await (await call(selectRevision, 'select-revision', owner, { generationId })).json()).activeGenerationId, generationId);
   await platform.reopen();
