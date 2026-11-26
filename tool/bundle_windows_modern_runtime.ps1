@@ -39,3 +39,10 @@ foreach ($required in @('llama-server.exe','llama-server-impl.dll','ggml-vulkan.
   if (!(Test-Path -LiteralPath (Join-Path $vulkanTarget $required))) { throw "Missing Vulkan dependency: $required" }
 }
 Write-Output 'Verified Vulkan server bundled separately; runtime selection retains CPU fallback.'
+
+# Exercise the exact bundled CPU server executable and its DLL loader. GPU
+# execution cannot be established on a hosted runner without the target GPU.
+$cpuServer = Join-Path $modernTarget 'llama-server.exe'
+& $cpuServer --version
+if ($LASTEXITCODE -ne 0) { throw "Bundled resident CPU server failed to start (exit $LASTEXITCODE)" }
+Write-Output 'Resident CPU server startup smoke passed; Vulkan execution requires physical GPU QA.'

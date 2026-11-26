@@ -1,0 +1,25 @@
+name: Windows Resident Bundle QA
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-release-publish.yml'
+      - '.github/workflows/windows-resident-bundle-qa.yml'
+      - 'tool/bundle_windows_modern_runtime.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-resident-bundle:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify pinned CPU and Vulkan payload and CPU server startup
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $env:RUNNER_TEMP 'resident-bundle-qa'
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+          & (Join-Path $PWD 'tool\bundle_windows_modern_runtime.ps1') -ReleaseDir $releaseDir
