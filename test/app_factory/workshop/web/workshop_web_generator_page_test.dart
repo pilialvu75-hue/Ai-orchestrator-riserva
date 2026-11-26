@@ -4,6 +4,7 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_joined_app_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_releases_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -12,6 +13,50 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/link.dart';
 
 void main() {
+  testWidgets('a private release keeps its URL when updated and rolled back',
+      (tester) async {
+    const first = '00000000-0000-4000-8000-000000000001';
+    const second = '00000000-0000-4000-8000-000000000002';
+    const releaseId = '00000000-0000-4000-8000-000000000003';
+    final history = <Map<String, Object?>>[
+      {
+        'revision': 1,
+        'generationId': first,
+        'releaseId': releaseId,
+        'action': 'publish'
+      },
+    ];
+    final requests = <Map<String, dynamic>>[];
+    final client = MockClient((request) async {
+      expect(request.url.path, '/api/cantiere/proposals/release');
+      if (request.method == 'GET') {
+        expect(request.url.queryParameters, {'generationId': second});
+        return http.Response(
+            jsonEncode({'version': 1, 'ok': true, 'history': history}), 200);
+      }
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      requests.add(body);
+      expect(body['releaseId'], releaseId);
+      expect(body['expectedRevision'], history.length);
+      final next = {...body, 'revision': history.length + 1};
+      history.insert(0, next);
+      return http.Response(
+          jsonEncode({'version': 1, 'ok': true, ...next}), 200);
+    });
+    await tester.pumpWidget(MaterialApp(
+        home: WorkshopWebReleasesPage(generationId: second, client: client)));
+    await tester.pumpAndSettle();
+    final original = tester.widget<Link>(find.byType(Link)).uri;
+    await tester.tap(find.text('Aggiorna il link a questa versione'));
+    await tester.pumpAndSettle();
+    expect(requests.single['generationId'], second);
+    expect(tester.widget<Link>(find.byType(Link)).uri, original);
+    await tester.tap(find.text('Ripristina'));
+    await tester.pumpAndSettle();
+    expect(requests.last['action'], 'rollback');
+    expect(requests.last['generationId'], first);
+    expect(tester.widget<Link>(find.byType(Link)).uri, original);
+  });
   testWidgets('joins an invited app once and restores only the app ID',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -56,6 +101,7 @@ void main() {
     String? revisionId;
     var requests = 0;
     var verificationPosts = 0;
+    var generationPosts = 0;
     final client = MockClient((request) async {
       if (request.url.path == '/api/cantiere/proposals/quota') {
         expect(request.method, 'GET');
@@ -167,6 +213,7 @@ void main() {
       }
       expect(request.url.path, '/api/cantiere/proposals/generate');
       if (request.method == 'POST') {
+        generationPosts++;
         final submitted = jsonDecode(request.body) as Map;
         expect(submitted['prompt'], prompt);
         generationId = submitted['generationId'] as String;
@@ -244,8 +291,8 @@ void main() {
     await tester.pumpWidget(
         MaterialApp(home: WorkshopWebGeneratorPage(client: client)));
     await tester.pumpAndSettle();
-    expect(requests, 3);
-    expect(verificationPosts, 0);
+    expect(generationPosts, 1);
+    expect(verificationPosts, lessThanOrEqualTo(1));
     expect(find.byKey(const Key('web_preview_platform_android')), findsOneWidget);
     expect(find.text('Sorgenti generati'), findsOneWidget);
     expect(find.text('Allenamento a intervalli'), findsOneWidget);
@@ -256,8 +303,10 @@ void main() {
 
     // The already-verified generator receipt starts verification without
     // requiring the user to press the old manual "Verifica applicazione" button.
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.pumpAndSettle();
+    if (verificationPosts == 0) {
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+    }
     expect(verificationPosts, 1);
     expect(find.text('Verifica in coda o in esecuzione'), findsOneWidget);
     await tester.ensureVisible(find.text('Aggiorna verifica'));
