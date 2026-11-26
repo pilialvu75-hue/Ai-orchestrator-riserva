@@ -15,6 +15,7 @@ import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids
 import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -385,6 +386,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
           await controller.close();
           return;
+        }
+
+        if (Platform.isWindows) {
+          WindowsEngineProcessTracker.instance.track(process);
         }
 
         if (windowsCliTiming != null) {

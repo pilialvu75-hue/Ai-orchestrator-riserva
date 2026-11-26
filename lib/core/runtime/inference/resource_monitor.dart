@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
 
 /// Unknown readings stay null. RSS, native heap and system RAM are distinct;
 /// they must never be added together as an estimate of app memory.
@@ -16,6 +17,11 @@ class ResourceSample {
         thresholdBytes = _number(data['thresholdBytes']),
         rssBytes = _number(data['rssBytes']),
         systemCpuPercent = _percent(data['systemCpuPercent']),
+        appCpuPercent = _percent(data['appCpuPercent']),
+        enginePid = _positiveInt(data['enginePid']),
+        engineGeneration = _positiveInt(data['engineGeneration']),
+        engineRssBytes = _number(data['engineRssBytes']),
+        engineCpuPercent = _percent(data['engineCpuPercent']),
         nativeHeapBytes = _number(data['nativeHeapBytes']),
         batteryTemperatureDeciC = _number(data['batteryTempDeciC']),
         deviceManufacturer = _text(data['deviceManufacturer']),
@@ -27,7 +33,15 @@ class ResourceSample {
         trimLevel = _number(data['trimLevel']) ?? 0;
 
   final DateTime timestamp;
-  final double? systemCpuPercent;
+  final double? systemCpuPercent, appCpuPercent, engineCpuPercent;
+  final int? enginePid, engineGeneration, engineRssBytes;
+
+  bool belongsTo(WindowsEngineProcessLease? lease) =>
+      lease != null && enginePid == lease.pid &&
+      engineGeneration == lease.generation;
+
+  static int? _positiveInt(Object? value) =>
+      value is int && value > 0 ? value : null;
   final int? availableBytes,
       totalBytes,
       thresholdBytes,
@@ -190,7 +204,26 @@ class ResourceMonitor extends ChangeNotifier {
             defaultTargetPlatform != TargetPlatform.windows)) {
       return null;
     }
-    return _channel.invokeMapMethod<Object?, Object?>('sample');
+    if (defaultTargetPlatform != TargetPlatform.windows) {
+      return _channel.invokeMapMethod<Object?, Object?>('sample');
+    }
+    final tracker = WindowsEngineProcessTracker.instance;
+    final lease = tracker.current;
+    final data = await _channel.invokeMapMethod<Object?, Object?>(
+      'sample', lease == null ? null : {'enginePid': lease.pid},
+    );
+    if (data == null) return null;
+    final clean = Map<Object?, Object?>.of(data);
+    clean.remove('engineGeneration');
+    if (lease != null && identical(tracker.current, lease) &&
+        clean['enginePid'] == lease.pid) {
+      clean['engineGeneration'] = lease.generation;
+    } else {
+      clean.remove('enginePid');
+      clean.remove('engineRssBytes');
+      clean.remove('engineCpuPercent');
+    }
+    return clean;
   }
 
   void retain() {
@@ -277,6 +310,14 @@ class ResourceMonitor extends ChangeNotifier {
       if (_history.length >= 60) _history.removeFirst();
       _history.addLast(reading);
       try {
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+          final current = reading.belongsTo(WindowsEngineProcessTracker.instance.current);
+          _logger('[WINDOWS_PROCESS_RESOURCE] system_cpu=${reading.systemCpuPercent ?? -1} '
+              'app_cpu=${reading.appCpuPercent ?? -1} '
+              'app_rss_bytes=${reading.rssBytes ?? -1} '
+              'engine_cpu=${current ? reading.engineCpuPercent ?? -1 : -1} '
+              'engine_rss_bytes=${current ? reading.engineRssBytes ?? -1 : -1}');
+        }
         _logger(
           '[RESOURCE_SAMPLE] available_bytes=${reading.availableBytes ?? -1} '
           'rss_bytes=${reading.rssBytes ?? -1} native_heap_bytes=${reading.nativeHeapBytes ?? -1} '
