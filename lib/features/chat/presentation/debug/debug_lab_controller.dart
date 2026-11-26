@@ -45,16 +45,6 @@ class DebugLabController extends ChangeNotifier {
     }
   }
 
-  /// Explicit diagnostic access independent of runtime-mode gestures.
-  void openFromMetricsMenu() {
-    _rapidTapCount = 0;
-    _lastTapAt = null;
-    if (_isVisible) return;
-    _isVisible = true;
-    RuntimeEventLog.instance.emit('[DEBUG_LAB_OVERLAY_OPEN] source=metrics_menu');
-    notifyListeners();
-  }
-
   void close() {
     _rapidTapCount = 0;
     _lastTapAt = null;
