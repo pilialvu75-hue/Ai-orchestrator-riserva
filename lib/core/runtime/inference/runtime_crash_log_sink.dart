@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
@@ -9,10 +10,9 @@ import 'package:path_provider/path_provider.dart';
 /// a SIGSEGV inside a native runtime — the in-memory buffer dies
 /// with the process.
 ///
-/// This sink appends every log line to a plain text file on disk,
-/// synchronously and with an immediate flush, so the events written
-/// immediately before a native crash remain available on the next
-/// application launch.
+/// Critical and unknown events are flushed immediately. Explicitly classified
+/// nonterminal progress events are batched, with a bounded timer and size.
+/// A sudden process crash may lose the most recent buffered progress only.
 ///
 /// This is diagnostic infrastructure only: every method deliberately
 /// fails safe. A logging problem must never crash the application.
@@ -37,6 +37,15 @@ class RuntimeCrashLogSink {
   static const int _maxFileBytes =
       1 * 1024 * 1024;
 
+  static const _progressFlushInterval = Duration(milliseconds: 250);
+  static const _maxPendingLines = 64;
+  // UTF-16 code units times three upper-bounds UTF-8 bytes, including
+  // supplementary characters. Bound pending memory independently of count.
+  static const _maxPendingBytes = 64 * 1024;
+  final List<String> _pending = [];
+  int _pendingBytes = 0;
+  Timer? _flushTimer;
+
   File? _file;
 
   bool _ready = false;
@@ -48,6 +57,8 @@ class RuntimeCrashLogSink {
   /// This should be awaited once, as early as possible in main(),
   /// before runtime/inference/voice activity starts.
   Future<void> init() async {
+    _flushPending();
+    _ready = false;
     try {
       final directory =
           await getApplicationDocumentsDirectory();
@@ -82,35 +93,45 @@ class RuntimeCrashLogSink {
     }
   }
 
-  /// Appends [line] synchronously and flushes it immediately.
-  ///
-  /// Persistence happens before dangerous native calls so the last
-  /// forensic marker has the best possible chance of surviving a
-  /// process-level crash.
-  void append(
-    String line,
-  ) {
-    final file = _file;
+  /// Only positively identified nonterminal progress may be deferred.
+  /// Everything else, including native boundaries and errors, is durable
+  /// on the same best-effort basis as before, in original event order.
+  void append(String line, {bool routineProgress = false}) {
+    if (!_ready || _file == null) return;
 
-    if (!_ready ||
-        file == null) {
+    _pending.add(line);
+    _pendingBytes += (line.length + 1) * 3;
+
+    if (!routineProgress ||
+        _pending.length >= _maxPendingLines ||
+        _pendingBytes >= _maxPendingBytes) {
+      _flushPending();
       return;
     }
+    _flushTimer ??= Timer(_progressFlushInterval, _flushPending);
+  }
 
+  void _discardPending() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    _pending.clear();
+    _pendingBytes = 0;
+  }
+
+  void _flushPending() {
+    final file = _file;
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    if (_pending.isEmpty) return;
+    final batch = '${_pending.join('\n')}\n';
+    _discardPending();
+    if (!_ready || file == null) return;
     try {
-      file.writeAsStringSync(
-        '$line\n',
-        mode:
-            FileMode.append,
-        flush: true,
-      );
-
-      _enforceMaxSizeIfNeeded(
-        file,
-      );
+      file.writeAsStringSync(batch, mode: FileMode.append, flush: true);
+      _enforceMaxSizeIfNeeded(file);
     } catch (_) {
-      // Diagnostic persistence is best-effort.
-      // Never let a logging error terminate the application.
+      // Preserve the existing best-effort persistence contract. Do not
+      // retry a potentially partial append or let diagnostics crash the app.
     }
   }
 
@@ -173,6 +194,7 @@ class RuntimeCrashLogSink {
   /// persistence is unavailable because this text is shown directly
   /// by Debug Lab.
   Future<String> readAsText() async {
+    _flushPending();
     final file = _file;
 
     if (!_ready ||
@@ -207,6 +229,7 @@ class RuntimeCrashLogSink {
   /// The file itself is intentionally retained so persistence can
   /// immediately resume without having to recreate the sink.
   Future<void> clear() async {
+    _discardPending();
     final file = _file;
 
     if (file == null) {
@@ -214,13 +237,10 @@ class RuntimeCrashLogSink {
     }
 
     try {
-      if (await file.exists()) {
-        await file.writeAsString(
-          '',
-          mode:
-              FileMode.write,
-          flush: true,
-        );
+      // Reset is rare and explicit. Keep it ordered with synchronous
+      // boundary writes; no await may allow an event to race truncation.
+      if (file.existsSync()) {
+        file.writeAsStringSync('', mode: FileMode.write, flush: true);
       }
     } catch (_) {
       // Clearing diagnostics must never crash the app.
