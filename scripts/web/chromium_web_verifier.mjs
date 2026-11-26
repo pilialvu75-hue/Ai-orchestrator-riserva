@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { addFixtureWebApplicationData } from './web_application_fixture_data.mjs';
 
 const ORIGIN = 'http://aivexus-generated.invalid';
 const CSP = "sandbox allow-scripts allow-same-origin; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
@@ -117,7 +118,7 @@ function browserCheck({ action, selector, value }) {
 }
 
 export function createChromiumWebVerifier({ executable }) {
-  async function verifyOnce({ assets, checks }) {
+  async function verifyOnce({ assets, checks, runtime }) {
     if (!executable) return { status: 'unavailable', diagnosis: 'browser_not_configured' };
     const profile = await mkdtemp(join(tmpdir(), 'aivexus-web-test-'));
     let exited;
@@ -152,7 +153,8 @@ export function createChromiumWebVerifier({ executable }) {
         const url = new URL(request.url);
         const path = url.pathname.slice(1) || 'index.html';
         const allowed = url.origin === ORIGIN && request.method === 'GET';
-        const content = allowed ? assets.get(path) : undefined;
+        const file = allowed ? assets.get(path) : undefined;
+        const content = path === 'index.html' && file !== undefined ? addFixtureWebApplicationData(file, runtime) : file;
         try {
           if (content !== undefined || (allowed && path === 'favicon.ico')) {
             await client.send('Fetch.fulfillRequest', {

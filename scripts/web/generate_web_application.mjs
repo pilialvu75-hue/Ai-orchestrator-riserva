@@ -1,4 +1,5 @@
 import { validateWebApplicationChecks } from './web_application_checks.mjs';
+import { normalizeWebApplicationRuntime } from './web_application_runtime_schema.mjs';
 import { WEB_RUNNER_TICKET as GENERATION_ID } from './web_runner_envelope.mjs';
 export const MAX_WEB_APP_PROMPT_CHARACTERS = 8000;
 export const WEB_APP_USER_DAILY_LIMIT = 10;
@@ -18,23 +19,37 @@ requested by the user after interacting with it. The entry point is index.html.
 Choose the other file names and number of files based on the brief. Use lowercase portable paths,
 local dependencies only, no package installation, secrets or external network requests.
 Keep the application compact enough to return all source within the response limit.`;
+const RECORD_INSTRUCTION = `When the user needs server persistence, include a runtime object with kind "records" and
+collections, each with name and fields. Fields map lowercase names to text, integer, boolean, or date.
+The preview supplies window.aivexusData.request({ action, collection, recordId, version, data, after }).
+Actions are list, create, update and delete. A list returns records and nextRecordId. Each record has
+recordId, version and data. Create takes recordId (from window.aivexusData.newRecordId()) and data. Update needs
+recordId, the last version and the full data. Delete needs recordId and the last version. The request
+returns JSON or rejects with a safe error code. Use only the fields applicable to each action.
+If the app requests the public GitHub repository integration, include integrations: ["github_repository"]
+in runtime and call window.aivexusData.integration("github_repository"). Never place credentials in source.
+Amounts of money should be stored as an integer number of cents. Omit runtime for an offline app.`;
 
 // Count reservations atomically before inference, including failed attempts.
-const CLAIM = `INSERT INTO web_app_generations
-  (owner_subject, generation_id, prompt_sha256, status)
-  SELECT ?1, ?2, ?3, 'generating' WHERE NOT EXISTS (
+export function webGenerationQuotaPredicate(userOffset, globalOffset) {
+  return `NOT EXISTS (
     SELECT 1 FROM web_app_generations WHERE owner_subject = ?1 AND created_at >= unixepoch() - 86400
-    LIMIT 1 OFFSET ?4
+    LIMIT 1 OFFSET ?${userOffset}
   ) AND NOT EXISTS (
     SELECT 1 FROM web_app_generations WHERE created_at >= unixepoch() - 86400
-    LIMIT 1 OFFSET ?5
-  )
+    LIMIT 1 OFFSET ?${globalOffset}
+  )`;
+}
+
+const CLAIM = `INSERT INTO web_app_generations
+  (owner_subject, generation_id, prompt_sha256, status)
+  SELECT ?1, ?2, ?3, 'generating' WHERE ${webGenerationQuotaPredicate(4, 5)}
   ON CONFLICT(owner_subject, generation_id) DO NOTHING
   RETURNING generation_id`;
 // Admin privileges require an exact match against a trusted *server-side*
 // Cloudflare Access subject. Never infer admin role from browser headers or a
 // URL and never turn off the global free-tier budget gate.
-function generationLimits(ownerSubject, adminSubject) {
+export function generationLimits(ownerSubject, adminSubject) {
   const admin = typeof adminSubject === 'string' &&
     adminSubject.length > 0 && adminSubject.length <= 256 &&
     adminSubject === ownerSubject;
@@ -149,7 +164,7 @@ function cleanGenerationPrompt(value) {
   return text;
 }
 
-function parseResponse(output) {
+export function parseResponse(output) {
   if (typeof output !== 'string') return null;
   const fenced = /^```(?:json)?\s*\n([\s\S]+)\n```$/i.exec(output);
   try { return JSON.parse(fenced ? fenced[1] : output); } catch (_) { return null; }
@@ -159,7 +174,7 @@ export function parseGeneratedWebApplication(output) {
   return normalizeSource(parseResponse(output));
 }
 
-function normalizeSource(parsed) {
+export function normalizeSource(parsed) {
 
   const title = cleanText(parsed?.title, 100);
   if (!title || !Array.isArray(parsed.requirements) || parsed.requirements.length < 1 ||
@@ -180,15 +195,18 @@ function normalizeSource(parsed) {
   }
   if (!paths.has('index.html')) return null;
   files.sort((a, b) => a.path < b.path ? -1 : a.path === b.path ? 0 : 1);
-  return { title, requirements, files };
+  if (parsed.runtime === undefined) return { title, requirements, files };
+  const runtime = normalizeWebApplicationRuntime(parsed.runtime);
+  return runtime && !paths.has('aivexus-runtime.json') ? { title, requirements, files, runtime } : null;
 }
 
-function receipt(generationId, status, saved) {
+export function receipt(generationId, status, saved) {
   if (status !== 'generated') return { ok: true, generationId, status };
   const { source, sourceSha256, provenance } = JSON.parse(saved);
   return {
     ok: true, generationId, status, sourceSha256, provenance,
     title: source.title, requirements: source.requirements,
+    hasRecords: Boolean(source.runtime?.collections.length),
     paths: source.files.map(file => file.path),
   };
 }
@@ -242,18 +260,21 @@ export async function generateWebApplication({ request, ownerSubject, adminSubje
     return receipt(generationId, winner.status, winner.resultJson);
   }
 
-  let resultJson = null;
   const inference = await infer([
-    { role: 'system', content: INSTRUCTION },
+    { role: 'system', content: INSTRUCTION + '\n' + RECORD_INSTRUCTION },
     { role: 'user', content: brief },
   ], isManual ? builderRouteId : null).catch(() => ({ ok: false }));
   const reply = inference.ok ? parseResponse(inference.text) : null;
-  const source = normalizeSource(reply);
+  return saveWebApplicationCandidate({ db, ownerSubject, generationId, inference,
+    source: normalizeSource(reply), checks: validateWebApplicationChecks(reply?.checks) });
+}
+
+export async function saveWebApplicationCandidate({ db, ownerSubject, generationId, inference, source, checks }) {
+  let resultJson = null;
   if (source) {
     const { model, reportedModel, provider, routeId, tokensGenerated } = inference;
     const provenance = { model, reportedModel, provider, routeId, tokensGenerated };
     const sourceSha256 = await sha256Text(JSON.stringify(source));
-    const checks = validateWebApplicationChecks(reply?.checks);
     const serialized = JSON.stringify({ source, sourceSha256, provenance, checks });
     if (encoder.encode(serialized).byteLength <= 65536) resultJson = serialized;
   }

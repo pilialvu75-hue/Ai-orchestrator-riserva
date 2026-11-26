@@ -1,4 +1,5 @@
 import { encodeRunnerBase64 } from './web_application_runner_packet.mjs';
+import { addWebApplicationDataBridge } from './web_application_preview_bridge.mjs';
 
 const encoder = new TextEncoder();
 const SYNTHETIC = 'https://aivexus-preview.invalid';
@@ -47,7 +48,7 @@ export function previewWebApplication(source) {
       element.removeAttribute('target');
       element.removeAttribute('ping');
     } });
-  return rewriter.transform(new Response(html, { headers: {
+  return rewriter.transform(new Response(source.runtime ? addWebApplicationDataBridge(html) : html, { headers: {
     'Content-Type': 'text/html; charset=utf-8',
     'Content-Security-Policy': POLICY,
     'Cache-Control': 'no-store',

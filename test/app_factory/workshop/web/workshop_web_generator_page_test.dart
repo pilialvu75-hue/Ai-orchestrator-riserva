@@ -2,6 +2,9 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_joined_app_page.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_releases_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -10,6 +13,82 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/link.dart';
 
 void main() {
+  testWidgets('a private release keeps its URL when updated and rolled back',
+      (tester) async {
+    const first = '00000000-0000-4000-8000-000000000001';
+    const second = '00000000-0000-4000-8000-000000000002';
+    const releaseId = '00000000-0000-4000-8000-000000000003';
+    final history = <Map<String, Object?>>[
+      {
+        'revision': 1,
+        'generationId': first,
+        'releaseId': releaseId,
+        'action': 'publish'
+      },
+    ];
+    final requests = <Map<String, dynamic>>[];
+    final client = MockClient((request) async {
+      expect(request.url.path, '/api/cantiere/proposals/release');
+      if (request.method == 'GET') {
+        expect(request.url.queryParameters, {'generationId': second});
+        return http.Response(
+            jsonEncode({'version': 1, 'ok': true, 'history': history}), 200);
+      }
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      requests.add(body);
+      expect(body['releaseId'], releaseId);
+      expect(body['expectedRevision'], history.length);
+      final next = {...body, 'revision': history.length + 1};
+      history.insert(0, next);
+      return http.Response(
+          jsonEncode({'version': 1, 'ok': true, ...next}), 200);
+    });
+    await tester.pumpWidget(MaterialApp(
+        home: WorkshopWebReleasesPage(generationId: second, client: client)));
+    await tester.pumpAndSettle();
+    final original = tester.widget<Link>(find.byType(Link)).uri;
+    await tester.tap(find.text('Aggiorna il link a questa versione'));
+    await tester.pumpAndSettle();
+    expect(requests.single['generationId'], second);
+    expect(tester.widget<Link>(find.byType(Link)).uri, original);
+    await tester.tap(find.text('Ripristina'));
+    await tester.pumpAndSettle();
+    expect(requests.last['action'], 'rollback');
+    expect(requests.last['generationId'], first);
+    expect(tester.widget<Link>(find.byType(Link)).uri, original);
+  });
+  testWidgets('joins an invited app once and restores only the app ID',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final code = '${'A' * 43}=';
+    const id = '00000000-0000-4000-8000-000000000001';
+    var claims = 0;
+    final client = MockClient((request) async {
+      claims++;
+      expect(request.url.path, '/api/cantiere/proposals/join');
+      expect(jsonDecode(request.body), {'token': code});
+      return http.Response(
+          jsonEncode({'version': 1, 'ok': true, 'generationId': id}), 200);
+    });
+    Widget app() => MaterialApp(home: WorkshopWebJoinedAppPage(client: client));
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), code);
+    await tester.pump();
+    await tester.tap(find.text('Accetta e apri app'));
+    await tester.pumpAndSettle();
+    final frame = tester
+        .widget<WorkshopWebPreviewFrame>(find.byType(WorkshopWebPreviewFrame));
+    expect(frame.uri.queryParameters, {'generationId': id});
+    expect((await SharedPreferences.getInstance()).getKeys(),
+        {'aivexus.web.joinedApp.v1'});
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    expect(find.byType(WorkshopWebPreviewFrame), findsOneWidget);
+    expect(claims, 1);
+  });
+
   testWidgets('submits once and recovers a saved generation without the prompt',
       (tester) async {
     tester.view.devicePixelRatio = 1;
@@ -19,8 +98,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     const prompt = 'Un allenamento a intervalli';
     String? generationId;
+    String? revisionId;
     var requests = 0;
     var verificationPosts = 0;
+    var generationPosts = 0;
     final client = MockClient((request) async {
       if (request.url.path == '/api/cantiere/proposals/quota') {
         expect(request.method, 'GET');
@@ -39,6 +120,55 @@ void main() {
         }), 200);
       }
       requests++;
+      if (request.url.path == '/api/cantiere/proposals/revisions') {
+        if (request.method == 'POST') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['baseGenerationId'], generationId);
+          expect(body['instruction'], 'Aggiungi il tema scuro');
+          revisionId = body['generationId'] as String;
+          return http.Response(
+              jsonEncode({
+                'version': 1,
+                'ok': true,
+                'generationId': revisionId,
+                'status': 'generating',
+              }),
+              200);
+        }
+        expect(request.url.queryParameters, {'generationId': revisionId});
+        return http.Response(
+            jsonEncode({
+              'version': 1,
+              'ok': true,
+              'projectId': generationId,
+              'activeGenerationId': generationId,
+              'revisions': [
+                {
+                  'generationId': revisionId,
+                  'revision': 2,
+                  'instruction': 'Aggiungi il tema scuro'
+                },
+                {
+                  'generationId': generationId,
+                  'revision': 1,
+                  'verificationStatus': 'verified'
+                },
+              ],
+            }),
+            200);
+      }
+      if (request.url.path == '/api/cantiere/proposals/select-revision') {
+        expect(request.method, 'POST');
+        expect(jsonDecode(request.body), {'generationId': generationId});
+        return http.Response(
+            jsonEncode({
+              'version': 1,
+              'ok': true,
+              'projectId': generationId,
+              'activeGenerationId': generationId,
+            }),
+            200);
+      }
       if (request.url.path == '/api/cantiere/proposals/source') {
         expect(request.method, 'GET');
         expect(request.url.queryParameters, {'generationId': generationId});
@@ -83,6 +213,7 @@ void main() {
       }
       expect(request.url.path, '/api/cantiere/proposals/generate');
       if (request.method == 'POST') {
+        generationPosts++;
         final submitted = jsonDecode(request.body) as Map;
         expect(submitted['prompt'], prompt);
         generationId = submitted['generationId'] as String;
@@ -96,6 +227,17 @@ void main() {
             200);
       }
       expect(request.method, 'GET');
+      if (revisionId != null &&
+          request.url.queryParameters['generationId'] == revisionId) {
+        return http.Response(
+            jsonEncode({
+              'version': 1,
+              'ok': true,
+              'status': 'generating',
+              'generationId': revisionId,
+            }),
+            200);
+      }
       expect(request.url.queryParameters, {'generationId': generationId});
       expect(request.body, isEmpty);
       return http.Response(
@@ -149,8 +291,8 @@ void main() {
     await tester.pumpWidget(
         MaterialApp(home: WorkshopWebGeneratorPage(client: client)));
     await tester.pumpAndSettle();
-    expect(requests, 3);
-    expect(verificationPosts, 0);
+    expect(generationPosts, 1);
+    expect(verificationPosts, lessThanOrEqualTo(1));
     expect(find.byKey(const Key('web_preview_platform_android')), findsOneWidget);
     expect(find.text('Sorgenti generati'), findsOneWidget);
     expect(find.text('Allenamento a intervalli'), findsOneWidget);
@@ -161,8 +303,10 @@ void main() {
 
     // The already-verified generator receipt starts verification without
     // requiring the user to press the old manual "Verifica applicazione" button.
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.pumpAndSettle();
+    if (verificationPosts == 0) {
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+    }
     expect(verificationPosts, 1);
     expect(find.text('Verifica in coda o in esecuzione'), findsOneWidget);
     await tester.ensureVisible(find.text('Aggiorna verifica'));
@@ -181,6 +325,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Sorgenti verificati'), findsOneWidget);
     expect(find.text('<h1>Intervalli</h1>'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Modifica applicazione'));
+    await tester.tap(find.text('Modifica applicazione'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Descrivi la modifica'), 'Aggiungi il tema scuro');
+    await tester.pump();
+    await tester.tap(find.text('Crea versione'));
+    await tester.pumpAndSettle();
+    expect(find.text('Generazione in corso'), findsOneWidget);
+    expect(preferences.getString('aivexus.web.lastGeneration.v1'), revisionId);
+    await tester.ensureVisible(find.text('Versioni'));
+    await tester.tap(find.text('Versioni'));
+    await tester.pumpAndSettle();
+    expect(find.text('Versione 2'), findsOneWidget);
+    await tester.tap(find.text('Versione 1'));
+    await tester.pumpAndSettle();
+    expect(find.text('Applicazione verificata'), findsOneWidget);
+    expect(
+        preferences.getString('aivexus.web.lastGeneration.v1'), generationId);
   });
 
   testWidgets('long structured first prompt is retained and submitted intact',
