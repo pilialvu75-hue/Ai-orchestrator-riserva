@@ -154,20 +154,22 @@ void main() {
         body: StatefulBuilder(builder: (context, setState) {
           refresh = setState;
           return Scaffold(
-            body: const SizedBox.expand(),
-            bottomNavigationBar: Column(
-              mainAxisSize: MainAxisSize.min,
+            appBar: AppBar(title: const Text('HYBRID')),
+            body: Column(
               children: [
                 InlineRuntimeNotice(message: message),
-                const TextField(key: composer),
+                const Expanded(child: SizedBox.expand()),
               ],
             ),
+            bottomNavigationBar: const TextField(key: composer),
           );
         }),
       ),
     ));
     final notice = find.byKey(const Key('inline-runtime-notice'));
     expect(notice, findsOneWidget);
+    expect(tester.getTopLeft(notice).dy, tester.getBottomLeft(find.byType(AppBar)).dy);
+    final composerPosition = tester.getRect(find.byKey(composer));
     expect(find.byType(SnackBar), findsNothing);
     expect(tester.getBottomLeft(notice).dy,
         lessThanOrEqualTo(tester.getTopLeft(find.byKey(composer)).dy));
@@ -177,6 +179,7 @@ void main() {
     await tester.tap(find.byIcon(Icons.close));
     await tester.pump();
     expect(notice, findsNothing);
+    expect(tester.getRect(find.byKey(composer)), composerPosition);
     refresh(() {});
     await tester.pump();
     expect(notice, findsNothing);
