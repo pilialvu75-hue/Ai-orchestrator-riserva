@@ -2644,8 +2644,15 @@ class _ChatBodyState
                     16,
                   ),
                 ),
+                onSelected: (value) {
+                  if (value == 1) _debugLabController.openFromMetricsMenu();
+                },
                 itemBuilder:
                     (context) => [
+                  const PopupMenuItem<int>(
+                    value: 1,
+                    child: Text('Debug Lab'),
+                  ),
                   PopupMenuItem(
                     enabled: false,
                     child:

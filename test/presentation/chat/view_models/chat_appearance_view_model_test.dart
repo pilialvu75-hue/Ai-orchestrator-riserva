@@ -3,6 +3,25 @@ import 'package:ai_orchestrator/presentation/chat/view_models/chat_appearance_vi
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('metrics menu opens Debug Lab independently of secret gestures', () {
+    final controller = DebugLabController.instance;
+    controller.close();
+    addTearDown(controller.close);
+    var notifications = 0;
+    void listener() => notifications++;
+    controller.addListener(listener);
+    addTearDown(() => controller.removeListener(listener));
+
+    controller.openFromMetricsMenu();
+    expect(controller.isVisible, isTrue);
+    expect(notifications, 1);
+    controller.openFromMetricsMenu();
+    expect(notifications, 1);
+    controller.close();
+    expect(controller.isVisible, isFalse);
+    expect(notifications, 2);
+  });
+
   test('panel close clears legacy appearance Debug Lab visibility', () {
     final controller = DebugLabController.instance;
     controller.close();

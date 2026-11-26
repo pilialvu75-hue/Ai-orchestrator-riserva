@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:io';
 
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
@@ -14,6 +16,8 @@ import 'package:ai_orchestrator/features/chat/presentation/debug/debug_lab_contr
 import 'package:ai_orchestrator/features/chat/presentation/debug/local_benchmark_score_store.dart';
 import 'package:ai_orchestrator/features/chat/presentation/debug/local_model_benchmark.dart';
 import 'package:ai_orchestrator/injection_container.dart' as di;
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -2698,6 +2702,37 @@ class _DebugOverlayState
     );
   }
 
+  Future<void> _exportFullPersistedLog(BuildContext dialogContext) async {
+    try {
+      // Read again at export time so events added while the dialog is open
+      // are included. Never apply the quick-copy 200-line limit here.
+      final log = await RuntimeEventLog.instance.readPersistedLog();
+      final bytes = Uint8List.fromList(utf8.encode(log));
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Esporta log diagnostico completo',
+        fileName: 'aivexus-debug-${DateTime.now().millisecondsSinceEpoch}.txt',
+        type: FileType.custom,
+        allowedExtensions: const ['txt'],
+        bytes: bytes,
+      );
+      if (path == null) return;
+      // Desktop file_picker returns a path; Android/iOS write supplied bytes.
+      if (!kIsWeb && defaultTargetPlatform != TargetPlatform.android &&
+          defaultTargetPlatform != TargetPlatform.iOS) {
+        await File(path).writeAsBytes(bytes, flush: true);
+      }
+      if (!dialogContext.mounted) return;
+      ScaffoldMessenger.of(dialogContext).showSnackBar(
+        const SnackBar(content: Text('Log completo esportato.')),
+      );
+    } catch (_) {
+      if (!dialogContext.mounted) return;
+      ScaffoldMessenger.of(dialogContext).showSnackBar(
+        const SnackBar(content: Text('Esportazione non riuscita. Il log originale è conservato.')),
+      );
+    }
+  }
+
   Future<void> _clearPersistedLog(
     BuildContext dialogContext,
   ) async {
@@ -2807,6 +2842,10 @@ class _DebugOverlayState
                   const Text(
                 'Azzera log',
               ),
+            ),
+            TextButton(
+              onPressed: () => _exportFullPersistedLog(dialogContext),
+              child: const Text('Esporta log completo (.txt)'),
             ),
             FilledButton(
               onPressed: () =>
