@@ -51,11 +51,10 @@ class RuntimeEventEntry {
 /// The in-memory buffer is capped at [maxEntries] to avoid unbounded
 /// memory growth. When the cap is reached the oldest entry is discarded.
 ///
-/// Every entry is also appended, synchronously and with an immediate
-/// flush, to a persistent on-disk file via [RuntimeCrashLogSink]. This
-/// is what lets a crash investigation see the last events even when a
-/// native crash kills the process before any Dart exception handler can
-/// run — the in-memory buffer alone does not survive that, the file does.
+/// Entries also reach [RuntimeCrashLogSink]. Critical/unknown markers are
+/// synchronously flushed before broadcast; routine nonterminal stream
+/// progress alone is batched. A native crash can lose the last pending
+/// progress burst, but not already flushed markers.
 class RuntimeEventLog {
   RuntimeEventLog._();
 
@@ -111,10 +110,17 @@ class RuntimeEventLog {
     if (_entries.length >= maxEntries) _entries.removeAt(0);
     _entries.add(entry);
 
-    // Persisted before the broadcast below: if a listener reacting to
-    // this event were to trigger a native call that crashes the
-    // process, the line must already be safely on disk.
-    RuntimeCrashLogSink.instance.append(entry.toString());
+    // Fail closed: only the known nonterminal chunk markers with both
+    // flags explicitly false are eligible. All unknown/error/terminal
+    // events flush the preceding queue before broadcasting.
+    final routineProgress =
+        (tag == 'TOKEN_STREAM' || tag == 'FINAL_RESPONSE') &&
+        _ordinaryChunkFlags.hasMatch(safeMessage) &&
+        !_unsafeChunkFlags.hasMatch(safeMessage);
+    RuntimeCrashLogSink.instance.append(
+      entry.toString(),
+      routineProgress: routineProgress,
+    );
 
     if (!_controller.isClosed) {
       _controller.add(entry);
@@ -147,6 +153,9 @@ class RuntimeEventLog {
 
   // ── Private helpers ──────────────────────────────────────────────────────────
 
+  static final _ordinaryChunkFlags =
+      RegExp(r'\bisFinal=false\s+isError=false(?:\s|$)');
+  static final _unsafeChunkFlags = RegExp(r'\b(?:isFinal|isError)=true\b');
   static final _tagRegExp = RegExp(r'^\[([A-Z0-9_]+)\]');
   static final _legacyQuotedQueryRegExp = RegExp(r'\bquery\s*=\s*"');
 

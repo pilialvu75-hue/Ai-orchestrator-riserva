@@ -76,6 +76,28 @@ void main() {
     expect(file.readAsStringSync(), contains('case=error'));
   });
 
+  test('timer flushes progress even without a later event', () async {
+    log.emit('[TOKEN_STREAM] case=timer isFinal=false isError=false');
+    expect(file.readAsStringSync(), isNot(contains('case=timer')));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(file.readAsStringSync(), contains('case=timer'));
+  });
+
+  test('count bound flushes sustained progress synchronously', () {
+    for (var i = 0; i < 64; i++) {
+      log.emit('[TOKEN_STREAM] case=bound chunk=$i isFinal=false isError=false');
+    }
+    expect(file.readAsStringSync(), contains('chunk=63'));
+  });
+
+  test('byte bound flushes large progress and unknown flags stay immediate', () {
+    final payload = List.filled(24000, 'x').join();
+    log.emit('[TOKEN_STREAM] case=large isFinal=false isError=false $payload');
+    expect(file.readAsStringSync(), contains('case=large'));
+    log.emit('[TOKEN_STREAM] case=unknown');
+    expect(file.readAsStringSync(), contains('case=unknown'));
+  });
+
   test('explicit reset discards pending progress without resurrecting it', () async {
     log.emit('[TOKEN_STREAM] case=stale isFinal=false isError=false');
     await log.clearPersistedLog();
