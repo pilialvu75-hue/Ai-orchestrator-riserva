@@ -143,4 +143,49 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Previous error'), findsNothing);
   });
+
+  testWidgets('inline runtime error never covers desktop composer and expires',
+      (tester) async {
+    const composer = Key('composer');
+    String? message = 'Errore di inferenza';
+    late StateSetter refresh;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: StatefulBuilder(builder: (context, setState) {
+          refresh = setState;
+          return Scaffold(
+            body: const SizedBox.expand(),
+            bottomNavigationBar: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InlineRuntimeNotice(message: message),
+                const TextField(key: composer),
+              ],
+            ),
+          );
+        }),
+      ),
+    ));
+    final notice = find.byKey(const Key('inline-runtime-notice'));
+    expect(notice, findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
+    expect(tester.getBottomLeft(notice).dy,
+        lessThanOrEqualTo(tester.getTopLeft(find.byKey(composer)).dy));
+    await tester.tap(find.byKey(composer));
+    await tester.enterText(find.byKey(composer), 'Testo ancora accessibile');
+    expect(find.text('Testo ancora accessibile'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pump();
+    expect(notice, findsNothing);
+    refresh(() {});
+    await tester.pump();
+    expect(notice, findsNothing);
+    refresh(() => message = null);
+    await tester.pump();
+    refresh(() => message = 'Errore di inferenza');
+    await tester.pump();
+    expect(notice, findsOneWidget);
+    await tester.pump(const Duration(seconds: 7));
+    expect(notice, findsNothing);
+  });
 }
