@@ -55,3 +55,104 @@ class RuntimeNoticePresenter {
     _active = null;
   }
 }
+
+
+/// In-flow runtime feedback: never paints over the chat input or queues overlays.
+class InlineRuntimeNotice extends StatefulWidget {
+  const InlineRuntimeNotice({
+    super.key,
+    required this.message,
+    this.settingsLabel,
+    this.onSettings,
+  });
+
+  final String? message;
+  final String? settingsLabel;
+  final VoidCallback? onSettings;
+
+  @override
+  State<InlineRuntimeNotice> createState() => _InlineRuntimeNoticeState();
+}
+
+class _InlineRuntimeNoticeState extends State<InlineRuntimeNotice> {
+  Timer? _timer;
+  String? _message;
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant InlineRuntimeNotice oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync();
+  }
+
+  void _sync() {
+    final trimmed = widget.message?.trim();
+    final next = trimmed == null || trimmed.isEmpty ? null : trimmed;
+    if (next == _message) return;
+    _timer?.cancel();
+    _message = next;
+    _visible = next != null;
+    if (_visible) {
+      _timer = Timer(const Duration(seconds: 6), _dismiss);
+    }
+  }
+
+  void _dismiss() {
+    _timer?.cancel();
+    if (mounted && _visible) setState(() => _visible = false);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_visible) return const SizedBox.shrink();
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      key: const Key('inline-runtime-notice'),
+      color: colors.errorContainer,
+      child: Row(
+        children: [
+          const SizedBox(width: 8),
+          Expanded(
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                _message!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.onErrorContainer),
+              ),
+            ),
+          ),
+          if (widget.onSettings != null)
+            IconButton(
+              tooltip: widget.settingsLabel,
+              color: colors.onErrorContainer,
+              onPressed: () {
+                _dismiss();
+                widget.onSettings?.call();
+              },
+              icon: const Icon(Icons.settings),
+            ),
+          IconButton(
+            tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+            color: colors.onErrorContainer,
+            onPressed: _dismiss,
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
+    );
+  }
+}
