@@ -14,7 +14,8 @@ const INSTRUCTION = `Generate an original, self-contained browser application ma
 Return a single JSON object with title, requirements (an array of user-visible behavior descriptions),
 files (an array of objects with path and content), and checks (up to 16 browser actions).
 Each check contains action and selector, and value for text or fill. Use click to activate controls,
-fill to enter text, and text to assert visible text. Include an assertion that verifies a behavior
+fill to enter text, and text to assert an exact match for the element’s trimmed visible text.
+Select a dedicated element for the assertion when its parent includes other text. Include an assertion that verifies a behavior
 requested by the user after interacting with it. The entry point is index.html.
 Choose the other file names and number of files based on the brief. Use lowercase portable paths,
 local dependencies only, no package installation, secrets or external network requests.

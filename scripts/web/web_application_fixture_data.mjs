@@ -1,6 +1,6 @@
-import { newWebApplicationRecordId, prependWebApplicationBootstrap } from './web_application_preview_bridge.mjs';
+import { WEB_RECORD_ID_SOURCE, prependWebApplicationBootstrap } from './web_application_preview_bridge.mjs';
 
-function installFixtureData(collectionNames, integrations, newRecordId) {
+const FIXTURE_DATA_SOURCE = String.raw`function installFixtureData(collectionNames, integrations, newRecordId) {
   const collections = new Map(collectionNames.map(name => [name, new Map()]));
   Object.defineProperty(window, 'aivexusData', { value: Object.freeze({
     newRecordId,
@@ -31,11 +31,11 @@ function installFixtureData(collectionNames, integrations, newRecordId) {
       return { version: 1, ok: true, record: structuredClone(record) };
     },
   }) });
-}
+}`;
 
 export function addFixtureWebApplicationData(html, runtime) {
   if (!runtime) return html;
   const names = runtime.collections.map(collection => collection.name);
   return prependWebApplicationBootstrap(html,
-    `(${installFixtureData.toString()})(${JSON.stringify(names)},${JSON.stringify(runtime.integrations ?? [])},${newWebApplicationRecordId.toString()})`);
+    `(${FIXTURE_DATA_SOURCE})(${JSON.stringify(names)},${JSON.stringify(runtime.integrations ?? [])},${WEB_RECORD_ID_SOURCE})`);
 }

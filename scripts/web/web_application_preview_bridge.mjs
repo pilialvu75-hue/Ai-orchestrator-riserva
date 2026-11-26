@@ -1,15 +1,16 @@
 const CHANNEL = 'aivexus-data:v1';
 
-export function newWebApplicationRecordId() {
+// Browser scripts must remain independent of the Pages bundler's runtime helpers.
+export const WEB_RECORD_ID_SOURCE = String.raw`function newWebApplicationRecordId() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6] & 15) | 64;
   bytes[8] = (bytes[8] & 63) | 128;
   const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
   return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' +
     hex.slice(16, 20) + '-' + hex.slice(20);
-}
+}`;
 
-function installFrameData(channelName, newRecordId) {
+const FRAME_DATA_SOURCE = String.raw`function installFrameData(channelName, newRecordId) {
   const pair = new MessageChannel();
   const requests = new Map();
   let nextId = 0;
@@ -35,9 +36,9 @@ function installFrameData(channelName, newRecordId) {
     integration: integration => request('integration', { integration }),
   }) });
   parent.postMessage(channelName, '*', [pair.port2]);
-}
+}`;
 
-function installPreviewHost(generationId, channelName) {
+const PREVIEW_HOST_SOURCE = String.raw`function installPreviewHost(generationId, channelName) {
   const frame = document.createElement('iframe');
   frame.title = 'Applicazione generata';
   frame.setAttribute('sandbox', 'allow-scripts');
@@ -75,7 +76,7 @@ function installPreviewHost(generationId, channelName) {
   window.addEventListener('message', accept);
   frame.src = '/api/cantiere/proposals/preview?generationId=' + encodeURIComponent(generationId);
   document.body.append(frame);
-}
+}`;
 
 export function prependWebApplicationBootstrap(html, bootstrap) {
   return '<!doctype html><script>' + bootstrap + '</script>' + html.replace(/^\s*<!doctype html\s*>/i, '');
@@ -83,12 +84,12 @@ export function prependWebApplicationBootstrap(html, bootstrap) {
 
 export function addWebApplicationDataBridge(html) {
   return prependWebApplicationBootstrap(html,
-    `(${installFrameData.toString()})(${JSON.stringify(CHANNEL)},${newWebApplicationRecordId.toString()})`);
+    `(${FRAME_DATA_SOURCE})(${JSON.stringify(CHANNEL)},${WEB_RECORD_ID_SOURCE})`);
 }
 
 export function renderWebApplicationPreviewHost(generationId) {
   const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(18))));
-  const script = `(${installPreviewHost.toString()})(${JSON.stringify(generationId)},${JSON.stringify(CHANNEL)})`;
+  const script = `(${PREVIEW_HOST_SOURCE})(${JSON.stringify(generationId)},${JSON.stringify(CHANNEL)})`;
   return new Response(`<!doctype html><meta charset="utf-8"><title>Anteprima AIVEXUS</title>
     <style nonce="${nonce}">html,body,iframe{width:100%;height:100%;margin:0;border:0}iframe{display:block}</style>
     <body><script nonce="${nonce}">${script}</script>`, { headers: {
