@@ -21,18 +21,18 @@ function installFrameData(channelName, newRecordId) {
     if (data.ok) pending.resolve(data.result);
     else pending.reject(new Error(data.error || 'records_unavailable'));
   };
+  const request = (operation, payload) => new Promise((resolve, reject) => {
+    if (requests.size >= 4) { reject(new Error('records_busy')); return; }
+    const id = ++nextId;
+    const timeout = setTimeout(() => { requests.delete(id); reject(new Error('records_timeout')); }, 12000);
+    requests.set(id, { resolve, reject, timeout });
+    try { pair.port1.postMessage({ id, operation, payload }); }
+    catch (_) { clearTimeout(timeout); requests.delete(id); reject(new Error('invalid_request')); }
+  });
   Object.defineProperty(window, 'aivexusData', { value: Object.freeze({
     newRecordId,
-    request(payload) {
-      return new Promise((resolve, reject) => {
-        if (requests.size >= 4) { reject(new Error('records_busy')); return; }
-        const id = ++nextId;
-        const timeout = setTimeout(() => { requests.delete(id); reject(new Error('records_timeout')); }, 12000);
-        requests.set(id, { resolve, reject, timeout });
-        try { pair.port1.postMessage({ id, payload }); }
-        catch (_) { clearTimeout(timeout); requests.delete(id); reject(new Error('invalid_request')); }
-      });
-    },
+    request: payload => request('records', payload),
+    integration: integration => request('integration', { integration }),
   }) });
   parent.postMessage(channelName, '*', [pair.port2]);
 }
@@ -51,16 +51,17 @@ function installPreviewHost(generationId, channelName) {
     window.removeEventListener('message', accept);
     const port = event.ports[0];
     port.onmessage = async ({ data }) => {
-      const { id, payload } = data ?? {};
+      const { id, operation, payload } = data ?? {};
       if (!Number.isSafeInteger(id)) return;
       const reject = error => port.postMessage({ id, ok: false, error });
       if (pending >= 4) { reject('records_busy'); return; }
+      if (operation !== 'records' && operation !== 'integration') { reject('invalid_request'); return; }
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) { reject('invalid_request'); return; }
       pending++;
       try {
         const body = JSON.stringify({ ...payload, generationId });
         if (body.length > 24576) { reject('invalid_request'); return; }
-        const response = await fetch('/api/cantiere/proposals/records', {
+        const response = await fetch('/api/cantiere/proposals/' + operation, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
           credentials: 'same-origin', redirect: 'manual', signal: AbortSignal.timeout(10000),
         });

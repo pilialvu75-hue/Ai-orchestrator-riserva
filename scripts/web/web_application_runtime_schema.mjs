@@ -19,7 +19,10 @@ export function normalizeWebApplicationRuntime(value) {
     collections.push({ name, fields: Object.fromEntries(entries) });
   }
   collections.sort((a, b) => a.name < b.name ? -1 : a.name === b.name ? 0 : 1);
-  return { kind: 'records', collections };
+  if (value.integrations === undefined) return { kind: 'records', collections };
+  if (!Array.isArray(value.integrations) || value.integrations.length !== 1 ||
+      value.integrations[0] !== 'github_repository') return null;
+  return { kind: 'records', collections, integrations: ['github_repository'] };
 }
 
 const validators = {

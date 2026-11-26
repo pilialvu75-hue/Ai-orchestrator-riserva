@@ -1,4 +1,5 @@
 import { readVerifiedWebApplicationSource } from './d1_web_application_verification.mjs';
+import { resolveWebApplicationAccess } from './d1_web_application_members.mjs';
 import { normalizeWebApplicationRecord } from './web_application_runtime_schema.mjs';
 import { WEB_RUNNER_TICKET as RECORD_ID } from './web_runner_envelope.mjs';
 
@@ -31,26 +32,25 @@ function toRecord(row) {
 export async function operateWebApplicationRecords({ db, ownerSubject, request }) {
   if (!validateRequest(request)) return fail('invalid_request');
   const { generationId, action, collection, recordId, version, data, after } = request;
-  const verified = await readVerifiedWebApplicationSource({ db, ownerSubject, generationId });
+  const access = await resolveWebApplicationAccess({ db, viewerSubject: ownerSubject, generationId });
+  if (!access.ok) return access;
+  const verified = await readVerifiedWebApplicationSource({ db, ownerSubject: access.projectOwner, generationId });
   if (!verified.ok) return verified;
   const schema = verified.source.runtime?.collections.find(entry => entry.name === collection);
   if (!schema) return fail('collection_not_found');
-  const project = await db.prepare(`SELECT COALESCE(project_id, generation_id) AS projectId
-    FROM web_app_generations WHERE owner_subject = ?1 AND generation_id = ?2`).bind(ownerSubject, generationId).first();
-  if (!project) return fail('generation_not_found');
-  const scope = [ownerSubject, project.projectId, collection];
+  const scope = [access.projectOwner, access.projectId, ownerSubject, collection];
 
   if (action === 'list') {
     const page = await db.prepare(`SELECT record_id AS recordId, record_version AS version, data_json AS dataJson
-      FROM web_app_records WHERE owner_subject = ?1 AND project_id = ?2 AND collection_name = ?3 AND record_id > ?4
-      ORDER BY record_id LIMIT ?5`).bind(...scope, after ?? '', RECORD_LIMIT + 1).all();
+      FROM web_app_records WHERE project_owner = ?1 AND project_id = ?2 AND user_subject = ?3 AND collection_name = ?4 AND record_id > ?5
+      ORDER BY record_id LIMIT ?6`).bind(...scope, after ?? '', RECORD_LIMIT + 1).all();
     if (!page?.success || !Array.isArray(page.results)) return fail('storage_unavailable');
     const records = page.results.slice(0, RECORD_LIMIT).map(toRecord);
     return { ok: true, records, nextRecordId: page.results.length > RECORD_LIMIT ? records.at(-1).recordId : null };
   }
   if (action === 'delete') {
-    const deleted = await db.prepare(`DELETE FROM web_app_records WHERE owner_subject = ?1 AND project_id = ?2
-      AND collection_name = ?3 AND record_id = ?4 AND record_version = ?5 RETURNING record_id AS recordId`)
+    const deleted = await db.prepare(`DELETE FROM web_app_records WHERE project_owner = ?1 AND project_id = ?2
+      AND user_subject = ?3 AND collection_name = ?4 AND record_id = ?5 AND record_version = ?6 RETURNING record_id AS recordId`)
       .bind(...scope, recordId, version).first();
     return deleted ? { ok: true, recordId, deleted: true } : fail('record_conflict');
   }
@@ -60,12 +60,12 @@ export async function operateWebApplicationRecords({ db, ownerSubject, request }
   const serialized = JSON.stringify(normalized);
   if (encoder.encode(serialized).byteLength > MAX_DATA_BYTES) return fail('invalid_record');
   const row = action === 'create'
-    ? await db.prepare(`INSERT INTO web_app_records (owner_subject, project_id, collection_name, record_id, record_version, data_json)
-        VALUES (?1, ?2, ?3, ?4, 1, ?5) ON CONFLICT(owner_subject, project_id, collection_name, record_id) DO NOTHING
+    ? await db.prepare(`INSERT INTO web_app_records (project_owner, project_id, user_subject, collection_name, record_id, record_version, data_json)
+        VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6) ON CONFLICT(project_owner, project_id, user_subject, collection_name, record_id) DO NOTHING
         RETURNING record_id AS recordId, record_version AS version, data_json AS dataJson`)
       .bind(...scope, recordId, serialized).first()
-    : await db.prepare(`UPDATE web_app_records SET data_json = ?6, record_version = record_version + 1, updated_at = unixepoch()
-        WHERE owner_subject = ?1 AND project_id = ?2 AND collection_name = ?3 AND record_id = ?4 AND record_version = ?5
+    : await db.prepare(`UPDATE web_app_records SET data_json = ?7, record_version = record_version + 1, updated_at = unixepoch()
+        WHERE project_owner = ?1 AND project_id = ?2 AND user_subject = ?3 AND collection_name = ?4 AND record_id = ?5 AND record_version = ?6
         RETURNING record_id AS recordId, record_version AS version, data_json AS dataJson`)
       .bind(...scope, recordId, version, serialized).first();
   return row ? { ok: true, record: toRecord(row) } : fail('record_conflict');

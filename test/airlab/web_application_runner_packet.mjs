@@ -13,6 +13,9 @@ import { onRequest as revisions } from '../../functions/api/cantiere/proposals/r
 import { onRequest as selectRevision } from '../../functions/api/cantiere/proposals/select-revision.js';
 import { onRequest as records } from '../../functions/api/cantiere/proposals/records.js';
 import { onRequest as view } from '../../functions/api/cantiere/proposals/view.js';
+import { onRequest as invite } from '../../functions/api/cantiere/proposals/invite.js';
+import { onRequest as joinApp } from '../../functions/api/cantiere/proposals/join.js';
+import { onRequest as integration } from '../../functions/api/cantiere/proposals/integration.js';
 import { runEncryptedWebApplicationJob } from '../../scripts/web/run_encrypted_web_application_job.mjs';
 import {
   decodeRunnerBase64, decodeWebAppJob, decodeWebAppResult, encodeRunnerBase64,
@@ -24,6 +27,27 @@ const generateRsa = () => crypto.subtle.generateKey({
 }, true, ['encrypt', 'decrypt']);
 const generateAuthorizationSecret = () => encodeRunnerBase64(crypto.getRandomValues(new Uint8Array(32)));
 const newAuthorizationKey = () => importWebAppAuthorizationKey(generateAuthorizationSecret());
+
+test('membership migration retains existing records in the owner partition', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const apply = name => db.exec(readFileSync(new URL('../../scripts/web/sql/' + name, import.meta.url), 'utf8'));
+    apply('006_web_app_generations.sql');
+    apply('009_web_app_revision_history.sql');
+    apply('010_web_app_records.sql');
+    db.prepare(`INSERT INTO web_app_generations(owner_subject,generation_id,prompt_sha256,status)
+      VALUES ('owner','project',?,'generating')`).run('0'.repeat(64));
+    db.exec(`INSERT INTO web_app_records(owner_subject,project_id,collection_name,record_id,record_version,data_json)
+      VALUES ('owner','project','expenses','record',2,'{"cents":570}')`);
+    apply('011_web_app_private_members.sql');
+    const migrated = db.prepare('SELECT * FROM web_app_records').get();
+    assert.equal(migrated.project_owner, 'owner');
+    assert.equal(migrated.user_subject, 'owner');
+    assert.equal(migrated.record_version, 2);
+    assert.equal(migrated.data_json, '{"cents":570}');
+    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+  } finally { db.close(); }
+});
 
 async function fixture({ now } = {}) {
   const authorizationSecret = generateAuthorizationSecret();
@@ -37,7 +61,8 @@ async function fixture({ now } = {}) {
       document.querySelector("#state").textContent = "Attivo";
     };` },
     { path: 'theme.css', content: 'output { color: rgb(0, 20, 30); }' },
-  ], runtime: { kind: 'records', collections: [{ name: 'expenses', fields: { label: 'text', cents: 'integer' } }] } };
+  ], runtime: { kind: 'records', collections: [{ name: 'expenses', fields: { label: 'text', cents: 'integer' } }],
+    integrations: ['github_repository'] } };
   const checks = [{ action: 'click', selector: '#toggle' }, { action: 'text', selector: '#state', value: 'Attivo' }];
   const resultPublicKeySpki = encodeRunnerBase64(new Uint8Array(await crypto.subtle.exportKey('spki', pages.publicKey)));
   const ticket = crypto.randomUUID();
@@ -115,7 +140,7 @@ async function temporaryD1(t) {
   }
   const sqlite = new DatabaseSync(':memory:');
   t.after(() => sqlite.close());
-  for (const migration of ['006_web_app_generations.sql', '007_web_app_verifications.sql', '009_web_app_revision_history.sql', '010_web_app_records.sql']) {
+  for (const migration of ['006_web_app_generations.sql', '007_web_app_verifications.sql', '009_web_app_revision_history.sql', '010_web_app_records.sql', '011_web_app_private_members.sql']) {
     sqlite.exec(readFileSync(new URL('../../scripts/web/sql/' + migration, import.meta.url), 'utf8'));
   }
   return { db: { prepare(sql) {
@@ -150,7 +175,7 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
     const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', accessKey.privateKey, Buffer.from(unsigned));
     return unsigned + '.' + Buffer.from(sig).toString('base64url');
   };
-  const [owner, stranger] = await Promise.all([signed('owner'), signed('stranger')]);
+  const [owner, stranger, outsider] = await Promise.all([signed('owner'), signed('stranger'), signed('outsider')]);
   const repo = { id: 1235011890 };
   const head = 'ab'.repeat(20);
   const storage = 'https://artifacts.blob.core.windows.net/test-fixture/';
@@ -179,6 +204,8 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
     AIVEXUS_WEB_BUILDER_JOB_PUBLIC_KEY: encodeRunnerBase64(new Uint8Array(await crypto.subtle.exportKey('spki', f.runner.publicKey))),
     AIVEXUS_WEB_BUILDER_RESULT_PUBLIC_KEY: f.encodeJob.resultPublicKeySpki,
     AIVEXUS_WEB_BUILDER_RESULT_PRIVATE_KEY: encodeRunnerBase64(new Uint8Array(await crypto.subtle.exportKey('pkcs8', f.pages.privateKey))),
+    AIVEXUS_WEB_APP_GITHUB_REPOSITORY: 'aivexus/public-fixture',
+    AIVEXUS_WEB_APP_GITHUB_METADATA_TOKEN: 'fixture-server-only-token',
   };
   const archives = new Map();
   let posts = 0;
@@ -186,12 +213,22 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   let complete = false;
   let failDispatch = false;
   let modelRevisions = 0;
+  let integrationRequests = 0;
+  let fixturePrivate = false;
   const localFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = localFetch; });
   globalThis.fetch = async (url, opts) => {
       if (String(url).startsWith('http://127.0.0.1:')) return localFetch(url, opts);
       const target = String(url);
       if (target === issuer + '/cdn-cgi/access/certs') return Response.json({ keys: [jwk] });
+      if (target === 'https://api.github.com/repos/aivexus/public-fixture') {
+        integrationRequests++;
+        assert.equal(opts.method, 'GET');
+        assert.equal(opts.redirect, 'manual');
+        assert.equal(opts.headers.Authorization, 'Bearer fixture-server-only-token');
+        return Response.json({ private: fixturePrivate, full_name: 'aivexus/public-fixture',
+          stargazers_count: 19, secret: opts.headers.Authorization });
+      }
       if (target.startsWith(storage)) {
         downloads++;
         assert.equal(opts.headers, undefined);
@@ -294,6 +331,36 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
   assert.equal(update.record.version, 2);
   assert.equal((await recordCall(owner, generationId, change)).status, 409);
   assert.equal((await recordCall(owner, generationId, { ...change, data: { label: 'Treno', cents: '570' } })).status, 400);
+  assert.equal((await call(invite, 'invite', owner, { generationId })).status, 404);
+  env.AIVEXUS_WEB_APP_MEMBERS_ENABLED = 'true';
+  assert.equal((await call(invite, 'invite', stranger, { generationId })).status, 403);
+  const createdInvite = await (await call(invite, 'invite', owner, { generationId })).json();
+  assert.equal(typeof createdInvite.token, 'string');
+  assert.equal(await platform.db.prepare('SELECT token_sha256 FROM web_app_invites WHERE token_sha256 = ?1').bind(createdInvite.token).first(), null);
+  assert.equal((await call(joinApp, 'join', owner, { token: createdInvite.token })).status, 404);
+  const accepted = await (await call(joinApp, 'join', stranger, { token: createdInvite.token })).json();
+  assert.equal(accepted.generationId, generationId);
+  assert.equal((await call(joinApp, 'join', outsider, { token: createdInvite.token })).status, 404);
+  assert.equal((await call(view, 'view', stranger, null, query)).status, 200);
+  assert.equal((await call(readSource, 'source', stranger, null, query)).status, 403);
+  assert.equal((await call(download, 'download', stranger, null, query)).status, 403);
+  assert.deepEqual((await (await recordCall(stranger, generationId, { action: 'list' })).json()).records, []);
+  const memberId = crypto.randomUUID();
+  assert.equal((await recordCall(stranger, generationId, { ...createRecord, recordId: memberId })).status, 200);
+  assert.equal((await recordCall(stranger, generationId, { ...change, version: 2 })).status, 409);
+  assert.equal((await recordCall(owner, generationId, { ...change, recordId: memberId })).status, 409);
+  await platform.reopen();
+  const memberRows = await (await recordCall(stranger, generationId, { action: 'list' })).json();
+  assert.deepEqual(memberRows.records, [{ recordId: memberId, version: 1, data: { label: 'Treno', cents: 420 } }]);
+  const connector = { generationId, integration: 'github_repository' };
+  assert.equal((await call(integration, 'integration', outsider, connector)).status, 404);
+  assert.equal((await call(integration, 'integration', stranger, { ...connector, repository: 'other/forbidden' })).status, 400);
+  assert.equal(integrationRequests, 0);
+  const publicData = await (await call(integration, 'integration', stranger, connector)).json();
+  assert.deepEqual(publicData, { version: 1, ok: true, repository: { fullName: 'aivexus/public-fixture', stars: 19 } });
+  fixturePrivate = true;
+  assert.equal((await call(integration, 'integration', owner, connector)).status, 503);
+  assert.equal(integrationRequests, 2);
 
   const generationIds = [generationId];
   for (const instruction of ['Aggiungi un tema', 'Cambia colore', 'Aumenta il contrasto']) {
