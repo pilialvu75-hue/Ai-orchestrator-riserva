@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { validateWebApplicationChecks } from './web_application_checks.mjs';
+import { normalizeWebApplicationRuntime } from './web_application_runtime_schema.mjs';
 
 const PATH = /^(?:[a-z0-9][a-z0-9_-]*\/){0,3}[a-z0-9][a-z0-9_-]*\.(?:html|css|js|mjs|json|txt|md)$/;
 const MAX_SOURCE_BYTES = 65536;
@@ -24,7 +25,9 @@ export function readVerificationInput(input) {
   }
   if (!assets.has('index.html')) return null;
 
-  return { assets, checks: plan };
+  const runtime = source.runtime === undefined ? null : normalizeWebApplicationRuntime(source.runtime);
+  if (source.runtime !== undefined && !runtime) return null;
+  return { assets, checks: plan, runtime };
 }
 
 // A trusted test plan stays fixed across repairs. Infrastructure failure and

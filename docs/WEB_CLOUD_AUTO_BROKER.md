@@ -223,6 +223,39 @@ incorporati nel documento. Gli import relativi all’interno di un modulo
 JavaScript, i percorsi verso altre pagine e le risorse esterne restano fuori
 dal percorso di anteprima. Lo ZIP conserva tutti i file verificati.
 
+## Modifiche e versioni
+
+La migrazione `009` associa le revisioni allo stesso progetto e conserva
+la versione scelta dal proprietario. Le generazioni esistenti restano radici
+di progetto valide. `POST /api/cantiere/proposals/revisions` riceve un nuovo
+`generationId`, la versione verificata `baseGenerationId` e `instruction`.
+L’operazione applica solo i file cambiati o rimossi che il modello dichiara,
+mantiene i controlli di base e può aggiungere nuovi controlli. La nuova
+versione usa il percorso di verifica e ZIP delle altre generazioni.
+
+`GET /api/cantiere/proposals/revisions?generationId=…` restituisce la
+cronologia dello stesso progetto. `POST /api/cantiere/proposals/select-revision`
+con `generationId` seleziona una versione già verificata senza sovrascrivere i
+file di alcuna versione. I controlli di proprietà valgono su cronologia,
+modifiche e ripristino. Lo storico conserva il testo delle modifiche.
+
+## Applicazioni con dati persistenti
+
+Una generazione può dichiarare un manifesto `runtime` con raccolte e campi
+tipizzati. Lo ZIP include il manifesto `aivexus-runtime.json`, i sorgenti e i
+dati statici del progetto. Le operazioni server sono disponibili nell’anteprima
+ospitata da AIVEXUS attraverso `window.aivexusData`. La pagina attendibile
+invia solo richieste al backend delle raccolte e fissa l’ID della generazione.
+L’iframe dell’app mantiene l’origine opaca e non riceve credenziali.
+
+`POST /api/cantiere/proposals/records` autentica il proprietario e accetta
+`list`, `create`, `update` e `delete` sulle raccolte della versione verificata.
+La migrazione `010` indicizza i dati per utente, progetto, raccolta e record.
+Le revisioni dello stesso progetto condividono i dati. Aggiornamento e
+cancellazione richiedono la versione del record per rilevare scritture
+concorrenti. I test del runner isolato usano dati temporanei. Il collaudo
+della persistenza usa D1.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does

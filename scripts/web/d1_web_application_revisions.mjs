@@ -43,7 +43,7 @@ function applyRevision(source, response) {
     files.set(path, content);
     changedPaths.add(path);
   }
-  const candidate = normalizeSource({ title: source.title, requirements,
+  const candidate = normalizeSource({ title: source.title, requirements, runtime: source.runtime,
     files: [...files].map(([path, content]) => ({ path, content })) });
   return candidate && JSON.stringify(candidate.files) !== JSON.stringify(source.files) ? candidate : null;
 }

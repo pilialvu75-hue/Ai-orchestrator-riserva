@@ -1,4 +1,5 @@
 import { validateWebApplicationChecks } from './web_application_checks.mjs';
+import { normalizeWebApplicationRuntime } from './web_application_runtime_schema.mjs';
 import { WEB_RUNNER_TICKET as GENERATION_ID } from './web_runner_envelope.mjs';
 export const MAX_WEB_APP_PROMPT_CHARACTERS = 8000;
 export const WEB_APP_USER_DAILY_LIMIT = 10;
@@ -18,6 +19,14 @@ requested by the user after interacting with it. The entry point is index.html.
 Choose the other file names and number of files based on the brief. Use lowercase portable paths,
 local dependencies only, no package installation, secrets or external network requests.
 Keep the application compact enough to return all source within the response limit.`;
+const RECORD_INSTRUCTION = `When the user needs server persistence, include a runtime object with kind "records" and
+collections, each with name and fields. Fields map lowercase names to text, integer, boolean, or date.
+The preview supplies window.aivexusData.request({ action, collection, recordId, version, data, after }).
+Actions are list, create, update and delete. A list returns records and nextRecordId. Each record has
+recordId, version and data. Create takes recordId (from window.aivexusData.newRecordId()) and data. Update needs
+recordId, the last version and the full data. Delete needs recordId and the last version. The request
+returns JSON or rejects with a safe error code. Use only the fields applicable to each action.
+Amounts of money should be stored as an integer number of cents. Omit runtime for an offline app.`;
 
 // Count reservations atomically before inference, including failed attempts.
 export function webGenerationQuotaPredicate(userOffset, globalOffset) {
@@ -184,7 +193,9 @@ export function normalizeSource(parsed) {
   }
   if (!paths.has('index.html')) return null;
   files.sort((a, b) => a.path < b.path ? -1 : a.path === b.path ? 0 : 1);
-  return { title, requirements, files };
+  if (parsed.runtime === undefined) return { title, requirements, files };
+  const runtime = normalizeWebApplicationRuntime(parsed.runtime);
+  return runtime && !paths.has('aivexus-runtime.json') ? { title, requirements, files, runtime } : null;
 }
 
 export function receipt(generationId, status, saved) {
@@ -247,7 +258,7 @@ export async function generateWebApplication({ request, ownerSubject, adminSubje
   }
 
   const inference = await infer([
-    { role: 'system', content: INSTRUCTION },
+    { role: 'system', content: INSTRUCTION + '\n' + RECORD_INSTRUCTION },
     { role: 'user', content: brief },
   ], isManual ? builderRouteId : null).catch(() => ({ ok: false }));
   const reply = inference.ok ? parseResponse(inference.text) : null;

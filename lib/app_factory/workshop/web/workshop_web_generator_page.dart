@@ -709,7 +709,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => Scaffold(
         appBar: AppBar(title: Text(title)),
-        body: WorkshopWebPreviewFrame(uri: _generationResource('preview', id)),
+        body: WorkshopWebPreviewFrame(uri: _generationResource('view', id)),
       ),
     ));
   }
@@ -1206,7 +1206,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
               : null,
           generationStatus: state == null ? null : tr(state),
           previewUri: id != null && verificationStatus == 'verified'
-              ? _generationResource('preview', id)
+              ? _generationResource('view', id)
               : null,
           onOpenPreview: id != null && verificationStatus == 'verified'
               ? () => _openPreview(id)
