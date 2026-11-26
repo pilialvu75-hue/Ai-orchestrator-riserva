@@ -2434,6 +2434,14 @@ class _ChatBodyState
         Widget chatMainContent =
             Column(
           children: [
+            InlineRuntimeNotice(
+              key: ValueKey('runtime-notice-${widget.chatNavigation.sessionId}'),
+              message: _runtimeMessageForState(state),
+              settingsLabel: context.l10n.t('settings'),
+              onSettings: state is ChatLoaded && state.suggestOpeningSettings
+                  ? widget.onSettings
+                  : null,
+            ),
             Expanded(
               child: Stack(
                 children: [
@@ -2912,7 +2920,8 @@ class _ChatBodyState
                       ),
                     ),
 
-          // Runtime feedback and the composer occupy separate layout rows.
+          // The runtime notice lives at the top of the chat body; keep the
+          // composer independent of notice visibility.
           bottomNavigationBar: AndroidKeyboardAwareComposer(
             enabled: Platform.isAndroid,
             child: Column(
@@ -2940,14 +2949,6 @@ class _ChatBodyState
                 ),
                 onSeek: (position) => unawaited(_audioPlayback.seek(position)),
               ),
-            InlineRuntimeNotice(
-              key: ValueKey('runtime-notice-${widget.chatNavigation.sessionId}'),
-              message: _runtimeMessageForState(state),
-              settingsLabel: context.l10n.t('settings'),
-              onSettings: state is ChatLoaded && state.suggestOpeningSettings
-                  ? widget.onSettings
-                  : null,
-            ),
             ChatInputBar(
               key: ValueKey(widget.chatNavigation.sessionId),
               onSend:
