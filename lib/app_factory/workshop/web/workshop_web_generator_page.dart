@@ -458,6 +458,134 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     await _refreshQuota();
   }
 
+  Future<void> _requestRevision(String baseId) async {
+    final instruction = await showDialog<String>(
+      context: context,
+      builder: (_) => const _RevisionInstructionDialog(),
+    );
+    if (!mounted || instruction == null) return;
+    await _run(() async {
+      final id = const Uuid().v4();
+      final result = await _revisionCall('revisions', {
+        'generationId': id,
+        'baseGenerationId': baseId,
+        'instruction': instruction,
+      });
+      if (result['generationId'] != id) {
+        throw const FormatException('Unexpected revised generation');
+      }
+      await _openGeneration(id);
+    });
+  }
+
+  Future<Map<String, dynamic>> _revisionCall(
+      String route, Map<String, String> payload) async {
+    final response = await _client
+        .post(
+          Uri.base.resolve('/api/cantiere/proposals/$route'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 95));
+    final result = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode != 200 ||
+        result is! Map<String, dynamic> ||
+        result['version'] != 1 ||
+        result['ok'] != true) {
+      throw const _GeneratorRequestException(
+          'Impossibile aggiornare la versione.');
+    }
+    return result;
+  }
+
+  Future<void> _openGeneration(String id) async {
+    final saved = await (await _preferences).setString(_storageKey, id);
+    if (!saved) {
+      throw const _GeneratorRequestException(
+          'Impossibile salvare la versione nel browser.');
+    }
+    if (!mounted) return;
+    setState(() {
+      _generationId = id;
+      _receipt = null;
+      _verification = null;
+      _pendingPrompt = null;
+    });
+    await _readStatus(id);
+  }
+
+  Future<Map<String, dynamic>> _loadHistory(String id) async {
+    final response = await _client
+        .get(_generationResource('revisions', id))
+        .timeout(const Duration(seconds: 15));
+    final result = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode != 200 ||
+        result is! Map<String, dynamic> ||
+        result['version'] != 1 ||
+        result['ok'] != true ||
+        result['revisions'] is! List) {
+      throw const FormatException('Invalid application version history');
+    }
+    return result;
+  }
+
+  Future<void> _showHistory(String id) async {
+    final history = _loadHistory(id);
+    final selection = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Versioni del progetto'),
+        children: [
+          FutureBuilder<Map<String, dynamic>>(
+            future: history,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const SimpleDialogOption(
+                    child: Text('Cronologia non disponibile.'));
+              }
+              final data = snapshot.data;
+              if (data == null) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final version in (data['revisions'] as List)
+                      .whereType<Map<String, dynamic>>())
+                    ListTile(
+                      title: Text('Versione ${version['revision']}'),
+                      subtitle: Text(version['instruction'] as String? ??
+                          'Generazione iniziale'),
+                      trailing: Icon(
+                          version['generationId'] == data['activeGenerationId']
+                              ? Icons.check_circle_outline
+                              : Icons.history_outlined),
+                      enabled: version['verificationStatus'] == 'verified',
+                      onTap: version['verificationStatus'] == 'verified'
+                          ? () => Navigator.pop(
+                              context, version['generationId'] as String)
+                          : null,
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+    if (!mounted || selection == null || !_idPattern.hasMatch(selection)) {
+      return;
+    }
+    await _run(() async {
+      final result =
+          await _revisionCall('select-revision', {'generationId': selection});
+      if (result['activeGenerationId'] != selection) {
+        throw const FormatException('Unexpected selected version');
+      }
+      await _openGeneration(selection);
+    });
+  }
+
   Future<void> _readStatus(String id) async {
     final result = await _call(id);
     if (!mounted) return;
@@ -926,6 +1054,10 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                         ),
                       if (verificationStatus == 'verified') ...[
                         OutlinedButton(
+                          onPressed: _busy ? null : () => _requestRevision(id),
+                          child: Text(tr('Modifica applicazione')),
+                        ),
+                        OutlinedButton(
                           onPressed: _busy ? null : () => _openPreview(id),
                           child: Text(tr('Anteprima')),
                         ),
@@ -963,6 +1095,11 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                           ? null
                           : () => _run(() => _readStatus(id)),
                       child: Text(tr('Aggiorna stato')),
+                    ),
+                  if (id != null && status != null)
+                    OutlinedButton(
+                      onPressed: _busy ? null : () => _showHistory(id),
+                      child: Text(tr('Versioni')),
                     ),
                   if (_terminalStates.contains(status) ||
                       (status == null && _pendingPrompt != null))
@@ -1090,6 +1227,43 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       ),
     );
   }
+}
+
+class _RevisionInstructionDialog extends StatefulWidget {
+  const _RevisionInstructionDialog();
+
+  @override
+  State<_RevisionInstructionDialog> createState() =>
+      _RevisionInstructionDialogState();
+}
+
+class _RevisionInstructionDialogState
+    extends State<_RevisionInstructionDialog> {
+  String _instruction = '';
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Modifica applicazione'),
+        content: TextField(
+          autofocus: true,
+          maxLength: 1200,
+          minLines: 2,
+          maxLines: 6,
+          decoration: const InputDecoration(labelText: 'Descrivi la modifica'),
+          onChanged: (value) => setState(() => _instruction = value.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annulla')),
+          FilledButton(
+            onPressed: _instruction.isEmpty
+                ? null
+                : () => Navigator.pop(context, _instruction),
+            child: const Text('Crea versione'),
+          ),
+        ],
+      );
 }
 
 class _GeneratorRequestException implements Exception {
