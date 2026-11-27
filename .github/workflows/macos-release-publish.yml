@@ -269,7 +269,7 @@ jobs:
         if: steps.signing.outputs.ready == 'true'
         run: bash native/macos/build_llama_cli.sh
 
-      - name: Resolve mandatory Computer Use beta profile
+      - name: Resolve mandatory Computer Use release profile
         if: steps.signing.outputs.ready == 'true'
         id: computer_use_lab
         shell: bash
@@ -279,8 +279,8 @@ jobs:
         run: |
           set -euo pipefail
           enabled=false
-          if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\+[0-9]+$ ]]; then
-            [[ "$HYBRID_ENABLED" == 'true' ]] || { echo "::error::Beta lacks protected HYBRID attestation"; exit 1; }
+          if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta)?\+[0-9]+$ ]]; then
+            [[ "$HYBRID_ENABLED" == 'true' ]] || { echo "::error::Beta/stable lacks protected HYBRID attestation"; exit 1; }
             enabled=true
           fi
           echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
