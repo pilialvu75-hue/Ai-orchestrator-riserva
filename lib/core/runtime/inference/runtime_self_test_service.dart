@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:ai_orchestrator/core/ai/entities/ai_model.dart';
 import 'package:ai_orchestrator/core/runtime/inference/android_ffi_runtime_provider.dart';
+import 'package:ai_orchestrator/core/runtime/inference/assistant_resident_local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_request.dart';
 import 'package:ai_orchestrator/core/runtime/inference/inference_response.dart';
@@ -29,9 +30,11 @@ class RuntimeSelfTestService {
     required LocalRuntimeProvider runtimeProvider,
     required LocalAiRepository localAiRepository,
     required ChatRepository chatRepository,
+    AssistantResidentLocalRuntimeProvider? desktopVerificationProvider,
   })  : _runtimeProvider = runtimeProvider,
         _localAiRepository = localAiRepository,
-        _chatRepository = chatRepository;
+        _chatRepository = chatRepository,
+        _desktopVerificationProvider = desktopVerificationProvider;
 
   /// Dedicated verification session cleared before every self-test run.
   static const String selfTestSessionId = 'runtime_self_test';
@@ -39,6 +42,7 @@ class RuntimeSelfTestService {
   static const String _verificationReusedMarker = 'VERIFICATION_REUSED';
 
   final LocalRuntimeProvider _runtimeProvider;
+  final AssistantResidentLocalRuntimeProvider? _desktopVerificationProvider;
   final LocalAiRepository _localAiRepository;
   final ChatRepository _chatRepository;
 
@@ -75,6 +79,11 @@ class RuntimeSelfTestService {
         request: request,
         cancellationToken: cancellationToken,
       );
+    }
+    final desktop = _desktopVerificationProvider;
+    if (desktop != null) {
+      return desktop.streamVerificationInference(request: request,
+          cancellationToken: cancellationToken);
     }
     return _runtimeProvider.streamInference(
       request: request,
@@ -193,7 +202,8 @@ class RuntimeSelfTestService {
         }
         
         if (chunk.isFinal) {
-          completed = true;
+          completed = !chunk.isError &&
+              chunk.terminalState == InferenceTerminalState.success;
           // SPIEGAZIONE: Rimosso responseBuffer.clear()! 
           // Aggiungiamo eventuale testo finale solo se non è vuoto.
           if (chunk.text.isNotEmpty && !responseBuffer.toString().endsWith(chunk.text.trim())) {
@@ -201,7 +211,7 @@ class RuntimeSelfTestService {
           }
         }
         
-        if (chunk.isError && firstToken == null) {
+        if (chunk.isError) {
           streamTerminalError = chunk.errorMessage ?? 'unknown runtime error';
         }
       }
@@ -236,7 +246,7 @@ class RuntimeSelfTestService {
         _log('[WARMUP_LIVENESS_OK] session=$selfTestSessionId ticks=$streamAliveTicks');
       }
 
-      final pass = firstTokenReceived && livenessOk && completed;
+      final pass = firstTokenReceived && livenessOk && completed && streamTerminalError == null;
       if (!pass) {
         _log(
           '[COMM_TEST_FAIL] first_token_received=$firstTokenReceived stream_alive_ticks=$streamAliveTicks completed=$completed',
@@ -244,7 +254,7 @@ class RuntimeSelfTestService {
         return RuntimeSelfTestResult(
           success: false,
           summary:
-              '${notes.join('\n')}\nGenerated text:\n$finalText',
+              '${notes.join('\n')}\n${streamTerminalError ?? 'Incomplete inference'}\nGenerated text:\n$finalText',
         );
       }
 
