@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createOpenBoxCad, renderOpenBox } from '../../scripts/web/studio_3d_open_box.mjs';
 
+import { mountStudioStlPreview } from '../../web/studio_3d_preview.mjs';
+
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
 
 test('accepts numeric dimensions and rejects invalid cavities and source injection', () => {
@@ -31,4 +33,30 @@ test('OpenSCAD exports the original and the resized box with an open cavity', as
       }
     }
   }
+});
+
+test('renders the real STL and redraws the mesh after keyboard rotation and zoom', async () => {
+  const { stl } = await renderOpenBox(box);
+  const frames = [];
+  const canvas = new EventTarget();
+  const context = {
+    fillRect: () => frames.push([]),
+    moveTo: (x, y) => frames.at(-1).push([x, y]),
+    beginPath() {}, lineTo() {}, closePath() {}, stroke() {}, fill() {}, fillText() {},
+  };
+  Object.assign(canvas, { width: 640, height: 480, getContext: () => context });
+  const label = {};
+  const dispose = mountStudioStlPreview(canvas, stl.toString('ascii'), label);
+  assert.equal(label.textContent, '80 × 60 × 30 mm');
+  for (const key of ['ArrowLeft', '+']) {
+    const event = Object.assign(new Event('keydown', { cancelable: true }), { key });
+    canvas.dispatchEvent(event);
+    assert.ok(event.defaultPrevented);
+  }
+  assert.equal(frames.length, 3);
+  assert.notDeepEqual(frames[0], frames[1]);
+  assert.notDeepEqual(frames[1], frames[2]);
+  dispose();
+  canvas.dispatchEvent(Object.assign(new Event('keydown'), { key: 'ArrowLeft' }));
+  assert.equal(frames.length, 3);
 });
