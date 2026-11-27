@@ -116,7 +116,8 @@ class WindowsGpuMetrics extends ChangeNotifier {
       try {
         _logger('[WINDOWS_WDDM_MEMORY] index=$index '
             'dedicated_bytes=${adapter.dedicatedBytes ?? -1} '
-            'shared_bytes=${adapter.sharedBytes ?? -1}');
+            'shared_bytes=${adapter.sharedBytes ?? -1} '
+            'busiest_engine_pct=${adapter.busiestEnginePercent ?? -1}');
       } on Object {
         // Diagnostic failures must not affect display.
       }
