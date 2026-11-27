@@ -1,16 +1,8 @@
-import { validateOpenBoxParameters } from './studio_3d_box_parameters.mjs';
+import { validateStudioCadParameters } from './studio_3d_box_parameters.mjs';
 
 export function createTaperedBoxCad(parameters) {
-  const { width, depth, height, wall, floor } = validateOpenBoxParameters({
-    width: parameters.width, depth: parameters.depth, height: parameters.height,
-    wall: parameters.wall, floor: parameters.floor,
-  });
-  const { baseWidth, baseDepth, cornerRadius } = parameters;
-  if (![baseWidth, baseDepth, cornerRadius].every(Number.isFinite) ||
-      baseWidth > width || baseDepth > depth || cornerRadius <= wall ||
-      2 * cornerRadius >= Math.min(baseWidth, baseDepth)) {
-    throw new RangeError('Invalid tapered box dimensions');
-  }
+  const { width, depth, height, wall, floor, baseWidth, baseDepth, cornerRadius } =
+    validateStudioCadParameters(parameters);
   return `// Millimetres. Wall is the horizontal inset.
 top = [${width}, ${depth}];
 base = [${baseWidth}, ${baseDepth}];

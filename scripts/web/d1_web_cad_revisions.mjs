@@ -11,7 +11,7 @@ export async function saveWebCadRevision({
 }) {
   if (!ownerSubject || !WEB_CAD_PROJECT_ID.test(projectId) || !WEB_RUNNER_TICKET.test(revisionId) ||
       (baseRevisionId !== null && !WEB_RUNNER_TICKET.test(baseRevisionId)) ||
-      manifest?.version !== 1 || manifest.kind !== 'cad' || manifest.shape !== 'open_box' ||
+      manifest?.version !== 1 || manifest.kind !== 'cad' || !['open_box', 'tapered_box'].includes(manifest.shape) ||
       manifest.unit !== 'mm' || !Array.isArray(manifest.files) || manifest.files.length !== 2) {
     return invalid();
   }

@@ -12,6 +12,7 @@ class AivexusStlPreview extends HTMLElement {
         output { display: block; min-height: 1.5em; margin: 12px 0; }
         fieldset { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
         input[type=number] { width: 5em; }
+        fieldset[hidden] { display: none; }
         canvas[hidden] { display: none; }
         canvas { width: 100%; height: auto; display: block; touch-action: none; }
       </style>
@@ -19,6 +20,13 @@ class AivexusStlPreview extends HTMLElement {
         <form hidden>
           <fieldset>
             <legend>Scatola aperta · misure in mm</legend>
+            <label>Forma <select data-cad-shape><option value="box">Scatola dritta</option><option value="tapered">Contenitore rastremato</option></select></label>
+            <fieldset data-tapered hidden disabled>
+              <legend>Base esterna e angoli</legend>
+              <label>Larghezza base <input name="baseWidth" type="number" min="0.1" step="any" required></label>
+              <label>Profondità base <input name="baseDepth" type="number" min="0.1" step="any" required></label>
+              <label>Raggio angoli <input name="cornerRadius" type="number" min="0.1" step="any" required></label>
+            </fieldset>
             <label>Larghezza <input name="width" type="number" min="0.1" max="500" step="any" value="80" required></label>
             <label>Profondità <input name="depth" type="number" min="0.1" max="500" step="any" value="60" required></label>
             <label>Altezza <input name="height" type="number" min="0.1" max="500" step="any" value="30" required></label>
@@ -152,6 +160,8 @@ class AivexusStlPreview extends HTMLElement {
       const revisionId = history.value;
       const revision = revisionsById.get(revisionId);
       const parameters = revision?.parameters;
+      shape.value = parameters?.baseWidth ? 'tapered' : 'box';
+      updateShape();
       review.hidden = true;
       confirmed.checked = false;
       manuallyEntered.clear();
@@ -187,6 +197,15 @@ class AivexusStlPreview extends HTMLElement {
 
     const form = root.querySelector('form');
     const fields = form.querySelector('fieldset');
+    const shape = form.querySelector('[data-cad-shape]');
+    const tapered = form.querySelector('[data-tapered]');
+    function updateShape() {
+      tapered.hidden = tapered.disabled = shape.value !== 'tapered';
+    }
+    shape.addEventListener('change', () => {
+      updateShape();
+      confirmed.checked = false;
+    });
     const edit = form.querySelector('[data-edit]');
     const instructionField = edit.querySelector('input');
     const projectDescription = this.getAttribute('project-description') ?? '';
@@ -416,6 +435,10 @@ class AivexusStlPreview extends HTMLElement {
         }
         const isEdit = event.submitter?.hasAttribute('data-apply');
         const instruction = instructionField.value.trim();
+        if (isEdit && shape.value === 'tapered' && !baseRevisionId) {
+          jobStatus.textContent = 'Inserisci le quote del contenitore e scegli Genera revisione CAD.';
+          return;
+        }
         if (isEdit && !review.hidden) {
           jobStatus.textContent = 'Per usare le quote della fotografia, scegli Genera revisione CAD.';
           return;
