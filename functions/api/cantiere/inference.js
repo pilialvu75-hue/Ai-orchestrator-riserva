@@ -461,7 +461,7 @@ export function createWebBuilderInference(env) {
   if (!cloudflareFree && !largeModelsAvailable) return null;
   const model = '@cf/google/gemma-4-26b-a4b-it';
 
-  const infer = async function builderInfer(input, builderRouteId = null) {
+  const infer = async function builderInfer(input, builderRouteId = null, { revision = false } = {}) {
     const messages = validateMessages(input, 70000, 72000);
     if (!messages) return { ok: false };
     if (builderRouteId !== null) {
@@ -487,9 +487,11 @@ export function createWebBuilderInference(env) {
     if (!cloudflareFree) return { ok: false, failureKind: 'free_builder_unavailable' };
     const result = await ai.run(model, {
       messages, max_tokens: 4096, temperature: 0.2, top_p: 0.9, stream: false, store: false,
+      ...(revision ? { chat_template_kwargs: { enable_thinking: false } } : {}),
     });
     const choice = result?.choices?.[0];
     const text = choice?.message?.content;
+    if (choice?.finish_reason === 'length') return { ok: false, failureKind: 'output_limit' };
     if (choice?.finish_reason !== 'stop' || typeof text !== 'string' ||
         !text.trim() || text.length > MAX_OUTPUT_CHARS) return { ok: false };
     const reported = result.model;

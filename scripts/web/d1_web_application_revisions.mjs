@@ -85,11 +85,18 @@ export async function createWebApplicationRevision({ db, ownerSubject, adminSubj
   const inference = await infer([
     { role: 'system', content: INSTRUCTION },
     { role: 'user', content: JSON.stringify({ instruction, source: verified.source, checks }) },
-  ]).catch(() => ({ ok: false }));
+  ], null, { revision: true }).catch(() => ({ ok: false }));
   const output = inference.ok ? parseResponse(inference.text) : null;
   const source = applyRevision(verified.source, output);
   const additional = output?.additionalChecks ?? [];
   const fullChecks = Array.isArray(additional) ? validateWebApplicationChecks([...checks, ...additional]) : null;
+  if (!source || !fullChecks) {
+    const reason = inference.failureKind === 'output_limit' ? 'output_limit'
+      : !inference.ok ? 'provider_unavailable'
+      : !output ? 'invalid_json'
+      : !source ? 'invalid_or_unchanged_source' : 'invalid_checks';
+    console.warn('Web revision rejected:', reason);
+  }
   return saveWebApplicationCandidate({ db, ownerSubject, generationId,
     source: fullChecks ? source : null, checks: fullChecks, inference });
 }
