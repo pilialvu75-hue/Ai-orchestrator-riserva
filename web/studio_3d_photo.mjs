@@ -48,6 +48,15 @@ export function detectPhotoSilhouette({ data, width, height }) {
   return largest;
 }
 
+export function isRectangularPhotoSilhouette(outline) {
+  if (!outline) return false;
+  const width = outline.right - outline.left + 1;
+  const height = outline.bottom - outline.top + 1;
+  // A loose bounding box around flaps, an oblique view or an articulated
+  // object should not supply a rectangular model's dimensions.
+  return width >= 8 && height >= 8 && outline.size >= width * height * 0.85;
+}
+
 export function detectPhotoCavity(imageData, bounds) {
   const { data, width: imageWidth } = imageData;
   const { left, top, right, bottom } = bounds;
@@ -196,6 +205,12 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal) {
     if (!bounds) {
       redraw();
       status.textContent = 'Contorno incerto. Usa uno sfondo uniforme o segna gli estremi a mano.';
+      return;
+    }
+    if (!isRectangularPhotoSilhouette(bounds)) {
+      points = points.slice(0, 2);
+      redraw();
+      status.textContent = 'La sagoma non è abbastanza rettangolare. Riprova con una foto perpendicolare all’oggetto.';
       return;
     }
     const { left, top, right, bottom } = bounds;

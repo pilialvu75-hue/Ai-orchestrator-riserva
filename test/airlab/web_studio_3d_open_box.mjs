@@ -10,7 +10,7 @@ import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio
 import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
   importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
-import { detectPhotoCavity, detectPhotoSilhouette, estimatePhotoDimension, nextPhotoView } from '../../web/studio_3d_photo.mjs';
+import { detectPhotoCavity, detectPhotoSilhouette, estimatePhotoDimension, isRectangularPhotoSilhouette, nextPhotoView } from '../../web/studio_3d_photo.mjs';
 import { checkOpenBoxFdm } from '../../web/studio_3d_fdm.mjs';
 
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
@@ -316,6 +316,8 @@ test('finds the main image silhouette and requests the missing viewing angle', (
   }
   assert.deepEqual(detectPhotoSilhouette({ data, width, height }),
     { left: 4, top: 6, right: 24, bottom: 15, size: 210 });
+  assert.equal(isRectangularPhotoSilhouette(detectPhotoSilhouette({ data, width, height })), true);
+  assert.equal(isRectangularPhotoSilhouette({ left: 92, top: 61, right: 921, bottom: 801, size: 360645 }), false);
   data[0] = 0;
   assert.equal(detectPhotoSilhouette({ data, width, height }), null);
   assert.match(nextPhotoView(new Set(['width', 'height'])), /foto laterale/);
