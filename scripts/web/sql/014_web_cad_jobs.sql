@@ -6,6 +6,7 @@ CREATE TABLE web_cad_jobs (
   head_sha TEXT NOT NULL,
   job_sha256 TEXT NOT NULL,
   parameters_json TEXT NOT NULL,
+  photo_estimates_json TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL CHECK(status IN ('dispatching','submitted','review_required','failed','verified')),
   run_id INTEGER,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),

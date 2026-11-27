@@ -197,7 +197,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
           if (request.projectId !== projectId) throw new Error('Bad project');
           if (request.action === 'start') {
             if (request.parameters.width !== 90 || request.parameters.wall !== 2 ||
-                request.baseRevisionId !== null || revisionId) throw new Error('Bad job');
+                request.photoEstimates?.join() !== 'width' || request.baseRevisionId !== null || revisionId) throw new Error('Bad job');
             revisionId = request.revisionId;
             return json({ status: 'submitted' });
           }

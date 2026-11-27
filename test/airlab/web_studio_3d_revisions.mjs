@@ -111,7 +111,7 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
     };
     const authorizationKey = await importWebAppAuthorizationKey(runner.authorizationKey);
     const parameters = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
-    const request = { projectId: 'web-project:1795000000000000', revisionId: crypto.randomUUID(), parameters };
+    const request = { projectId: 'web-project:1795000000000000', revisionId: crypto.randomUUID(), parameters, photoEstimates: ['width'] };
     const scad = Uint8Array.of(1, 2, 3);
     const stl = Uint8Array.of(4, 5, 6);
     const manifest = { version: 1, kind: 'cad', shape: 'open_box', unit: 'mm', parameters, files: [
@@ -149,7 +149,7 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
     assert.equal((await collect('owner')).status, 'verified');
     const saved = await readWebCadRevision({ db, ownerSubject: 'owner', projectId, revisionId });
     assert.deepEqual(saved.stl, stl);
-    assert.deepEqual(saved.manifest, manifest);
+    assert.deepEqual(saved.manifest, { ...manifest, photoEstimates: ['width'] });
     const edit = { projectId, revisionId: crypto.randomUUID(), baseRevisionId: revisionId,
       instruction: 'Allarga la scatola di 10 mm.' };
     assert.equal((await startWebCadJob({ ...options, request: { ...edit, instruction: 'Aggiungi fori' } })).reason,
@@ -161,6 +161,7 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
     const updated = await readWebCadRevision({ ...options, projectId, revisionId: edit.revisionId });
     assert.equal(updated.revisionNumber, 2);
     assert.equal(updated.manifest.parameters.width, 90);
+    assert.deepEqual(updated.manifest.photoEstimates, ['width']);
     assert.equal((await readWebCadRevision({ ...options, projectId, revisionId })).manifest.parameters.width, 80);
 
     assert.equal(applyOpenBoxInstruction(parameters, 'Porta il fondo a 3,5 mm').floor, 3.5);

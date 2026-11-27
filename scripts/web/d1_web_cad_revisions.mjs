@@ -64,14 +64,16 @@ export async function listWebCadRevisions({ db, ownerSubject, projectId }) {
   const query = await db.prepare(`
     SELECT revision_id AS revisionId, revision_number AS revisionNumber,
       revision_id IS (SELECT revision_id FROM web_cad_project_selection WHERE owner_subject = ?1 AND project_id = ?2) AS selected,
-      base_revision_id AS baseRevisionId, json_extract(manifest_json, '$.parameters') AS parametersJson
+      base_revision_id AS baseRevisionId, json_extract(manifest_json, '$.parameters') AS parametersJson,
+      json_extract(manifest_json, '$.photoEstimates') AS photoEstimatesJson
     FROM web_cad_revisions
     WHERE owner_subject = ?1 AND project_id = ?2
     ORDER BY selected DESC, revision_number DESC LIMIT 50
   `).bind(ownerSubject, projectId).all();
   if (query.success === false || !Array.isArray(query.results)) throw new Error('CAD history unavailable');
-  return query.results.map(({ parametersJson, selected, ...revision }) => ({
+  return query.results.map(({ parametersJson, photoEstimatesJson, selected, ...revision }) => ({
     ...revision, selected: Boolean(selected), parameters: parametersJson ? JSON.parse(parametersJson) : null,
+    photoEstimates: photoEstimatesJson ? JSON.parse(photoEstimatesJson) : [],
   }));
 }
 

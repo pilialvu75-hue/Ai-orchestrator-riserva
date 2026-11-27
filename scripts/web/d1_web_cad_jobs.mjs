@@ -5,6 +5,7 @@ import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 import { decodeRunnerBase64, decodeWebAppResult, encodeWebAppJob, importWebAppAuthorizationKey,
   importWebAppPrivateKey, importWebAppPublicKey } from './web_application_runner_packet.mjs';
 
+const photoAxes = ['width', 'depth', 'height'];
 const fail = reason => ({ ok: false, reason });
 const validIds = (projectId, revisionId) => WEB_CAD_PROJECT_ID.test(projectId) && WEB_RUNNER_TICKET.test(revisionId);
 const keys = ({ ownerSubject, projectId, revisionId }) => [ownerSubject, projectId, revisionId];
@@ -15,11 +16,17 @@ export async function startWebCadJob({ db, ownerSubject, request, runner,
   githubClient = createGitHubStudioCadRunnerClient }) {
   const { projectId, revisionId, baseRevisionId = null } = request;
   if (!validIds(projectId, revisionId) || (baseRevisionId !== null && !WEB_RUNNER_TICKET.test(baseRevisionId)) ||
-      Object.keys(request).some(key => !['projectId', 'revisionId', 'baseRevisionId', 'parameters', 'instruction'].includes(key))) {
+      Object.keys(request).some(key => !['projectId', 'revisionId', 'baseRevisionId', 'parameters', 'instruction', 'photoEstimates'].includes(key))) {
     return fail('invalid_request');
   }
   if (!runner?.token || !/^[a-f0-9]{40}$/.test(runner.headSha ?? '')) return fail('cad_unavailable');
   const hasInstruction = Object.hasOwn(request, 'instruction');
+  const requestedEstimates = request.photoEstimates ?? [];
+  if (!Array.isArray(requestedEstimates) ||
+      requestedEstimates.length > photoAxes.length ||
+      requestedEstimates.some(axis => !photoAxes.includes(axis)) ||
+      (hasInstruction && Object.hasOwn(request, 'photoEstimates'))) return fail('invalid_request');
+  let photoEstimates = photoAxes.filter(axis => requestedEstimates.includes(axis));
   if (hasInstruction === Object.hasOwn(request, 'parameters')) return fail('invalid_request');
   let parameters;
   if (hasInstruction) {
@@ -28,6 +35,7 @@ export async function startWebCadJob({ db, ownerSubject, request, runner,
     if (!base.ok) return fail('cad_revision_conflict');
     try {
       parameters = applyOpenBoxInstruction(base.manifest.parameters, request.instruction);
+      photoEstimates = photoAxes.filter(axis => base.manifest.photoEstimates?.includes(axis));
     } catch (_) {
       return fail('unsupported_cad_instruction');
     }
@@ -37,6 +45,7 @@ export async function startWebCadJob({ db, ownerSubject, request, runner,
 
   const args = { ownerSubject, projectId, revisionId };
   const parametersJson = JSON.stringify(parameters);
+  const photoEstimatesJson = JSON.stringify(photoEstimates);
   // Release an abandoned local claim after the artifact retention window.
   // Its ticket remains recorded and can never dispatch a second time.
   await db.prepare(`UPDATE web_cad_jobs SET status = 'review_required'
@@ -44,7 +53,7 @@ export async function startWebCadJob({ db, ownerSubject, request, runner,
       AND created_at <= unixepoch() - 86400`).bind(ownerSubject).run();
   const previous = await readJob(db, args);
   if (previous) {
-    return previous.base_revision_id === baseRevisionId && previous.parameters_json === parametersJson
+    return previous.base_revision_id === baseRevisionId && previous.parameters_json === parametersJson && previous.photo_estimates_json === photoEstimatesJson
       ? { ok: true, revisionId, status: previous.status }
       : fail('cad_job_conflict');
   }
@@ -58,8 +67,8 @@ export async function startWebCadJob({ db, ownerSubject, request, runner,
 
   const claim = await db.prepare(`
     INSERT INTO web_cad_jobs
-      (owner_subject, project_id, revision_id, base_revision_id, head_sha, job_sha256, parameters_json, status)
-    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'dispatching'
+      (owner_subject, project_id, revision_id, base_revision_id, head_sha, job_sha256, parameters_json, photo_estimates_json, status)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'dispatching'
     WHERE (?4 IS NULL AND NOT EXISTS (
         SELECT 1 FROM web_cad_revisions WHERE owner_subject = ?1 AND project_id = ?2
       )) OR (?4 IS NOT NULL AND EXISTS (
@@ -67,7 +76,7 @@ export async function startWebCadJob({ db, ownerSubject, request, runner,
         WHERE owner_subject = ?1 AND project_id = ?2 AND revision_id = ?4
       ))
     ON CONFLICT DO NOTHING RETURNING revision_id
-  `).bind(...keys(args), baseRevisionId, runner.headSha, job.jobSha256, parametersJson).first();
+  `).bind(...keys(args), baseRevisionId, runner.headSha, job.jobSha256, parametersJson, photoEstimatesJson).first();
   if (!claim) return fail('cad_job_conflict');
 
   let runId = null;
@@ -109,7 +118,8 @@ export async function collectWebCadJob({ db, ownerSubject, request, runner,
     const parameters = validateOpenBoxParameters(manifest?.parameters);
     if (JSON.stringify(parameters) !== row.parameters_json) return fail('invalid_cad_result');
     const stored = await saveWebCadRevision({
-      db, ...args, baseRevisionId: row.base_revision_id, manifest,
+      db, ...args, baseRevisionId: row.base_revision_id,
+      manifest: { ...manifest, photoEstimates: JSON.parse(row.photo_estimates_json) },
       scad: decodeRunnerBase64(scad, 90000), stl: decodeRunnerBase64(stl, 90000),
     });
     if (!stored.ok && (stored.reason !== 'cad_revision_conflict' ||

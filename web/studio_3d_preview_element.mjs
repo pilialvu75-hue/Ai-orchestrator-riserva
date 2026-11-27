@@ -79,7 +79,7 @@ class AivexusStlPreview extends HTMLElement {
     const history = root.querySelector('select');
     const useRevision = root.querySelector('[data-select]');
     let activeRevisionId;
-    let revisionParameters = new Map();
+    let revisionsById = new Map();
     const projectId = this.getAttribute('project-id');
     const requests = new AbortController();
     this.requests = requests;
@@ -141,8 +141,12 @@ class AivexusStlPreview extends HTMLElement {
     const selectRevision = async () => {
       const version = reset();
       const revisionId = history.value;
-      const parameters = revisionParameters.get(revisionId);
+      const revision = revisionsById.get(revisionId);
+      const parameters = revision?.parameters;
       estimatedFields.clear();
+      for (const axis of revision?.photoEstimates ?? []) {
+        if (Number.isFinite(parameters?.[axis])) estimatedFields.set(axis, parameters[axis]);
+      }
       showEstimateNote();
       edit.hidden = !parameters;
       for (const field of fields.querySelectorAll('input[name]')) {
@@ -213,9 +217,9 @@ class AivexusStlPreview extends HTMLElement {
       busy = true;
       updateControls();
       try {
-        const { revisionId, parameters, instruction, baseRevisionId } = pending;
+        const { revisionId, parameters, photoEstimates, instruction, baseRevisionId } = pending;
         const request = action === 'start'
-          ? { action, projectId, revisionId, baseRevisionId, ...(instruction ? { instruction } : { parameters }) }
+          ? { action, projectId, revisionId, baseRevisionId, ...(instruction ? { instruction } : { parameters, photoEstimates }) }
           : { action, projectId, revisionId };
         const response = await fetch('/api/cantiere/cad/job', {
           method: 'POST', redirect: 'error', cache: 'no-store', signal: requests.signal,
@@ -279,7 +283,7 @@ class AivexusStlPreview extends HTMLElement {
       const { revisions } = await (await read('history')).json();
       if (requests.signal.aborted) return;
       activeRevisionId = revisions.find(revision => revision.selected)?.revisionId ?? revisions[0]?.revisionId;
-      revisionParameters = new Map(revisions.map(({ revisionId, parameters }) => [revisionId, parameters]));
+      revisionsById = new Map(revisions.map(revision => [revision.revisionId, revision]));
       history.replaceChildren(...revisions.map(({ revisionId, revisionNumber }) =>
         new Option('Revisione ' + revisionNumber, revisionId)));
       history.parentElement.hidden = !revisions.length;
@@ -333,6 +337,7 @@ class AivexusStlPreview extends HTMLElement {
         }
         const input = isEdit ? { instruction } : {
           parameters: Object.fromEntries([...new FormData(form)].map(([name, value]) => [name, Number(value)])),
+          photoEstimates: [...estimatedFields.keys()],
         };
         remember({ revisionId: crypto.randomUUID(), baseRevisionId, ...input });
         void runJob('start');
