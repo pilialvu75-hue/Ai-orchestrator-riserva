@@ -1392,3 +1392,30 @@ test('free-verified NVIDIA 1T builder uses exactly one trial request and reports
   assert.equal(result.routeId, trial.id);
   assert.equal(calls, 1);
 });
+
+test('CAD artifacts require a signed owner and are served as private downloads', async () => {
+  const signing = await signer();
+  const projectId = crypto.randomUUID();
+  const revisionId = crypto.randomUUID();
+  const path = '/api/cantiere/cad/revision?' + new URLSearchParams({
+    projectId, revisionId, file: 'stl',
+  });
+  let reads = 0;
+  const f = { db: { prepare: () => ({ bind: (...args) => ({
+    first: async () => {
+      reads++;
+      assert.deepEqual(args.slice(1), [projectId, revisionId]);
+      return { revisionId, revisionNumber: 1, manifest: '{}', stl: [1, 2, 3] };
+    },
+  }) }) } };
+  const email = 'cad-owner@example.test';
+  const gate = setup(f, signing, 'cad_revision_read', { ownerEmail: email });
+  const request = token => webRequest(token, null, { method: 'GET', path, requestOrigin: null });
+  assert.equal((await gate.handler(request(await signing.sign({ email: 'other@example.test' })))).status, 403);
+  assert.equal(reads, 0);
+  const response = await gate.handler(request(await signing.sign({ email })));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'model/stl');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), Uint8Array.of(1, 2, 3));
+});

@@ -27,6 +27,8 @@ import { changeWebApplicationRelease, readWebApplicationReleaseHistory, resolveW
 import {
   createWebApplicationRevision, readWebApplicationRevisions, selectWebApplicationRevision,
 } from './d1_web_application_revisions.mjs';
+import { readWebCadRevision } from './d1_web_cad_revisions.mjs';
+import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 import { previewWebApplication } from './web_application_preview.mjs';
 
 const MAX_JSON_BYTES = 2048;
@@ -35,6 +37,7 @@ const MAX_JSON_BYTES = 2048;
 const MAX_GENERATION_JSON_BYTES = 49152;
 const OPERATIONS = new Set([
   'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
+  'cad_revision_read',
   'create_app_revision', 'app_revision_history', 'select_app_revision',
   'generate_app', 'generation_status', 'generation_quota', 'generation_reuse',
   'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
@@ -181,11 +184,12 @@ export function createAuthenticatedWebProjectOperation({
   const previewsApp = operation === 'preview_app';
   const readsHost = operation === 'app_preview_host';
   const readsSource = operation === 'read_app_source' || previewsApp || readsHost;
+  const readsCad = operation === 'cad_revision_read';
   const readsHistory = operation === 'app_revision_history';
   const readsReleases = operation === 'app_release_history';
   const launchesRelease = operation === 'app_release_launch';
   const exportsRecords = operation === 'app_records_export';
-  const readOnly = exportsRecords || readsReleases || launchesRelease || readsHistory || readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
+  const readOnly = readsCad || exportsRecords || readsReleases || launchesRelease || readsHistory || readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -241,7 +245,7 @@ export function createAuthenticatedWebProjectOperation({
     if ((operation === 'app_invite' || operation === 'app_join') && !appMemberInvitesEnabled) {
       return reject(404, 'invite_not_found');
     }
-    if (ownerOnly && !authorizedOwnerSubject) {
+    if ((ownerOnly || readsCad) && !authorizedOwnerSubject) {
       return reject(403, 'owner_required');
     }
 
@@ -352,6 +356,36 @@ export function createAuthenticatedWebProjectOperation({
           response.headers.set('Link', `<${url.pathname}?${next}>; rel="next"`);
         }
         return response;
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+    }
+
+    if (readsCad) {
+      const { searchParams } = url;
+      const projectId = searchParams.get('projectId');
+      const revisionId = searchParams.get('revisionId');
+      const file = searchParams.get('file');
+      if (searchParams.size !== 3 || !WEB_RUNNER_TICKET.test(projectId) ||
+          !WEB_RUNNER_TICKET.test(revisionId) || !['manifest', 'stl', 'scad'].includes(file)) {
+        return reject(400, 'invalid_request');
+      }
+      try {
+        const result = await readWebCadRevision({
+          db, ownerSubject: verified.principal.subject, projectId, revisionId,
+        });
+        if (!result.ok) return reject(404, 'cad_revision_not_found');
+        const { revisionNumber, baseRevisionId, manifest } = result;
+        if (file === 'manifest') {
+          return respond(200, { ok: true, revisionId, revisionNumber, baseRevisionId, manifest });
+        }
+        return new Response(new Uint8Array(result[file]), { headers: {
+          'Content-Type': file === 'stl' ? 'model/stl' : 'text/plain; charset=utf-8',
+          'Content-Disposition': `attachment; filename="box.${file}"`,
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'no-referrer',
+        } });
       } catch (_) {
         return reject(503, 'storage_unavailable');
       }
