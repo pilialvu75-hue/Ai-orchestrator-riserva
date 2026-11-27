@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'workshop_web_cad_preview_page.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_project_storage.dart';
@@ -794,6 +795,16 @@ proposta breve, concreta e approvabile.
                       'l’estensione del progetto.',
                     ),
                   ),
+                ),
+              if (project.projectKind == AivexusProjectKind.cad)
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const WorkshopWebCadPreviewPage(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.view_in_ar_outlined),
+                  label: const Text('Apri anteprima STL'),
                 ),
               if (!project.isReadOnly &&
                   project.projectKind != AivexusProjectKind.software)
