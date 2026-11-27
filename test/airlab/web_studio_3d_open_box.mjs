@@ -10,10 +10,18 @@ import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio
 import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
   importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
+import { checkOpenBoxFdm } from '../../scripts/web/studio_3d_box_parameters.mjs';
+
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
 
 test('accepts numeric dimensions and rejects invalid cavities and source injection', () => {
   assert.match(createOpenBoxCad(box), /width = 80;/);
+  const sample = checkOpenBoxFdm(box);
+  assert.ok(sample.fitsVolume && sample.wallMeetsMinimum && sample.floorMeetsMinimum);
+  const oversize = checkOpenBoxFdm({ ...box, width: 221, wall: 0.4, floor: 0.5 });
+  assert.equal(oversize.fitsVolume, false);
+  assert.equal(oversize.wallMeetsMinimum, false);
+  assert.equal(oversize.floorMeetsMinimum, false);
   assert.throws(() => createOpenBoxCad({ ...box, wall: 30 }), RangeError);
   assert.throws(() => createOpenBoxCad({ ...box, floor: 30 }), RangeError);
   assert.throws(() => createOpenBoxCad({ ...box, width: '80; import("file")' }), RangeError);
@@ -26,6 +34,7 @@ test('OpenSCAD exports the original and the resized box with an open cavity', as
     const vertices = [...stl.toString('ascii').matchAll(/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/g)]
       .map(match => match.slice(1).map(Number));
     assert.equal(verification.triangles, vertices.length / 3);
+    assert.deepEqual(verification.cavityMm, { wall: 2, floor: 3 });
     assert.ok(vertices.flat().every(Number.isFinite));
     assert.deepEqual([0, 1, 2].map(axis => {
       const coordinates = vertices.map(vertex => vertex[axis]);

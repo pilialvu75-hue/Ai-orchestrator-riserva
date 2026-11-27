@@ -24,7 +24,7 @@ difference() {
 `;
 }
 
-function verifyBoxMesh(stl, { width, depth, height }) {
+function verifyBoxMesh(stl, { width, depth, height, wall, floor }) {
   const vertices = [...stl.toString('ascii').matchAll(/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/g)]
     .map(match => match.slice(1).map(Number));
   if (vertices.length < 12 || vertices.length % 3 ||
@@ -41,10 +41,28 @@ function verifyBoxMesh(stl, { width, depth, height }) {
     }
   }
 
+  // A valid outer envelope can still hide a missing or mis-sized cavity.
+  const toleranceMm = 0.001;
+  for (const x of [wall, width - wall]) {
+    for (const y of [wall, depth - wall]) {
+      for (const z of [floor, height]) {
+        if (!vertices.some(vertex => vertex.every((value, axis) =>
+          Math.abs(value - [x, y, z][axis]) <= toleranceMm))) {
+          throw new Error('STL cavity dimensions differ from the CAD parameters');
+        }
+      }
+    }
+  }
+
   const edges = new Map();
   for (let index = 0; index < vertices.length; index += 3) {
-    const triangle = vertices.slice(index, index + 3).map(vertex => vertex.join(','));
-    if (new Set(triangle).size !== 3) throw new Error('STL has a collapsed triangle');
+    const [a, b, c] = vertices.slice(index, index + 3);
+    const u = b.map((value, axis) => value - a[axis]);
+    const v = c.map((value, axis) => value - a[axis]);
+    const cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    if (Math.hypot(...cross) < 1e-10) throw new Error('STL has a zero-area triangle');
+    const triangle = [a, b, c].map(vertex => vertex.join(','));
+
     for (let side = 0; side < 3; side++) {
       const start = triangle[side];
       const end = triangle[(side + 1) % 3];
@@ -60,7 +78,7 @@ function verifyBoxMesh(stl, { width, depth, height }) {
       throw new Error('STL has an open or inconsistently oriented edge');
     }
   }
-  return { dimensionsMm: { width, depth, height }, triangles: vertices.length / 3 };
+  return { dimensionsMm: { width, depth, height }, cavityMm: { wall, floor }, triangles: vertices.length / 3 };
 }
 
 // Runs a fixed template with numeric inputs. The caller never supplies executable CAD.
