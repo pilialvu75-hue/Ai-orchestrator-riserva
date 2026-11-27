@@ -70,7 +70,9 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
               Text(
                 'RAM libera: ${mib(ram?.availableBytes)} / ${mib(ram?.totalBytes)}',
               ),
-              Text('Soglia RAM Android: ${mib(ram?.thresholdBytes)}'),
+              Text(_gpuRetained
+                  ? 'Soglia RAM Windows (diagnostica): ${mib(ram?.windowsPressureThresholdBytes)}'
+                  : 'Soglia RAM Android: ${mib(ram?.thresholdBytes)}'),
               if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
                 Text('CPU sistema: ${ram?.systemCpuPercent?.toStringAsFixed(1) ?? 'n/d'}${ram?.systemCpuPercent == null ? '' : '%'}'),
               Text('App RSS: ${mib(ram?.rssBytes)}'),
