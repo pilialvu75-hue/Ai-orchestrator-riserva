@@ -93,7 +93,9 @@ void main() {
         expect(find.text(testCase.detailLabel), findsOneWidget);
         expect(
           find.textContaining('runner specializzato non è ancora collegato'),
-          findsOneWidget,
+          testCase.kind == AivexusProjectKind.game
+              ? findsOneWidget
+              : findsNothing,
         );
 
         final reopened = await WorkshopWebProjectStorage.open();
