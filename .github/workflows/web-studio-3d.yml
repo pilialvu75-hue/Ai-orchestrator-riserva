@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/web-studio-3d.yml'
       - 'scripts/web/studio_3d_open_box.mjs'
+      - 'scripts/web/studio_3d_tapered_box.mjs'
       - 'scripts/web/build_studio_3d_box_result.mjs'
       - 'scripts/web/run_studio_3d_box_job.mjs'
       - 'scripts/web/run_encrypted_studio_cad_job.mjs'
@@ -59,6 +60,12 @@ jobs:
           export AIVEXUS_WEB_CHROMIUM="$(command -v google-chrome)"
           test -x "$AIVEXUS_WEB_CHROMIUM"
           node --test test/airlab/web_studio_3d_open_box.mjs
+
+      - name: Render the measured tapered container
+        run: |
+          node --input-type=module -e 'import { createTaperedBoxCad } from "./scripts/web/studio_3d_tapered_box.mjs"; console.log(createTaperedBoxCad({width:120,depth:110,height:55,wall:5,floor:5,baseWidth:110,baseDepth:105,cornerRadius:8}));' > "$RUNNER_TEMP/tapered.scad"
+          openscad -o "$RUNNER_TEMP/tapered.stl" "$RUNNER_TEMP/tapered.scad"
+          node --input-type=module -e 'import assert from "node:assert/strict"; import { readFileSync } from "node:fs"; import { readStudioStl } from "./web/studio_3d_preview.mjs"; const { bounds }=readStudioStl(readFileSync(process.argv[1],"ascii")); const size=bounds.map(([a,b])=>b-a); assert.ok(size.every((n,i)=>Math.abs(n-[120,110,55][i])<0.05), JSON.stringify(size)); console.log(size);' "$RUNNER_TEMP/tapered.stl"
 
       - name: Build verified CAD artifacts
         run: |
