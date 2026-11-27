@@ -64,7 +64,7 @@ jobs:
         run: |
           node scripts/web/build_studio_3d_box_result.mjs box-80mm 80 60 30 2 3
           node scripts/web/build_studio_3d_box_result.mjs box-90mm 90 60 30 2 3
-          AIVEXUS_CAD_TEST_ARTIFACTS=. node --test test/airlab/web_studio_3d_revisions.mjs
+          AIVEXUS_CAD_TEST_ARTIFACTS=. AIVEXUS_CAD_REAL_RUNNER=1 node --test test/airlab/web_studio_3d_revisions.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: studio-3d-open-box

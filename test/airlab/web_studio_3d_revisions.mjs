@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio_cad_job.mjs';
 import { readStudioStl } from '../../web/studio_3d_preview.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
@@ -85,6 +86,8 @@ test('stores both real OpenSCAD results and recovers either revision by ID',
     }
   });
 
+const realRunner = process.env.AIVEXUS_CAD_REAL_RUNNER === '1';
+
 test('reserves one CAD dispatch and imports its ticket-bound result into private history', async () => {
   const sqlite = new DatabaseSync(':memory:');
   try {
@@ -94,6 +97,7 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
     const db = { prepare: query => ({ bind: (...args) => ({
       first: async () => sqlite.prepare(query).get(...args.map(sqliteValue)),
       run: async () => sqlite.prepare(query).run(...args.map(sqliteValue)),
+      all: async () => ({ results: sqlite.prepare(query).all(...args.map(sqliteValue)) }),
     }) }) };
     const makeKey = () => crypto.subtle.generateKey({
       name: 'RSA-OAEP', modulusLength: 2048, hash: 'SHA-256',
@@ -126,7 +130,9 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
         const job = await decodeWebAppJob({ privateKey: sender.privateKey, authorizationKey, ticket, input });
         const expected = dispatches === 1 ? parameters : { ...parameters, width: 90 };
         assert.deepEqual(job.source, { kind: 'cad_open_box', parameters: expected });
-        packet = await encodeWebAppResult({
+        packet = realRunner ? await runEncryptedStudioCadJob({
+          input, ticket, privateKey: sender.privateKey, authorizationKey,
+        }) : await encodeWebAppResult({
           publicKey: job.resultPublicKey, authorizationKey, ticket, jobSha256: job.jobSha256,
           result: { manifest: { ...manifest, parameters: expected }, scad: encodeRunnerBase64(scad), stl: encodeRunnerBase64(stl) },
         });
@@ -155,8 +161,12 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
     assert.equal((await recover('owner')).activeJob, null);
     assert.equal((await collect('owner')).status, 'verified');
     const saved = await readWebCadRevision({ db, ownerSubject: 'owner', projectId, revisionId });
-    assert.deepEqual(saved.stl, stl);
-    assert.deepEqual(saved.manifest, { ...manifest, photoEstimates: ['width'] });
+    if (realRunner) {
+      assert.deepEqual(readStudioStl(new TextDecoder().decode(saved.stl)).bounds, [[0, 80], [0, 60], [0, 30]]);
+    } else {
+      assert.deepEqual(saved.stl, stl);
+      assert.deepEqual(saved.manifest, { ...manifest, photoEstimates: ['width'] });
+    }
     const edit = { projectId, revisionId: crypto.randomUUID(), baseRevisionId: revisionId,
       instruction: 'Allarga la scatola di 10 mm.' };
     assert.equal((await startWebCadJob({ ...options, request: { ...edit, instruction: 'Aggiungi fori' } })).reason,
@@ -167,6 +177,14 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
       request: { projectId, revisionId: edit.revisionId } })).status, 'verified');
     const updated = await readWebCadRevision({ ...options, projectId, revisionId: edit.revisionId });
     assert.equal(updated.revisionNumber, 2);
+    if (realRunner) {
+      assert.deepEqual(readStudioStl(new TextDecoder().decode(updated.stl)).bounds, [[0, 90], [0, 60], [0, 30]]);
+      assert.match(new TextDecoder().decode(updated.scad), /width = 90;/);
+    }
+    assert.equal((await selectWebCadRevision({ ...options, projectId, revisionId })).activeRevisionId, revisionId);
+    const reopened = (await listWebCadRevisions({ ...options, projectId })).find(entry => entry.selected);
+    assert.equal(reopened.revisionId, revisionId);
+    assert.equal(reopened.parameters.width, 80);
     assert.equal(updated.manifest.parameters.width, 90);
     assert.deepEqual(updated.manifest.photoEstimates, ['width']);
     assert.equal((await readWebCadRevision({ ...options, projectId, revisionId })).manifest.parameters.width, 80);
