@@ -19,7 +19,7 @@ wall = ${wall};
 floor = ${floor};
 corner = ${cornerRadius};
 eps = 0.01;
-$fn = 64;
+$fn = 16;
 module section(size, radius, z) {
     translate([0, 0, z])
         linear_extrude(height = eps)

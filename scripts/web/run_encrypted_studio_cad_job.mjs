@@ -4,9 +4,12 @@ import { decodeWebAppJob, encodeRunnerBase64, encodeWebAppResult } from './web_a
 export async function runEncryptedStudioCadJob({ input, ticket, privateKey, authorizationKey }) {
   const job = await decodeWebAppJob({ privateKey, authorizationKey, ticket, input });
   const { source, checks } = job;
-  if (source?.kind !== 'cad_open_box' || Object.keys(source).length !== 2 ||
+  if (!['cad_open_box', 'cad_tapered_box'].includes(source?.kind) || Object.keys(source).length !== 2 ||
       !Array.isArray(checks) || checks.length !== 0) {
     throw new Error('Invalid CAD runner job');
+  }
+  if ((source.kind === 'cad_tapered_box') !== Object.hasOwn(source.parameters, 'baseWidth')) {
+    throw new Error('CAD job shape mismatch');
   }
   const { manifest, scad, stl } = await runStudio3dBoxJob(source.parameters);
   return encodeWebAppResult({
