@@ -1,8 +1,9 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
+import { runEncryptedStudioCadJob } from './run_encrypted_studio_cad_job.mjs';
 import { runEncryptedWebApplicationJob } from './run_encrypted_web_application_job.mjs';
 import { importWebAppAuthorizationKey, importWebAppPrivateKey } from './web_application_runner_packet.mjs';
 
-const [eventFile, output] = process.argv.slice(2);
+const [eventFile, output, kind] = process.argv.slice(2);
 
 try {
   if (!output || !eventFile || (await stat(eventFile)).size > 180000) throw new Error('Invalid runner event');
@@ -12,7 +13,9 @@ try {
     importWebAppPrivateKey(process.env.AIVEXUS_WEB_BUILDER_JOB_PRIVATE_KEY),
     importWebAppAuthorizationKey(process.env.AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY),
   ]);
-  const encrypted = await runEncryptedWebApplicationJob({
+  if (kind !== undefined && kind !== 'cad') throw new Error('Invalid runner kind');
+  const runJob = kind === 'cad' ? runEncryptedStudioCadJob : runEncryptedWebApplicationJob;
+  const encrypted = await runJob({
     input: inputs.job, ticket: inputs.ticket, privateKey, authorizationKey,
     executable: process.env.AIVEXUS_WEB_CHROMIUM || 'google-chrome', env: process.env,
   });

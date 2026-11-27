@@ -160,12 +160,12 @@ export function createGitHubCounterRunnerClient(options) {
   };
 }
 
-export function createGitHubWebApplicationRunnerClient(options) {
+function createGitHubEncryptedRunner(options, workflow, artifactName, entry) {
   const maxArchiveBytes = 224 * 1024;
   const client = createGitHubRunnerClient(options, {
-    workflow: 'web-application-runner.yml', artifactName: 'aivexus-application-envelope',
+    workflow, artifactName,
     maxArchiveBytes,
-    openArchive: bytes => readRunnerArchiveEntry(bytes, 'application.aivexus', MAX_WEB_APP_RESULT_PACKET_BYTES, maxArchiveBytes),
+    openArchive: bytes => readRunnerArchiveEntry(bytes, entry, MAX_WEB_APP_RESULT_PACKET_BYTES, maxArchiveBytes),
   });
   return {
     ...client,
@@ -178,4 +178,14 @@ export function createGitHubWebApplicationRunnerClient(options) {
       return client.dispatch({ ticket, job: input });
     },
   };
+}
+
+export function createGitHubWebApplicationRunnerClient(options) {
+  return createGitHubEncryptedRunner(options,
+    'web-application-runner.yml', 'aivexus-application-envelope', 'application.aivexus');
+}
+
+export function createGitHubStudioCadRunnerClient(options) {
+  return createGitHubEncryptedRunner(options,
+    'web-studio-3d.yml', 'aivexus-cad-envelope', 'cad.aivexus');
 }

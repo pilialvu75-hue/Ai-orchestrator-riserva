@@ -1,0 +1,136 @@
+name: AIVEXUS Studio 3D CAD
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/web-studio-3d.yml'
+      - 'scripts/web/studio_3d_open_box.mjs'
+      - 'scripts/web/build_studio_3d_box_result.mjs'
+      - 'scripts/web/run_studio_3d_box_job.mjs'
+      - 'scripts/web/run_encrypted_studio_cad_job.mjs'
+      - 'scripts/web/build_web_application_runner_result.mjs'
+      - 'test/airlab/web_studio_3d_open_box.mjs'
+      - 'test/airlab/web_studio_3d_revisions.mjs'
+      - 'scripts/web/d1_web_cad_revisions.mjs'
+      - 'scripts/web/sql/013_web_cad_revisions.sql'
+      - 'scripts/web/sql/014_web_cad_jobs.sql'
+      - 'scripts/web/d1_web_cad_jobs.mjs'
+      - 'scripts/web/studio_3d_box_parameters.mjs'
+      - 'scripts/web/github_counter_runner_client.mjs'
+      - 'functions/api/cantiere/cad/job.js'
+      - 'web/studio_3d_preview.mjs'
+      - 'web/studio_3d_preview_element.mjs'
+      - 'web/studio_3d_fdm.mjs'
+      - 'web/studio_3d_photo.mjs'
+
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: Opaque CAD runner ticket
+        required: true
+        type: string
+      job:
+        description: Authenticated encrypted CAD job
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  open-box-stl:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install OpenSCAD
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y openscad
+      - name: Render and measure both box revisions
+        run: |
+          openscad --version
+          export AIVEXUS_WEB_CHROMIUM="$(command -v google-chrome)"
+          test -x "$AIVEXUS_WEB_CHROMIUM"
+          node --test test/airlab/web_studio_3d_open_box.mjs
+
+      - name: Build verified CAD artifacts
+        run: |
+          node scripts/web/build_studio_3d_box_result.mjs box-80mm 80 60 30 2 3
+          node scripts/web/build_studio_3d_box_result.mjs box-90mm 90 60 30 2 3
+          AIVEXUS_CAD_TEST_ARTIFACTS=. AIVEXUS_CAD_REAL_RUNNER=1 node --test test/airlab/web_studio_3d_revisions.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: studio-3d-open-box
+          path: |
+            box-80mm/
+            box-90mm/
+          if-no-files-found: error
+          retention-days: 7
+
+
+  slice-open-box:
+    if: github.event_name == 'pull_request'
+    needs: open-box-stl
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: studio-3d-open-box
+          path: cad-samples
+      - name: Install PrusaSlicer
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y prusa-slicer xvfb xauth
+      - name: Slice both real STL revisions
+        run: |
+          for width in 80 90; do
+            source="cad-samples/box-${width}mm/box.stl"
+            output="$RUNNER_TEMP/box-${width}mm.gcode"
+            xvfb-run -a prusa-slicer --export-gcode --layer-height 0.2 \
+              --nozzle-diameter 0.4 --output "$output" "$source"
+            test -s "$output"
+            layers="$(grep -c '^;LAYER_CHANGE' "$output")"
+            test "$layers" -gt 1
+            grep -Eq '^G1 .* E[0-9]' "$output"
+            printf 'Box %s mm: %s layers, G-code SHA-256 ' "$width" "$layers"
+            sha256sum "$output" | cut -d' ' -f1
+          done
+
+  render-private-cad:
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 && vars.AIVEXUS_WEB_BUILDER_RUNNER_ACTOR != '' &&
+      github.actor == vars.AIVEXUS_WEB_BUILDER_RUNNER_ACTOR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install OpenSCAD
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y openscad
+      - name: Render authenticated CAD job
+        env:
+          AIVEXUS_WEB_BUILDER_JOB_PRIVATE_KEY: ${{ secrets.AIVEXUS_WEB_BUILDER_JOB_PRIVATE_KEY }}
+          AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY: ${{ secrets.AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY }}
+        run: node scripts/web/build_web_application_runner_result.mjs "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/cad.aivexus" cad
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-cad-envelope
+          path: ${{ runner.temp }}/cad.aivexus
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
