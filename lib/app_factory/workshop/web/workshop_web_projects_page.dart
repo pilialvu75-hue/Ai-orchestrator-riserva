@@ -181,7 +181,9 @@ final class _WorkshopWebProjectsPageState
         status: WorkshopWebProjectStatus.draft,
         progress: 0,
         currentPhase: _projectKindLabel(kind),
-        currentItem: 'Bozza salvata · runner non ancora collegato',
+        currentItem: kind == AivexusProjectKind.cad
+            ? 'Apri Studio Stampa 3D per generare il modello'
+            : 'Bozza salvata · runner non ancora collegato',
         createdAt: now,
         updatedAt: now,
         extension: AivexusProjectExtension.draft(kind),
@@ -677,7 +679,9 @@ proposta breve, concreta e approvabile.
                 _tr(_newProjectKind == AivexusProjectKind.software
                     ? 'La creazione non parte da questo pulsante. Prima vedrai '
                         'la proposta e dovrai approvarla esplicitamente.'
-                    : 'La bozza viene salvata nello stesso elenco progetti. '
+                    : _newProjectKind == AivexusProjectKind.cad
+                        ? 'Apri Studio Stampa 3D dopo aver salvato il progetto.'
+                        : 'La bozza viene salvata nello stesso elenco progetti. '
                         'Il runner specializzato non è ancora collegato e '
                         'nessuna generazione viene simulata.'),
                 style: const TextStyle(color: Colors.white54, height: 1.4),
@@ -742,7 +746,13 @@ proposta breve, concreta e approvabile.
               const SizedBox(height: 12),
               _infoRow('Tipo', _tr(_projectKindLabel(project.projectKind))),
               _infoRow('Fase', _tr(project.currentPhase)),
-              _infoRow('Elemento', _tr(project.currentItem)),
+              _infoRow(
+                'Elemento',
+                _tr(project.projectKind == AivexusProjectKind.cad &&
+                        project.currentItem == 'Bozza salvata · runner non ancora collegato'
+                    ? 'Apri Studio Stampa 3D per generare il modello'
+                    : project.currentItem),
+              ),
               _infoRow('Stato progetto', _tr(_statusLabel(project.status))),
               const SizedBox(height: 16),
               Text(
@@ -802,14 +812,15 @@ proposta breve, concreta e approvabile.
                     MaterialPageRoute<void>(
                       builder: (_) => WorkshopWebCadPreviewPage(
                         projectId: project.id,
+                        description: project.goal,
                       ),
                     ),
                   ),
                   icon: const Icon(Icons.view_in_ar_outlined),
-                  label: const Text('Apri anteprima STL'),
+                  label: const Text('Apri Studio Stampa 3D'),
                 ),
               if (!project.isReadOnly &&
-                  project.projectKind != AivexusProjectKind.software)
+                  project.projectKind == AivexusProjectKind.game)
                 Card(
                   child: ListTile(
                     leading: Icon(_projectKindIcon(project.projectKind)),
@@ -887,7 +898,7 @@ proposta breve, concreta e approvabile.
     AivexusProjectKind.software =>
       'App e software seguono il flusso proposta → approvazione del Cantiere.',
     AivexusProjectKind.cad =>
-      'Stampa 3D salva una bozza CAD nello stesso progetto; il runner 3D arriverà nello Studio dedicato.',
+      'Salva il progetto per aprire Studio Stampa 3D e generare il modello.',
     AivexusProjectKind.game =>
       'Videogiochi salva una bozza GameSpec nello stesso progetto; il runner gioco arriverà nello Studio dedicato.',
   };

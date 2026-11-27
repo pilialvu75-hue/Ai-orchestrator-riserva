@@ -1,1 +1,1 @@
-void setCadPreviewProject(Object element, String projectId) {}
+void setCadPreviewProject(Object element, String projectId, String description) {}

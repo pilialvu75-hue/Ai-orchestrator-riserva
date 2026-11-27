@@ -189,6 +189,7 @@ class AivexusStlPreview extends HTMLElement {
     const fields = form.querySelector('fieldset');
     const edit = form.querySelector('[data-edit]');
     const instructionField = edit.querySelector('input');
+    const projectDescription = this.getAttribute('project-description') ?? '';
     function setTextCommand(hasRevision) {
       edit.hidden = false;
       edit.querySelector('[data-instruction-label]').textContent = hasRevision ? 'Modifica della revisione' : 'Descrizione quotata';
@@ -359,6 +360,9 @@ class AivexusStlPreview extends HTMLElement {
       history.parentElement.hidden = !revisions.length;
       historyReady = true;
       setTextCommand(Boolean(revisions.length));
+      if (!revisions.length && !instructionField.value && projectDescription.length <= instructionField.maxLength) {
+        instructionField.value = projectDescription;
+      }
       updateControls();
       if (revisions.length && (selectedId || !loadNumber)) {
         history.value = selectedId ?? activeRevisionId;

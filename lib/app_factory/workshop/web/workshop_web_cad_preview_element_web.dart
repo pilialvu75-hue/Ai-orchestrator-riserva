@@ -2,5 +2,7 @@
 
 import 'dart:html' as html;
 
-void setCadPreviewProject(Object element, String projectId) =>
-    (element as html.Element).setAttribute('project-id', projectId);
+void setCadPreviewProject(Object element, String projectId, String description) =>
+    (element as html.Element)
+      ..setAttribute('project-id', projectId)
+      ..setAttribute('project-description', description);
