@@ -299,7 +299,7 @@ class ResidentCompletionRuntime {
   /// and must name the selected device; CPU cannot accept GPU layers.
   static int resolveGpuLayers(String? device, int? requested) {
     if (requested == null) return device == null ? 0 : 99;
-    if (device == null || requested < 1 || requested > 512) {
+    if (device == null || requested < 1 || requested > 513) {
       throw ArgumentError.value(requested, 'gpuLayers');
     }
     return requested;
