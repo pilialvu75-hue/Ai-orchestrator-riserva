@@ -221,9 +221,24 @@ jobs:
           --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=${{ steps.computer_use_lab.outputs.enabled }}
           test/features/computer_use/computer_use_build_policy_test.dart
 
+      # CUDA is opt-in at compile time for the coordinated beta channel only.
+      # Do not let an old QA installation enable it on stable or legacy builds.
+      - name: Resolve Windows resident acceleration beta profile
+        id: resident_acceleration
+        shell: pwsh
+        run: |
+          $releaseTag = '${{ steps.publish_tag.outputs.tag }}'
+          $enabled = if ($releaseTag -match '^v[0-9]+\.[0-9]+\.[0-9]+-beta\+[0-9]+$') {
+            'true'
+          } else {
+            'false'
+          }
+          "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Windows CUDA resident beta enabled=$enabled"
+
       - name: Build coordinated Windows release
         shell: pwsh
-        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }} --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=${{ steps.computer_use_lab.outputs.enabled }}
+        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }} --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=${{ steps.computer_use_lab.outputs.enabled }} --dart-define=AIVEXUS_WINDOWS_CUDA_QA=${{ steps.resident_acceleration.outputs.enabled }}
 
       - name: Package local ChatGPT adapter for beta only
         if: steps.computer_use_lab.outputs.enabled == 'true'
@@ -232,6 +247,19 @@ jobs:
           $toolsDir = Join-Path $PWD 'build\windows\x64\runner\Release\mcp-tools'
           New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
           Copy-Item 'scripts\chatgpt_bridge\aivexus_mcp.ps1' (Join-Path $toolsDir 'aivexus_mcp.ps1')
+
+      # Include the pinned CUDA, Vulkan and CPU servers only in coordinated beta.
+      # Keep the legacy standalone helper, recovery and existing trust policy.
+      - name: Bundle and validate Windows beta resident runtimes
+        if: steps.resident_acceleration.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $releaseTag = '${{ steps.publish_tag.outputs.tag }}'
+          if ($releaseTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+-beta\+[0-9]+$') { throw 'Resident beta bundle requires an exact beta tag' }
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\bundle_windows_modern_runtime.ps1') -ReleaseDir $releaseDir
+          & (Join-Path $PWD 'tool\bundle_windows_cuda_runtime.ps1') -ReleaseDir $releaseDir
+          & (Join-Path $PWD 'tool\test_windows_cuda_bundle.ps1') -ReleaseDir $releaseDir
 
       - name: Verify bundled Windows GGUF inference
         shell: pwsh
