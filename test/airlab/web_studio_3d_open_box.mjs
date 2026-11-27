@@ -13,10 +13,11 @@ test('accepts numeric dimensions and rejects invalid cavities and source injecti
 
 test('OpenSCAD exports the original and the resized box with an open cavity', async () => {
   for (const width of [80, 90]) {
-    const { stl } = await renderOpenBox({ ...box, width });
+    const { stl, verification } = await renderOpenBox({ ...box, width });
+    assert.deepEqual(verification.dimensionsMm, { width, depth: 60, height: 30 });
     const vertices = [...stl.toString('ascii').matchAll(/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/g)]
       .map(match => match.slice(1).map(Number));
-    assert.ok(vertices.length >= 12 && vertices.length % 3 === 0);
+    assert.equal(verification.triangles, vertices.length / 3);
     assert.ok(vertices.flat().every(Number.isFinite));
     assert.deepEqual([0, 1, 2].map(axis => {
       const coordinates = vertices.map(vertex => vertex[axis]);

@@ -34,6 +34,45 @@ difference() {
 `;
 }
 
+function verifyBoxMesh(stl, { width, depth, height }) {
+  const vertices = [...stl.toString('ascii').matchAll(/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/g)]
+    .map(match => match.slice(1).map(Number));
+  if (vertices.length < 12 || vertices.length % 3 ||
+      !vertices.every(vertex => vertex.every(Number.isFinite))) {
+    throw new Error('OpenSCAD returned invalid ASCII STL vertices');
+  }
+
+  const extent = [width, depth, height];
+  for (let axis = 0; axis < extent.length; axis++) {
+    const coordinates = vertices.map(vertex => vertex[axis]);
+    if (Math.abs(Math.min(...coordinates)) > 0.001 ||
+        Math.abs(Math.max(...coordinates) - extent[axis]) > 0.001) {
+      throw new Error('STL dimensions differ from the CAD parameters');
+    }
+  }
+
+  const edges = new Map();
+  for (let index = 0; index < vertices.length; index += 3) {
+    const triangle = vertices.slice(index, index + 3).map(vertex => vertex.join(','));
+    if (new Set(triangle).size !== 3) throw new Error('STL has a collapsed triangle');
+    for (let side = 0; side < 3; side++) {
+      const start = triangle[side];
+      const end = triangle[(side + 1) % 3];
+      const key = [start, end].sort().join('|');
+      const edge = edges.get(key) ?? { faces: 0, orientation: 0 };
+      edge.faces++;
+      edge.orientation += start < end ? 1 : -1;
+      edges.set(key, edge);
+    }
+  }
+  for (const edge of edges.values()) {
+    if (edge.faces !== 2 || edge.orientation !== 0) {
+      throw new Error('STL has an open or inconsistently oriented edge');
+    }
+  }
+  return { dimensionsMm: { width, depth, height }, triangles: vertices.length / 3 };
+}
+
 // Runs a fixed template with numeric inputs. The caller never supplies executable CAD.
 export async function renderOpenBox(parameters, { executable = 'openscad' } = {}) {
   const source = createOpenBoxCad(parameters);
@@ -46,8 +85,8 @@ export async function renderOpenBox(parameters, { executable = 'openscad' } = {}
       maxBuffer: 128 * 1024,
     });
     const stl = await readFile(join(directory, 'box.stl'));
-    if (stl.length === 0) throw new Error('OpenSCAD returned an empty STL');
-    return { source, stl };
+    const verification = verifyBoxMesh(stl, parameters);
+    return { source, stl, verification };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
