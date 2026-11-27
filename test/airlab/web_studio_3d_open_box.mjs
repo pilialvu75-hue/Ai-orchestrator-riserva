@@ -118,9 +118,9 @@ test('Chromium imports the actual STL through the preview element file input',
     assets.set('fixture.mjs', `
       import './studio_3d_preview_element.mjs';
       const root = document.querySelector('aivexus-stl-preview').shadowRoot;
-      const input = root.querySelector('input');
+      const input = root.querySelector('input[type=file]');
       const canvas = root.querySelector('canvas');
-      const status = root.querySelector('output');
+      const status = root.querySelector('output:not([data-job])');
       new MutationObserver(() => {
         document.querySelector('#result').textContent =
           canvas.hidden ? status.textContent : status.textContent + ' rendered';
@@ -164,4 +164,68 @@ test('encrypts the real CAD job and verifies its encrypted result and ticket',
     assert.deepEqual(manifest.parameters, box);
     assert.equal(await runnerPayloadSha256(decodeRunnerBase64(stl, 90000)),
       manifest.files.find(file => file.name === 'box.stl').sha256);
+  });
+
+test('Chromium submits dimensions and opens the verified CAD revision after refresh',
+  { skip: !chromium, timeout: 45000 }, async () => {
+    const { stl } = await renderOpenBox({ ...box, width: 90 });
+    const names = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs'];
+    const assets = new Map(await Promise.all(names.map(async name =>
+      [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
+    assets.set('index.html', '<!doctype html><button id="start">Start</button><button id="refresh">Refresh</button><output id="state"></output><script type="module" src="fixture.mjs"></script>');
+    assets.set('fixture.mjs', `
+      let revisionId;
+      let saved = false;
+      const projectId = 'web-project:1795000000000000';
+      globalThis.fetch = async (path, options) => {
+        const url = new URL(path, location.origin);
+        if (url.pathname.endsWith('/job')) {
+          const request = JSON.parse(options.body);
+          if (request.projectId !== projectId) throw new Error('Bad project');
+          if (request.action === 'start') {
+            if (request.parameters.width !== 90 || request.parameters.wall !== 2 ||
+                request.baseRevisionId !== null || revisionId) throw new Error('Bad job');
+            revisionId = request.revisionId;
+            return Response.json({ status: 'submitted' });
+          }
+          if (request.action !== 'collect' || request.revisionId !== revisionId) throw new Error('Bad ticket');
+          saved = true;
+          return Response.json({ status: 'verified' });
+        }
+        if (url.searchParams.get('file') === 'history') {
+          return Response.json({ revisions: saved ? [{ revisionId, revisionNumber: 1 }] : [] });
+        }
+        if (saved && url.searchParams.get('file') === 'stl' &&
+            url.searchParams.get('revisionId') === revisionId) {
+          return new Response(${JSON.stringify(stl.toString('ascii'))});
+        }
+        throw new Error('Unexpected request');
+      };
+      import './studio_3d_preview_element.mjs';
+      const viewer = document.createElement('aivexus-stl-preview');
+      viewer.setAttribute('project-id', projectId);
+      document.body.append(viewer);
+      const root = viewer.shadowRoot;
+      const state = document.querySelector('#state');
+      const status = root.querySelectorAll('output');
+      new MutationObserver(() => {
+        state.textContent = status[1].textContent.includes('90 × 60 × 30 mm')
+          ? 'revision rendered' : status[0].textContent;
+      }).observe(root, { childList: true, subtree: true });
+      document.querySelector('#start').onclick = () => {
+        root.querySelector('[name=width]').value = 90;
+        root.querySelector('form').requestSubmit();
+      };
+      document.querySelector('#refresh').onclick = () => root.querySelector('[data-refresh]').click();
+    `);
+    const result = await createChromiumWebVerifier({ executable: chromium })({
+      assets,
+      checks: [
+        { action: 'click', selector: '#start' },
+        { action: 'text', selector: '#state', value: 'Generazione CAD in corso. Usa Aggiorna generazione per verificarne l’esito.' },
+        { action: 'click', selector: '#refresh' },
+        { action: 'text', selector: '#state', value: 'revision rendered' },
+      ],
+    });
+    assert.equal(result.status, 'passed', JSON.stringify(result));
   });
