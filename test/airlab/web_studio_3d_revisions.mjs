@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { readStudioStl } from '../../web/studio_3d_preview.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { listWebCadRevisions, readWebCadRevision, saveWebCadRevision } from '../../scripts/web/d1_web_cad_revisions.mjs';
@@ -40,3 +42,38 @@ test('stores immutable CAD artifacts, rejects altered bytes and isolates owners'
   assert.deepEqual(await listWebCadRevisions({ ...root, ownerSubject: 'stranger' }), []);
   sqlite.close();
 });
+
+const artifactBase = process.env.AIVEXUS_CAD_TEST_ARTIFACTS;
+test('stores both real OpenSCAD results and recovers either revision by ID',
+  { skip: !artifactBase }, async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    sqlite.exec(readFileSync(new URL('../../scripts/web/sql/013_web_cad_revisions.sql', import.meta.url), 'utf8'));
+    const db = { prepare: query => ({
+      bind: (...params) => ({ first: async () => sqlite.prepare(query).get(...params) }),
+    }) };
+    try {
+      const project = { db, ownerSubject: 'private-test-owner', projectId: 'web-project:1795000000000000' };
+      const revisionIds = [];
+      for (const width of [80, 90]) {
+        const path = join(artifactBase, 'box-' + width + 'mm');
+        const scad = readFileSync(join(path, 'box.scad'));
+        const stl = readFileSync(join(path, 'box.stl'));
+        const manifest = JSON.parse(readFileSync(join(path, 'result.json'), 'utf8'));
+        const revisionId = crypto.randomUUID();
+        const baseRevisionId = revisionIds.at(-1) ?? null;
+        const stored = await saveWebCadRevision({ ...project, revisionId, baseRevisionId, manifest, scad, stl });
+        assert.deepEqual(stored, { ok: true, revisionNumber: revisionIds.length + 1 });
+        revisionIds.push(revisionId);
+      }
+      for (const [index, revisionId] of revisionIds.entries()) {
+        const revision = await readWebCadRevision({ ...project, revisionId });
+        assert.equal(revision.ok, true);
+        const width = index === 0 ? 80 : 90;
+        const { bounds } = readStudioStl(new TextDecoder().decode(revision.stl));
+        assert.deepEqual(bounds, [[0, width], [0, 60], [0, 30]]);
+        assert.match(new TextDecoder().decode(revision.scad), new RegExp('width = ' + width + ';'));
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
