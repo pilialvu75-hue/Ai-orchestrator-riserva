@@ -346,10 +346,18 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         onPromptUsage: (cached, evaluated) => RuntimeEventLog.instance.emit(
           '[ASSISTANT_LOCAL_CACHE] cached_tokens=$cached evaluated_tokens=$evaluated'),
       );
-      final answer = Platform.isWindows &&
-              LocalPromptTemplates.usesDeepSeekR1AssistantOutput(request.modelId!)
-          ? AssistantReasoningOutput.answerAfterInitialReasoning(output)
-          : output;
+      final Stream<String> answer;
+      if (Platform.isWindows &&
+          LocalPromptTemplates.usesDeepSeekR1AssistantOutput(request.modelId!)) {
+        answer = AssistantReasoningOutput.answerAfterInitialReasoning(output);
+      } else if (_isWindowsHost() &&
+          LocalInferenceModelIds.resolveTemplate(request.modelId!) ==
+              LocalInferenceModelIds.templateQwen &&
+          !AssistantReasoningOutput.requestsLiteralThinkTags(request.prompt)) {
+        answer = AssistantReasoningOutput.answerAfterOptionalInitialReasoning(output);
+      } else {
+        answer = output;
+      }
       await for (final chunk in CompletionOutput.visible(answer)) {
         if (chunk.isEmpty) continue;
         if (chunks == 0 && metricId != null) metrics?.firstText(metricId);
