@@ -46,12 +46,15 @@ void main() {
     expect(manifest, isNot(contains('QUERY_ALL_PACKAGES')));
   });
 
-  test('QA build opt-in is explicit and normal Android releases remain off', () {
+  test('Authorized beta and stable builds expose CU without bypassing consent', () {
     final workflow = File('.github/workflows/build.yml').readAsStringSync();
     expect(workflow, contains('android_computer_use_qa:'));
     expect(workflow, contains('AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA='));
     expect(workflow, contains('OWNER_OPT_IN'));
-    expect(workflow, contains('Android CU QA owner only'));
+    expect(workflow, contains('Missing trusted owner checkpoint'));
+    expect(workflow, contains('owner_checkpoint_run_id'));
+    expect(workflow, contains('Authorized release profile: Computer Use ON'));
+    expect(workflow, contains('Verify mandatory Computer Use build flag'));
   });
 
   test('Android lab requires explicit screenshot and gesture permission', () {

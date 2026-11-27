@@ -20,14 +20,20 @@ class HybridBetaReleaseManifestTests(unittest.TestCase):
                 "true",
             )
 
-    def test_ordinary_beta_remains_off(self):
+    def test_legacy_beta_off_manifest_is_readable(self):
         self.assertIn("enabled=false", make(
             self.sha, self.run_number, "v1.0.15-beta+100123", "beta", "false"
         ))
 
-    def test_stable_must_not_enable_hybrid(self):
-        with self.assertRaises(ValueError):
-            make(self.sha, self.run_number, "v1.0.15+100123", "stable", "true")
+    def test_explicit_stable_roundtrip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "manifest.txt"
+            tag = "v1.0.15+100123"
+            target.write_text(
+                make(self.sha, self.run_number, tag, "stable", "true"),
+                encoding="utf-8",
+            )
+            self.assertEqual(resolve(target, self.sha, self.run_number, tag), "true")
 
     def test_ci_and_nightly_must_not_enable_hybrid(self):
         for channel, tag in (

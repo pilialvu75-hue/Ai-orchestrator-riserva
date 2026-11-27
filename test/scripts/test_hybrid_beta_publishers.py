@@ -17,11 +17,18 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
         self.assertIn("AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA", content)
         self.assertIn("defaultValue: false", content)
 
-    def test_android_has_explicit_off_by_default_beta_only_input(self):
+    def test_android_requires_authorized_beta_and_stable_profile(self):
         content = source(".github/workflows/build.yml")
         self.assertIn("hybrid_consent_beta:", content)
         self.assertIn("default: false", content)
-        self.assertIn("if [[ \"$OWNER_OPT_IN\" == 'true' && \"$RELEASE_CHANNEL\" != 'beta' ]]", content)
+        self.assertIn("Resolve mandatory authorized release feature profile", content)
+        self.assertIn("steps.beta_profile.outputs.enabled", content)
+        self.assertIn("Missing trusted owner checkpoint", content)
+        self.assertIn("Release request SHA mismatch", content)
+        self.assertIn("current_sha", content)
+        self.assertIn("owner_checkpoint_run_id", content)
+        self.assertIn("Authorized release profile: Computer Use ON, protected HYBRID ON", content)
+        self.assertIn("Verify mandatory Computer Use build flag", content)
         self.assertEqual(content.count("--dart-define=" + FLAG), 2)
         self.assertIn(ASSET, content)
         self.assertIn("steps.hybrid_gate.outputs.enabled", content)
@@ -30,7 +37,7 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
     def test_only_owner_can_request_explicit_hybrid_beta(self):
         workflow = source(".github/workflows/owner-beta-checkpoint.yml")
         self.assertIn("hybrid-beta-checkpoint", workflow)
-        self.assertIn("hybrid_consent_beta='false'", workflow)
+        self.assertIn("hybrid_consent_beta='true'", workflow)
         self.assertIn("if [[ \"$requested_type\" == 'hybrid-beta-checkpoint' ]]", workflow)
         self.assertIn("github.actor == github.repository_owner", workflow)
         self.assertIn("github.event.comment.user.login == github.repository_owner", workflow)
@@ -38,6 +45,8 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
         self.assertIn('sha="${BASH_REMATCH[2]}"', workflow)
         self.assertIn('if [[ "$sha" != "$main_sha" ]]', workflow)
         self.assertIn('-f hybrid_consent_beta="$hybrid_consent_beta"', workflow)
+        self.assertIn('-f android_computer_use_qa=true', workflow)
+        self.assertIn('-f owner_checkpoint_run_id="$GITHUB_RUN_ID"', workflow)
         self.assertEqual(workflow.count("gh workflow run build.yml"), 1)
         self.assertEqual(
             workflow.count("gh workflow run windows-release-publish.yml"), 1
@@ -49,7 +58,7 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
             workflow.index('if [[ "$release_state" == "success" ]]'),
             workflow.index("gh workflow run windows-release-publish.yml"),
         )
-        self.assertIn("hybrid_consent_beta='false'", workflow)
+        self.assertIn("hybrid_consent_beta='true'", workflow)
 
 
     def test_internal_hybrid_prs_enable_android_qa_without_publishing(self):
@@ -157,20 +166,22 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
         self.assertIn("AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA", policy)
         self.assertIn("defaultValue: false", policy)
 
-        gate_start = workflow.index("name: Resolve Windows Computer Use beta laboratory profile")
+        gate_start = workflow.index("name: Resolve Windows Computer Use release laboratory profile")
         gate_end = workflow.index("name: Resolve Flutter dependencies", gate_start)
         gate = workflow[gate_start:gate_end]
         self.assertIn("steps.publish_tag.outputs.tag", gate)
         self.assertIn("id: computer_use_lab", gate)
         self.assertIn("enabled=$enabled", gate)
+        self.assertIn("Required protected HYBRID release attestation is missing", gate)
+        self.assertIn("bridge_enabled=$bridge", gate)
         self.assertIn("'false'", gate)
         match = re.search(r"\$releaseTag -match '([^']+)'", gate)
-        self.assertIsNotNone(match, "Must gate only the explicit beta release tag")
+        self.assertIsNotNone(match, "Must gate exact beta/stable release tags")
         pattern = match.group(1)
         for tag, enabled in (
             ("v1.0.16-beta+104671", True),
             ("v1.0.17-beta+104672", True),
-            ("v1.0.16+104671", False),
+            ("v1.0.16+104671", True),
             ("v1.0.16-nightly+104671", False),
             ("v1.0.16-dev+104671", False),
             ("v1.0.16-beta+104671-malformed", False),
@@ -204,6 +215,7 @@ class HybridBetaPublishersContractTest(unittest.TestCase):
                 self.assertIn("steps.publish_tag.outputs.tag", content)
                 self.assertEqual(content.count("--dart-define=" + FLAG), 1)
                 self.assertIn("steps.hybrid_gate.outputs.enabled", content)
+                self.assertIn("--dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }}", content)
                 self.assertLess(content.index("id: hybrid_gate"),
                                 content.index(f"run: flutter build {platform} --release"))
                 self.assertIn("github.event.workflow_run.event == 'workflow_dispatch'", content)
