@@ -63,9 +63,7 @@ jobs:
 
       - name: Render the measured tapered container
         run: |
-          node --input-type=module -e 'import { createTaperedBoxCad } from "./scripts/web/studio_3d_tapered_box.mjs"; console.log(createTaperedBoxCad({width:120,depth:110,height:55,wall:5,floor:5,baseWidth:110,baseDepth:105,cornerRadius:8}));' > "$RUNNER_TEMP/tapered.scad"
-          openscad -o "$RUNNER_TEMP/tapered.stl" "$RUNNER_TEMP/tapered.scad"
-          node --input-type=module -e 'import assert from "node:assert/strict"; import { readFileSync } from "node:fs"; import { readStudioStl } from "./web/studio_3d_preview.mjs"; const { bounds }=readStudioStl(readFileSync(process.argv[1],"ascii")); const size=bounds.map(([a,b])=>b-a); assert.ok(size.every((n,i)=>Math.abs(n-[120,110,55][i])<0.05), JSON.stringify(size)); console.log(size);' "$RUNNER_TEMP/tapered.stl"
+          node --input-type=module -e 'import assert from "node:assert/strict"; import { runStudio3dBoxJob } from "./scripts/web/run_studio_3d_box_job.mjs"; const {stl,manifest}=await runStudio3dBoxJob({width:120,depth:110,height:55,wall:5,floor:5,baseWidth:110,baseDepth:105,cornerRadius:8}); assert.equal(manifest.shape,"tapered_box"); assert.ok(stl.length<=65536, String(stl.length)); console.log(manifest.verification, stl.length);'
 
       - name: Build verified CAD artifacts
         run: |

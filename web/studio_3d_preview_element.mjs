@@ -48,7 +48,7 @@ class AivexusStlPreview extends HTMLElement {
           <button type="button" data-refresh hidden>Aggiorna generazione</button>
           <output data-job role="status"></output>
         </form>
-        <label hidden>Revisione salvata <select></select></label>
+        <label hidden>Revisione salvata <select data-cad-history></select></label>
         <button type="button" data-select hidden>Imposta come revisione attiva</button>
         <a data-file="stl" hidden>Scarica STL</a> <a data-file="scad" hidden>Scarica SCAD</a>
         <label>File STL <input type="file" accept=".stl,model/stl"></label>
@@ -93,7 +93,7 @@ class AivexusStlPreview extends HTMLElement {
     const input = root.querySelector('input[accept=".stl,model/stl"]');
     const status = root.querySelector('output:not([data-job]):not([data-photo-status])');
     const canvas = root.querySelector('canvas');
-    const history = root.querySelector('select');
+    const history = root.querySelector('[data-cad-history]');
     const useRevision = root.querySelector('[data-select]');
     let activeRevisionId;
     let revisionsById = new Map();
