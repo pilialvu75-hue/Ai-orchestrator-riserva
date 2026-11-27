@@ -6,6 +6,10 @@ import { createOpenBoxCad, renderOpenBox } from '../../scripts/web/studio_3d_ope
 
 import { mountStudioStlPreview } from '../../web/studio_3d_preview.mjs';
 
+import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio_cad_job.mjs';
+import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
+  importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
+
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
 
 test('accepts numeric dimensions and rejects invalid cavities and source injection', () => {
@@ -133,4 +137,31 @@ test('Chromium imports the actual STL through the preview element file input',
       ],
     });
     assert.equal(result.status, 'passed', JSON.stringify(result));
+  });
+
+test('encrypts the real CAD job and verifies its encrypted result and ticket',
+  { skip: !chromium }, async () => {
+    const makeKey = () => crypto.subtle.generateKey({
+      name: 'RSA-OAEP', modulusLength: 2048, hash: 'SHA-256',
+      publicExponent: Uint8Array.of(1, 0, 1),
+    }, true, ['encrypt', 'decrypt']);
+    const [runner, pages] = await Promise.all([makeKey(), makeKey()]);
+    const authorizationKey = await importWebAppAuthorizationKey(
+      encodeRunnerBase64(crypto.getRandomValues(new Uint8Array(32))));
+    const ticket = crypto.randomUUID();
+    const resultPublicKeySpki = encodeRunnerBase64(new Uint8Array(
+      await crypto.subtle.exportKey('spki', pages.publicKey)));
+    const { input, jobSha256 } = await encodeWebAppJob({
+      publicKey: runner.publicKey, authorizationKey, ticket, resultPublicKeySpki,
+      source: { kind: 'cad_open_box', parameters: box }, checks: [],
+    });
+    const runnerRequest = { input, ticket, privateKey: runner.privateKey, authorizationKey };
+    await assert.rejects(runEncryptedStudioCadJob({ ...runnerRequest, ticket: crypto.randomUUID() }));
+    const packet = await runEncryptedStudioCadJob(runnerRequest);
+    const { manifest, stl } = await decodeWebAppResult({
+      privateKey: pages.privateKey, authorizationKey, ticket, packet, jobSha256,
+    });
+    assert.deepEqual(manifest.parameters, box);
+    assert.equal(await runnerPayloadSha256(decodeRunnerBase64(stl, 90000)),
+      manifest.files.find(file => file.name === 'box.stl').sha256);
   });

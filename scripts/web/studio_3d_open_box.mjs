@@ -81,6 +81,14 @@ export async function renderOpenBox(parameters, { executable = 'openscad' } = {}
     await writeFile(join(directory, 'box.scad'), source);
     await run(executable, ['-o', 'box.stl', 'box.scad'], {
       cwd: directory,
+      env: {
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        HOME: directory,
+        TMPDIR: directory,
+        TEMP: directory,
+        TMP: directory,
+      },
       timeout: 30_000,
       maxBuffer: 128 * 1024,
     });

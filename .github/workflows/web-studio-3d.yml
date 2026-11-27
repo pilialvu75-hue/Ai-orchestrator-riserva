@@ -7,6 +7,8 @@ on:
       - 'scripts/web/studio_3d_open_box.mjs'
       - 'scripts/web/build_studio_3d_box_result.mjs'
       - 'scripts/web/run_studio_3d_box_job.mjs'
+      - 'scripts/web/run_encrypted_studio_cad_job.mjs'
+      - 'scripts/web/build_web_application_runner_result.mjs'
       - 'test/airlab/web_studio_3d_open_box.mjs'
       - 'test/airlab/web_studio_3d_revisions.mjs'
       - 'scripts/web/d1_web_cad_revisions.mjs'
@@ -14,11 +16,23 @@ on:
       - 'web/studio_3d_preview.mjs'
       - 'web/studio_3d_preview_element.mjs'
 
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: Opaque CAD runner ticket
+        required: true
+        type: string
+      job:
+        description: Authenticated encrypted CAD job
+        required: true
+        type: string
+
 permissions:
   contents: read
 
 jobs:
   open-box-stl:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
@@ -52,3 +66,34 @@ jobs:
             box-90mm/
           if-no-files-found: error
           retention-days: 7
+
+  render-private-cad:
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 && vars.AIVEXUS_WEB_BUILDER_RUNNER_ACTOR != '' &&
+      github.actor == vars.AIVEXUS_WEB_BUILDER_RUNNER_ACTOR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install OpenSCAD
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y openscad
+      - name: Render authenticated CAD job
+        env:
+          AIVEXUS_WEB_BUILDER_JOB_PRIVATE_KEY: ${{ secrets.AIVEXUS_WEB_BUILDER_JOB_PRIVATE_KEY }}
+          AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY: ${{ secrets.AIVEXUS_WEB_BUILDER_JOB_AUTH_KEY }}
+        run: node scripts/web/build_web_application_runner_result.mjs "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/cad.aivexus" cad
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aivexus-cad-envelope
+          path: ${{ runner.temp }}/cad.aivexus
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
