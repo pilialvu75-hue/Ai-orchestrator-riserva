@@ -7,6 +7,8 @@ import { createWebCustomerAccessHandler, activeWebCustomerGrant } from
 import { createAuthenticatedWebProjectOperation } from
   '../../scripts/web/authenticated_web_project_operation.mjs';
 import { onRequest as rawInference } from '../../functions/api/cantiere/inference.js';
+import { onRequest as studioQuota } from '../../functions/api/cantiere/proposals/quota.js';
+import { onRequest as studioStatus } from '../../functions/api/cantiere/access/status.js';
 
 const issuer = 'https://aivexus-test.cloudflareaccess.com';
 const audience = 'private-web-client';
@@ -156,6 +158,29 @@ test('existing owner creates/list/revokes invitations; invited Access client is 
   const ownerQuota = await parse(await gate(quotaRequest(owner)));
   assert.equal(ownerQuota.tier, 'administrator');
   assert.equal(ownerQuota.userLimit, 72);
+
+  const env = {
+    AIVEXUS_WEB_D1: db, AIVEXUS_WEB_ORIGIN: origin, AIVEXUS_WEB_ACCESS_ISSUER: issuer,
+    AIVEXUS_WEB_ACCESS_AUDIENCE: audience, AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT: 'owner-subject',
+    AIVEXUS_WEB_CLIENT_ACCESS_ENABLED: 'true',
+  };
+  const live = (handler, token, path) => handler({ env, request: request({ token, path }) });
+  const signInStatus = token => live(studioStatus, token, '/api/cantiere/access/status');
+  const studioLimit = token => live(studioQuota, token, '/api/cantiere/proposals/quota');
+  const fetchOriginal = globalThis.fetch;
+  globalThis.fetch = auth.fetchImpl;
+  try {
+    assert.equal((await parse(await signInStatus(alice))).canUseStudio, false);
+    assert.equal((await studioLimit(alice)).status, 403);
+    assert.equal((await studioLimit(owner)).status, 200);
+    env.AIVEXUS_WEB_STUDIO_BETA_ENABLED = 'true';
+    assert.equal((await parse(await signInStatus(alice))).canUseStudio, true);
+    assert.equal((await parse(await studioLimit(alice))).tier, 'standard');
+    assert.equal((await parse(await studioLimit(wrong))).error, 'client_access_required');
+  } finally {
+    globalThis.fetch = fetchOriginal;
+  }
+
 
   assert.equal((await call('revoke', alice, 'POST', {
     invitationId: created.invitationId,

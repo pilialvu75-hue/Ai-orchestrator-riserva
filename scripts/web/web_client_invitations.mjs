@@ -184,9 +184,7 @@ export function createWebCustomerAccessHandler({
       principal, configuredSubject: configuredOwnerSubject,
       configuredEmail: configuredOwnerEmail,
     });
-    // Customer service has been shelved by the owner. Default closed, and
-    // production wrappers never override it. Keep role status read-only for
-    // existing owner diagnostics; do not query invitation D1 when paused.
+    // Keep role status read-only while enrollment is paused.
     if (enrollmentPaused && operation !== 'status') {
       return deny(403, 'client_service_paused');
     }

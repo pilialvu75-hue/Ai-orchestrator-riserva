@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_customer_access_page.dart';
 import 'dart:async';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_chat_controller.dart';
@@ -160,6 +161,28 @@ class WorkshopWebHome extends StatefulWidget {
 
 class _WorkshopWebHomeState extends State<WorkshopWebHome> {
   int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    final params = Uri.base.queryParameters;
+    final id = params['invite'];
+    final isInvitation = id != null &&
+        RegExp(r'^[a-f0-9-]{36}$', caseSensitive: false).hasMatch(id);
+    if (!isInvitation && params['access'] != 'beta') return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => WorkshopWebLanguageScope(
+          language: widget.language,
+          child: WorkshopWebCustomerAccessPage(
+            invitationId: isInvitation ? id : null,
+          ),
+        ),
+      ));
+    });
+  }
+
   void _openCloudTools(int initialTab) {
     Navigator.of(context).pop(); // close the hamburger drawer
     Navigator.of(context).push(
