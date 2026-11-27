@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - '.github/workflows/windows-release-publish.yml'
+      - '.github/workflows/windows-inference-candidate.yml'
+      - '.github/workflows/windows-computer-use-beta.yml'
+      - '.github/workflows/windows-cuda-unsigned-owner-beta.yml'
       - '.github/workflows/windows-resident-bundle-qa.yml'
       - 'tool/bundle_windows_modern_runtime.ps1'
       - 'tool/bundle_windows_cuda_runtime.ps1'

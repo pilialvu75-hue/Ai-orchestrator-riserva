@@ -182,6 +182,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\bundle_windows_modern_runtime.ps1') -ReleaseDir $dir
           & (Join-Path $PWD 'tool\bundle_windows_cuda_runtime.ps1') -ReleaseDir $dir
           # PowerShell scripts throw on error; LASTEXITCODE here can be stale/null.
           # Do not interpret it as the result of a PowerShell script invocation.

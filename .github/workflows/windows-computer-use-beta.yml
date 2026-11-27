@@ -211,6 +211,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $dir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\bundle_windows_modern_runtime.ps1') -ReleaseDir $dir
           & (Join-Path $PWD 'tool\bundle_windows_cuda_runtime.ps1') -ReleaseDir $dir
           if ($LASTEXITCODE -ne 0) { throw 'Pinned CUDA bundle download failed.' }
           & (Join-Path $PWD 'tool\test_windows_cuda_bundle.ps1') -ReleaseDir $dir

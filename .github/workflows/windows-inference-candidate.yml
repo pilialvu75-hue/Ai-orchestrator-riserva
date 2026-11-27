@@ -100,7 +100,15 @@ jobs:
 
       - name: Build Windows release
         shell: pwsh
-        run: flutter build windows --release --build-number=${{ github.run_number }}
+        run: flutter build windows --release --build-number=${{ github.run_number }} --dart-define=AIVEXUS_WINDOWS_CUDA_QA=true
+
+      - name: Bundle and validate Windows release resident runtimes
+        shell: pwsh
+        run: |
+          $releaseDir = Join-Path $PWD 'build\windows\x64\runner\Release'
+          & (Join-Path $PWD 'tool\bundle_windows_modern_runtime.ps1') -ReleaseDir $releaseDir
+          & (Join-Path $PWD 'tool\bundle_windows_cuda_runtime.ps1') -ReleaseDir $releaseDir
+          & (Join-Path $PWD 'tool\test_windows_cuda_bundle.ps1') -ReleaseDir $releaseDir
 
       - name: Verify bundled Windows GGUF inference
         shell: pwsh
