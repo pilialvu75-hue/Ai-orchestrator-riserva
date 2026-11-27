@@ -39,8 +39,8 @@ class RuntimeBootstrap {
   static const bool localTestBridgeEnabled =
       bool.fromEnvironment('AIVEXUS_LOCAL_TEST_BRIDGE', defaultValue: false);
 
-  /// Opt-in for an explicitly compiled INTERNAL HYBRID QA binary only.
-  /// Ordinary OTA/release workflows do not set this build-time define.
+  /// Enabled at build time for authorized beta/stable protected HYBRID.
+  /// Runtime consent and user-selected LOCAL/CLOUD/HYBRID remain independent.
   /// It is not a user-configurable runtime switch.
   static const bool experimentalConsentGateEnabled =
       bool.fromEnvironment('AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA',

@@ -1,6 +1,6 @@
 /// Build-time gate for the experimental Computer Use laboratory.
-/// Default CI, stable and other non-beta builds remain disabled. Authorized
-/// beta publishers must explicitly compile this flag ON; user permissions
+/// Default CI and non-release builds remain disabled. Authorized beta and
+/// stable publishers explicitly compile this flag ON; user permissions
 /// and manual session consent still apply.
 ///
 /// This gate only exposes a manual lab. It does not register an autonomous
