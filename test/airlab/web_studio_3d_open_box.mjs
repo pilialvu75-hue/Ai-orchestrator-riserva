@@ -218,7 +218,11 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
       }).observe(root, { childList: true, subtree: true });
       document.querySelector('#start').onclick = () => {
         root.querySelector('[name=width]').value = 90;
-        root.querySelector('form').requestSubmit();
+        const form = root.querySelector('form');
+        if (!form.checkValidity()) throw new Error('Invalid CAD form fixture');
+        // The verifier's CSP sandbox blocks native form submission. Exercise
+        // the same event handler without permitting navigation or form posts.
+        form.dispatchEvent(new SubmitEvent('submit', { cancelable: true }));
       };
       document.querySelector('#refresh').onclick = () => root.querySelector('[data-refresh]').click();
     `);

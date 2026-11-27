@@ -67,7 +67,7 @@ export async function listWebCadRevisions({ db, ownerSubject, projectId }) {
       base_revision_id AS baseRevisionId, json_extract(manifest_json, '$.parameters') AS parametersJson
     FROM web_cad_revisions
     WHERE owner_subject = ?1 AND project_id = ?2
-    ORDER BY revision_number DESC LIMIT 50
+    ORDER BY selected DESC, revision_number DESC LIMIT 50
   `).bind(ownerSubject, projectId).all();
   if (query.success === false || !Array.isArray(query.results)) throw new Error('CAD history unavailable');
   return query.results.map(({ parametersJson, selected, ...revision }) => ({

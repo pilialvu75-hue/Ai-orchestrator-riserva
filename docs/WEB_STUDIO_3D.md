@@ -20,3 +20,11 @@ Il prossimo passo è integrare il risultato CAD nei contratti del runner e delle
 - Contatore Semplice. Versione iniziale `4c528359-2640-4986-9c53-bedd0d4effeb`, versione rivista `54216260-40c8-42eb-afc4-2f1092b2e3e3`. La v2 è verificata in Studio e consegnata sul link privato. Il collaudo manuale ha prodotto 0, 1, 0, 1, 0 con Decrementa, Incrementa, Decrementa, Incrementa e Azzera.
 - Cloudflare Access mostra il criterio dedicato ai tre tester sull'applicazione Aivexus Production. Nessuna email inviata.
 - La #1246 rimane aperta. Il catalogo NVIDIA documenta accesso gratuito per prototipazione. Serve evidenza dell'account per i job completi e per l'assenza di fatturazione automatica.
+
+## Fasi 13.3–13.5 — Flusso in bozza
+
+Dal dettaglio di un progetto Stampa 3D il pannello Web apre STL ASCII locali e le revisioni private del progetto. Un job CAD riceve cinque misure, usa OpenSCAD, conserva SCAD e STL con SHA-256 e rende disponibile l'anteprima dopo l'importazione del risultato. La selezione della revisione attiva è persistente. Il primo comando testuale opera sulle dimensioni della revisione scelta, con sintassi italiana limitata.
+
+La migrazione 013 archivia le revisioni e la selezione. La 014 registra l'invio al runner e vincola il risultato al ticket. Per il collaudo privato occorrono entrambe le migrazioni, una versione di main che contenga il workflow CAD, le chiavi già usate dal runner Web e il flag Pages `AIVEXUS_WEB_CAD_RUNNER_ENABLED=true`. La bozza può essere verificata in CI senza impostare il flag.
+
+Il collaudo privato deve partire dal pannello del Cantiere, generare 80 × 60 × 30 mm, chiedere «Allarga la scatola di 10 mm», verificare la seconda versione, ripristinare la prima e riscaricare entrambi i formati. La validazione attuale controlla dimensioni e bordi chiusi con orientamento coerente. Restano profilo stampante, verifica in slicer e percorso da fotografia.
