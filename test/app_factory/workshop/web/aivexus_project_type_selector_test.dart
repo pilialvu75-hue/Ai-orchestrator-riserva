@@ -27,7 +27,7 @@ void main() {
       goalLabel: 'Descrivi il modello 3D',
       button: 'Crea bozza Stampa 3D',
       title: 'Supporto telefono',
-      detailLabel: 'Stampa 3D · bozza salvata',
+      detailLabel: 'Apri Studio Stampa 3D',
       kind: AivexusProjectKind.cad,
       platforms: const <String>[],
     ),
@@ -107,7 +107,9 @@ void main() {
         await tester.tap(find.byIcon(Icons.arrow_back).first);
         await tester.pumpAndSettle();
         expect(find.text(testCase.title), findsOneWidget);
-        expect(find.textContaining(testCase.detailLabel.split(' · ').first),
+        expect(find.textContaining(testCase.kind == AivexusProjectKind.cad
+            ? 'Stampa 3D'
+            : 'Videogiochi'),
             findsWidgets);
 
         await tester.tap(find.text(testCase.title));
