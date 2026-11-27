@@ -98,8 +98,8 @@ try {
     }
 } catch {}
 try {
-  Get-CimInstance -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine |
-    ForEach-Object {
+  $engines = @(Get-CimInstance -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine)
+  $engines | ForEach-Object {
       [Console]::WriteLine(('E|{0}|{1}' -f $_.Name, $_.UtilizationPercentage))
     }
 } catch {}
