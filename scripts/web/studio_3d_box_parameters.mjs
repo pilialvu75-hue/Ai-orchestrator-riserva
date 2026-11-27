@@ -39,3 +39,16 @@ export function applyOpenBoxInstruction(parameters, instruction) {
     ...baseline, [field]: Number((baseline[field] + direction * Number(incremental[2].replace(',', '.'))).toFixed(6)),
   });
 }
+
+export function parseOpenBoxDescription(description) {
+  if (typeof description !== 'string' || description.length > 300) {
+    throw new RangeError('Invalid CAD description');
+  }
+  const text = description.trim().toLowerCase().replace(/\s+/g, ' ');
+  const tuple = /^(?:voglio |crea )?(?:una )?scatola(?: portaoggetti)?(?: aperta)? (\d+(?:[.,]\d+)?)\s*[x×]\s*(\d+(?:[.,]\d+)?)\s*[x×]\s*(\d+(?:[.,]\d+)?)\s*mm,? (?:con )?pareti (?:spesse )?(\d+(?:[.,]\d+)?)\s*mm(?:,| e)? fondo (?:spesso )?(\d+(?:[.,]\d+)?)\s*mm[.!]?$/;
+  const prose = /^(?:voglio |crea )?(?:una )?scatola(?: portaoggetti)?(?: aperta)? larga (\d+(?:[.,]\d+)?)\s*mm,? profonda (\d+(?:[.,]\d+)?)\s*mm,?(?: e)? alta (\d+(?:[.,]\d+)?)\s*mm,? (?:con )?pareti (?:spesse )?(\d+(?:[.,]\d+)?)\s*mm(?:,| e)? fondo (?:spesso )?(\d+(?:[.,]\d+)?)\s*mm[.!]?$/;
+  const match = tuple.exec(text) ?? prose.exec(text);
+  if (!match) throw new RangeError('Specify width, depth, height, wall and floor in millimetres');
+  const [width, depth, height, wall, floor] = match.slice(1).map(value => Number(value.replace(',', '.')));
+  return validateOpenBoxParameters({ width, depth, height, wall, floor });
+}

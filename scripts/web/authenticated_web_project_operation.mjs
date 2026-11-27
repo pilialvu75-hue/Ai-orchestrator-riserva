@@ -128,7 +128,7 @@ async function readJson(request, maxBytes = MAX_JSON_BYTES) {
 }
 function operationFailure(result) {
   const reason = result?.reason;
-  if (reason === 'unsupported_cad_instruction') return reject(400, reason);
+  if (reason === 'unsupported_cad_instruction' || reason === 'unsupported_cad_description') return reject(400, reason);
   if (reason === 'cad_job_not_found') return reject(404, reason);
   if (reason === 'cad_job_conflict' || reason === 'cad_revision_conflict') return reject(409, reason);
   if (reason === 'cad_unavailable' || reason === 'invalid_cad_result') return reject(503, reason);

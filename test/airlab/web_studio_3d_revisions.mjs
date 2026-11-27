@@ -5,7 +5,7 @@ import { readStudioStl } from '../../web/studio_3d_preview.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { listWebCadRevisions, readWebCadRevision, saveWebCadRevision, selectWebCadRevision } from '../../scripts/web/d1_web_cad_revisions.mjs';
-import { applyOpenBoxInstruction } from '../../scripts/web/studio_3d_box_parameters.mjs';
+import { applyOpenBoxInstruction, parseOpenBoxDescription } from '../../scripts/web/studio_3d_box_parameters.mjs';
 import { collectWebCadJob, findActiveWebCadJob, startWebCadJob } from '../../scripts/web/d1_web_cad_jobs.mjs';
 import { decodeWebAppJob, encodeRunnerBase64, encodeWebAppResult, importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
@@ -174,4 +174,11 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
     assert.equal(applyOpenBoxInstruction(parameters, 'Porta il fondo a 3,5 mm').floor, 3.5);
     assert.throws(() => applyOpenBoxInstruction(parameters, 'Restringi la scatola di 79 mm'));
   } finally { sqlite.close(); }
+});
+
+test('reads both supported descriptions and rejects missing dimensions', () => {
+  const expected = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
+  assert.deepEqual(parseOpenBoxDescription('Voglio una scatola portaoggetti larga 80 mm, profonda 60 mm e alta 30 mm, con pareti spesse 2 mm e fondo spesso 3 mm.'), expected);
+  assert.deepEqual(parseOpenBoxDescription('Scatola aperta 80×60×30 mm, pareti 2 mm, fondo 3 mm'), expected);
+  assert.throws(() => parseOpenBoxDescription('Scatola aperta 80×60×30 mm'));
 });

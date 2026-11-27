@@ -26,10 +26,10 @@ class AivexusStlPreview extends HTMLElement {
             <label>Fondo <input name="floor" type="number" min="0.1" max="500" step="any" value="3" required></label>
             <button type="submit">Genera revisione CAD</button>
             <div data-edit hidden>
-              <label>Modifica della revisione
-                <input data-instruction maxlength="160" placeholder="Allarga la scatola di 10 mm">
+              <label><span data-instruction-label>Descrizione quotata</span>
+                <input data-instruction maxlength="300" placeholder="Allarga la scatola di 10 mm">
               </label>
-              <button type="submit" data-apply>Applica modifica</button>
+              <button type="submit" data-apply>Genera da descrizione</button>
             </div>
           </fieldset>
           <p data-estimate-note hidden></p>
@@ -148,7 +148,7 @@ class AivexusStlPreview extends HTMLElement {
         if (Number.isFinite(parameters?.[axis])) estimatedFields.set(axis, parameters[axis]);
       }
       showEstimateNote();
-      edit.hidden = !parameters;
+      setTextCommand(true);
       for (const field of fields.querySelectorAll('input[name]')) {
         if (Number.isFinite(parameters?.[field.name])) field.value = parameters[field.name];
       }
@@ -177,6 +177,14 @@ class AivexusStlPreview extends HTMLElement {
     const fields = form.querySelector('fieldset');
     const edit = form.querySelector('[data-edit]');
     const instructionField = edit.querySelector('input');
+    function setTextCommand(hasRevision) {
+      edit.hidden = false;
+      edit.querySelector('[data-instruction-label]').textContent = hasRevision ? 'Modifica della revisione' : 'Descrizione quotata';
+      edit.querySelector('[data-apply]').textContent = hasRevision ? 'Applica modifica' : 'Genera da descrizione';
+      instructionField.placeholder = hasRevision
+        ? 'Allarga la scatola di 10 mm'
+        : 'Scatola aperta 80×60×30 mm, pareti 2 mm, fondo 3 mm';
+    }
     const refresh = form.querySelector('[data-refresh]');
     const jobStatus = form.querySelector('[data-job]');
     const estimateNote = form.querySelector('[data-estimate-note]');
@@ -230,6 +238,10 @@ class AivexusStlPreview extends HTMLElement {
         if (!response.ok) {
           if ([400, 401, 403, 404, 409].includes(response.status)) remember(null);
           const { error } = await response.json().catch(() => ({}));
+          if (error === 'unsupported_cad_description') {
+            jobStatus.textContent = 'Indica larghezza, profondità, altezza, pareti e fondo in millimetri.';
+            return;
+          }
           if (error === 'unsupported_cad_instruction') {
             jobStatus.textContent = 'Modifica non riconosciuta. Prova «Allarga la scatola di 10 mm».';
             return;
@@ -311,6 +323,7 @@ class AivexusStlPreview extends HTMLElement {
         new Option('Revisione ' + revisionNumber, revisionId)));
       history.parentElement.hidden = !revisions.length;
       historyReady = true;
+      setTextCommand(Boolean(revisions.length));
       updateControls();
       if (revisions.length && (selectedId || !loadNumber)) {
         history.value = selectedId ?? activeRevisionId;
@@ -354,8 +367,8 @@ class AivexusStlPreview extends HTMLElement {
         const baseRevisionId = history.value || history.options[0]?.value || null;
         const isEdit = event.submitter?.hasAttribute('data-apply');
         const instruction = instructionField.value.trim();
-        if (isEdit && (!baseRevisionId || !instruction)) {
-          jobStatus.textContent = 'Seleziona una revisione e descrivi la modifica.';
+        if (isEdit && !instruction) {
+          jobStatus.textContent = 'Inserisci una descrizione quotata o una modifica della revisione.';
           return;
         }
         const input = isEdit ? { instruction } : {
@@ -375,7 +388,6 @@ class AivexusStlPreview extends HTMLElement {
     input.addEventListener('change', async () => {
       const file = input.files[0];
       history.selectedIndex = -1;
-      edit.hidden = true;
       const version = reset();
       status.textContent = '';
       if (!file) return;

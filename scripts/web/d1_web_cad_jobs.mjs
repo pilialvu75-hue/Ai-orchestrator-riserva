@@ -1,6 +1,6 @@
 import { createGitHubStudioCadRunnerClient } from './github_counter_runner_client.mjs';
 import { readWebCadRevision, saveWebCadRevision, WEB_CAD_PROJECT_ID } from './d1_web_cad_revisions.mjs';
-import { applyOpenBoxInstruction, validateOpenBoxParameters } from './studio_3d_box_parameters.mjs';
+import { applyOpenBoxInstruction, parseOpenBoxDescription, validateOpenBoxParameters } from './studio_3d_box_parameters.mjs';
 import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 import { decodeRunnerBase64, decodeWebAppResult, encodeWebAppJob, importWebAppAuthorizationKey,
   importWebAppPrivateKey, importWebAppPublicKey } from './web_application_runner_packet.mjs';
@@ -30,14 +30,19 @@ export async function startWebCadJob({ db, ownerSubject, request, runner,
   if (hasInstruction === Object.hasOwn(request, 'parameters')) return fail('invalid_request');
   let parameters;
   if (hasInstruction) {
-    if (baseRevisionId === null) return fail('invalid_request');
-    const base = await readWebCadRevision({ db, ownerSubject, projectId, revisionId: baseRevisionId });
-    if (!base.ok) return fail('cad_revision_conflict');
-    try {
-      parameters = applyOpenBoxInstruction(base.manifest.parameters, request.instruction);
-      photoEstimates = photoAxes.filter(axis => base.manifest.photoEstimates?.includes(axis));
-    } catch (_) {
-      return fail('unsupported_cad_instruction');
+    if (baseRevisionId === null) {
+      try { parameters = parseOpenBoxDescription(request.instruction); } catch (_) {
+        return fail('unsupported_cad_description');
+      }
+    } else {
+      const base = await readWebCadRevision({ db, ownerSubject, projectId, revisionId: baseRevisionId });
+      if (!base.ok) return fail('cad_revision_conflict');
+      try {
+        parameters = applyOpenBoxInstruction(base.manifest.parameters, request.instruction);
+        photoEstimates = photoAxes.filter(axis => base.manifest.photoEstimates?.includes(axis));
+      } catch (_) {
+        return fail('unsupported_cad_instruction');
+      }
     }
   } else {
     try { parameters = validateOpenBoxParameters(request.parameters); } catch (_) { return fail('invalid_request'); }
