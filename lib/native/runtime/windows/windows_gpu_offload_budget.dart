@@ -38,28 +38,9 @@ class WindowsGpuOffloadBudget {
     final gpuBudget = freeVramBytes - gpuReserveBytes;
     final hostBudget = freeRamBytes - hostReserveBytes;
     if (gpuBudget <= 0 || hostBudget <= 0) return null;
-    var offloaded = 0;
-    // Leave at least one transformer block on CPU in partial mode.
-    for (var layers = 1; layers < blockBytes.length; layers++) {
-      final next = blockBytes[blockBytes.length - layers];
-      if (next > gpuBudget - offloaded) break;
-      offloaded += next;
-      // 12.5% weight-allocation allowance on each side, rounded up.
-      final gpuExtra = offloaded ~/ 8 + (offloaded % 8 == 0 ? 0 : 1);
-      final hostWeights = modelBytes - offloaded;
-      final hostExtra = hostWeights ~/ 8 + (hostWeights % 8 == 0 ? 0 : 1);
-      if (gpuExtra > gpuBudget - offloaded) break;
-      // Evaluate all fitting suffixes; retain the largest that leaves RAM.
-      if (hostWeights <= hostBudget && hostExtra <= hostBudget - hostWeights) {
-        // Continue looking for a larger feasible suffix below.
-        // Return only after scanning, so the caller gets maximum safe layers.
-      }
-    }
-    // Scan downward from the maximum GPU-fitting suffix. Host need increases
-    // as layers are removed, so a failed host check cannot be repaired by
-    // moving additional weights to CPU.
+    // Select the largest fitting suffix, leaving at least one CPU block.
     var selected = 0;
-    offloaded = 0;
+    var offloaded = 0;
     for (var i = blockBytes.length - 1; i > 0; i--) {
       final next = blockBytes[i];
       if (next > gpuBudget - offloaded) break;
