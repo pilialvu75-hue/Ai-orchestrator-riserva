@@ -23,7 +23,7 @@ class _CompletedRuntime extends ResidentCompletionRuntime {
     required double temperature, required double topP,
     required double repeatPenalty, required int threads,
     int? batchSize, int? ubatchSize, bool flashAttention = false,
-    String? device, required CancellationToken cancellation,
+    String? device, int? gpuLayers, required CancellationToken cancellation,
     void Function(int cached, int evaluated)? onPromptUsage,
     bool rejectTokenLimit = false,
   }) async* {
