@@ -14,8 +14,8 @@ class WindowsLargeModelAdmission {
 
   static int _extra(int bytes) => bytes ~/ 8 + (bytes % 8 == 0 ? 0 : 1);
 
-  static bool cpuFits(int modelBytes, int freeRamBytes) {
-    final budget = freeRamBytes - reserveBytes;
+  static bool cpuFits(int modelBytes, int freeRamBytes, {bool reduced = false}) {
+    final budget = freeRamBytes - (reduced ? reserveBytes ~/ 2 : reserveBytes);
     return modelBytes > 0 && modelBytes <= budget &&
         _extra(modelBytes) <= budget - modelBytes;
   }
@@ -30,9 +30,11 @@ class WindowsLargeModelAdmission {
     required int modelBytes,
     required List<int>? blockBytes,
     required int freeRamBytes,
+    bool reduced = false,
   }) {
+    final reserve = reduced ? reserveBytes ~/ 2 : reserveBytes;
     if ((backend != 'cuda' && backend != 'vulkan') ||
-        freeRamBytes <= reserveBytes || modelBytes <= 0 ||
+        freeRamBytes <= reserve || modelBytes <= 0 ||
         blockBytes == null || blockBytes.length < 2 || blockBytes.length > 512) {
       return null;
     }
@@ -43,13 +45,13 @@ class WindowsLargeModelAdmission {
     }
     // Consider non-block tensors on the host even when offload is complete.
     final hostBytes = modelBytes - blockTotal;
-    final hostBudget = freeRamBytes - reserveBytes;
+    final hostBudget = freeRamBytes - reserve;
     final candidates = devices.where((d) => d.isNvidia &&
         d.device.startsWith(backend == 'cuda' ? 'CUDA' : 'Vulkan')).toList()
       ..sort((a, b) => b.freeBytes.compareTo(a.freeBytes));
     if (hostBytes <= hostBudget && _extra(hostBytes) <= hostBudget - hostBytes) {
       for (final d in candidates) {
-        final gpuBudget = d.freeBytes - reserveBytes;
+        final gpuBudget = d.freeBytes - reserve;
         if (modelBytes <= gpuBudget && _extra(modelBytes) <= gpuBudget - modelBytes) {
           return WindowsLargeModelAdmission(backend, d.device, blockBytes.length + 1);
         }
@@ -60,7 +62,8 @@ class WindowsLargeModelAdmission {
       final plan = WindowsGpuOffloadBudget.partial(
         modelBytes: modelBytes, blockBytes: blockBytes,
         freeVramBytes: d.freeBytes, freeRamBytes: freeRamBytes,
-        gpuReserveBytes: reserveBytes, hostReserveBytes: reserveBytes,
+        gpuReserveBytes: reserve, hostReserveBytes: reserve,
+        allowReducedReserve: reduced,
       );
       if (plan != null && (best == null || plan.layers > best.layers)) {
         best = WindowsLargeModelAdmission(backend, d.device, plan.layers);
