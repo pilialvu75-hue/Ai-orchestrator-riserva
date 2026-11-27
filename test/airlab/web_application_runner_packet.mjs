@@ -192,6 +192,8 @@ test('Pages verifies Web versions, restores history and serves ZIP only to the o
       const input = request.messages.at(-1).content;
       let output = { ...f.source, checks: f.checks };
       if (input.startsWith('{')) {
+        assert.deepEqual(request.chat_template_kwargs, { enable_thinking: false });
+        assert.equal(request.max_tokens, 4096);
         const revision = JSON.parse(input);
         assert.deepEqual(revision.checks, f.checks);
         modelRevisions++;
