@@ -7,6 +7,9 @@ on:
       - 'scripts/web/studio_3d_open_box.mjs'
       - 'scripts/web/build_studio_3d_box_result.mjs'
       - 'test/airlab/web_studio_3d_open_box.mjs'
+      - 'test/airlab/web_studio_3d_revisions.mjs'
+      - 'scripts/web/d1_web_cad_revisions.mjs'
+      - 'scripts/web/sql/013_web_cad_revisions.sql'
       - 'web/studio_3d_preview.mjs'
       - 'web/studio_3d_preview_element.mjs'
 
@@ -33,7 +36,7 @@ jobs:
           openscad --version
           export AIVEXUS_WEB_CHROMIUM="$(command -v google-chrome)"
           test -x "$AIVEXUS_WEB_CHROMIUM"
-          node --test test/airlab/web_studio_3d_open_box.mjs
+          node --test test/airlab/web_studio_3d_open_box.mjs test/airlab/web_studio_3d_revisions.mjs
 
       - name: Build verified CAD artifacts
         run: |
