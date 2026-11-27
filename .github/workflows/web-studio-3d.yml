@@ -1,0 +1,31 @@
+name: AIVEXUS Studio 3D CAD
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/web-studio-3d.yml'
+      - 'scripts/web/studio_3d_open_box.mjs'
+      - 'test/airlab/web_studio_3d_open_box.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  open-box-stl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install OpenSCAD
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y openscad
+      - name: Render and measure both box revisions
+        run: |
+          openscad --version
+          node --test test/airlab/web_studio_3d_open_box.mjs
