@@ -88,6 +88,24 @@ def validate_desktop_publisher(source: str, platform: str) -> list[str]:
             problems.append(f"{platform}: manual replay must reject non-authorized run or release")
     if "steps.version.outputs.tag" in source:
         problems.append(f"{platform}: publisher may not upload to an unsuffixed tag")
+    if platform == "windows":
+        # Owner policy: every modern coordinated Windows channel must compile
+        # and package CUDA/Vulkan/CPU, never silently ship the CLI-only payload.
+        for marker in (
+            "--dart-define=AIVEXUS_WINDOWS_CUDA_QA=true",
+            "Bundle and validate Windows release resident runtimes",
+            "bundle_windows_modern_runtime.ps1",
+            "bundle_windows_cuda_runtime.ps1",
+            "test_windows_cuda_bundle.ps1",
+        ):
+            if marker not in source:
+                problems.append(f"windows: missing mandatory resident release component: {marker}")
+        block = re.search(
+            r"(?ms)^      - name: Bundle and validate Windows release resident runtimes\n(.*?)(?=^      - name:|\Z)",
+            source,
+        )
+        if not block or re.search(r"(?m)^\s+if:", block.group(1)):
+            problems.append("windows: resident release bundle must not be channel-conditional")
     if platform == "macos" and 'version_code="$((500000 +' not in source:
         problems.append("macOS must use the same build-code namespace as Android")
     if platform == "macos":
