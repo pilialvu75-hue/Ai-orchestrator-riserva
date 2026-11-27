@@ -7,6 +7,8 @@ import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resident_process_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_memory_guard.dart';
 
 /// Native terminal statistics. Missing or malformed fields remain unknown.
 class ResidentGenerationMetrics {
@@ -46,10 +48,19 @@ class ResidentCompletionRuntime {
   ResidentCompletionRuntime({
     this.idleTimeout = const Duration(minutes: 5),
     this.contextSize = 4096,
+    this.windowsResources,
   }) : assert(contextSize > 0);
 
   final Duration idleTimeout;
   final int contextSize;
+  final ResourceMonitor? windowsResources;
+
+  WindowsMemoryGuard? _memoryGuard() {
+    final resources = windowsResources;
+    return resources == null ? null : WindowsMemoryGuard(resources, abort: () {
+      _process?.kill();
+    });
+  }
   Process? _process;
   ResidentProcessLease? _lease;
   HttpClient? _client;
@@ -70,13 +81,18 @@ class ResidentCompletionRuntime {
     if (_busy) throw ResidentRuntimeBusy();
     _busy = true;
     _idle?.cancel();
+    final memory = _memoryGuard();
     try {
+      await memory?.start();
       await _ensureStarted(executable, modelPath, sessionId, threads,
-          CancellationToken(), batchSize, ubatchSize, device, flashAttention);
+          CancellationToken(), batchSize, ubatchSize, device, flashAttention, memory);
+      memory?.check();
     } catch (_) {
       await close();
+      memory?.check();
       rethrow;
     } finally {
+      memory?.release();
       _busy = false;
       if (_process != null) _idle = Timer(idleTimeout, () => unawaited(close()));
     }
@@ -110,7 +126,9 @@ class ResidentCompletionRuntime {
     cancellation.onCancel(() {
       if (identical(_activeCancellation, cancellation)) unawaited(close());
     });
+    final memory = _memoryGuard();
     try {
+      await memory?.start();
       if (batchSize != null && (batchSize < 1 || batchSize > 2048)) {
         throw ArgumentError.value(batchSize, 'batchSize');
       }
@@ -124,7 +142,8 @@ class ResidentCompletionRuntime {
       final firstContentWatch = Stopwatch()..start();
       var sawContent = false;
       await _ensureStarted(executable, modelPath, sessionId, threads, cancellation,
-          batchSize, ubatchSize, device, flashAttention);
+          batchSize, ubatchSize, device, flashAttention, memory);
+      memory?.check();
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       final request = await _request('POST', '/completion');
       request.headers.contentType = ContentType.json;
@@ -143,6 +162,7 @@ class ResidentCompletionRuntime {
       ResidentGenerationMetrics? terminalMetrics;
       await for (final line in response.transform(utf8.decoder)
           .transform(const LineSplitter()).timeout(const Duration(minutes: 4))) {
+        memory?.check();
         if (cancellation.isCancelled) throw StateError('Inference cancelled.');
         if (!line.startsWith('data:')) continue;
         final raw = line.substring(5).trim();
@@ -169,13 +189,16 @@ class ResidentCompletionRuntime {
         }
       }
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
+      memory?.check();
       if (!stopped) throw StateError('Local inference ended without completion.');
       if (rejectTokenLimit && tokenLimitReached) throw ResidentGenerationLimitReached();
       _lastGenerationMetrics = terminalMetrics;
     } catch (error) {
-      if (error is! ResidentGenerationLimitReached) await close();
+      if (error is! ResidentGenerationLimitReached || memory?.tripped == true) await close();
+      memory?.check();
       rethrow;
     } finally {
+      memory?.release();
       _activeCancellation = null;
       _busy = false;
       if (_process != null) _idle = Timer(idleTimeout, () => unawaited(close()));
@@ -194,7 +217,7 @@ class ResidentCompletionRuntime {
 
   Future<void> _ensureStarted(String executable, String model, String session,
       int threads, CancellationToken cancellation, int? batchSize, int? ubatchSize,
-      String? device, bool flashAttention) async {
+      String? device, bool flashAttention, WindowsMemoryGuard? memory) async {
     final identity = '$executable\u0000$model\u0000$session\u0000$batchSize\u0000$ubatchSize\u0000$device\u0000$flashAttention';
     if (_process != null && _identity == identity) return;
     final startupWatch = Stopwatch()..start();
@@ -206,6 +229,8 @@ class ResidentCompletionRuntime {
     final random = Random.secure();
     _key = List.generate(32, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
     _client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+    memory?.check();
+    if (cancellation.isCancelled) throw StateError('Inference cancelled.');
     final process = await Process.start(executable, [
       '-m', model, '--host', '127.0.0.1', '--port', '$_port', '--api-key', _key!,
       '-c', '$contextSize', '-t', '${threads.clamp(1, 8)}', '-ngl', device == null ? '0' : '99', '--parallel', '1',
@@ -236,8 +261,10 @@ class ResidentCompletionRuntime {
         _identity = null;
       }
     }));
+    memory?.check();
     final deadline = DateTime.now().add(const Duration(minutes: 2));
     while (DateTime.now().isBefore(deadline)) {
+      memory?.check();
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       if (exitCode != null) throw StateError('Local runtime failed to start.');
       try {

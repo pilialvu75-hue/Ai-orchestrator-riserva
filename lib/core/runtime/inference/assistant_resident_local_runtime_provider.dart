@@ -20,6 +20,8 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.da
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resident_completion_runtime.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_generation_metrics.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_memory_guard.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -36,7 +38,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       bool Function()? isWindowsHost, bool Function()? isModernWindowsHost,
       Future<String?> Function(String executable)? gpuDeviceListing,
       bool Function()? cudaQaEnabled})
-      : _delegate = delegate, _runtime = runtime ?? ResidentCompletionRuntime(),
+      : _delegate = delegate, _runtime = runtime ?? ResidentCompletionRuntime(
+          windowsResources: Platform.isWindows ? ResourceMonitor.instance : null),
         _executable = executable ?? _bundledServer,
         _isWindowsHost = isWindowsHost ?? _platformIsWindows,
         _isModernWindowsHost = isModernWindowsHost ?? _platformIsModernWindows,
@@ -92,6 +95,9 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
               sessionId: 'default', threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8),
               device: cudaDevice, batchSize: 512, ubatchSize: 256, flashAttention: true);
           RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_PREPARE] backend=cuda status=ready elapsed_ms=${watch.elapsedMilliseconds}');
+          return;
+        } on WindowsMemoryPressure {
+          RuntimeEventLog.instance.emit('[WINDOWS_MEMORY_GUARD] stage=prepare action=stop');
           return;
         } catch (_) {
           _cudaUnavailable = true;
@@ -373,7 +379,10 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           tokensGenerated: (text.length / 4).ceil(), model: request.modelId);
     } catch (error) {
       clearRuntimeVerification();
-      if (cancellationToken.isCancelled) {
+      if (error is WindowsMemoryPressure) {
+        RuntimeEventLog.instance.emit('[WINDOWS_MEMORY_GUARD] stage=generation action=stop_no_fallback');
+        yield InferenceResponse.error(WindowsMemoryPressure.message);
+      } else if (cancellationToken.isCancelled) {
         yield InferenceResponse.error('Inference cancelled.', state: InferenceTerminalState.cancelled);
       } else if (error is ResidentRuntimeBusy) {
         yield InferenceResponse.error('Local inference is already running.');

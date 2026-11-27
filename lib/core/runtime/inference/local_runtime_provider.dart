@@ -16,6 +16,8 @@ import 'package:ai_orchestrator/core/runtime/inference/local_prompt_templates.da
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_status.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
+import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_memory_guard.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -279,6 +281,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
     final controller = StreamController<InferenceResponse>();
 
     () async {
+      WindowsMemoryGuard? memory;
       try {
         final modelPath = request.modelPath;
         final modelId = request.modelId;
@@ -369,6 +372,12 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
             Platform.isWindows ? (Stopwatch()..start()) : null;
         var firstVisibleOutputMs = -1;
 
+        if (Platform.isWindows) {
+          memory = WindowsMemoryGuard(ResourceMonitor.instance, abort: () {
+            process?.kill();
+          });
+          await memory.start();
+        }
         try {
           process = await startRuntimeProcess(
             executable,
@@ -388,6 +397,9 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           return;
         }
 
+        if (memory?.tripped == true) {
+          process.kill();
+        }
         if (Platform.isWindows) {
           WindowsEngineProcessTracker.instance.track(process);
         }
@@ -407,7 +419,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         final decodedOutput = process.stdout.transform(utf8.decoder);
         stdoutSub = CompletionOutput.visible(decodedOutput).listen(
           (chunk) {
-            if (chunk.isEmpty) return;
+            if (chunk.isEmpty || memory?.tripped == true) return;
 
             final visibleChunk = chunk;
             if (visibleChunk.isEmpty) return;
@@ -462,6 +474,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         );
 
         final exitCode = await process.exitCode;
+        memory?.release();
 
         if (Platform.isWindows) {
           // Process exit can precede the final buffered stdout event.
@@ -486,6 +499,7 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
           '[$_localProviderTag] process exitCode=$exitCode',
         );
 
+        memory?.check();
         if (cancellationToken.isCancelled) {
           clearRuntimeVerification();
           RuntimeEventLog.instance.emit('[INFERENCE_ERROR] session=${request.sessionId} reason=cancelled');
@@ -539,6 +553,13 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         );
 
         await controller.close();
+      } on WindowsMemoryPressure {
+        clearRuntimeVerification();
+        RuntimeEventLog.instance.emit('[WINDOWS_MEMORY_GUARD] stage=cli action=stop');
+        if (!controller.isClosed) {
+          controller.add(InferenceResponse.error(WindowsMemoryPressure.message));
+          await controller.close();
+        }
       } catch (error, stackTrace) {
         clearRuntimeVerification();
 
@@ -563,6 +584,8 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
           await controller.close();
         }
+      } finally {
+        memory?.release();
       }
     }();
 
