@@ -222,9 +222,19 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     await _runtime.close();
   }
 
+  /// Diagnostic communication check uses the same admitted backend and RAM
+  /// guard, but observes raw synthetic output rather than chat answer quality.
+  TokenStream streamVerificationInference({required InferenceRequest request,
+      required CancellationToken cancellationToken}) =>
+      _streamInference(request: request, cancellationToken: cancellationToken, verification: true);
+
   @override
   TokenStream streamInference({required InferenceRequest request,
-      required CancellationToken cancellationToken}) async* {
+      required CancellationToken cancellationToken}) =>
+      _streamInference(request: request, cancellationToken: cancellationToken);
+
+  TokenStream _streamInference({required InferenceRequest request,
+      required CancellationToken cancellationToken, bool verification = false}) async* {
     // Scope presentation telemetry to this attempt. A recursive fallback
     // obtains a newer id, so the outer finally cannot overwrite it.
     final metrics = Platform.isWindows ? WindowsGenerationMetrics.instance : null;
@@ -362,7 +372,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
 
         final initial = await assess();
         largePlan = initial.normal;
-        if (largePlan == null && !cancellationToken.isCancelled && _memoryReview != null) {
+        if (largePlan == null && !cancellationToken.isCancelled && _memoryReview != null && !verification) {
           final choice = await _memoryReview!(request.sessionId,
               WindowsMemoryReview(modelBytes: modelBytes,
                 availableRamBytes: initial.ram, availableVramBytes: initial.vram,
@@ -472,7 +482,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8), cancellation: cancellationToken,
         device: gpuDevice,
         gpuLayers: gpuLayers,
-        rejectTokenLimit: Platform.isWindows,
+        rejectTokenLimit: Platform.isWindows && !verification,
         batchSize: reducedSettings ? 128 : gpuBackend == 'cuda'
             ? 512
             : (gpuDevice == null && Platform.isWindows &&
@@ -486,7 +496,9 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           '[ASSISTANT_LOCAL_CACHE] cached_tokens=$cached evaluated_tokens=$evaluated'),
       );
       final Stream<String> answer;
-      if (Platform.isWindows &&
+      if (verification) {
+        answer = output;
+      } else if (Platform.isWindows &&
           LocalPromptTemplates.usesDeepSeekR1AssistantOutput(request.modelId!)) {
         answer = AssistantReasoningOutput.answerAfterInitialReasoning(output);
       } else if (_isWindowsHost() &&
@@ -508,9 +520,9 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       if (text.toString().trim().isEmpty) throw StateError('No generated text.');
       markRuntimeVerified(model);
       final pid = _runtime.processId;
-      if (largePlan != null && pid != null && !confirmedReducedReserve && !reducedSettings) {
+      if (largePlan != null && pid != null && !confirmedReducedReserve && !reducedSettings && !verification) {
         _largeRoute = (model: model, session: request.sessionId, pid: pid, plan: largePlan);
-      } else if (confirmedReducedReserve || reducedSettings) {
+      } else if (confirmedReducedReserve || reducedSettings || verification) {
         _largeRoute = null;
         await _runtime.close();
       }
@@ -546,7 +558,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           }
           RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] backend=${gpuBackend ?? 'unknown'} status=unavailable action=resident_fallback');
           if (metricId != null) metrics?.finish(metricId, success: false);
-          yield* streamInference(request: request, cancellationToken: cancellationToken);
+          yield* _streamInference(request: request, cancellationToken: cancellationToken, verification: verification);
           return;
         }
         _unavailable = true;
