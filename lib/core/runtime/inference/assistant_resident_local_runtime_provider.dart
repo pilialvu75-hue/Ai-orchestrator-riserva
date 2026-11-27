@@ -88,6 +88,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     if (cpuExecutable == null || modelPath == null || !File(modelPath).existsSync()) return;
     final watch = Stopwatch()..start();
     final modelBytes = await File(modelPath).length();
+    // Large files must go through the explicit fresh-memory admission path.
+    if (modelBytes > WindowsLargeModelAdmission.protectedFileBytes) return;
     final cudaCandidate = p.join(p.dirname(cpuExecutable), '..', 'runtime-cuda', 'llama-server.exe');
     if (_cudaQaEnabled() && !_cudaUnavailable && File(cudaCandidate).existsSync()) {
       final cudaListing = await _cudaDevices.get(() => _listGpuDevices(cudaCandidate),
