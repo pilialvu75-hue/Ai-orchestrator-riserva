@@ -1669,3 +1669,11 @@ Creare un **progetto di sicurezza indipendente**, con repository dedicato quando
 - **Consegna:** roadmap e prototipi nel progetto indipendente; integrazione nel prodotto solo dopo misure, test di regressione e valutazione dell'impatto su Cantiere/Computer Use.
 
 Riferimenti: sezioni 11, 15, 16, 17 e 18; issue #911, #913, #915. Progetto di sicurezza **pianificato, non ancora dichiarato implementato o collaudato**.
+
+### Direttiva permanente release — 27/11/2026 (owner, issue #1300)
+
+- Ogni nuova beta autorizzata: Computer Use ON e consenso HYBRID protetto ON; non-beta: Computer Use OFF salvo esplicita QA separata già autorizzata. ON significa disponibilità della funzione, non consenso automatico a osservazione o controllo.
+- Tutti i nuovi canali Windows (stable, beta, nightly, dev e candidate) includono CUDA, Vulkan e CPU residente, con priorità CUDA su NVIDIA compatibile → Vulkan → CPU residente → CLI. Windows 7/8.1 e hardware incompatibile mantengono fallback sicuro. Le release storiche e i pacchetti di recupero esclusivamente legacy non vengono ricostruiti.
+- 505083: riferimento fisico CUDA su ASUS RTX 4060, Qwen3 4B LOCAL; primo contenuto 390 ms, risposta breve 713 ms. Non è un benchmark a parità di prompt rispetto alla CLI.
+- Gate di pubblicazione: provenienza owner, SHA/tag, controlli delle dipendenze, integrità, firma applicabile, rollback e OTA invariati. Nessun bypass di Smart App Control; nessuna promozione stable implicita.
+- Stato di implementazione: PR #1304 (runtime Windows), PR #1305 (profilo beta). Linux non dispone ancora dell'adapter/UI Computer Use: flag compilato ON non è prova di supporto funzionale; collaudo multipiattaforma non completo. ChatGPT bridge Android resta separato. Non dichiarare superato un collaudo su piattaforma non supportata.
