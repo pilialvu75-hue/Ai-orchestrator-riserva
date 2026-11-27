@@ -33,6 +33,10 @@ class AivexusStlPreview extends HTMLElement {
             </div>
           </fieldset>
           <p data-estimate-note hidden></p>
+          <div data-photo-review hidden>
+            <p data-photo-question aria-live="polite"></p>
+            <label><input type="checkbox" data-photo-confirm> Confermo le quote della scatola</label>
+          </div>
           <button type="button" data-refresh hidden>Aggiorna generazione</button>
           <output data-job role="status"></output>
         </form>
@@ -148,6 +152,9 @@ class AivexusStlPreview extends HTMLElement {
       const revisionId = history.value;
       const revision = revisionsById.get(revisionId);
       const parameters = revision?.parameters;
+      review.hidden = true;
+      confirmed.checked = false;
+      manuallyEntered.clear();
       estimatedFields.clear();
       for (const axis of revision?.photoEstimates ?? []) {
         if (Number.isFinite(parameters?.[axis])) estimatedFields.set(axis, parameters[axis]);
@@ -194,6 +201,21 @@ class AivexusStlPreview extends HTMLElement {
     const jobStatus = form.querySelector('[data-job]');
     const estimateNote = form.querySelector('[data-estimate-note]');
     const estimatedFields = new Map();
+    const manuallyEntered = new Set();
+    const review = form.querySelector('[data-photo-review]');
+    const question = review.querySelector('[data-photo-question]');
+    const confirmed = review.querySelector('[data-photo-confirm]');
+    const dimensionLabels = { width: 'larghezza', depth: 'profondità', height: 'altezza',
+      wall: 'spessore delle pareti', floor: 'spessore del fondo' };
+    function reviewPhotoDimensions() {
+      const missing = Object.keys(dimensionLabels).filter(axis =>
+        !estimatedFields.has(axis) && !manuallyEntered.has(axis));
+      question.textContent = missing.length
+        ? 'Puoi indicare queste misure in millimetri? ' + missing.map(axis => dimensionLabels[axis]).join(', ') + '.'
+        : 'Puoi confermare le quote qui sopra prima che generi il modello?';
+      confirmed.disabled = missing.length > 0;
+      return missing.length === 0 && confirmed.checked;
+    }
     const axisLabels = { width: 'larghezza', depth: 'profondità', height: 'altezza', wall: 'parete' };
     const storageKey = 'aivexus.cad.pending.' + projectId;
     let pending;
@@ -208,7 +230,15 @@ class AivexusStlPreview extends HTMLElement {
     }
 
     fields.addEventListener('input', event => {
-      if (estimatedFields.delete(event.target.name)) showEstimateNote();
+      const field = event.target;
+      if (!Object.hasOwn(dimensionLabels, field.name)) return;
+      if (estimatedFields.delete(field.name)) showEstimateNote();
+      if (field.value && field.validity.valid) manuallyEntered.add(field.name);
+      else manuallyEntered.delete(field.name);
+      if (!review.hidden) {
+        confirmed.checked = false;
+        reviewPhotoDimensions();
+      }
     });
 
     function remember(value) {
@@ -347,8 +377,14 @@ class AivexusStlPreview extends HTMLElement {
         if (!field || fields.disabled) return false;
         field.value = estimate;
         estimatedFields.set(axis, estimate);
+        confirmed.checked = false;
+        reviewPhotoDimensions();
         showEstimateNote();
-      }, requests.signal);
+      }, requests.signal, () => {
+        review.hidden = false;
+        confirmed.checked = false;
+        reviewPhotoDimensions();
+      });
       try { pending = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* browser storage optional */ }
       updateControls();
       history.addEventListener('change', selectRevision);
@@ -370,8 +406,16 @@ class AivexusStlPreview extends HTMLElement {
         event.preventDefault();
         if (busy || resuming || pending || !historyReady) return;
         const baseRevisionId = history.value || history.options[0]?.value || null;
+        if (!review.hidden && !reviewPhotoDimensions()) {
+          jobStatus.textContent = 'Completa e conferma le quote della fotografia.';
+          return;
+        }
         const isEdit = event.submitter?.hasAttribute('data-apply');
         const instruction = instructionField.value.trim();
+        if (isEdit && !review.hidden) {
+          jobStatus.textContent = 'Per usare le quote della fotografia, scegli Genera revisione CAD.';
+          return;
+        }
         if (isEdit && !instruction) {
           jobStatus.textContent = 'Inserisci una descrizione quotata o una modifica della revisione.';
           return;

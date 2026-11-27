@@ -182,7 +182,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
     const names = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs', 'studio_3d_fdm.mjs', 'studio_3d_photo.mjs'];
     const assets = new Map(await Promise.all(names.map(async name =>
       [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
-    assets.set('index.html', '<!doctype html><button id="photo">Load synthetic photo</button><button id="start">Start</button><button id="refresh">Refresh</button><button id="bed">Smaller bed</button><output id="state"></output><script type="module" src="fixture.mjs"></script>');
+    assets.set('index.html', '<!doctype html><button id="photo">Load synthetic photo</button><button id="start">Start</button><button id="confirm">Confirm dimensions</button><button id="refresh">Refresh</button><button id="bed">Smaller bed</button><output id="state"></output><script type="module" src="fixture.mjs"></script>');
     assets.set('fixture.mjs', `
       // Chromium's intercepted test origin is HTTP, so supply a deterministic UUID.
       Object.defineProperty(crypto, 'randomUUID', { value: () => 'a1000000-0000-4000-8000-000000000001' });
@@ -274,6 +274,16 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
         // the same event handler without permitting navigation or form posts.
         form.dispatchEvent(new SubmitEvent('submit', { cancelable: true }));
       };
+      document.querySelector('#confirm').onclick = () => {
+        for (const [axis, value] of Object.entries({ depth: 60, height: 30, wall: 2, floor: 3 })) {
+          const field = root.querySelector('[name=' + axis + ']');
+          field.value = value;
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const checkbox = root.querySelector('[data-photo-confirm]');
+        if (checkbox.disabled) throw new Error('Cannot confirm complete photo dimensions');
+        checkbox.checked = true;
+      };
       document.querySelector('#refresh').onclick = () => root.querySelector('[data-refresh]').click();
       document.querySelector('#bed').onclick = () => {
         const panel = root.querySelector('[data-fdm]');
@@ -289,6 +299,9 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
       checks: [
         { action: 'click', selector: '#photo' },
         { action: 'text', selector: '#state', value: 'larghezza: 90 mm (stima da foto)' },
+        { action: 'click', selector: '#start' },
+        { action: 'text', selector: '#state', value: 'Completa e conferma le quote della fotografia.' },
+        { action: 'click', selector: '#confirm' },
         { action: 'click', selector: '#start' },
         { action: 'text', selector: '#state', value: 'Generazione CAD in corso. Usa Aggiorna generazione per verificarne l’esito.' },
         { action: 'click', selector: '#refresh' },

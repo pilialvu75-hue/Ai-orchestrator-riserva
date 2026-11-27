@@ -94,7 +94,7 @@ export function estimatePhotoDimension(points, referenceMm) {
   return estimate >= 0.1 && estimate <= 500 ? Number(estimate.toFixed(1)) : null;
 }
 
-export function mountStudioPhotoMeasurement(panel, onApply, signal) {
+export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoaded) {
   const input = panel.querySelector('[data-photo-file]');
   const canvas = panel.querySelector('canvas');
   const status = panel.querySelector('output');
@@ -162,6 +162,7 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal) {
       canvas.width = Math.max(2, Math.round(image.width * scale));
       canvas.height = Math.max(2, Math.round(image.height * scale));
       canvas.hidden = false;
+      onPhotoLoaded?.();
       redraw();
     } catch {
       if (!signal.aborted && version === imageVersion) {
