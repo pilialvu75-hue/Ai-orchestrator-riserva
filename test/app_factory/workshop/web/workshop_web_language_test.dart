@@ -55,7 +55,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Cantiere Web'), findsOneWidget);
-    expect(find.text('Cloud / AUTO execution'), findsOneWidget);
+    expect(find.text('Esecuzione Cloud / AUTO'), findsOneWidget);
 
     await language.select('fr');
     await tester.pumpAndSettle();

@@ -1,5 +1,4 @@
 import 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
-import 'package:ai_orchestrator/app_factory/workshop/workshop_contract.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_broker.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_cloud_self_test.dart' as cloud_test;
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
@@ -92,8 +91,7 @@ class WorkshopWebShell extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Browser startup ready • shared Workshop contract '
-                      'stage=${WorkshopStage.requested.name}',
+                  WorkshopWebLanguageScope.tr(context, 'Browser startup ready'),
                   style: const TextStyle(
                     color: Colors.white70,
                     height: 1.4,
@@ -128,20 +126,19 @@ class WorkshopWebShell extends StatelessWidget {
                 const _CapabilityCard(
                   title: 'Native local inference',
                   subtitle:
-                      'Explicitly unavailable in W1; no llama.cpp/FFI fallback is attempted.',
+                      'Local inference requires the desktop app. Cloud inference is available in the browser.',
                   state: WorkshopWebCapabilityState.unavailable,
                 ),
                 const _CapabilityCard(
                   title: 'Native process execution',
                   subtitle:
-                      'Explicitly unavailable in the browser.',
+                      'Native execution requires the desktop app. Studio verifies Web apps on a server runner.',
                   state: WorkshopWebCapabilityState.unavailable,
                 ),
                 const SizedBox(height: 20),
-                const Text(
-                  'PWA/installable/offline-first browser work is intentionally '
-                  'not enabled in this release ring.',
-                  style: TextStyle(
+                Text(
+                  WorkshopWebLanguageScope.tr(context, 'PWA and offline installation are unavailable.'),
+                  style: const TextStyle(
                     color: Colors.white54,
                     fontSize: 12,
                     height: 1.4,
@@ -210,7 +207,8 @@ class _CloudAutoCardState extends State<_CloudAutoCard> {
                 title: 'Cloud / AUTO execution',
                 subtitle: health?.errorCode == null
                     ? 'Server-side broker is reachable but one or more Cantiere capabilities are not configured.'
-                    : 'Server-side broker unavailable: ${health!.errorCode}.',
+                    : 'Cloud broker unavailable',
+                detail: health?.errorCode,
                 state: WorkshopWebCapabilityState.unavailable,
               );
             }
@@ -347,8 +345,8 @@ class _DurableStorageCardState extends State<_DurableStorageCard> {
         return _CapabilityCard(
           title: 'Durable browser storage',
           subtitle:
-              'Existing WorkshopCheckpointStore active • '
-              '${checkpoints.length} saved checkpoint(s).',
+              'Browser checkpoints saved',
+          detail: checkpoints.length.toString(),
           state: WorkshopWebCapabilityState.available,
         );
       },
@@ -361,11 +359,13 @@ class _CapabilityCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.state,
+    this.detail,
   });
 
   final String title;
   final String subtitle;
   final WorkshopWebCapabilityState state;
+  final String? detail;
 
   @override
   Widget build(BuildContext context) {
@@ -397,7 +397,10 @@ class _CapabilityCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    WorkshopWebLanguageScope.tr(context, subtitle),
+                    [
+                      WorkshopWebLanguageScope.tr(context, subtitle),
+                      if (detail != null) detail!,
+                    ].join(' · '),
                     style: const TextStyle(
                       color: Colors.white60,
                       height: 1.35,

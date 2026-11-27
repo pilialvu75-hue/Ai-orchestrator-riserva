@@ -1,3 +1,4 @@
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
 import 'dart:convert';
 
 import 'package:ai_orchestrator/app_factory/workshop/workshop_checkpoint_store.dart';
@@ -65,7 +66,7 @@ void main() {
     expect(find.text('Cantiere Web'), findsOneWidget);
     expect(find.textContaining('Browser startup ready'), findsOneWidget);
     expect(find.text('Durable browser storage'), findsOneWidget);
-    expect(find.textContaining('0 saved checkpoint(s)'), findsOneWidget);
+    expect(find.text('Browser checkpoints saved · 0'), findsOneWidget);
     expect(find.text('Cloud / AUTO execution'), findsOneWidget);
     expect(
       find.textContaining('Server-side AUTO routing ready'),
@@ -84,6 +85,29 @@ void main() {
     expect(find.text('Native local inference'), findsOneWidget);
     expect(find.textContaining('general Assistant'), findsNothing);
   });
+  testWidgets('Italian status translates labels and explains desktop features',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: WorkshopWebLanguageScope(
+        language: WorkshopWebLanguage(),
+        child: WorkshopWebShell(
+          checkpointStore: Future.value(InMemoryWorkshopCheckpointStore()),
+          cloudHealth: Future.value(const WorkshopWebCloudBrokerHealth(
+            capabilities: WorkshopWebCloudBrokerHealth.requiredWorkshopCapabilities,
+          )),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Cantiere pronto nel browser'), findsOneWidget);
+    expect(find.text('Punti di ripristino salvati · 0'), findsOneWidget);
+    expect(find.text('Available'), findsNothing);
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
+    expect(find.text('Inferenza locale nativa'), findsOneWidget);
+    expect(find.textContaining('runner server'), findsOneWidget);
+  });
+
   testWidgets('Web Status self-test shows verified model and elapsed time',
       (tester) async {
     var calls = 0;

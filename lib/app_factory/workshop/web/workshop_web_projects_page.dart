@@ -11,10 +11,12 @@ final class WorkshopWebProjectsPage extends StatefulWidget {
     super.key,
     required this.controller,
     required this.storage,
+    this.onOpenWebStudio,
   });
 
   final WorkshopChatController controller;
   final WorkshopWebProjectStorage storage;
+  final ValueChanged<String>? onOpenWebStudio;
 
   @override
   State<WorkshopWebProjectsPage> createState() =>
@@ -828,20 +830,31 @@ proposta breve, concreta e approvabile.
                   label: Text(_tr('Modifica progetto')),
                 ),
               ],
-              if (project.status ==
-                  WorkshopWebProjectStatus.approved) ...<Widget>[
+              if (!project.isReadOnly &&
+                  project.status == WorkshopWebProjectStatus.approved) ...[
                 const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.construction_outlined),
-                    title: Text(_tr('Inizia creazione')),
-                    subtitle: Text(
-                      'Il gate è pronto, ma l’esecutore Web server-side non è '
-                      'ancora collegato. Il Cantiere non simulerà file o percentuali.',
+                if (project.projectKind == AivexusProjectKind.software &&
+                    project.platforms.length == 1 &&
+                    project.platforms.single.toLowerCase() == 'web' &&
+                    widget.onOpenWebStudio != null)
+                  FilledButton.icon(
+                    onPressed: () => widget.onOpenWebStudio!(
+                      [project.goal, project.proposal?.trim()]
+                          .whereType<String>()
+                          .where((value) => value.isNotEmpty)
+                          .join('\n\n'),
                     ),
-                    trailing: const Icon(Icons.lock_clock_outlined),
+                    icon: const Icon(Icons.construction_outlined),
+                    label: Text(_tr('Inizia creazione')),
+                  )
+                else
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.desktop_windows_outlined),
+                      title: Text(_tr('Inizia creazione')),
+                      subtitle: Text(_tr('Studio genera app Web. Per un eseguibile nativo serve un runner dedicato.')),
+                    ),
                   ),
-                ),
               ],
             ],
           ),

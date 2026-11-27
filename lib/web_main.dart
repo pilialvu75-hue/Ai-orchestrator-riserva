@@ -293,6 +293,17 @@ class _WorkshopWebHomeState extends State<WorkshopWebHome> {
           WorkshopWebProjectsPage(
             controller: widget.chatController,
             storage: widget.projectStorage,
+            onOpenWebStudio: (brief) => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => WorkshopWebLanguageScope(
+                  language: widget.language,
+                  child: WorkshopWebGeneratorPage(
+                    modelPreference: widget.modelPreference,
+                    initialPrompt: brief,
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),

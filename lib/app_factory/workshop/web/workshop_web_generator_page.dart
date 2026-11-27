@@ -28,9 +28,11 @@ class WorkshopWebGeneratorPage extends StatefulWidget {
     super.key,
     this.client,
     this.modelPreference,
+    this.initialPrompt,
   });
 
   final http.Client? client;
+  final String? initialPrompt;
   /// Uses the already-configured Web Cloud/AUTO route; no new backend.
   final WorkshopWebModelPreference? modelPreference;
 
@@ -110,7 +112,13 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       );
     }
     _chatController?.addListener(_onChatControllerChanged);
-    _restore();
+    final initialPrompt = widget.initialPrompt;
+    if (initialPrompt == null) {
+      _restore();
+    } else {
+      _prompt.text = initialPrompt;
+      _busy = false;
+    }
     _refreshQuota();
   }
 
