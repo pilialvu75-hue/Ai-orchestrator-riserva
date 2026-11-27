@@ -20,15 +20,20 @@ on:
           - nightly
           - dev
       hybrid_consent_beta:
-        description: 'Opt in to protected HYBRID Cloud consent (beta only; default OFF)'
+        description: 'Compatibility input: protected HYBRID consent mandatory on beta only'
         type: boolean
         required: false
         default: false
       android_computer_use_qa:
-        description: 'Enable Android Computer Use for owner-only beta QA'
+        description: 'Compatibility input: Computer Use mandatory on authorized beta only'
         type: boolean
         required: false
         default: false
+      owner_checkpoint_run_id:
+        description: 'Trusted owner checkpoint workflow run ID (automated beta dispatch only)'
+        type: string
+        required: false
+        default: ''
 
 # MODIFICA 1: Ampliati i permessi per permettere a CodeQL di scrivere i report nella scheda Security
 permissions:
@@ -394,10 +399,58 @@ jobs:
             echo "channel=$CHANNEL"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolve mandatory authorized beta feature profile
+        id: beta_profile
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ steps.version.outputs.channel }}
+          REQUESTED_CU: ${{ github.event_name == 'workflow_dispatch' && inputs.android_computer_use_qa || false }}
+          REQUESTED_HYBRID: ${{ github.event_name == 'workflow_dispatch' && inputs.hybrid_consent_beta || false }}
+          CHECKPOINT_RUN_ID: ${{ inputs.owner_checkpoint_run_id }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_CHANNEL" != 'beta' ]]; then
+            [[ "$REQUESTED_CU" == 'false' && "$REQUESTED_HYBRID" == 'false' ]] || { echo "::error::QA flags are beta only"; exit 1; }
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' && "$GITHUB_REF" == 'refs/heads/main' ]] || { echo "::error::Beta must be an authorized main dispatch"; exit 1; }
+          current_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)"
+          [[ "$current_sha" == "$GITHUB_SHA" ]] || { echo "::error::Beta source is no longer main"; exit 1; }
+          if [[ "$GITHUB_ACTOR" != "$REPO_OWNER" ]]; then
+            [[ "$GITHUB_ACTOR" == 'github-actions[bot]' && "$CHECKPOINT_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Missing trusted owner checkpoint"; exit 1; }
+            parent="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CHECKPOINT_RUN_ID")"
+            jq -e --arg owner "$REPO_OWNER" --arg repo "$GITHUB_REPOSITORY" '
+              .actor.login == $owner and .triggering_actor.login == $owner and
+              .head_repository.full_name == $repo
+            ' <<<"$parent" >/dev/null
+            jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CHECKPOINT_RUN_ID/jobs?per_page=100")"
+            parent_path="$(jq -r .path <<<"$parent")"
+            if [[ "$parent_path" == '.github/workflows/owner-beta-checkpoint.yml' ]]; then
+              jq -e --arg sha "$GITHUB_SHA" '
+                (.event == "issue_comment" or .event == "pull_request") and
+                .head_sha == $sha and .status == "in_progress"
+              ' <<<"$parent" >/dev/null
+              jq -e 'any(.jobs[]; .name == "authorize-and-dispatch" and .status == "in_progress")' <<<"$jobs" >/dev/null
+            elif [[ "$parent_path" == '.github/workflows/authorized-beta-request.yml' ]]; then
+              jq -e '.event == "push" and .head_branch == "release-request/beta"' <<<"$parent" >/dev/null
+              parent_sha="$(jq -r .head_sha <<<"$parent")"
+              request="$(gh api "repos/$GITHUB_REPOSITORY/contents/release-requests/ship-beta.txt?ref=$parent_sha" --jq .content | base64 -d)"
+              [[ "$request" == "$(printf 'channel=beta\nmain_sha=%s' "$GITHUB_SHA")" ]] || { echo "::error::Legacy beta request SHA mismatch"; exit 1; }
+              jq -e 'any(.jobs[]; .name == "dispatch-official-beta" and any(.steps[]; .name == "Validate request matches current main" and .conclusion == "success") and any(.steps[]; .name == "Dispatch canonical Android beta workflow" and (.status == "in_progress" or .conclusion == "success")))' <<<"$jobs" >/dev/null
+            else
+              echo "::error::Unrecognized beta checkpoint workflow"
+              exit 1
+            fi
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "Authorized beta profile: Computer Use ON, protected HYBRID ON"
+
       - name: Verify explicit HYBRID beta flag and write release attestation
         id: hybrid_gate
         env:
-          OWNER_OPT_IN: ${{ github.event_name == 'workflow_dispatch' && inputs.hybrid_consent_beta || false }}
+          OWNER_OPT_IN: ${{ steps.beta_profile.outputs.enabled }}
           RELEASE_CHANNEL: ${{ steps.version.outputs.channel }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
@@ -428,17 +481,24 @@ jobs:
 
       - name: Resolve owner-only Android Computer Use QA
         id: android_computer_use
-        shell: bash
         env:
-          OWNER_OPT_IN: ${{ github.event_name == 'workflow_dispatch' && inputs.android_computer_use_qa || false }}
+          ENABLED: ${{ steps.beta_profile.outputs.enabled }}
           RELEASE_CHANNEL: ${{ steps.version.outputs.channel }}
         run: |
           set -euo pipefail
-          if [[ "$OWNER_OPT_IN" == 'true' ]]; then
-            [[ "$RELEASE_CHANNEL" == 'beta' ]] || { echo "Android CU QA beta only"; exit 1; }
-            [[ "$GITHUB_ACTOR" == 'pilialvu75-hue' ]] || { echo "Android CU QA owner only"; exit 1; }
+          if [[ "$RELEASE_CHANNEL" == 'beta' ]]; then
+            [[ "$ENABLED" == 'true' ]] || exit 1
+          else
+            [[ "$ENABLED" == 'false' ]] || exit 1
           fi
-          echo "enabled=$OWNER_OPT_IN" >> "$GITHUB_OUTPUT"
+          echo "enabled=$ENABLED" >> "$GITHUB_OUTPUT"
+
+      - name: Verify mandatory Computer Use build flag
+        run: >-
+          flutter test --reporter expanded
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.android_computer_use.outputs.enabled }}
+          --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=${{ steps.android_computer_use.outputs.enabled }}
+          test/features/computer_use/computer_use_build_policy_test.dart
 
       - name: Generate build README/manual (IT)
         run: |

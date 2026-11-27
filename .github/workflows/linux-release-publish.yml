@@ -215,8 +215,31 @@ jobs:
       - name: Build bundled llama.cpp runtime
         run: bash native/linux/build_llama_cli.sh
 
+      - name: Resolve mandatory Computer Use beta profile
+        id: computer_use_lab
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.publish_tag.outputs.tag }}
+          HYBRID_ENABLED: ${{ steps.hybrid_gate.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          enabled=false
+          if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\+[0-9]+$ ]]; then
+            [[ "$HYBRID_ENABLED" == 'true' ]] || { echo "::error::Beta lacks protected HYBRID attestation"; exit 1; }
+            enabled=true
+          fi
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          if [[ "$enabled" == 'true' ]]; then echo '::warning::Linux Computer Use flag ON; native adapter not implemented, no lab exposed'; fi
+
+      - name: Verify mandatory Computer Use build flag
+        run: >-
+          flutter test --reporter expanded
+          --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }}
+          --dart-define=AIVEXUS_EXPECT_COMPUTER_USE_QA_ENABLED=${{ steps.computer_use_lab.outputs.enabled }}
+          test/features/computer_use/computer_use_build_policy_test.dart
+
       - name: Build coordinated Linux release
-        run: flutter build linux --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }}
+        run: flutter build linux --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }}
 
       - name: Embed and validate llama.cpp runtime
         shell: bash
