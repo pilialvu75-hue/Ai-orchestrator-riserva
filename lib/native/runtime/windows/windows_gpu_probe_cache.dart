@@ -11,10 +11,12 @@ final class WindowsGpuProbeCache {
   Duration? _retryAt;
 
   Future<String?> get(Future<String?> Function() probe,
-      {required bool Function(String) usable}) {
+      {required bool Function(String) usable, bool fresh = false}) {
     if (_pending != null) return _pending!;
-    if (_value != null && usable(_value!)) return Future.value(_value);
-    if (_retryAt != null && _now() < _retryAt!) return Future.value(_value);
+    // Cold-load admission must not reuse a historical free-VRAM figure.
+    // A concurrent in-flight probe is still shared, without starting two tools.
+    if (!fresh && _value != null && usable(_value!)) return Future.value(_value);
+    if (!fresh && _retryAt != null && _now() < _retryAt!) return Future.value(_value);
     final operation = Future<String?>.sync(probe).then((value) {
       _value = value;
       _retryAt = value != null && usable(value) ? null : _now() + retryDelay;
