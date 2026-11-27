@@ -48,10 +48,31 @@ export function detectPhotoSilhouette({ data, width, height }) {
   return largest;
 }
 
+export function detectPhotoCavity(imageData, bounds) {
+  const { data, width: imageWidth } = imageData;
+  const { left, top, right, bottom } = bounds;
+  const width = right - left + 1;
+  const height = bottom - top + 1;
+  const crop = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    const start = ((top + y) * imageWidth + left) * 4;
+    crop.set(data.subarray(start, start + width * 4), y * width * 4);
+  }
+  const cavity = detectPhotoSilhouette({ data: crop, width, height });
+  if (!cavity) return null;
+  const area = (cavity.right - cavity.left + 1) * (cavity.bottom - cavity.top + 1);
+  const margins = [cavity.left, width - cavity.right - 1, cavity.top, height - cavity.bottom - 1];
+  const wallPixels = margins.reduce((sum, value) => sum + value, 0) / margins.length;
+  if (cavity.size < area * 0.9 || wallPixels < 2 ||
+      margins.some(value => Math.abs(value - wallPixels) > Math.max(2, wallPixels * 0.25))) return null;
+  return { wallPixels };
+}
+
 export function nextPhotoView(axes) {
   if (!axes.has('width') || !axes.has('height')) return 'Usa una foto frontale per larghezza e altezza.';
   if (!axes.has('depth')) return 'Aggiungi una foto laterale per stimare la profondità.';
-  return 'Controlla le tre dimensioni stimate e inserisci gli spessori misurati.';
+  if (!axes.has('wall')) return 'Aggiungi una foto superiore per stimare le pareti.';
+  return 'Controlla le stime e inserisci lo spessore del fondo misurato.';
 }
 export function estimatePhotoDimension(points, referenceMm) {
   if (points.length !== 4 || !Number.isFinite(referenceMm) || referenceMm <= 0 ||
@@ -154,7 +175,7 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal) {
   reset.addEventListener('click', () => { points = []; redraw(); }, { signal });
   reference.addEventListener('input', redraw, { signal });
   view.addEventListener('change', () => {
-    const allowed = view.value === 'front' ? ['width', 'height'] : ['depth', 'height'];
+    const allowed = { front: ['width', 'height'], side: ['depth', 'height'], top: ['width', 'depth', 'wall'] }[view.value];
     for (const option of axis.options) option.disabled = !allowed.includes(option.value);
     if (!allowed.includes(axis.value)) axis.value = allowed[0];
     points = [];
@@ -170,7 +191,8 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal) {
       return;
     }
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const bounds = detectPhotoSilhouette(context.getImageData(0, 0, canvas.width, canvas.height));
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+    const bounds = detectPhotoSilhouette(pixels);
     if (!bounds) {
       redraw();
       status.textContent = 'Contorno incerto. Usa uno sfondo uniforme o segna gli estremi a mano.';
@@ -179,7 +201,19 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal) {
     const { left, top, right, bottom } = bounds;
     const x = (left + right) / 2;
     const y = (top + bottom) / 2;
-    const extremes = axis.value === 'height'
+    if (axis.value === 'wall') {
+      const cavity = detectPhotoCavity(pixels, bounds);
+      if (!cavity) {
+        redraw();
+        status.textContent = 'Cavità non distinguibile. Prova una vista superiore con bordi ben visibili.';
+        return;
+      }
+      points = [...points.slice(0, 2), { x: left, y }, { x: left + cavity.wallPixels, y }];
+      redraw();
+      return;
+    }
+    const vertical = axis.value === 'height' || (axis.value === 'depth' && view.value === 'top');
+    const extremes = vertical
       ? [{ x, y: top - 0.5 }, { x, y: bottom + 0.5 }]
       : [{ x: left - 0.5, y }, { x: right + 0.5, y }];
     points = [...points.slice(0, 2), ...extremes];

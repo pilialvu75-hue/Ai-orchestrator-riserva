@@ -47,14 +47,14 @@ class AivexusStlPreview extends HTMLElement {
           <summary>Stima da fotografia</summary>
           <p data-photo-guide role="status"></p>
           <label>Angolazione <select data-photo-view>
-            <option value="front">Frontale</option><option value="side">Laterale</option>
+            <option value="front">Frontale</option><option value="side">Laterale</option><option value="top">Superiore</option>
           </select></label>
           <p>Usa una foto frontale e un riferimento sullo stesso piano. La foto resta nel browser.</p>
           <label>Foto <input data-photo-file type="file" accept="image/jpeg,image/png,image/webp"></label>
           <label>Riferimento (mm) <input data-photo-reference type="number" min="0.1" step="any"></label>
           <label>Dimensione <select data-photo-axis>
             <option value="width">Larghezza</option><option value="depth" disabled>Profondità</option>
-            <option value="height">Altezza</option>
+            <option value="height">Altezza</option><option value="wall" disabled>Parete</option>
           </select></label>
           <canvas hidden aria-label="Foto da misurare"></canvas>
           <output data-photo-status role="status"></output>
@@ -194,7 +194,7 @@ class AivexusStlPreview extends HTMLElement {
     const jobStatus = form.querySelector('[data-job]');
     const estimateNote = form.querySelector('[data-estimate-note]');
     const estimatedFields = new Map();
-    const axisLabels = { width: 'larghezza', depth: 'profondità', height: 'altezza' };
+    const axisLabels = { width: 'larghezza', depth: 'profondità', height: 'altezza', wall: 'parete' };
     const storageKey = 'aivexus.cad.pending.' + projectId;
     let pending;
     let busy = false;

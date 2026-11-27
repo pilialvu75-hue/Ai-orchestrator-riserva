@@ -5,7 +5,7 @@ import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 import { decodeRunnerBase64, decodeWebAppResult, encodeWebAppJob, importWebAppAuthorizationKey,
   importWebAppPrivateKey, importWebAppPublicKey } from './web_application_runner_packet.mjs';
 
-const photoAxes = ['width', 'depth', 'height'];
+const photoAxes = ['width', 'depth', 'height', 'wall'];
 const fail = reason => ({ ok: false, reason });
 const validIds = (projectId, revisionId) => WEB_CAD_PROJECT_ID.test(projectId) && WEB_RUNNER_TICKET.test(revisionId);
 const keys = ({ ownerSubject, projectId, revisionId }) => [ownerSubject, projectId, revisionId];

@@ -10,7 +10,7 @@ import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio
 import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
   importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
-import { detectPhotoSilhouette, estimatePhotoDimension, nextPhotoView } from '../../web/studio_3d_photo.mjs';
+import { detectPhotoCavity, detectPhotoSilhouette, estimatePhotoDimension, nextPhotoView } from '../../web/studio_3d_photo.mjs';
 import { checkOpenBoxFdm } from '../../web/studio_3d_fdm.mjs';
 
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
@@ -319,5 +319,20 @@ test('finds the main image silhouette and requests the missing viewing angle', (
   data[0] = 0;
   assert.equal(detectPhotoSilhouette({ data, width, height }), null);
   assert.match(nextPhotoView(new Set(['width', 'height'])), /foto laterale/);
-  assert.match(nextPhotoView(new Set(['width', 'height', 'depth'])), /tre dimensioni/);
+  assert.match(nextPhotoView(new Set(['width', 'height', 'depth'])), /foto superiore/);
+});
+
+test('estimates uniform walls only when a rectangular cavity is visible from above', () => {
+  const width = 30, height = 30;
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  const draw = (start, end, color) => {
+    for (let y = start; y < end; y++) {
+      for (let x = start; x < end; x++) data.fill(color, (y * width + x) * 4, (y * width + x) * 4 + 3);
+    }
+  };
+  draw(5, 25, 30);
+  const image = { data, width, height };
+  assert.equal(detectPhotoCavity(image, detectPhotoSilhouette(image)), null);
+  draw(8, 22, 140);
+  assert.deepEqual(detectPhotoCavity(image, detectPhotoSilhouette(image)), { wallPixels: 3 });
 });
