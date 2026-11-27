@@ -45,15 +45,20 @@ class AivexusStlPreview extends HTMLElement {
           aria-describedby="controls"></canvas>
         <details data-photo hidden>
           <summary>Stima da fotografia</summary>
+          <p data-photo-guide role="status"></p>
+          <label>Angolazione <select data-photo-view>
+            <option value="front">Frontale</option><option value="side">Laterale</option>
+          </select></label>
           <p>Usa una foto frontale e un riferimento sullo stesso piano. La foto resta nel browser.</p>
           <label>Foto <input data-photo-file type="file" accept="image/jpeg,image/png,image/webp"></label>
           <label>Riferimento (mm) <input data-photo-reference type="number" min="0.1" step="any"></label>
           <label>Dimensione <select data-photo-axis>
-            <option value="width">Larghezza</option><option value="depth">Profondità</option>
+            <option value="width">Larghezza</option><option value="depth" disabled>Profondità</option>
             <option value="height">Altezza</option>
           </select></label>
           <canvas hidden aria-label="Foto da misurare"></canvas>
           <output data-photo-status role="status"></output>
+          <button type="button" data-photo-detect>Rileva contorno</button>
           <button type="button" data-photo-reset>Azzera punti</button>
           <button type="button" data-photo-apply disabled>Usa stima nel progetto</button>
         </details>
@@ -339,7 +344,7 @@ class AivexusStlPreview extends HTMLElement {
       photoPanel.hidden = false;
       mountStudioPhotoMeasurement(photoPanel, (axis, estimate) => {
         const field = fields.elements.namedItem(axis);
-        if (!field || fields.disabled) return;
+        if (!field || fields.disabled) return false;
         field.value = estimate;
         estimatedFields.set(axis, estimate);
         showEstimateNote();

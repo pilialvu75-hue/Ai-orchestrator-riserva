@@ -10,7 +10,7 @@ import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio
 import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
   importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
-import { estimatePhotoDimension } from '../../web/studio_3d_photo.mjs';
+import { detectPhotoSilhouette, estimatePhotoDimension, nextPhotoView } from '../../web/studio_3d_photo.mjs';
 import { checkOpenBoxFdm } from '../../web/studio_3d_fdm.mjs';
 
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
@@ -251,12 +251,13 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
           measure.value = 50;
           measure.dispatchEvent(new Event('input'));
           const rect = image.getBoundingClientRect();
-          for (const [x, y] of [[10, 12], [110, 12], [10, 45], [190, 45]]) {
+          for (const [x, y] of [[10, 12], [110, 12]]) {
             image.dispatchEvent(new MouseEvent('click', {
               clientX: rect.left + rect.width * x / image.width,
               clientY: rect.top + rect.height * y / image.height,
             }));
           }
+          panel.querySelector('[data-photo-detect]').click();
           panel.querySelector('[data-photo-apply]').click();
           state.textContent = root.querySelector('[data-estimate-note]').textContent;
         });
@@ -305,4 +306,18 @@ test('estimates only a calibrated visible segment from a synthetic photo fixture
   assert.equal(estimatePhotoDimension(points.slice(0, 3), 50), null);
   assert.equal(estimatePhotoDimension([points[0], points[0], ...points.slice(2)], 50), null);
   assert.equal(estimatePhotoDimension(points, 0), null);
+});
+
+test('finds the main image silhouette and requests the missing viewing angle', () => {
+  const width = 30, height = 20;
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  for (let y = 6; y <= 15; y++) {
+    for (let x = 4; x <= 24; x++) data.fill(20, (y * width + x) * 4, (y * width + x) * 4 + 3);
+  }
+  assert.deepEqual(detectPhotoSilhouette({ data, width, height }),
+    { left: 4, top: 6, right: 24, bottom: 15, size: 210 });
+  data[0] = 0;
+  assert.equal(detectPhotoSilhouette({ data, width, height }), null);
+  assert.match(nextPhotoView(new Set(['width', 'height'])), /foto laterale/);
+  assert.match(nextPhotoView(new Set(['width', 'height', 'depth'])), /tre dimensioni/);
 });
