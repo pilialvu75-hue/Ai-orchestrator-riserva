@@ -52,6 +52,7 @@ class _RecordingResident extends ResidentCompletionRuntime {
     int? ubatchSize,
     bool flashAttention = false,
     String? device,
+    int? gpuLayers,
     required CancellationToken cancellation,
     void Function(int cached, int evaluated)? onPromptUsage,
     bool rejectTokenLimit = false,
