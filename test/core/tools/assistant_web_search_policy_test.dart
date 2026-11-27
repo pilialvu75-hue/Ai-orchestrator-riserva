@@ -325,6 +325,21 @@ void main() {
       'i migliori browser per Windows 7',
     );
   });
+  test('upcoming episode is current public evidence, not ordinary conversation', () {
+    const question = 'est ce que koyuki hikawa et minato amamya vont finir ensemble dans le prochain episode de la saison 2?';
+    expect(AssistantWebSearchPolicy.shouldSearch(question), isTrue);
+    expect(AssistantWebSearchPolicy.shouldSearch('sans internet: $question'), isFalse);
+    expect(AssistantWebSearchPolicy.shouldSearch('Spiegami il primo episodio della serie'), isFalse);
+    for (final followUp in ['cita le tue fonti', 'cite your sources',
+        'dove hai preso queste informazioni, chi sono i personaggi in questione?']) {
+      expect(AssistantWebSearchPolicy.isAnswerVerification(followUp), isTrue);
+      expect(AssistantWebSearchPolicy.answerVerificationQuery(followUp, question),
+          AssistantWebSearchPolicy.extractQuery(question));
+      expect(AssistantWebSearchPolicy.answerVerificationQuery(followUp, null), isNull);
+      expect(AssistantWebSearchPolicy.shouldSearch(followUp), isFalse);
+    }
+  });
+
   test('short source follow-ups require a prior user topic, not literal search', () {
     for (final prompt in ['fonti', 'Fonti?', 'le fonti', 'sources?', 'your sources',
       'tes sources ?', 'fuentes', 'las fuentes']) {
