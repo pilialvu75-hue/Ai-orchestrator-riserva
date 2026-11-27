@@ -7,11 +7,13 @@ import { test } from 'node:test';
 import { listWebCadRevisions, readWebCadRevision, saveWebCadRevision } from '../../scripts/web/d1_web_cad_revisions.mjs';
 import { runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
+const sqliteValue = value => value instanceof ArrayBuffer ? new Uint8Array(value) : value;
+
 test('stores immutable CAD artifacts, rejects altered bytes and isolates owners', async () => {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../../scripts/web/sql/013_web_cad_revisions.sql', import.meta.url), 'utf8'));
   const db = { prepare: query => ({
-    bind: (...params) => ({ first: async () => sqlite.prepare(query).get(...params), all: async () => ({ results: sqlite.prepare(query).all(...params) }) }),
+    bind: (...params) => ({ first: async () => sqlite.prepare(query).get(...params.map(sqliteValue)), all: async () => ({ results: sqlite.prepare(query).all(...params.map(sqliteValue)) }) }),
   }) };
   const scad = Uint8Array.of(1, 2, 3);
   const stl = Uint8Array.of(4, 5, 6);
@@ -49,7 +51,7 @@ test('stores both real OpenSCAD results and recovers either revision by ID',
     const sqlite = new DatabaseSync(':memory:');
     sqlite.exec(readFileSync(new URL('../../scripts/web/sql/013_web_cad_revisions.sql', import.meta.url), 'utf8'));
     const db = { prepare: query => ({
-      bind: (...params) => ({ first: async () => sqlite.prepare(query).get(...params) }),
+      bind: (...params) => ({ first: async () => sqlite.prepare(query).get(...params.map(sqliteValue)) }),
     }) };
     try {
       const project = { db, ownerSubject: 'private-test-owner', projectId: 'web-project:1795000000000000' };
