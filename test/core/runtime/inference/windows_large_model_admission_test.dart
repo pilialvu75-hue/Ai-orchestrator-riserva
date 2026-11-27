@@ -37,6 +37,20 @@ void main() {
       modelBytes: 5 * gib, blockBytes: List.filled(4, gib),
       freeRamBytes: 8 * gib), isNull);
   });
+  test('reduced reserve requires explicit opt-in and still rejects impossible fit', () {
+    expect(WindowsLargeModelAdmission.cpuFits(5 * gib, 7 * gib), isFalse);
+    expect(WindowsLargeModelAdmission.cpuFits(5 * gib, 7 * gib, reduced: true), isTrue);
+    expect(WindowsLargeModelAdmission.cpuFits(5 * gib, 5 * gib, reduced: true), isFalse);
+    expect(WindowsLargeModelAdmission.gpu(backend: 'cuda', devices: devices,
+      modelBytes: 9 * gib, blockBytes: List.filled(8, gib),
+      freeRamBytes: 4 * gib), isNull);
+    expect(WindowsLargeModelAdmission.gpu(backend: 'cuda', devices: devices,
+      modelBytes: 9 * gib, blockBytes: List.filled(8, gib),
+      freeRamBytes: 5 * gib, reduced: true)?.layers, 6);
+    expect(WindowsLargeModelAdmission.gpu(backend: 'cuda', devices: devices,
+      modelBytes: 9 * gib, blockBytes: List.filled(8, gib),
+      freeRamBytes: 0, reduced: true), isNull);
+  });
   test('native layer request preserves defaults and rejects inconsistent bounds', () {
     expect(ResidentCompletionRuntime.resolveGpuLayers(null, null), 0);
     expect(ResidentCompletionRuntime.resolveGpuLayers('CUDA0', null), 99);
