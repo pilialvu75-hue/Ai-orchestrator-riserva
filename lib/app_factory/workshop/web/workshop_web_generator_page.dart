@@ -9,6 +9,8 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dar
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_download.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_record_export.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_joined_app_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_workspace.dart';
@@ -701,6 +703,16 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     });
   }
 
+  Future<void> _exportRecords(String id) => _run(() async {
+    try {
+      final bytes = await collectWorkshopRecordExport(
+        _client, _generationResource('export-records', id), id);
+      if (mounted) downloadWorkshopJson(bytes, 'aivexus-app-data.json');
+    } catch (_) {
+      throw const _GeneratorRequestException('Esportazione dei dati non riuscita.');
+    }
+  });
+
   Uri _generationResource(String route, String id) => Uri.base
       .resolve('/api/cantiere/proposals/$route')
       .replace(queryParameters: {'generationId': id});
@@ -1131,14 +1143,10 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                           ),
                         ),
                         if (receipt['hasRecords'] == true)
-                          Link(
-                            uri: _generationResource('export-records', id),
-                            target: LinkTarget.blank,
-                            builder: (context, followLink) => OutlinedButton.icon(
-                              onPressed: _busy ? null : followLink,
-                              icon: const Icon(Icons.download_outlined),
-                              label: Text(tr('Esporta dati JSON')),
-                            ),
+                          OutlinedButton.icon(
+                            onPressed: _busy ? null : () => _exportRecords(id),
+                            icon: const Icon(Icons.download_outlined),
+                            label: Text(tr('Esporta dati JSON')),
                           ),
                       ],
                     ],
