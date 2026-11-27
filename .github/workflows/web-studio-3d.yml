@@ -21,6 +21,7 @@ on:
       - 'web/studio_3d_preview.mjs'
       - 'web/studio_3d_preview_element.mjs'
       - 'web/studio_3d_fdm.mjs'
+      - 'web/studio_3d_photo.mjs'
 
   workflow_dispatch:
     inputs:

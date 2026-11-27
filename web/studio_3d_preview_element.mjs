@@ -1,4 +1,5 @@
 import { checkOpenBoxFdm } from './studio_3d_fdm.mjs';
+import { mountStudioPhotoMeasurement } from './studio_3d_photo.mjs';
 import { mountStudioStlPreview } from './studio_3d_preview.mjs';
 
 class AivexusStlPreview extends HTMLElement {
@@ -41,6 +42,20 @@ class AivexusStlPreview extends HTMLElement {
         <output role="status"></output>
         <canvas width="800" height="560" tabindex="0" aria-label="Anteprima 3D"
           aria-describedby="controls"></canvas>
+        <details data-photo hidden>
+          <summary>Stima da fotografia</summary>
+          <p>Usa una foto frontale e un riferimento sullo stesso piano. La foto resta nel browser.</p>
+          <label>Foto <input data-photo-file type="file" accept="image/jpeg,image/png,image/webp"></label>
+          <label>Riferimento (mm) <input data-photo-reference type="number" min="0.1" step="any"></label>
+          <label>Dimensione <select data-photo-axis>
+            <option value="width">Larghezza</option><option value="depth">Profondità</option>
+            <option value="height">Altezza</option>
+          </select></label>
+          <canvas hidden aria-label="Foto da misurare"></canvas>
+          <output data-photo-status role="status"></output>
+          <button type="button" data-photo-reset>Azzera punti</button>
+          <button type="button" data-photo-apply disabled>Usa stima nel progetto</button>
+        </details>
         <details data-fdm hidden>
           <summary>Controlli di stampa FDM</summary>
           <form data-fdm-profile>
@@ -57,8 +72,8 @@ class AivexusStlPreview extends HTMLElement {
           Usa la rotella o i tasti + e − per lo zoom.</p>
       </section>
     `;
-    const input = root.querySelector('input[type=file]');
-    const status = root.querySelector('output:not([data-job])');
+    const input = root.querySelector('input[accept=".stl,model/stl"]');
+    const status = root.querySelector('output:not([data-job]):not([data-photo-status])');
     const canvas = root.querySelector('canvas');
     const history = root.querySelector('select');
     const useRevision = root.querySelector('[data-select]');
@@ -264,6 +279,12 @@ class AivexusStlPreview extends HTMLElement {
 
     if (projectId) {
       form.hidden = false;
+      const photoPanel = root.querySelector('[data-photo]');
+      photoPanel.hidden = false;
+      mountStudioPhotoMeasurement(photoPanel, (axis, estimate) => {
+        const field = fields.elements.namedItem(axis);
+        if (field && !fields.disabled) field.value = estimate;
+      }, requests.signal);
       try { pending = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* browser storage optional */ }
       updateControls();
       history.addEventListener('change', selectRevision);

@@ -10,6 +10,7 @@ import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio
 import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
   importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
+import { estimatePhotoDimension } from '../../web/studio_3d_photo.mjs';
 import { checkOpenBoxFdm } from '../../web/studio_3d_fdm.mjs';
 
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
@@ -120,7 +121,7 @@ test('Chromium draws the OpenSCAD STL and changes canvas pixels after rotation a
 test('Chromium imports the actual STL through the preview element file input',
   { skip: !chromium, timeout: 45000 }, async () => {
     const { stl } = await renderOpenBox({ ...box, width: 90 });
-    const elementFiles = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs', 'studio_3d_fdm.mjs'];
+    const elementFiles = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs', 'studio_3d_fdm.mjs', 'studio_3d_photo.mjs'];
     const assets = new Map(await Promise.all(elementFiles.map(async name =>
       [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
     assets.set('index.html', '<!doctype html><aivexus-stl-preview></aivexus-stl-preview><output id="result"></output><script type="module" src="fixture.mjs"></script>');
@@ -178,7 +179,7 @@ test('encrypts the real CAD job and verifies its encrypted result and ticket',
 test('Chromium submits dimensions and opens the verified CAD revision after refresh',
   { skip: !chromium, timeout: 45000 }, async () => {
     const { stl } = await renderOpenBox({ ...box, width: 90 });
-    const names = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs', 'studio_3d_fdm.mjs'];
+    const names = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs', 'studio_3d_fdm.mjs', 'studio_3d_photo.mjs'];
     const assets = new Map(await Promise.all(names.map(async name =>
       [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
     assets.set('index.html', '<!doctype html><button id="start">Start</button><button id="refresh">Refresh</button><button id="bed">Smaller bed</button><output id="state"></output><script type="module" src="fixture.mjs"></script>');
@@ -257,3 +258,11 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
     });
     assert.equal(result.status, 'passed', JSON.stringify(result));
   });
+
+test('estimates only a calibrated visible segment from a synthetic photo fixture', () => {
+  const points = [{ x: 10, y: 12 }, { x: 110, y: 12 }, { x: 20, y: 40 }, { x: 180, y: 40 }];
+  assert.equal(estimatePhotoDimension(points, 50), 80);
+  assert.equal(estimatePhotoDimension(points.slice(0, 3), 50), null);
+  assert.equal(estimatePhotoDimension([points[0], points[0], ...points.slice(2)], 50), null);
+  assert.equal(estimatePhotoDimension(points, 0), null);
+});
