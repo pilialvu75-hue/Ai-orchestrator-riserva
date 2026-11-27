@@ -30,6 +30,8 @@ jobs:
       - name: Render and measure both box revisions
         run: |
           openscad --version
+          export AIVEXUS_WEB_CHROMIUM="$(command -v google-chrome)"
+          test -x "$AIVEXUS_WEB_CHROMIUM"
           node --test test/airlab/web_studio_3d_open_box.mjs
 
       - name: Build verified CAD artifacts

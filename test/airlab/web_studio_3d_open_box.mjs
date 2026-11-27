@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createChromiumWebVerifier } from '../../scripts/web/chromium_web_verifier.mjs';
 import { test } from 'node:test';
 import { createOpenBoxCad, renderOpenBox } from '../../scripts/web/studio_3d_open_box.mjs';
 
@@ -60,3 +62,44 @@ test('renders the real STL and redraws the mesh after keyboard rotation and zoom
   canvas.dispatchEvent(Object.assign(new Event('keydown'), { key: 'ArrowLeft' }));
   assert.equal(frames.length, 3);
 });
+
+const chromium = process.env.AIVEXUS_WEB_CHROMIUM;
+test('Chromium draws the OpenSCAD STL and changes canvas pixels after rotation and zoom',
+  { skip: !chromium, timeout: 45000 }, async () => {
+    const { stl } = await renderOpenBox(box);
+    const viewer = await readFile(new URL('../../web/studio_3d_preview.mjs', import.meta.url), 'utf8');
+    const verify = createChromiumWebVerifier({ executable: chromium });
+    const result = await verify({
+      assets: new Map([
+        ['index.html', '<!doctype html><canvas width="640" height="480" tabindex="0"></canvas><output id="dimensions"></output><output id="pixels"></output><button id="rotate">Rotate</button><button id="zoom">Zoom</button><script type="module" src="fixture.mjs"></script>'],
+        ['viewer.mjs', viewer],
+        ['fixture.mjs', `
+          import { mountStudioStlPreview } from './viewer.mjs';
+          const canvas = document.querySelector('canvas');
+          mountStudioStlPreview(canvas, ${JSON.stringify(stl.toString('ascii'))},
+            document.querySelector('#dimensions'));
+          const pixels = document.querySelector('#pixels');
+          const context = canvas.getContext('2d');
+          const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          pixels.textContent = data.some((value, index) => index % 4 === 0 && value > 45)
+            ? 'mesh drawn' : 'blank';
+          for (const [id, key] of [['rotate', 'ArrowLeft'], ['zoom', '+']]) {
+            document.getElementById(id).onclick = () => {
+              const before = canvas.toDataURL();
+              canvas.dispatchEvent(new KeyboardEvent('keydown', { key, cancelable: true }));
+              pixels.textContent = canvas.toDataURL() === before ? 'unchanged' : id;
+            };
+          }
+        `],
+      ]),
+      checks: [
+        { action: 'text', selector: '#dimensions', value: '80 × 60 × 30 mm' },
+        { action: 'text', selector: '#pixels', value: 'mesh drawn' },
+        { action: 'click', selector: '#rotate' },
+        { action: 'text', selector: '#pixels', value: 'rotate' },
+        { action: 'click', selector: '#zoom' },
+        { action: 'text', selector: '#pixels', value: 'zoom' },
+      ],
+    });
+    assert.equal(result.status, 'passed', JSON.stringify(result));
+  });
