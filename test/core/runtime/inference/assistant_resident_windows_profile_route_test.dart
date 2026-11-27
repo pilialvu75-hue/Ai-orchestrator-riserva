@@ -180,7 +180,8 @@ void main() {
     }
   });
 
-  test('ASUS Windows selects CUDA and passes bounded GPU settings', () async {
+  for (final selectedId in ['phi3_5_mini', 'qwen3_8b', 'custom-model.gguf']) {
+  test('ASUS Windows selects CUDA for $selectedId with sufficient VRAM', () async {
     final temp = await Directory.systemTemp.createTemp('aivexus-cuda-route-');
     final runtimeModern = Directory('${temp.path}${Platform.pathSeparator}runtime-modern');
     final runtimeCuda = Directory('${temp.path}${Platform.pathSeparator}runtime-cuda');
@@ -214,7 +215,7 @@ void main() {
         request: InferenceRequest(
           sessionId: 'asus-cuda-route',
           prompt: 'Reply OK',
-          modelId: 'phi3_5_mini',
+          modelId: selectedId,
           modelPath: model.path,
           maxTokens: 16,
         ),
@@ -233,6 +234,8 @@ void main() {
       await temp.delete(recursive: true);
     }
   });
+
+  }
 
   test('CUDA resident startup failure falls back to Vulkan without CLI', () async {
     final temp = await Directory.systemTemp.createTemp('aivexus-cuda-fallback-');
