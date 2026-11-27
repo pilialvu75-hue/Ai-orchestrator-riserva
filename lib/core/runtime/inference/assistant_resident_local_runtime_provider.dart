@@ -344,8 +344,13 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       }
       final plan = largePlan;
       if (plan == null) {
-        RuntimeEventLog.instance.emit('[WINDOWS_MODEL_ADMISSION] result=blocked reason=insufficient_or_unknown_memory');
-        yield InferenceResponse.error('Insufficient or unverified memory for this model. Free RAM/VRAM or select a smaller quantization.');
+        RuntimeEventLog.instance.emit('[WINDOWS_MODEL_ADMISSION] result=warning reason=insufficient_or_unknown_memory action=defer_load');
+        const warning = 'Avviso: RAM/VRAM disponibile insufficiente o non verificabile. '
+            'Il modello resta selezionato. Libera memoria e riprova.';
+        // A temporary resource warning is not an incompatible model or a
+        // request to switch automatically to another model/backend.
+        yield InferenceResponse.notice(warning);
+        yield InferenceResponse.error(warning);
         return;
       }
       if (plan.device != null) {
