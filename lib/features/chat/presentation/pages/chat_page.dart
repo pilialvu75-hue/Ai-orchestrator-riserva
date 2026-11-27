@@ -40,6 +40,7 @@ import 'package:ai_orchestrator/features/chat/presentation/widgets/empty_trash_c
 import 'package:ai_orchestrator/features/chat_memory/conversation_memory_service.dart';
 import 'package:ai_orchestrator/core/memory/assistant_durable_memory_capture_service.dart';
 import 'package:ai_orchestrator/features/chat/presentation/services/hybrid_cloud_chat_consent_gateway.dart';
+import 'package:ai_orchestrator/features/chat/presentation/services/windows_memory_review_gateway.dart';
 import 'package:ai_orchestrator/core/database/database_helper.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/data/services/live_chat_transcript_recorder.dart';
@@ -319,12 +320,20 @@ class _ChatPageState extends State<ChatPage>
   List<ChatSessionInfo> _chatSessions = const <ChatSessionInfo>[];
   late final ChatSessionStore _sessionStore;
   Object? _cloudConsentBinding;
+  Object? _windowsMemoryReviewBinding;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     // The normal Cloud runtime is not consent-gated yet. This host merely
     // binds the translated review dialog to the currently visible Chat.
+    if (Platform.isWindows) {
+      _windowsMemoryReviewBinding ??= WindowsMemoryReviewGateway.instance.bind(
+        context: context,
+        activeSessionId: () => _activeSessionId,
+        isSending: () => _isSending,
+      );
+    }
     _cloudConsentBinding ??= HybridCloudChatConsentGateway.instance.bind(
       context: context,
       activeSessionId: () => _activeSessionId,
@@ -418,6 +427,7 @@ class _ChatPageState extends State<ChatPage>
       final id = await _sessionStore.restoreActiveSession();
       if (!mounted) return;
       if (id != _activeSessionId) {
+        WindowsMemoryReviewGateway.instance.invalidate(_windowsMemoryReviewBinding);
         HybridCloudChatConsentGateway.instance.invalidate();
       }
       setState(() => _activeSessionId = id);
@@ -471,6 +481,7 @@ class _ChatPageState extends State<ChatPage>
     try {
       await _sessionStore.selectSession(id);
       if (!mounted) return;
+      WindowsMemoryReviewGateway.instance.invalidate(_windowsMemoryReviewBinding);
       HybridCloudChatConsentGateway.instance.invalidate();
       setState(() {
         _activeSessionId = id;
@@ -833,6 +844,8 @@ class _ChatPageState extends State<ChatPage>
 
   @override
   void dispose() {
+    final memoryBinding = _windowsMemoryReviewBinding;
+    if (memoryBinding != null) WindowsMemoryReviewGateway.instance.unbind(memoryBinding);
     final consentBinding = _cloudConsentBinding;
     if (consentBinding != null) {
       HybridCloudChatConsentGateway.instance.unbind(consentBinding);
@@ -890,6 +903,7 @@ class _ChatPageState extends State<ChatPage>
     );
 
     // A new message must never inherit a pending review for an older turn.
+    WindowsMemoryReviewGateway.instance.invalidate(_windowsMemoryReviewBinding);
     HybridCloudChatConsentGateway.instance.invalidate();
     _isSending = true;
 
@@ -921,6 +935,7 @@ class _ChatPageState extends State<ChatPage>
           'session=$_activeSessionId '
           'reason=deadlock_breaker',
         );
+        WindowsMemoryReviewGateway.instance.invalidate(_windowsMemoryReviewBinding);
         HybridCloudChatConsentGateway.instance.invalidate();
 
         context

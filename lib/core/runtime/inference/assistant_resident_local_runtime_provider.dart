@@ -22,6 +22,7 @@ import 'package:ai_orchestrator/core/runtime/inference/resident_completion_runti
 import 'package:ai_orchestrator/core/runtime/inference/windows_generation_metrics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_memory_guard.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_memory_review.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -29,6 +30,9 @@ import 'package:ai_orchestrator/native/runtime/windows/windows_llama_runtime.dar
 import 'package:ai_orchestrator/native/runtime/windows/windows_vulkan_device.dart';
 import 'package:ai_orchestrator/native/runtime/windows/windows_cuda_device.dart';
 import 'package:ai_orchestrator/native/runtime/windows/windows_gpu_probe_cache.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_gpu_device_capacity.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_gguf_block_sizes.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_large_model_admission.dart';
 
 /// Assistant-only warm desktop runtime. Workshop and diagnostics retain their
 /// canonical provider. Unsupported platforms and startup failures use the CLI.
@@ -37,14 +41,16 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       ResidentCompletionRuntime? runtime, String? Function()? executable,
       bool Function()? isWindowsHost, bool Function()? isModernWindowsHost,
       Future<String?> Function(String executable)? gpuDeviceListing,
-      bool Function()? cudaQaEnabled})
+      bool Function()? cudaQaEnabled,
+      Future<WindowsMemoryChoice> Function(String, WindowsMemoryReview, CancellationToken)? memoryReview})
       : _delegate = delegate, _runtime = runtime ?? ResidentCompletionRuntime(
           windowsResources: Platform.isWindows ? ResourceMonitor.instance : null),
         _executable = executable ?? _bundledServer,
         _isWindowsHost = isWindowsHost ?? _platformIsWindows,
         _isModernWindowsHost = isModernWindowsHost ?? _platformIsModernWindows,
         _gpuDeviceListing = gpuDeviceListing,
-        _cudaQaEnabled = cudaQaEnabled ?? _defaultCudaQaEnabled;
+        _cudaQaEnabled = cudaQaEnabled ?? _defaultCudaQaEnabled,
+        _memoryReview = memoryReview;
 
   static bool _platformIsWindows() => Platform.isWindows;
 
@@ -62,6 +68,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   final bool Function() _isModernWindowsHost;
   final Future<String?> Function(String executable)? _gpuDeviceListing;
   final bool Function() _cudaQaEnabled;
+  final Future<WindowsMemoryChoice> Function(String, WindowsMemoryReview, CancellationToken)? _memoryReview;
   AppLifecycleListener? _lifecycle;
   bool _unavailable = false;
   bool _gpuUnavailable = false;
@@ -69,6 +76,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   final _gpuDevices = WindowsGpuProbeCache();
   final _cudaDevices = WindowsGpuProbeCache();
   Future<void>? _preparation;
+  ({String model, String session, int pid, WindowsLargeModelAdmission plan})? _largeRoute;
 
   /// Prepare only the measured Windows GPU route while the app opens.
   /// This does not verify inference or populate the conversation cache.
@@ -84,6 +92,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     if (cpuExecutable == null || modelPath == null || !File(modelPath).existsSync()) return;
     final watch = Stopwatch()..start();
     final modelBytes = await File(modelPath).length();
+    // Large files must go through the explicit fresh-memory admission path.
+    if (modelBytes > WindowsLargeModelAdmission.protectedFileBytes) return;
     final cudaCandidate = p.join(p.dirname(cpuExecutable), '..', 'runtime-cuda', 'llama-server.exe');
     if (_cudaQaEnabled() && !_cudaUnavailable && File(cudaCandidate).existsSync()) {
       final cudaListing = await _cudaDevices.get(() => _listGpuDevices(cudaCandidate),
@@ -212,13 +222,27 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     await _runtime.close();
   }
 
+  /// Diagnostic communication check uses the same admitted backend and RAM
+  /// guard, but observes raw synthetic output rather than chat answer quality.
+  TokenStream streamVerificationInference({required InferenceRequest request,
+      required CancellationToken cancellationToken}) =>
+      _streamInference(request: request, cancellationToken: cancellationToken, verification: true);
+
   @override
   TokenStream streamInference({required InferenceRequest request,
-      required CancellationToken cancellationToken}) async* {
+      required CancellationToken cancellationToken}) =>
+      _streamInference(request: request, cancellationToken: cancellationToken);
+
+  TokenStream _streamInference({required InferenceRequest request,
+      required CancellationToken cancellationToken, bool verification = false}) async* {
     // Scope presentation telemetry to this attempt. A recursive fallback
     // obtains a newer id, so the outer finally cannot overwrite it.
     final metrics = Platform.isWindows ? WindowsGenerationMetrics.instance : null;
     final metricId = metrics?.begin();
+    if (metrics != null && metricId == null) {
+      yield InferenceResponse.error('Local inference is already running.');
+      return;
+    }
     try {
     // Use the ordinary resident CUDA/Vulkan/CPU route also for Qwen 2.5 3B.
     // Existing guarded CLI recovery remains available on actual failures.
@@ -278,7 +302,125 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
     String? gpuExecutable;
     String? gpuDevice;
     String? gpuBackend;
-    if (_isWindowsHost() && _cudaQaEnabled() && !_cudaUnavailable &&
+    int? gpuLayers;
+    final largeAdmission = _isWindowsHost() && _isModernWindowsHost() &&
+        _runtime.windowsResources != null &&
+        await file.length() > WindowsLargeModelAdmission.protectedFileBytes;
+    WindowsLargeModelAdmission? largePlan;
+    var confirmedReducedReserve = false;
+    var reducedSettings = false;
+    if (largeAdmission) {
+      final previous = _largeRoute;
+      if (previous != null && previous.pid == _runtime.processId &&
+          previous.model == model && previous.session == request.sessionId) {
+        largePlan = previous.plan;
+      } else {
+        _largeRoute = null;
+        try {
+          await _runtime.releaseForAdmission();
+        } on ResidentRuntimeBusy {
+          yield InferenceResponse.error('Local inference is already running.');
+          return;
+        }
+        final modelBytes = await file.length();
+        final layout = await WindowsGgufBlockSizes.read(model);
+        final measuredBlocks = layout?.modelBytes == modelBytes ? layout?.blockBytes : null;
+        Future<({WindowsLargeModelAdmission? normal, WindowsLargeModelAdmission? relaxed,
+            int? ram, int? vram})> assess() async {
+          WindowsLargeModelAdmission? normal;
+          WindowsLargeModelAdmission? relaxed;
+          int? availableVram;
+          final readings = <String, List<WindowsGpuDeviceCapacity>>{};
+          for (final backend in ['cuda', 'vulkan']) {
+            if (cancellationToken.isCancelled) break;
+            if (backend == 'cuda' && (!_cudaQaEnabled() || _cudaUnavailable)) continue;
+            if (backend == 'vulkan' && _gpuUnavailable) continue;
+            final candidate = p.join(p.dirname(executable), '..', 'runtime-$backend', 'llama-server.exe');
+            if (!File(candidate).existsSync()) continue;
+            final listing = await _listGpuDevices(candidate);
+            final devices = WindowsGpuDeviceCapacity.parse(listing ?? '', cuda: backend == 'cuda');
+            readings[backend] = devices;
+            for (final device in devices.where((d) => d.isNvidia)) {
+              if (availableVram == null || device.freeBytes > availableVram) {
+                availableVram = device.freeBytes;
+              }
+            }
+          }
+          // Evaluate all candidates against the same final RAM reading.
+          final ram = await _runtime.windowsResources!.sample();
+          final availableRam = ram?.windowsSample == true ? ram?.availableBytes : null;
+          if (!cancellationToken.isCancelled && ram?.critical == false && availableRam != null) {
+            for (final entry in readings.entries) {
+              normal ??= WindowsLargeModelAdmission.gpu(
+                backend: entry.key, devices: entry.value, modelBytes: modelBytes,
+                blockBytes: measuredBlocks, freeRamBytes: availableRam,
+              );
+              relaxed ??= WindowsLargeModelAdmission.gpu(
+                backend: entry.key, devices: entry.value, modelBytes: modelBytes,
+                blockBytes: measuredBlocks, freeRamBytes: availableRam, reduced: true,
+              );
+            }
+            if (WindowsLargeModelAdmission.cpuFits(modelBytes, availableRam)) {
+              normal ??= const WindowsLargeModelAdmission('resident_cpu', null, 0);
+            }
+            if (WindowsLargeModelAdmission.cpuFits(modelBytes, availableRam, reduced: true)) {
+              relaxed ??= const WindowsLargeModelAdmission('resident_cpu', null, 0);
+            }
+          }
+          return (normal: normal, relaxed: relaxed, ram: availableRam, vram: availableVram);
+        }
+
+        final initial = await assess();
+        largePlan = initial.normal;
+        if (largePlan == null && !cancellationToken.isCancelled && _memoryReview != null && !verification) {
+          final choice = await _memoryReview!(request.sessionId,
+              WindowsMemoryReview(modelBytes: modelBytes,
+                availableRamBytes: initial.ram, availableVramBytes: initial.vram,
+                canAttempt: initial.relaxed != null),
+              cancellationToken);
+          if (!cancellationToken.isCancelled && choice != WindowsMemoryChoice.cancel) {
+            // Confirmation is request-scoped. Re-measure after the dialog,
+            // never authorize a load from the pre-dialog memory snapshot.
+            final refreshed = await assess();
+            largePlan = refreshed.normal;
+            final allowRelaxed = initial.relaxed != null &&
+                (choice == WindowsMemoryChoice.tryAnyway || choice == WindowsMemoryChoice.reduced);
+            if (largePlan == null && allowRelaxed) {
+              largePlan = refreshed.relaxed;
+              confirmedReducedReserve = largePlan != null;
+            }
+            reducedSettings = largePlan != null && choice == WindowsMemoryChoice.reduced;
+            RuntimeEventLog.instance.emit('[WINDOWS_MODEL_ADMISSION] user_choice=${choice.name} reduced_reserve=$confirmedReducedReserve reduced_settings=$reducedSettings');
+          } else {
+            yield InferenceResponse.error('Caricamento annullato. Il modello resta selezionato.',
+                state: InferenceTerminalState.cancelled);
+            return;
+          }
+        }
+      }
+      if (cancellationToken.isCancelled) {
+        yield InferenceResponse.error('Inference cancelled.', state: InferenceTerminalState.cancelled);
+        return;
+      }
+      final plan = largePlan;
+      if (plan == null) {
+        RuntimeEventLog.instance.emit('[WINDOWS_MODEL_ADMISSION] result=warning reason=insufficient_or_unknown_memory action=defer_load');
+        const warning = 'Avviso: RAM/VRAM disponibile insufficiente o non verificabile. '
+            'Il modello resta selezionato. Libera memoria e riprova.';
+        // A temporary resource warning is not an incompatible model or a
+        // request to switch automatically to another model/backend.
+        yield InferenceResponse.notice(warning);
+        yield InferenceResponse.error(warning);
+        return;
+      }
+      if (plan.device != null) {
+        gpuBackend = plan.backend;
+        gpuDevice = plan.device;
+        gpuLayers = plan.layers;
+        gpuExecutable = p.join(p.dirname(executable), '..', 'runtime-${plan.backend}', 'llama-server.exe');
+      }
+      RuntimeEventLog.instance.emit('[WINDOWS_MODEL_ADMISSION] result=allowed backend=${plan.backend} requested_gpu_layers=${plan.layers}');
+    } else if (_isWindowsHost() && _cudaQaEnabled() && !_cudaUnavailable &&
         _isModernWindowsHost() &&
         AssistantWindowsGpuPolicy.supports(request.modelId!)) {
       final candidate = p.join(p.dirname(executable), '..', 'runtime-cuda', 'llama-server.exe');
@@ -298,7 +440,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         }
       }
     }
-    if (gpuDevice == null && _isWindowsHost() && !_gpuUnavailable &&
+    if (!largeAdmission && gpuDevice == null && _isWindowsHost() && !_gpuUnavailable &&
         _isModernWindowsHost() &&
         AssistantWindowsGpuPolicy.supports(request.modelId!)) {
       final candidate = p.join(p.dirname(executable), '..', 'runtime-vulkan', 'llama-server.exe');
@@ -329,7 +471,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       RuntimeEventLog.instance.emit(
         '[ASSISTANT_LOCAL_ROUTE] backend=${gpuBackend ?? 'resident_cpu'} '
         'engine=${p.basename(p.dirname(gpuExecutable ?? executable))} '
-        'device=${gpuDevice ?? 'none'}',
+        'device=${gpuDevice ?? 'none'} requested_gpu_layers=${gpuLayers ?? (gpuDevice == null ? 0 : 99)}',
       );
       if (metricId != null) metrics?.selectRoute(metricId, gpuBackend ?? 'resident_cpu');
       final output = _runtime.generate(executable: gpuExecutable ?? executable, modelPath: model,
@@ -339,21 +481,24 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         repeatPenalty: metadata.repeatPenalty ?? request.repeatPenalty,
         threads: (Platform.numberOfProcessors ~/ 2).clamp(1, 8), cancellation: cancellationToken,
         device: gpuDevice,
-        rejectTokenLimit: Platform.isWindows,
-        batchSize: gpuBackend == 'cuda'
+        gpuLayers: gpuLayers,
+        rejectTokenLimit: Platform.isWindows && !verification,
+        batchSize: reducedSettings ? 128 : gpuBackend == 'cuda'
             ? 512
             : (gpuDevice == null && Platform.isWindows &&
                     LocalInferenceModelIds.resolveTemplate(request.modelId!) ==
                         LocalInferenceModelIds.templateNemotron
                 ? 128
                 : null),
-        ubatchSize: gpuBackend == 'cuda' ? 256 : null,
+        ubatchSize: reducedSettings ? 64 : gpuBackend == 'cuda' ? 256 : null,
         flashAttention: gpuBackend == 'cuda',
         onPromptUsage: (cached, evaluated) => RuntimeEventLog.instance.emit(
           '[ASSISTANT_LOCAL_CACHE] cached_tokens=$cached evaluated_tokens=$evaluated'),
       );
       final Stream<String> answer;
-      if (Platform.isWindows &&
+      if (verification) {
+        answer = output;
+      } else if (Platform.isWindows &&
           LocalPromptTemplates.usesDeepSeekR1AssistantOutput(request.modelId!)) {
         answer = AssistantReasoningOutput.answerAfterInitialReasoning(output);
       } else if (_isWindowsHost() &&
@@ -374,6 +519,13 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
       if (cancellationToken.isCancelled) throw StateError('Inference cancelled.');
       if (text.toString().trim().isEmpty) throw StateError('No generated text.');
       markRuntimeVerified(model);
+      final pid = _runtime.processId;
+      if (largePlan != null && pid != null && !confirmedReducedReserve && !reducedSettings && !verification) {
+        _largeRoute = (model: model, session: request.sessionId, pid: pid, plan: largePlan);
+      } else if (confirmedReducedReserve || reducedSettings || verification) {
+        _largeRoute = null;
+        await _runtime.close();
+      }
       if (metricId != null) metrics?.finish(metricId, success: true, stats: _runtime.lastGenerationMetrics);
       yield InferenceResponse.finalChunk(text: text.toString(),
           tokensGenerated: (text.length / 4).ceil(), model: request.modelId);
@@ -393,6 +545,10 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         // A reasoning budget/format failure is not an unavailable GPU/model.
         // Do not silently retry another backend or rank thoughts as an answer.
         yield InferenceResponse.error('The response ended before a final answer. The reasoning budget may be insufficient.');
+      } else if (largeAdmission) {
+        _largeRoute = null;
+        RuntimeEventLog.instance.emit('[WINDOWS_MODEL_ADMISSION] result=failed action=stop_no_unsafe_fallback');
+        yield InferenceResponse.error('Large model inference failed. No unbudgeted fallback was attempted.');
       } else if (chunks == 0) {
         if (gpuExecutable != null) {
           if (gpuBackend == 'cuda') {
@@ -402,7 +558,7 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           }
           RuntimeEventLog.instance.emit('[ASSISTANT_LOCAL_GPU] backend=${gpuBackend ?? 'unknown'} status=unavailable action=resident_fallback');
           if (metricId != null) metrics?.finish(metricId, success: false);
-          yield* streamInference(request: request, cancellationToken: cancellationToken);
+          yield* _streamInference(request: request, cancellationToken: cancellationToken, verification: verification);
           return;
         }
         _unavailable = true;

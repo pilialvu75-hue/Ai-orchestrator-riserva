@@ -85,7 +85,7 @@ class ResidentCompletionRuntime {
     try {
       await memory?.start();
       await _ensureStarted(executable, modelPath, sessionId, threads,
-          CancellationToken(), batchSize, ubatchSize, device, flashAttention, memory);
+          CancellationToken(), batchSize, ubatchSize, device, flashAttention, memory, null);
       memory?.check();
     } catch (_) {
       await close();
@@ -112,6 +112,7 @@ class ResidentCompletionRuntime {
     int? ubatchSize,
     bool flashAttention = false,
     String? device,
+    int? gpuLayers,
     required CancellationToken cancellation,
     void Function(int cached, int evaluated)? onPromptUsage,
     bool rejectTokenLimit = false,
@@ -139,10 +140,11 @@ class ResidentCompletionRuntime {
       if (device != null && !RegExp(r'^(?:Vulkan|CUDA)\d+$').hasMatch(device)) {
         throw ArgumentError.value(device, 'device');
       }
+      resolveGpuLayers(device, gpuLayers);
       final firstContentWatch = Stopwatch()..start();
       var sawContent = false;
       await _ensureStarted(executable, modelPath, sessionId, threads, cancellation,
-          batchSize, ubatchSize, device, flashAttention, memory);
+          batchSize, ubatchSize, device, flashAttention, memory, gpuLayers);
       memory?.check();
       if (cancellation.isCancelled) throw StateError('Inference cancelled.');
       final request = await _request('POST', '/completion');
@@ -217,8 +219,9 @@ class ResidentCompletionRuntime {
 
   Future<void> _ensureStarted(String executable, String model, String session,
       int threads, CancellationToken cancellation, int? batchSize, int? ubatchSize,
-      String? device, bool flashAttention, WindowsMemoryGuard? memory) async {
-    final identity = '$executable\u0000$model\u0000$session\u0000$batchSize\u0000$ubatchSize\u0000$device\u0000$flashAttention';
+      String? device, bool flashAttention, WindowsMemoryGuard? memory, int? gpuLayers) async {
+    final layers = resolveGpuLayers(device, gpuLayers);
+    final identity = '$executable\u0000$model\u0000$session\u0000$batchSize\u0000$ubatchSize\u0000$device\u0000$flashAttention\u0000$layers';
     if (_process != null && _identity == identity) return;
     final startupWatch = Stopwatch()..start();
     await close();
@@ -233,7 +236,7 @@ class ResidentCompletionRuntime {
     if (cancellation.isCancelled) throw StateError('Inference cancelled.');
     final process = await Process.start(executable, [
       '-m', model, '--host', '127.0.0.1', '--port', '$_port', '--api-key', _key!,
-      '-c', '$contextSize', '-t', '${threads.clamp(1, 8)}', '-ngl', device == null ? '0' : '99', '--parallel', '1',
+      '-c', '$contextSize', '-t', '${threads.clamp(1, 8)}', '-ngl', '$layers', '--parallel', '1',
       // Avoid an extra synthetic generation before the first real request.
       // Measured with this pinned Vulkan package; CPU/legacy paths unchanged.
       if (device != null) ...['--device', device, '--no-warmup'],
@@ -284,6 +287,22 @@ class ResidentCompletionRuntime {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
     throw TimeoutException('Local model startup timed out.');
+  }
+
+  /// Only an idle resident can be released for a new memory admission.
+  Future<void> releaseForAdmission() async {
+    if (_busy) throw ResidentRuntimeBusy();
+    await close();
+  }
+
+  /// Legacy defaults remain identical. Explicit partial offload is bounded
+  /// and must name the selected device; CPU cannot accept GPU layers.
+  static int resolveGpuLayers(String? device, int? requested) {
+    if (requested == null) return device == null ? 0 : 99;
+    if (device == null || requested < 1 || requested > 513) {
+      throw ArgumentError.value(requested, 'gpuLayers');
+    }
+    return requested;
   }
 
   Future<void> close() async {

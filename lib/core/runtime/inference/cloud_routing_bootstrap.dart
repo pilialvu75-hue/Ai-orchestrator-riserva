@@ -29,6 +29,7 @@ import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_public_web_link.dart';
 import 'package:ai_orchestrator/core/tools/search/duckduckgo_lite_provider.dart';
 import 'package:ai_orchestrator/core/tools/search/duckduckgo_provider.dart';
@@ -37,6 +38,7 @@ import 'package:ai_orchestrator/core/tools/search/fallback_search_provider.dart'
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/features/chat/data/datasources/chat_local_datasource.dart';
 import 'package:ai_orchestrator/features/chat/presentation/services/hybrid_cloud_chat_consent_gateway.dart';
+import 'package:ai_orchestrator/features/chat/presentation/services/windows_memory_review_gateway.dart';
 import 'package:ai_orchestrator/features/cloud_ai/domain/repositories/ai_repository.dart';
 import 'package:ai_orchestrator/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:ai_orchestrator/features/chat/data/services/chat_image_vision_service.dart';
@@ -117,7 +119,10 @@ abstract final class CloudRoutingBootstrap {
     // Assistant-only runtime decorator. The globally registered Local runtime
     // remains the canonical FFI/desktop provider used by diagnostics, Workshop
     // and the rest of the application.
-    final residentAssistantRuntime = AssistantResidentLocalRuntimeProvider(delegate: sl<LocalRuntimeProvider>());
+    final residentAssistantRuntime = AssistantResidentLocalRuntimeProvider(
+      delegate: sl<LocalRuntimeProvider>(),
+      memoryReview: WindowsMemoryReviewGateway.instance.ask,
+    );
     final assistantLocalRuntimeProvider =
         AssistantWebContinuationLocalRuntimeProvider(
       delegate: residentAssistantRuntime,
@@ -281,6 +286,18 @@ abstract final class CloudRoutingBootstrap {
         ),
       ),
     );
+
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      // Share the already-registered Assistant resident instance; do not
+      // start a second resident model just to verify its communication.
+      await _unregisterIfPresent<RuntimeSelfTestService>(sl);
+      sl.registerLazySingleton<RuntimeSelfTestService>(() => RuntimeSelfTestService(
+        runtimeProvider: sl<LocalRuntimeProvider>(),
+        desktopVerificationProvider: residentAssistantRuntime,
+        localAiRepository: sl<LocalAiRepository>(),
+        chatRepository: sl<ChatRepository>(),
+      ));
+    }
 
     debugPrint(
       '[CLOUD_ROUTING] direct Cloud safety path, Assistant general web search, '
