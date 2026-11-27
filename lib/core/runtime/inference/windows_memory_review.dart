@@ -7,9 +7,11 @@ class WindowsMemoryReview {
     this.availableRamBytes,
     this.availableVramBytes,
     required this.canAttempt,
+    this.layoutVerified = true,
   });
   final int modelBytes;
   final int? availableRamBytes, availableVramBytes;
   // True only when a measured reduced-reserve plan fits.
   final bool canAttempt;
+  final bool layoutVerified;
 }
