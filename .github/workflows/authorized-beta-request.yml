@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   dispatch-official-beta:
-    if: github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' && github.ref == 'refs/heads/release-request/beta'
+    if: github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' && github.ref == 'refs/heads/release-request/beta' && github.actor == github.repository_owner
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -57,5 +57,8 @@ jobs:
           gh workflow run build.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
-            -f release_channel=beta
+            -f release_channel=beta \
+            -f hybrid_consent_beta=true \
+            -f android_computer_use_qa=true \
+            -f owner_checkpoint_run_id="$GITHUB_RUN_ID"
           echo "Official Build & Release APK dispatched on main, beta channel."

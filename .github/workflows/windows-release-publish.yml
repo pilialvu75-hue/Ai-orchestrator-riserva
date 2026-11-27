@@ -192,21 +192,22 @@ jobs:
           "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Protected HYBRID consent Windows build: $enabled"
 
-      # Computer Use is already integrated into main but hidden by a build-time
-      # switch. The standalone owner Windows QA beta explicitly opted into it;
-      # restore parity only for owner-authorized coordinated beta releases.
-      # Stable/nightly/dev and Android/macOS/Linux keep their existing gates.
-      - name: Resolve Windows Computer Use beta laboratory profile
+      # Enable the manual Computer Use lab for authorized beta and stable.
+      # Keep the separate local ChatGPT test bridge beta-only.
+      - name: Resolve Windows Computer Use release laboratory profile
         id: computer_use_lab
         shell: pwsh
         run: |
           $releaseTag = '${{ steps.publish_tag.outputs.tag }}'
-          $enabled = if ($releaseTag -match '^v[0-9]+\.[0-9]+\.[0-9]+-beta\+[0-9]+$') {
+          $enabled = if ($releaseTag -match '^v[0-9]+\.[0-9]+\.[0-9]+(?:-beta)?\+[0-9]+$') {
+            if ('${{ steps.hybrid_gate.outputs.enabled }}' -ne 'true') { throw 'Required protected HYBRID release attestation is missing' }
             'true'
           } else {
             'false'
           }
+          $bridge = if ($releaseTag -match '^v[0-9]+\.[0-9]+\.[0-9]+-beta\+[0-9]+$') { 'true' } else { 'false' }
           "enabled=$enabled" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "bridge_enabled=$bridge" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Windows Computer Use manual lab enabled=$enabled"
 
       - name: Resolve Flutter dependencies
@@ -223,10 +224,10 @@ jobs:
 
       - name: Build coordinated Windows release
         shell: pwsh
-        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }} --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=${{ steps.computer_use_lab.outputs.enabled }} --dart-define=AIVEXUS_WINDOWS_CUDA_QA=true
+        run: flutter build windows --release --dart-define=AIVEXUS_EXPERIMENTAL_HYBRID_CONSENT_QA=${{ steps.hybrid_gate.outputs.enabled }} --dart-define=AIVEXUS_EXPERIMENTAL_COMPUTER_USE_QA=${{ steps.computer_use_lab.outputs.enabled }} --dart-define=AIVEXUS_LOCAL_TEST_BRIDGE=${{ steps.computer_use_lab.outputs.bridge_enabled }} --dart-define=AIVEXUS_WINDOWS_CUDA_QA=true
 
       - name: Package local ChatGPT adapter for beta only
-        if: steps.computer_use_lab.outputs.enabled == 'true'
+        if: steps.computer_use_lab.outputs.bridge_enabled == 'true'
         shell: pwsh
         run: |
           $toolsDir = Join-Path $PWD 'build\windows\x64\runner\Release\mcp-tools'

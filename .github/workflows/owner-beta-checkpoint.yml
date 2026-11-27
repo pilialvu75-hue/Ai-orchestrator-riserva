@@ -69,9 +69,8 @@ jobs:
           command -v gh
           command -v jq
 
-          # Only an exact owner issue comment can opt a beta into HYBRID.
-          # A merged PR checkpoint always keeps the HYBRID gate OFF.
-          hybrid_consent_beta='false'
+          # All owner-authorized beta checkpoints keep protected HYBRID and CU ON.
+          hybrid_consent_beta='true'
           if [[ "$GITHUB_EVENT_NAME" == "issue_comment" ]]; then
             request="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
             if [[ ! "$request" =~ ^/aivexus[[:space:]](beta-checkpoint|hybrid-beta-checkpoint)[[:space:]]([0-9a-f]{40})$ ]]; then
@@ -158,7 +157,7 @@ jobs:
               # GITHUB_TOKEN workflow_dispatch does not trigger a workflow_run.
               # Explicitly bridge Android SUCCESS to all desktop publishers
               # only after verifying SHA, release channel and run conclusion.
-              gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_channel=beta -f hybrid_consent_beta="$hybrid_consent_beta"
+              gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_channel=beta -f hybrid_consent_beta="$hybrid_consent_beta" -f android_computer_use_qa=true -f owner_checkpoint_run_id="$GITHUB_RUN_ID"
               echo "Authorized beta dispatch requested for main SHA $sha, HYBRID opt-in=$hybrid_consent_beta"
               release_run_id=""
               for release_attempt in $(seq 1 80); do

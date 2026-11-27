@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   dispatch-official-stable:
-    if: github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' && github.ref == 'refs/heads/release-request/stable'
+    if: github.repository == 'pilialvu75-hue/Ai-orchestrator-riserva' && github.ref == 'refs/heads/release-request/stable' && github.actor == github.repository_owner
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -85,5 +85,6 @@ jobs:
           gh workflow run build.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
-            -f release_channel=stable
+            -f release_channel=stable \
+            -f owner_checkpoint_run_id="$GITHUB_RUN_ID"
           echo "Explicit stable release requested from current main."
