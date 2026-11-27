@@ -8,6 +8,7 @@ on:
       - 'scripts/web/build_studio_3d_box_result.mjs'
       - 'test/airlab/web_studio_3d_open_box.mjs'
       - 'web/studio_3d_preview.mjs'
+      - 'web/studio_3d_preview_element.mjs'
 
 permissions:
   contents: read

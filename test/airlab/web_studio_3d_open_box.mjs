@@ -103,3 +103,34 @@ test('Chromium draws the OpenSCAD STL and changes canvas pixels after rotation a
     });
     assert.equal(result.status, 'passed', JSON.stringify(result));
   });
+
+test('Chromium imports the actual STL through the preview element file input',
+  { skip: !chromium, timeout: 45000 }, async () => {
+    const { stl } = await renderOpenBox({ ...box, width: 90 });
+    const elementFiles = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs'];
+    const assets = new Map(await Promise.all(elementFiles.map(async name =>
+      [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
+    assets.set('index.html', '<!doctype html><aivexus-stl-preview></aivexus-stl-preview><output id="result"></output><script type="module" src="fixture.mjs"></script>');
+    assets.set('fixture.mjs', `
+      import './studio_3d_preview_element.mjs';
+      const root = document.querySelector('aivexus-stl-preview').shadowRoot;
+      const input = root.querySelector('input');
+      const canvas = root.querySelector('canvas');
+      const status = root.querySelector('output');
+      new MutationObserver(() => {
+        document.querySelector('#result').textContent =
+          canvas.hidden ? status.textContent : status.textContent + ' rendered';
+      }).observe(status, { childList: true });
+      const selection = new DataTransfer();
+      selection.items.add(new File([${JSON.stringify(stl.toString('ascii'))}], 'box.stl'));
+      input.files = selection.files;
+      input.dispatchEvent(new Event('change'));
+    `);
+    const result = await createChromiumWebVerifier({ executable: chromium })({
+      assets,
+      checks: [
+        { action: 'text', selector: '#result', value: '90 × 60 × 30 mm rendered' },
+      ],
+    });
+    assert.equal(result.status, 'passed', JSON.stringify(result));
+  });
