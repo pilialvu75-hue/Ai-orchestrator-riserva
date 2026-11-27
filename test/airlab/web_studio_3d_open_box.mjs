@@ -174,6 +174,8 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
       [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
     assets.set('index.html', '<!doctype html><button id="start">Start</button><button id="refresh">Refresh</button><output id="state"></output><script type="module" src="fixture.mjs"></script>');
     assets.set('fixture.mjs', `
+      // Chromium's intercepted test origin is HTTP, so supply a deterministic UUID.
+      Object.defineProperty(crypto, 'randomUUID', { value: () => 'a1000000-0000-4000-8000-000000000001' });
       let revisionId;
       let saved = false;
       const projectId = 'web-project:1795000000000000';
