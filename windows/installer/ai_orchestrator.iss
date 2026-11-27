@@ -22,6 +22,13 @@
   #endif
 #endif
 
+#if FileExists(ReleaseDir + "\runtime-cuda\llama-server.exe")
+  #define AivexusHasCudaRuntime
+#endif
+#if FileExists(ReleaseDir + "\runtime-vulkan\llama-server.exe")
+  #define AivexusHasVulkanRuntime
+#endif
+
 #define AppName "AI Orchestrator"
 #define AppExeName "ai_orchestrator.exe"
 
@@ -86,9 +93,15 @@ Source: "{#AivexusRecoveryHelper}"; DestDir: "{commonappdata}\AI Orchestrator\Re
 ; This is the FIRST application file processed, after Restart Manager closes
 ; the old app but BEFORE any existing AIVEXUS binaries are overwritten.
 Source: "{#ReleaseDir}\ai_orchestrator.exe"; DestDir: "{app}"; Flags: ignoreversion; BeforeInstall: SnapshotInstalledVersion
-Source: "{#ReleaseDir}\*"; Excludes: "ai_orchestrator.exe"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ReleaseDir}\*"; Excludes: "ai_orchestrator.exe,\runtime-cuda\*,\runtime-vulkan\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 #else
-Source: "{#ReleaseDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ReleaseDir}\*"; Excludes: "\runtime-cuda\*,\runtime-vulkan\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
+#ifdef AivexusHasCudaRuntime
+Source: "{#ReleaseDir}\runtime-cuda\*"; DestDir: "{app}\runtime-cuda"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: InstallCudaRuntime
+#endif
+#ifdef AivexusHasVulkanRuntime
+Source: "{#ReleaseDir}\runtime-vulkan\*"; DestDir: "{app}\runtime-vulkan"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: InstallVulkanRuntime
 #endif
 Source: "{#VCRedistPath}"; DestDir: "{tmp}"; DestName: "vc_redist.x64.exe"; Flags: deleteafterinstall
 
@@ -108,10 +121,96 @@ Name: "{group}\AI Orchestrator - Conferma aggiornamento funzionante"; Filename: 
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installazione componenti Microsoft Visual C++..."; Flags: waituntilterminated runhidden
 Filename: "{app}\{#AppExeName}"; Description: "Avvia AI Orchestrator"; Flags: nowait postinstall skipifsilent
 
-#ifdef AivexusRecoveryHelper
 [Code]
 var
+  CudaSupported, VulkanSupported: Boolean;
+#ifdef AivexusRecoveryHelper
   SnapshotAttempted: Boolean;
+#endif
+
+function InstallCudaRuntime(): Boolean;
+begin
+  Result := CudaSupported;
+end;
+
+function InstallVulkanRuntime(): Boolean;
+begin
+  Result := VulkanSupported;
+end;
+
+function PSQuote(Value: String): String;
+begin
+  StringChangeEx(Value, #39, #39 + #39, True);
+  Result := #39 + Value + #39;
+end;
+
+{ Probe the exact bundled server in Setup's private temporary directory.
+  A device listing is a driver/runtime startup check, not an inference test.
+  Never download or install GPU drivers here. Unknown or failed probes skip
+  the new GPU files. The existing recovery snapshot still runs before copies. }
+function ProbeGpuRuntime(const Backend, DriverDll, DevicePattern: String): Boolean;
+var
+  ProbeDir, Server, Command, PowerShell: String;
+  ResultCode: Integer;
+begin
+  Result := False;
+  if (GetWindowsVersion < $0A000000) or
+     (not FileExists(ExpandConstant('{sys}\') + DriverDll)) then begin
+    Log('AIVEXUS GPU ' + Backend + ': unsupported OS or driver loader missing; skip.');
+    Exit;
+  end;
+  PowerShell := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  if not FileExists(PowerShell) then begin
+    Log('AIVEXUS GPU ' + Backend + ': probe unavailable; skip.');
+    Exit;
+  end;
+  try
+    ExtractTemporaryFiles('{app}\runtime-' + Backend + '\*');
+    ProbeDir := ExpandConstant('{tmp}\') + '{app}\runtime-' + Backend;
+    Server := AddBackslash(ProbeDir) + 'llama-server.exe';
+    if not FileExists(Server) then
+      Exit;
+    Command := '$ErrorActionPreference=''Stop''; try { ' +
+      '$server=' + PSQuote(Server) + '; ' +
+      '$out=$server+''.probe-out''; $err=$server+''.probe-err''; ' +
+      '$p=Start-Process -FilePath $server -ArgumentList ''--list-devices'' ' +
+      '-WorkingDirectory ' + PSQuote(ProbeDir) + ' -PassThru -WindowStyle Hidden ' +
+      '-RedirectStandardOutput $out -RedirectStandardError $err; ' +
+      'if(-not $p.WaitForExit(15000)){try{$p.Kill()}catch{};exit 2}; ' +
+      'if($p.ExitCode -ne 0){exit 3}; ' +
+      '$lines=[IO.File]::ReadAllText($out)+[Environment]::NewLine+[IO.File]::ReadAllText($err); ' +
+      '$matches=[regex]::Matches($lines,' + PSQuote(DevicePattern) + '); ' +
+      'foreach($m in $matches){if(([long]$m.Groups[1].Value -gt 0) -and ' +
+      '([long]$m.Groups[2].Value -le [long]$m.Groups[1].Value)){exit 0}}; ' +
+      'exit 4 } catch {exit 5}';
+    if Exec(PowerShell, '-NoLogo -NoProfile -NonInteractive -Command "' + Command + '"',
+      ProbeDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
+      Result := ResultCode = 0;
+      Log('AIVEXUS GPU ' + Backend + ': probe exit=' + IntToStr(ResultCode));
+    end;
+  except
+    Log('AIVEXUS GPU ' + Backend + ': probe failed; skip new backend files.');
+  end;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  CudaSupported := False;
+  VulkanSupported := False;
+#ifdef AivexusHasCudaRuntime
+  CudaSupported := ProbeGpuRuntime('cuda', 'nvcuda.dll',
+    '(?m)\bCUDA\d+:\s*NVIDIA[^\r\n]*\((\d+) MiB,\s*(\d+) MiB free\)');
+#endif
+#ifdef AivexusHasVulkanRuntime
+  VulkanSupported := ProbeGpuRuntime('vulkan', 'vulkan-1.dll',
+    '(?mi)\bVulkan\d+:\s*(?:NVIDIA|AMD|Intel|ATI|Radeon)[^\r\n]*\((\d+) MiB,\s*(\d+) MiB free\)');
+#endif
+  Log('AIVEXUS GPU selective install: CUDA=' + IntToStr(Ord(CudaSupported)) +
+    ' Vulkan=' + IntToStr(Ord(VulkanSupported)));
+  Result := True;
+end;
+
+#ifdef AivexusRecoveryHelper
 
 procedure SnapshotInstalledVersion();
 var
