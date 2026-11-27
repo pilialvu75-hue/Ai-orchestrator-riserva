@@ -118,15 +118,26 @@ Name: "{group}\AI Orchestrator - Conferma aggiornamento funzionante"; Filename: 
 #endif
 
 [Run]
-Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installazione componenti Microsoft Visual C++..."; Flags: waituntilterminated runhidden
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installazione componenti Microsoft Visual C++..."; Flags: waituntilterminated runhidden; Check: NeedVCRedistRun
 Filename: "{app}\{#AppExeName}"; Description: "Avvia AI Orchestrator"; Flags: nowait postinstall skipifsilent
 
 [Code]
 var
-  CudaSupported, VulkanSupported: Boolean;
+  CudaSupported, VulkanSupported, GpuProbePrepared, VCRedistPrepared: Boolean;
 #ifdef AivexusRecoveryHelper
   SnapshotAttempted: Boolean;
 #endif
+
+function NeedVCRedistRun(): Boolean;
+begin
+  Result := not VCRedistPrepared;
+end;
+
+function DriverCandidate(const DriverDll: String): Boolean;
+begin
+  Result := (GetWindowsVersion >= $0A000000) and
+    FileExists(ExpandConstant('{sys}\') + DriverDll);
+end;
 
 function InstallCudaRuntime(): Boolean;
 begin
@@ -195,19 +206,61 @@ end;
 
 function InitializeSetup(): Boolean;
 begin
+  { Provisional candidates count towards the pre-install disk estimate.
+    PrepareToInstall performs the actual probe before any application copy. }
   CudaSupported := False;
   VulkanSupported := False;
+  GpuProbePrepared := False;
+  VCRedistPrepared := False;
 #ifdef AivexusHasCudaRuntime
-  CudaSupported := ProbeGpuRuntime('cuda', 'nvcuda.dll',
-    '(?m)\bCUDA\d+:\s*NVIDIA[^\r\n]*\((\d+) MiB,\s*(\d+) MiB free\)');
+  CudaSupported := DriverCandidate('nvcuda.dll');
 #endif
 #ifdef AivexusHasVulkanRuntime
-  VulkanSupported := ProbeGpuRuntime('vulkan', 'vulkan-1.dll',
-    '(?mi)\bVulkan\d+:\s*(?:NVIDIA|AMD|Intel|ATI|Radeon)[^\r\n]*\((\d+) MiB,\s*(\d+) MiB free\)');
+  VulkanSupported := DriverCandidate('vulkan-1.dll');
+#endif
+  Result := True;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Installed: Cardinal;
+  ResultCode: Integer;
+begin
+  Result := '';
+  if GpuProbePrepared then Exit;
+  GpuProbePrepared := True;
+  if CudaSupported or VulkanSupported then begin
+    { The VC redistributable is already included in the approved installation.
+      On a fresh machine install it before probing the GPU executable, otherwise
+      a missing VC loader would incorrectly exclude supported hardware. }
+    if not RegQueryDWordValue(HKLM64,
+      'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed) or
+      (Installed <> 1) then begin
+      try
+        ExtractTemporaryFile('vc_redist.x64.exe');
+        if Exec(ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart',
+          '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
+          VCRedistPrepared := (ResultCode = 0) or (ResultCode = 1638) or
+            (ResultCode = 3010);
+          Log('AIVEXUS GPU prerequisite VC redistributable exit=' + IntToStr(ResultCode));
+        end;
+      except
+        Log('AIVEXUS GPU prerequisite probe unavailable; normal redist install remains enabled.');
+      end;
+    end;
+  end;
+#ifdef AivexusHasCudaRuntime
+  if CudaSupported then
+    CudaSupported := ProbeGpuRuntime('cuda', 'nvcuda.dll',
+      '(?m)\bCUDA\d+:\s*NVIDIA[^\r\n]*\((\d+) MiB,\s*(\d+) MiB free\)');
+#endif
+#ifdef AivexusHasVulkanRuntime
+  if VulkanSupported then
+    VulkanSupported := ProbeGpuRuntime('vulkan', 'vulkan-1.dll',
+      '(?mi)\bVulkan\d+:\s*(?:NVIDIA|AMD|Intel|ATI|Radeon)[^\r\n]*\((\d+) MiB,\s*(\d+) MiB free\)');
 #endif
   Log('AIVEXUS GPU selective install: CUDA=' + IntToStr(Ord(CudaSupported)) +
     ' Vulkan=' + IntToStr(Ord(VulkanSupported)));
-  Result := True;
 end;
 
 #ifdef AivexusRecoveryHelper
