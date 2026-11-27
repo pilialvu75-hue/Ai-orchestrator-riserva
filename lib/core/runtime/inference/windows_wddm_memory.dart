@@ -8,14 +8,21 @@ import 'package:path/path.dart' as p;
 /// vendor index. Dedicated and shared allocations must remain distinct.
 class WindowsWddmMemorySample {
   const WindowsWddmMemorySample(this.adapterId, this.dedicatedBytes,
-      this.sharedBytes);
+      this.sharedBytes, {this.busiestEnginePercent});
 
   final String adapterId;
-  final int? dedicatedBytes, sharedBytes;
+  final int? dedicatedBytes, sharedBytes, busiestEnginePercent;
 
   static List<WindowsWddmMemorySample> parse(String output) {
     final result = <WindowsWddmMemorySample>[];
     final seen = <String>{};
+    final engineRows = <String>{};
+    final engineTotals = <String, Map<String, int>>{};
+    final invalidAdapters = <String>{};
+    final enginePattern = RegExp(
+      r'^pid_\d+_(luid_0x[0-9a-f]+_0x[0-9a-f]+_phys_\d+)_(eng_\d+)_engtype_[a-z0-9_]+$',
+      caseSensitive: false,
+    );
     final pattern = RegExp(r'^luid_0x[0-9a-f]+_0x[0-9a-f]+_phys_\d+$',
         caseSensitive: false);
     int? bytes(String field) {
@@ -25,6 +32,22 @@ class WindowsWddmMemorySample {
     for (final line in const LineSplitter().convert(output)) {
       final fields = line.split('|');
       if (fields.length != 3) continue;
+      if (fields[0] == 'E') {
+        final instance = fields[1].trim().toLowerCase();
+        final match = enginePattern.firstMatch(instance);
+        if (match == null) continue;
+        final adapter = match.group(1)!;
+        final engine = match.group(2)!;
+        final value = bytes(fields[2]);
+        if (value == null || value > 100 || !engineRows.add(instance)) {
+          invalidAdapters.add(adapter);
+          continue;
+        }
+        final totals = engineTotals.putIfAbsent(adapter, () => {});
+        totals[engine] = (totals[engine] ?? 0) + value;
+        if (totals[engine]! > 100) invalidAdapters.add(adapter);
+        continue;
+      }
       final id = fields[0].trim().toLowerCase();
       if (!pattern.hasMatch(id) || !seen.add(id)) continue;
       final dedicated = bytes(fields[1]);
@@ -32,7 +55,23 @@ class WindowsWddmMemorySample {
       if (dedicated == null && shared == null) continue;
       result.add(WindowsWddmMemorySample(id, dedicated, shared));
     }
-    return List.unmodifiable(result);
+    int? utilization(String adapter) {
+      final totals = engineTotals[adapter];
+      if (invalidAdapters.contains(adapter) || totals == null || totals.isEmpty) {
+        return null;
+      }
+      return totals.values.reduce((a, b) => a > b ? a : b);
+    }
+    return List.unmodifiable(<WindowsWddmMemorySample>[
+      for (final memory in result)
+        WindowsWddmMemorySample(memory.adapterId, memory.dedicatedBytes,
+            memory.sharedBytes, busiestEnginePercent: utilization(memory.adapterId)),
+      for (final adapter in engineTotals.keys)
+        if (!result.any((memory) => memory.adapterId == adapter) &&
+            utilization(adapter) != null)
+          WindowsWddmMemorySample(adapter, null, null,
+              busiestEnginePercent: utilization(adapter)),
+    ]);
   }
 }
 
@@ -51,10 +90,18 @@ abstract final class WindowsWddmMemory {
     const script = r'''
 $ErrorActionPreference = 'Stop'
 if ([Environment]::OSVersion.Version.Major -lt 10) { exit 0 }
-Get-CimInstance -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory |
-  ForEach-Object {
+try {
+  $memory = @(Get-CimInstance -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory)
+  $memory | ForEach-Object {
     [Console]::WriteLine(('{0}|{1}|{2}' -f $_.Name, $_.DedicatedUsage, $_.SharedUsage))
   }
+} catch {}
+try {
+  $engines = @(Get-CimInstance -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine)
+  $engines | ForEach-Object {
+    [Console]::WriteLine(('E|{0}|{1}' -f $_.Name, $_.UtilizationPercentage))
+  }
+} catch {}
 ''';
     Process? process;
     try {

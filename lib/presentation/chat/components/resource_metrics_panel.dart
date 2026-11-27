@@ -109,6 +109,7 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
                 const Text('Windows WDDM • memoria per adattatore (non sommare a NVIDIA)'),
                 for (final (index, adapter) in gpuMonitor.wddmLatest.indexed) ...[
                   Text('Adattatore WDDM ${index + 1} (${adapter.adapterId})'),
+                  Text('Utilizzo WDDM (motore più attivo): ${percent(adapter.busiestEnginePercent?.toDouble())}'),
                   Text('Memoria dedicata: ${mib(adapter.dedicatedBytes)}'),
                   Text('Memoria condivisa: ${mib(adapter.sharedBytes)}'),
                 ],
