@@ -1677,3 +1677,11 @@ Riferimenti: sezioni 11, 15, 16, 17 e 18; issue #911, #913, #915. Progetto di si
 - 505083: riferimento fisico CUDA su ASUS RTX 4060, Qwen3 4B LOCAL; primo contenuto 390 ms, risposta breve 713 ms. Non è un benchmark a parità di prompt rispetto alla CLI.
 - Gate di pubblicazione: provenienza owner, SHA/tag, controlli delle dipendenze, integrità, firma applicabile, rollback e OTA invariati. Nessun bypass di Smart App Control; nessuna promozione stable implicita.
 - Stato di implementazione: PR #1304 (runtime Windows), PR #1305 (profilo beta). Vulkan oggi riconosce solo NVIDIA e modelli verificati; AMD/Intel richiedono qualifica separata. Linux non dispone ancora dell'adapter/UI Computer Use: flag compilato ON non è prova di supporto funzionale; collaudo multipiattaforma non completo. ChatGPT bridge Android resta separato. Non dichiarare superato un collaudo su piattaforma non supportata.
+
+### Roadmap futura — AIVEXUS Light e installer universale (issue #1307, 27/11/2026)
+
+- Installer unico: rilevazione locale di versione/architettura Windows, CPU e istruzioni supportate, RAM, spazio e GPU/driver. Windows >=10 con requisiti verificati sceglie il pacchetto completo; Windows 7/8.1 sceglie Light; valutare Light anche su hardware moderno insufficiente.
+- Light: runtime CPU realmente compatibile con OS/ISA, modello quantizzato candidato 0,5–1,5B dopo verifica licenza, memoria e qualità IT/FR; contesto e batch ridotti, chat offline-first. Nessun obbligo cloud. Funzioni non supportate dichiarate, non simulate.
+- Download solo di artefatto ufficiale compatibile, con canale/versione/provenienza, hash e autenticità verificati; consenso, backup/rollback e OTA che conserva il profilo e i dati utente. Nessun downgrade forzato o bypass protezioni. Windows legacy fuori supporto: non esporre servizi in rete.
+- Collaudo nativo Win7/8.1 (Lenovo Flex 2), risposta reale, avvio/aggiornamento/ripristino; preservare il riferimento CUDA ASUS 505083. Il report 505083 su Win8.1 segnala inferenza assente; causa non diagnosticata.
+- Stato: progettazione futura, non avviare lo sviluppo Light ora; priorità alla nuova beta per ASUS/S24 e qualità delle risposte.

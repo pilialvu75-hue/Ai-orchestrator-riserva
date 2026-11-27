@@ -14,6 +14,8 @@ abstract final class AssistantReplyLanguagePolicy {
       'bonjour', 'comment', 'mon', 'pote', "s'appelle", 'suis', 'est',
       'résultat', 'championnat', 'votre', 'prénom', 'peux',
       'pouvez', 'vous', 'merci', 'français', 'quelle',
+      'vont', 'ensemble', 'dans', 'prochain', 'prochaine', 'épisode',
+      'episode', 'saison', 'personnages', 'épisodes',
     },
     'English': <String>{
       'hello', 'what', 'how', 'my', 'name', 'friend', 'please',
@@ -112,6 +114,12 @@ abstract final class AssistantReplyLanguagePolicy {
     final baseHint = '$systemPrompt\n\nFor this response, write in $language. '
         'The latest user message determines the reply language, even when '
         'earlier messages used another language. Preserve proper names.';
+    if (language == 'French') {
+      return '$baseHint\n'
+          'Réponds entièrement en français, dès le premier mot. '
+          'Garde les noms propres, les citations littérales et le code. '
+          'Ne prétends pas avoir vérifié une information sans preuve.';
+    }
     if (language != 'Italian') return baseHint;
     // Small LOCAL models sometimes prefix otherwise-correct Italian answers
     // with an English acknowledgment. Reinforce the *whole* turn without

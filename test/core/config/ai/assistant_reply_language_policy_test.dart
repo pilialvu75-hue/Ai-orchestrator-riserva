@@ -109,6 +109,16 @@ void main() {
     );
   });
 
+  test('owner French upcoming-episode question overrides Italian history', () {
+    const prompt = 'est ce que koyuki hikawa et minato amamya vont finir ensemble dans le prochain episode de la saison 2?';
+    expect(AssistantReplyLanguagePolicy.detect(prompt), 'French');
+    final system = AssistantReplyLanguagePolicy.withCurrentTurnHint(
+      systemPrompt: 'Lingua predefinita: italiano.', userPrompt: prompt);
+    expect(system, contains('write in French'));
+    expect(system, contains('Réponds entièrement en français'));
+    expect(AssistantReplyLanguagePolicy.detect('Koyuki Hikawa'), isNull);
+  });
+
   test('declines ambiguous and mixed-language messages', () {
     expect(AssistantReplyLanguagePolicy.detect('ok'), isNull);
     expect(AssistantReplyLanguagePolicy.detect('Giuseppe'), isNull);
