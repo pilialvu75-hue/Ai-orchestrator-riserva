@@ -323,10 +323,12 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           return;
         }
         final modelBytes = await file.length();
-        final layout = await WindowsGgufBlockSizes.read(model);
+        final layoutResult = await WindowsGgufBlockSizes.readDetailed(model);
+        final layout = layoutResult.layout;
         final measuredBlocks = layout?.modelBytes == modelBytes ? layout?.blockBytes : null;
         RuntimeEventLog.instance.emit(
-          '[WINDOWS_MODEL_LAYOUT] model_bytes=$modelBytes '
+          '[WINDOWS_MODEL_LAYOUT] model_id=${request.modelId} model_bytes=$modelBytes '
+          'reason=${layoutResult.reason} '
           'layout_verified=${measuredBlocks != null} '
           'blocks=${measuredBlocks?.length ?? -1} '
           'block_bytes=${measuredBlocks?.fold<int>(0, (a, b) => a + b) ?? -1}');
@@ -391,7 +393,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           final choice = await _memoryReview!(request.sessionId,
               WindowsMemoryReview(modelBytes: modelBytes,
                 availableRamBytes: initial.ram, availableVramBytes: initial.vram,
-                canAttempt: initial.relaxed != null),
+                canAttempt: initial.relaxed != null,
+                layoutVerified: measuredBlocks != null),
               cancellationToken);
           if (!cancellationToken.isCancelled && choice != WindowsMemoryChoice.cancel) {
             // Confirmation is request-scoped. Re-measure after the dialog,
