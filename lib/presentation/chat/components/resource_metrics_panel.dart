@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_generation_metrics.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_gpu_metrics.dart';
 
 class ResourceMetricsPanel extends StatefulWidget {
   const ResourceMetricsPanel({super.key});
@@ -12,14 +13,21 @@ class ResourceMetricsPanel extends StatefulWidget {
 
 class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
   final monitor = ResourceMonitor.instance;
+  final gpuMonitor = WindowsGpuMetrics.instance;
+  bool _gpuRetained = false;
   @override
   void initState() {
     super.initState();
     monitor.retain();
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      gpuMonitor.retain();
+      _gpuRetained = true;
+    }
   }
 
   @override
   void dispose() {
+    if (_gpuRetained) gpuMonitor.release();
     monitor.release();
     super.dispose();
   }
@@ -31,6 +39,7 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: Listenable.merge([
           monitor, WindowsGenerationMetrics.instance, WindowsEngineProcessTracker.instance,
+          if (_gpuRetained) gpuMonitor,
         ]),
         builder: (context, _) {
           final ram = monitor.latest;
@@ -87,7 +96,15 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
                 ),
               ),
               Text('GPU: $gpu'),
-              const Text('GPU utilizzo / memoria: n/d'),
+              if (_gpuRetained && gpuMonitor.latest.isNotEmpty) ...[
+                const Text('NVIDIA • intera scheda, non solo AIVEXUS'),
+                for (final device in gpuMonitor.latest) ...[
+                  Text('GPU ${device.index}: ${device.name}'),
+                  Text('Utilizzo GPU: ${percent(device.utilizationPercent?.toDouble())}'),
+                  Text('VRAM: ${device.usedMiB ?? 'n/d'} / ${device.totalMiB ?? 'n/d'} MiB'),
+                ],
+              ] else
+                const Text('GPU utilizzo / memoria: n/d'),
               Text(
                 'Decode completati: ${monitor.native['decode_calls'] ?? 'n/d'}',
               ),
@@ -98,7 +115,7 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
                 '${monitor.native['micro_batch'] ?? '-'}',
               ),
               Text('Ultimo campione: $sampleTime'),
-              const Text('Campioni ogni 2 s • GPU % non esposta'),
+              Text(_gpuRetained ? 'CPU/RAM ogni 2 s • GPU ogni 5 s' : 'Campioni ogni 2 s • GPU % non esposta'),
             ]
                 .map(
                   (child) => DefaultTextStyle(
