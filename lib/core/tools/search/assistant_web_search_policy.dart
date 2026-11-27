@@ -33,6 +33,7 @@ abstract final class AssistantWebSearchPolicy {
         _shoppingIntent(value) ||
         isPresentOfficeHolderQuery(value) ||
         isSportsResultQuery(value) ||
+        isUpcomingEpisodeQuery(value) ||
         _evidenceDrivenIntent(value);
   }
 
@@ -62,7 +63,11 @@ abstract final class AssistantWebSearchPolicy {
     return const <String>{
       'verifica la tua risposta', 'verifica questa risposta',
       'controlla le fonti della tua risposta',
-      'fonti', 'le fonti',
+      'fonti', 'le fonti', 'cita le tue fonti', 'cita le fonti',
+      'dove hai preso queste informazioni',
+      'dove hai preso queste informazioni, chi sono i personaggi in questione',
+      'cite your sources', 'cite tes sources', 'cite vos sources',
+      'cita tus fuentes',
       'sources', 'your sources', 'tes sources',
       'fuentes', 'las fuentes',
       'verify your answer', 'fact check your answer',
@@ -71,6 +76,14 @@ abstract final class AssistantWebSearchPolicy {
       'vérifie les sources de ta réponse',
       'verifica tu respuesta', 'verifica las fuentes de tu respuesta',
     }.contains(value);
+  }
+
+  /// Future episodes are changing public facts, not model-memory questions.
+  static bool isUpcomingEpisodeQuery(String prompt) {
+    final value = prompt.toLowerCase();
+    final episode = RegExp(r'(?:^|[^\p{L}])(?:episod[ioei]|episodes?|épisodes?|cap[ií]tulos?)(?:$|[^\p{L}])', unicode: true);
+    final future = RegExp(r'\b(?:prossim[oaie]|prochain(?:e|s|es)?|next|pr[oó]xim[oa])\b');
+    return episode.hasMatch(value) && future.hasMatch(value);
   }
 
   /// Use the user's topic, never an assistant assertion as search evidence.

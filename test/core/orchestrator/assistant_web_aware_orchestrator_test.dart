@@ -226,6 +226,52 @@ void main() {
     expect(request.systemPrompt, contains('not verified facts'));
   });
 
+  test('owner episode and chained source requests use the original public topic', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(toolId: 'web_search',
+        output: 'Public evidence URL: https://example.test/episode'),
+    );
+    const question = 'est ce que koyuki hikawa et minato amamya vont finir ensemble dans le prochain episode de la saison 2?';
+    const history = [
+      ChatTurn(role: ChatRole.user, content: question),
+      ChatTurn(role: ChatRole.assistant, content: 'Unsupported relationship claim'),
+      ChatTurn(role: ChatRole.user, content: 'cita le tue fonti'),
+      ChatTurn(role: ChatRole.assistant, content: 'Another unsupported claim'),
+    ];
+    final assistant = build();
+    await assistant.handleStream(question, sessionId: 'episode-first').drain<void>();
+    await assistant.handleStream('cita le tue fonti', sessionId: 'episode-cite',
+      context: history.take(2).toList()).drain<void>();
+    await assistant.handleStream('dove hai preso queste informazioni, chi sono i personaggi in questione?',
+      sessionId: 'episode-cite-chain', context: history).drain<void>();
+    final searches = verify(() => webSearch.execute(captureAny())).captured;
+    expect(searches, hasLength(3));
+    for (final args in searches) {
+      expect((args as Map<String, dynamic>)['query'], question);
+    }
+    final requests = verify(() => inference.stream(captureAny())).captured;
+    expect(requests, hasLength(3));
+    for (final request in requests.cast<InferenceRequest>()) {
+      expect(request.systemPrompt, contains('https://example.test/episode'));
+      expect(request.systemPrompt, contains('Never invent a source'));
+    }
+    verifyNever(() => cloud.shouldPreferCloudFor(any()));
+  });
+
+  test('failed upcoming episode lookup cannot become an invented plot result', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
+    when(() => webSearch.execute(any())).thenAnswer(
+      (_) async => const ToolResult(toolId: 'web_search', output: '', success: false),
+    );
+    final chunks = await build().handleStream(
+      'Que va-t-il se passer dans le prochain épisode ?', sessionId: 'episode-failure',
+    ).toList();
+    expect(chunks.single.providerId, 'web_verification_unavailable');
+    expect(chunks.single.text, contains("aucune source exploitable"));
+    verifyNever(() => inference.stream(any()));
+  });
+
   test('verification without a user topic never searches assistant assertions', () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
     await build().handleStream('Verify your answer', sessionId: 'no-topic',
