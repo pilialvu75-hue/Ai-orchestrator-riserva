@@ -319,8 +319,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
             int? ram, int? vram})> assess() async {
           WindowsLargeModelAdmission? normal;
           WindowsLargeModelAdmission? relaxed;
-          int? availableRam;
           int? availableVram;
+          final readings = <String, List<WindowsGpuDeviceCapacity>>{};
           for (final backend in ['cuda', 'vulkan']) {
             if (cancellationToken.isCancelled) break;
             if (backend == 'cuda' && (!_cudaQaEnabled() || _cudaUnavailable)) continue;
@@ -328,45 +328,33 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
             final candidate = p.join(p.dirname(executable), '..', 'runtime-$backend', 'llama-server.exe');
             if (!File(candidate).existsSync()) continue;
             final listing = await _listGpuDevices(candidate);
-            final ram = await _runtime.windowsResources!.sample();
             final devices = WindowsGpuDeviceCapacity.parse(listing ?? '', cuda: backend == 'cuda');
+            readings[backend] = devices;
             for (final device in devices.where((d) => d.isNvidia)) {
               if (availableVram == null || device.freeBytes > availableVram) {
                 availableVram = device.freeBytes;
               }
             }
-            if (ram?.windowsSample != true || ram?.availableBytes == null) continue;
-            availableRam = ram!.availableBytes;
-            if (ram.critical) continue;
-            normal ??= WindowsLargeModelAdmission.gpu(
-              backend: backend, devices: devices, modelBytes: modelBytes,
-              blockBytes: measuredBlocks, freeRamBytes: availableRam!,
-            );
-            if (normal != null) break;
-            relaxed ??= WindowsLargeModelAdmission.gpu(
-              backend: backend, devices: devices, modelBytes: modelBytes,
-              blockBytes: measuredBlocks, freeRamBytes: availableRam,
-              reduced: true,
-            );
           }
-          if (normal == null && !cancellationToken.isCancelled) {
-            final ram = await _runtime.windowsResources!.sample();
-            if (ram?.windowsSample == true && ram?.availableBytes != null) {
-              availableRam = ram!.availableBytes;
-              if (ram.critical) {
-                relaxed = null;
-              } else {
-                if (WindowsLargeModelAdmission.cpuFits(modelBytes, availableRam!)) {
-                  normal = const WindowsLargeModelAdmission('resident_cpu', null, 0);
-                }
-                if (WindowsLargeModelAdmission.cpuFits(modelBytes, availableRam, reduced: true)) {
-                  relaxed ??= const WindowsLargeModelAdmission('resident_cpu', null, 0);
-                }
-              }
-            } else {
-              // No opt-in based on a stale RAM measurement.
-              availableRam = null;
-              relaxed = null;
+          // Evaluate all candidates against the same final RAM reading.
+          final ram = await _runtime.windowsResources!.sample();
+          final availableRam = ram?.windowsSample == true ? ram?.availableBytes : null;
+          if (!cancellationToken.isCancelled && ram?.critical == false && availableRam != null) {
+            for (final entry in readings.entries) {
+              normal ??= WindowsLargeModelAdmission.gpu(
+                backend: entry.key, devices: entry.value, modelBytes: modelBytes,
+                blockBytes: measuredBlocks, freeRamBytes: availableRam,
+              );
+              relaxed ??= WindowsLargeModelAdmission.gpu(
+                backend: entry.key, devices: entry.value, modelBytes: modelBytes,
+                blockBytes: measuredBlocks, freeRamBytes: availableRam, reduced: true,
+              );
+            }
+            if (WindowsLargeModelAdmission.cpuFits(modelBytes, availableRam)) {
+              normal ??= const WindowsLargeModelAdmission('resident_cpu', null, 0);
+            }
+            if (WindowsLargeModelAdmission.cpuFits(modelBytes, availableRam, reduced: true)) {
+              relaxed ??= const WindowsLargeModelAdmission('resident_cpu', null, 0);
             }
           }
           return (normal: normal, relaxed: relaxed, ram: availableRam, vram: availableVram);
