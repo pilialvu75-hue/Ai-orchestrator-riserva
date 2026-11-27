@@ -1,13 +1,15 @@
 import { runnerPayloadSha256 } from './web_application_runner_packet.mjs';
 import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 
+export const WEB_CAD_PROJECT_ID = /^(?:web-project:[0-9]{1,20}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
+
 const invalid = () => ({ ok: false, reason: 'invalid_cad_result' });
 
 /** Called by trusted runner ingestion after authenticating the result and owner. */
 export async function saveWebCadRevision({
   db, ownerSubject, projectId, revisionId, baseRevisionId = null, manifest, scad, stl,
 }) {
-  if (!ownerSubject || !WEB_RUNNER_TICKET.test(projectId) || !WEB_RUNNER_TICKET.test(revisionId) ||
+  if (!ownerSubject || !WEB_CAD_PROJECT_ID.test(projectId) || !WEB_RUNNER_TICKET.test(revisionId) ||
       (baseRevisionId !== null && !WEB_RUNNER_TICKET.test(baseRevisionId)) ||
       manifest?.version !== 1 || manifest.kind !== 'cad' || manifest.shape !== 'open_box' ||
       manifest.unit !== 'mm' || !Array.isArray(manifest.files) || manifest.files.length !== 2) {
@@ -56,4 +58,16 @@ export async function readWebCadRevision({ db, ownerSubject, projectId, revision
   `).bind(ownerSubject, projectId, revisionId).first();
   if (!row) return { ok: false, reason: 'cad_revision_not_found' };
   return { ok: true, ...row, manifest: JSON.parse(row.manifest) };
+}
+
+export async function listWebCadRevisions({ db, ownerSubject, projectId }) {
+  const query = await db.prepare(`
+    SELECT revision_id AS revisionId, revision_number AS revisionNumber,
+      base_revision_id AS baseRevisionId
+    FROM web_cad_revisions
+    WHERE owner_subject = ?1 AND project_id = ?2
+    ORDER BY revision_number DESC LIMIT 50
+  `).bind(ownerSubject, projectId).all();
+  if (query.success === false || !Array.isArray(query.results)) throw new Error('CAD history unavailable');
+  return query.results;
 }

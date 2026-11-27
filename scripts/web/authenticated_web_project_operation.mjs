@@ -27,7 +27,7 @@ import { changeWebApplicationRelease, readWebApplicationReleaseHistory, resolveW
 import {
   createWebApplicationRevision, readWebApplicationRevisions, selectWebApplicationRevision,
 } from './d1_web_application_revisions.mjs';
-import { readWebCadRevision } from './d1_web_cad_revisions.mjs';
+import { listWebCadRevisions, readWebCadRevision, WEB_CAD_PROJECT_ID } from './d1_web_cad_revisions.mjs';
 import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 import { previewWebApplication } from './web_application_preview.mjs';
 
@@ -366,11 +366,20 @@ export function createAuthenticatedWebProjectOperation({
       const projectId = searchParams.get('projectId');
       const revisionId = searchParams.get('revisionId');
       const file = searchParams.get('file');
-      if (searchParams.size !== 3 || !WEB_RUNNER_TICKET.test(projectId) ||
-          !WEB_RUNNER_TICKET.test(revisionId) || !['manifest', 'stl', 'scad'].includes(file)) {
+      const history = file === 'history';
+      if (!WEB_CAD_PROJECT_ID.test(projectId) ||
+          (history ? searchParams.size !== 2 :
+            searchParams.size !== 3 || !WEB_RUNNER_TICKET.test(revisionId) ||
+            !['manifest', 'stl', 'scad'].includes(file))) {
         return reject(400, 'invalid_request');
       }
       try {
+        if (history) {
+          const revisions = await listWebCadRevisions({
+            db, ownerSubject: verified.principal.subject, projectId,
+          });
+          return respond(200, { ok: true, revisions });
+        }
         const result = await readWebCadRevision({
           db, ownerSubject: verified.principal.subject, projectId, revisionId,
         });

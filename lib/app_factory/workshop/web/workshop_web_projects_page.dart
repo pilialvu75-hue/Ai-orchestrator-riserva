@@ -800,7 +800,9 @@ proposta breve, concreta e approvabile.
                 OutlinedButton.icon(
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => const WorkshopWebCadPreviewPage(),
+                      builder: (_) => WorkshopWebCadPreviewPage(
+                        projectId: project.id,
+                      ),
                     ),
                   ),
                   icon: const Icon(Icons.view_in_ar_outlined),
