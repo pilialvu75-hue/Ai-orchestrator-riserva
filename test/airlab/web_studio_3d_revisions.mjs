@@ -5,6 +5,7 @@ import { readStudioStl } from '../../web/studio_3d_preview.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { listWebCadRevisions, readWebCadRevision, saveWebCadRevision } from '../../scripts/web/d1_web_cad_revisions.mjs';
+import { applyOpenBoxInstruction } from '../../scripts/web/studio_3d_box_parameters.mjs';
 import { collectWebCadJob, startWebCadJob } from '../../scripts/web/d1_web_cad_jobs.mjs';
 import { decodeWebAppJob, encodeRunnerBase64, encodeWebAppResult, importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
@@ -120,10 +121,11 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
       async dispatch({ ticket, input }) {
         dispatches++;
         const job = await decodeWebAppJob({ privateKey: sender.privateKey, authorizationKey, ticket, input });
-        assert.deepEqual(job.source, { kind: 'cad_open_box', parameters });
+        const expected = dispatches === 1 ? parameters : { ...parameters, width: 90 };
+        assert.deepEqual(job.source, { kind: 'cad_open_box', parameters: expected });
         packet = await encodeWebAppResult({
           publicKey: job.resultPublicKey, authorizationKey, ticket, jobSha256: job.jobSha256,
-          result: { manifest, scad: encodeRunnerBase64(scad), stl: encodeRunnerBase64(stl) },
+          result: { manifest: { ...manifest, parameters: expected }, scad: encodeRunnerBase64(scad), stl: encodeRunnerBase64(stl) },
         });
         return 123;
       },
@@ -145,5 +147,20 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
     const saved = await readWebCadRevision({ db, ownerSubject: 'owner', projectId, revisionId });
     assert.deepEqual(saved.stl, stl);
     assert.deepEqual(saved.manifest, manifest);
+    const edit = { projectId, revisionId: crypto.randomUUID(), baseRevisionId: revisionId,
+      instruction: 'Allarga la scatola di 10 mm.' };
+    assert.equal((await startWebCadJob({ ...options, request: { ...edit, instruction: 'Aggiungi fori' } })).reason,
+      'unsupported_cad_instruction');
+    assert.equal((await startWebCadJob({ ...options, request: edit })).status, 'submitted');
+    assert.equal(dispatches, 2);
+    assert.equal((await collectWebCadJob({ ...options,
+      request: { projectId, revisionId: edit.revisionId } })).status, 'verified');
+    const updated = await readWebCadRevision({ ...options, projectId, revisionId: edit.revisionId });
+    assert.equal(updated.revisionNumber, 2);
+    assert.equal(updated.manifest.parameters.width, 90);
+    assert.equal((await readWebCadRevision({ ...options, projectId, revisionId })).manifest.parameters.width, 80);
+
+    assert.equal(applyOpenBoxInstruction(parameters, 'Porta il fondo a 3,5 mm').floor, 3.5);
+    assert.throws(() => applyOpenBoxInstruction(parameters, 'Restringi la scatola di 79 mm'));
   } finally { sqlite.close(); }
 });

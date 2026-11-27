@@ -14,3 +14,28 @@ export function validateOpenBoxParameters(parameters) {
 
   return { width, depth, height, wall, floor };
 }
+
+const axis = { larghezza: 'width', profondità: 'depth', altezza: 'height', parete: 'wall', fondo: 'floor' };
+
+export function applyOpenBoxInstruction(parameters, instruction) {
+  if (typeof instruction !== 'string' || instruction.length > 160) {
+    throw new RangeError('Invalid CAD instruction');
+  }
+  const baseline = validateOpenBoxParameters(parameters);
+  const text = instruction.trim().toLowerCase().replace(/\s+/g, ' ');
+  const absolute = /^(?:porta|imposta|modifica) (?:la |il )?(larghezza|profondità|altezza|parete|fondo) (?:a|al) (\d+(?:[.,]\d+)?)\s*mm[.!]?$/.exec(text);
+  if (absolute) {
+    return validateOpenBoxParameters({
+      ...baseline, [axis[absolute[1]]]: Number(absolute[2].replace(',', '.')),
+    });
+  }
+  const incremental = /^(allarga|restringi|alza|abbassa|approfondisci) (?:la scatola )?di (\d+(?:[.,]\d+)?)\s*mm[.!]?$/.exec(text);
+  if (!incremental) throw new RangeError('Unsupported CAD instruction');
+  const [field, direction] = {
+    allarga: ['width', 1], restringi: ['width', -1],
+    alza: ['height', 1], abbassa: ['height', -1], approfondisci: ['depth', 1],
+  }[incremental[1]];
+  return validateOpenBoxParameters({
+    ...baseline, [field]: Number((baseline[field] + direction * Number(incremental[2].replace(',', '.'))).toFixed(6)),
+  });
+}

@@ -23,6 +23,12 @@ class AivexusStlPreview extends HTMLElement {
             <label>Parete <input name="wall" type="number" min="0.1" max="500" step="any" value="2" required></label>
             <label>Fondo <input name="floor" type="number" min="0.1" max="500" step="any" value="3" required></label>
             <button type="submit">Genera revisione CAD</button>
+            <div data-edit hidden>
+              <label>Modifica della revisione
+                <input data-instruction maxlength="160" placeholder="Allarga la scatola di 10 mm">
+              </label>
+              <button type="submit" data-apply>Applica modifica</button>
+            </div>
           </fieldset>
           <button type="button" data-refresh hidden>Aggiorna generazione</button>
           <output data-job role="status"></output>
@@ -77,6 +83,7 @@ class AivexusStlPreview extends HTMLElement {
       const version = reset();
       const revisionId = history.value;
       const parameters = revisionParameters.get(revisionId);
+      edit.hidden = !parameters;
       for (const field of fields.querySelectorAll('input[name]')) {
         if (Number.isFinite(parameters?.[field.name])) field.value = parameters[field.name];
       }
@@ -99,6 +106,8 @@ class AivexusStlPreview extends HTMLElement {
 
     const form = root.querySelector('form');
     const fields = form.querySelector('fieldset');
+    const edit = form.querySelector('[data-edit]');
+    const instructionField = edit.querySelector('input');
     const refresh = form.querySelector('[data-refresh]');
     const jobStatus = form.querySelector('[data-job]');
     const storageKey = 'aivexus.cad.pending.' + projectId;
@@ -126,9 +135,9 @@ class AivexusStlPreview extends HTMLElement {
       busy = true;
       updateControls();
       try {
-        const { revisionId, parameters, baseRevisionId } = pending;
+        const { revisionId, parameters, instruction, baseRevisionId } = pending;
         const request = action === 'start'
-          ? { action, projectId, revisionId, parameters, baseRevisionId }
+          ? { action, projectId, revisionId, baseRevisionId, ...(instruction ? { instruction } : { parameters }) }
           : { action, projectId, revisionId };
         const response = await fetch('/api/cantiere/cad/job', {
           method: 'POST', redirect: 'error', cache: 'no-store', signal: requests.signal,
@@ -137,6 +146,11 @@ class AivexusStlPreview extends HTMLElement {
         if (requests.signal.aborted) return;
         if (!response.ok) {
           if ([400, 401, 403, 404, 409].includes(response.status)) remember(null);
+          const { error } = await response.json().catch(() => ({}));
+          if (error === 'unsupported_cad_instruction') {
+            jobStatus.textContent = 'Modifica non riconosciuta. Prova «Allarga la scatola di 10 mm».';
+            return;
+          }
           throw new Error('CAD job unavailable');
         }
         const { status: state } = await response.json();
@@ -144,6 +158,7 @@ class AivexusStlPreview extends HTMLElement {
           case 'verified':
             remember(null);
             jobStatus.textContent = 'Revisione CAD verificata.';
+            instructionField.value = '';
             await loadHistory(revisionId);
             break;
           case 'submitted':
@@ -193,9 +208,17 @@ class AivexusStlPreview extends HTMLElement {
       form.addEventListener('submit', event => {
         event.preventDefault();
         if (busy || pending || !historyReady) return;
-        const parameters = Object.fromEntries([...new FormData(form)].map(([name, value]) => [name, Number(value)]));
-        remember({ revisionId: crypto.randomUUID(), parameters,
-          baseRevisionId: history.value || history.options[0]?.value || null });
+        const baseRevisionId = history.value || history.options[0]?.value || null;
+        const isEdit = event.submitter?.hasAttribute('data-apply');
+        const instruction = instructionField.value.trim();
+        if (isEdit && (!baseRevisionId || !instruction)) {
+          jobStatus.textContent = 'Seleziona una revisione e descrivi la modifica.';
+          return;
+        }
+        const input = isEdit ? { instruction } : {
+          parameters: Object.fromEntries([...new FormData(form)].map(([name, value]) => [name, Number(value)])),
+        };
+        remember({ revisionId: crypto.randomUUID(), baseRevisionId, ...input });
         void runJob('start');
       });
       refresh.addEventListener('click', () => void runJob(pending?.submitted ? 'collect' : 'start'));
@@ -207,6 +230,7 @@ class AivexusStlPreview extends HTMLElement {
     input.addEventListener('change', async () => {
       const file = input.files[0];
       history.selectedIndex = -1;
+      edit.hidden = true;
       const version = reset();
       status.textContent = '';
       if (!file) return;
