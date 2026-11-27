@@ -223,6 +223,71 @@ incorporati nel documento. Gli import relativi all’interno di un modulo
 JavaScript, i percorsi verso altre pagine e le risorse esterne restano fuori
 dal percorso di anteprima. Lo ZIP conserva tutti i file verificati.
 
+## Modifiche e versioni
+
+La migrazione `009` associa le revisioni allo stesso progetto e conserva
+la versione scelta dal proprietario. Le generazioni esistenti restano radici
+di progetto valide. `POST /api/cantiere/proposals/revisions` riceve un nuovo
+`generationId`, la versione verificata `baseGenerationId` e `instruction`.
+L’operazione applica solo i file cambiati o rimossi che il modello dichiara,
+mantiene i controlli di base e può aggiungere nuovi controlli. La nuova
+versione usa il percorso di verifica e ZIP delle altre generazioni.
+
+`GET /api/cantiere/proposals/revisions?generationId=…` restituisce la
+cronologia dello stesso progetto. `POST /api/cantiere/proposals/select-revision`
+con `generationId` seleziona una versione già verificata senza sovrascrivere i
+file di alcuna versione. I controlli di proprietà valgono su cronologia,
+modifiche e ripristino. Lo storico conserva il testo delle modifiche.
+
+## Applicazioni con dati persistenti
+
+Una generazione può dichiarare un manifesto `runtime` con raccolte e campi
+tipizzati. Lo ZIP include il manifesto `aivexus-runtime.json`, i sorgenti e i
+dati statici del progetto. Le operazioni server sono disponibili nell’anteprima
+ospitata da AIVEXUS attraverso `window.aivexusData`. La pagina attendibile
+invia solo richieste al backend delle raccolte e fissa l’ID della generazione.
+L’iframe dell’app mantiene l’origine opaca e non riceve credenziali.
+
+`POST /api/cantiere/proposals/records` autentica il proprietario e accetta
+`list`, `create`, `update` e `delete` sulle raccolte della versione verificata.
+La migrazione `010` indicizza i dati per utente, progetto, raccolta e record.
+Le revisioni dello stesso progetto condividono i dati. Aggiornamento e
+cancellazione richiedono la versione del record per rilevare scritture
+concorrenti. I test del runner isolato usano dati temporanei. Il collaudo
+della persistenza usa D1.
+
+## Inviti e integrazioni
+
+La migrazione `011` conserva i record esistenti nella partizione dei loro
+proprietari. Il binding server `AIVEXUS_WEB_APP_MEMBERS_ENABLED=true`
+abilita gli inviti per le app verificate, con le policy Cloudflare Access
+esistenti e la generazione di Studio riservata al proprietario del sito.
+Il proprietario di una versione verificata può creare un codice di invito.
+Il server conserva il digest del codice e accetta un solo utente entro 24 ore.
+L’utente accede tramite il Cloudflare Access esistente e conferma l’invito in
+AIVEXUS. L’app resta privata. Le funzioni di generazione, modifica, sorgenti e
+ZIP rimangono riservate al proprietario. I record appartengono all’utente che
+li scrive, anche quando più utenti aprono il medesimo progetto.
+
+Un manifesto può dichiarare `github_repository`. Il frame richiede soltanto
+quel nome attraverso `window.aivexusData.integration`. Il server legge il
+repository pubblico impostato in `AIVEXUS_WEB_APP_GITHUB_REPOSITORY` e
+restituisce nome completo e stelle. Un eventuale token di sola lettura rimane
+nel binding server `AIVEXUS_WEB_APP_GITHUB_METADATA_TOKEN`. L’app e il browser
+ricevono solo i metadati previsti. Il connettore è indisponibile finché il
+repository non viene configurato.
+
+## Link privati e rollback
+
+La migrazione `012` aggiunge la cronologia delle pubblicazioni private. Il
+proprietario può associare una versione verificata a un URL stabile e poi
+aggiornarla o ripristinare una versione pubblicata in precedenza. Un numero
+di revisione impedisce di sovrascrivere una scelta concorrente. Proprietario
+e invitati aprono l’URL tramite l’Access esistente. L’impostazione server
+`AIVEXUS_WEB_PRIVATE_RELEASES_ENABLED=true` abilita scrittura e apertura dei
+link. Il codice generato resta nel frame isolato. Le pubblicazioni pubbliche
+richiedono un host distinto dal Cantiere protetto.
+
 ## Security and sequencing
 
 Cloudflare Access from W2 remains the outer authentication boundary. W4 does

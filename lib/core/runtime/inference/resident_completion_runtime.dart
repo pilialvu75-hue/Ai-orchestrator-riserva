@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:ai_orchestrator/core/runtime/inference/cancellation_token.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resident_process_lease.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
 
 /// Native terminal statistics. Missing or malformed fields remain unknown.
 class ResidentGenerationMetrics {
@@ -220,6 +221,7 @@ class ResidentCompletionRuntime {
     ]);
     RuntimeEventLog.instance.emit('[ASSISTANT_RESIDENT_PHASE] phase=process_started elapsed_ms=${startupWatch.elapsedMilliseconds}');
     _process = process;
+    WindowsEngineProcessTracker.instance.track(process);
     _lease = ResidentProcessLease.attach(process.pid);
     _identity = identity;
     // Drain both pipes. Neither prompts, process arguments nor credentials go

@@ -73,7 +73,42 @@ final class WorkshopWebLanguageScope
 }
 
 const Map<String, Map<String, String>> _translations = {
+  'it': {
+    'Browser startup ready': 'Cantiere pronto nel browser',
+    'Cantiere shell': 'Interfaccia del Cantiere',
+    'Browser-safe startup with no native or Assistant dependency.': 'Il Cantiere funziona nel browser con servizi Web.',
+    'Durable browser storage': 'Archiviazione nel browser',
+    'Browser checkpoints saved': 'Punti di ripristino salvati',
+    'Unavailable: persistent Workshop checkpoints could not be opened or read.': 'Impossibile leggere i punti di ripristino.',
+    'Opening the existing Workshop checkpoint persistence contract.': 'Apertura dell’archivio dei punti di ripristino.',
+    'Cloud / AUTO execution': 'Esecuzione Cloud / AUTO',
+    'Cloud broker unavailable': 'Servizio Cloud non disponibile',
+    'Server-side broker is reachable but one or more Cantiere capabilities are not configured.': 'Il servizio Cloud risponde. Alcune funzioni del Cantiere richiedono configurazione.',
+    'Checking the server-side capability broker. No provider secret is stored in the browser.': 'Verifica del servizio Cloud.',
+    'Server-side AUTO routing ready for Orchestrator, Architect, Engineer and Reviewer.': 'Instradamento Cloud pronto per Orchestratore, Architetto, Ingegnere e Revisore.',
+    'Module Library + Researcher': 'Libreria moduli e Ricerca',
+    'Shared contracts remain the target; browser adapter comes later.': 'Integrazione Web prevista.',
+    'Diagnostics': 'Diagnostica',
+    'Browser-safe queue/transport is planned; public privacy projection stays shared.': 'Raccolta della diagnostica Web prevista.',
+    'Native local inference': 'Inferenza locale nativa',
+    'Local inference requires the desktop app. Cloud inference is available in the browser.': 'Funzione dell’app desktop. Nel browser è disponibile l’inferenza Cloud.',
+    'Native process execution': 'Esecuzione di processi nativi',
+    'Native execution requires the desktop app. Studio verifies Web apps on a server runner.': 'Funzione dell’app desktop. Studio verifica le app Web su un runner server.',
+    'PWA and offline installation are unavailable.': 'Installazione PWA e uso offline non disponibili.',
+    'Available': 'Disponibile',
+    'Planned': 'Previsto',
+    'Unavailable': 'Non disponibile',
+    'Cloud Self-Test Passed': 'Self-test Cloud riuscito',
+    'Cloud Self-Test Not Passed': 'Self-test Cloud non riuscito',
+  },
   'fr': {
+    'Modifica applicazione': 'Modifier l’application',
+    'Versioni': 'Versions',
+    'Descrivi la modifica': 'Décrivez la modification',
+    'Crea versione': 'Créer une version',
+    'Invita un utente': 'Inviter un utilisateur',
+    'Usa un invito': 'Utiliser une invitation',
+    'Pubblicazione privata': 'Publication privée',
     'Accessi clienti': 'Accès clients',
     'Aggiorna': 'Actualiser',
     'Accesso non autorizzato.': 'Accès non autorisé.',
@@ -120,6 +155,10 @@ const Map<String, Map<String, String>> _translations = {
     'Scrivi all’IA…': 'Écrivez à l’IA…',
     'Invia messaggio': 'Envoyer le message',
     'Tu': 'Vous',
+    'Esporta dati JSON': 'Exporter les données JSON',
+    'Esportazione dei dati non riuscita.': 'Échec de l’exportation des données.',
+    'Limite di generazione raggiunto. Riprova più tardi.':
+        'Limite de génération atteinte. Réessayez plus tard.',
     'Self-Test Cloud': 'Test automatique Cloud',
     'Self-Test in corso…': 'Test Cloud en cours…',
     'Esegui Self-Test Cloud': 'Exécuter le test Cloud',
@@ -239,9 +278,9 @@ const Map<String, Map<String, String>> _translations = {
         "Les contrats partagés sont prévus ; l’adaptateur navigateur viendra ensuite.",
     'Browser-safe queue/transport is planned; public privacy projection stays shared.':
         'Le diagnostic Web sera ajouté ultérieurement.',
-    'Explicitly unavailable in W1; no llama.cpp/FFI fallback is attempted.':
+    'Local inference requires the desktop app. Cloud inference is available in the browser.':
         "Non disponible sur le Web ; aucun repli vers FFI n'est tenté.",
-    'Explicitly unavailable in the browser.':
+    'Native execution requires the desktop app. Studio verifies Web apps on a server runner.':
         'Non disponible dans le navigateur.',
     'Checking the server-side capability broker. No provider secret is stored in the browser.':
         "Vérification du broker. Aucune clé fournisseur n'est stockée dans le navigateur.",
@@ -256,6 +295,13 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Inférence Cloud / AUTO',
   },
   'en': {
+    'Modifica applicazione': 'Modify application',
+    'Versioni': 'Versions',
+    'Descrivi la modifica': 'Describe the change',
+    'Crea versione': 'Create version',
+    'Invita un utente': 'Invite a user',
+    'Usa un invito': 'Use an invitation',
+    'Pubblicazione privata': 'Private release',
     'Accessi clienti': 'Customer access',
     'Aggiorna': 'Refresh',
     'Accesso non autorizzato.': 'Access denied.',
@@ -302,6 +348,10 @@ const Map<String, Map<String, String>> _translations = {
     'Scrivi all’IA…': 'Message the AI…',
     'Invia messaggio': 'Send message',
     'Tu': 'You',
+    'Esporta dati JSON': 'Export JSON data',
+    'Esportazione dei dati non riuscita.': 'Data export failed.',
+    'Limite di generazione raggiunto. Riprova più tardi.':
+        'Generation limit reached. Try again later.',
 
     'Titolo': 'Title',
     'Tipo progetto': 'Project type',
@@ -381,9 +431,9 @@ const Map<String, Map<String, String>> _translations = {
         'Shared contracts are planned; the browser adapter comes later.',
     'Browser-safe queue/transport is planned; public privacy projection stays shared.':
         'Web diagnostics are planned.',
-    'Explicitly unavailable in W1; no llama.cpp/FFI fallback is attempted.':
+    'Local inference requires the desktop app. Cloud inference is available in the browser.':
         'Unavailable in Web; no llama.cpp/FFI fallback is attempted.',
-    'Explicitly unavailable in the browser.':
+    'Native execution requires the desktop app. Studio verifies Web apps on a server runner.':
         'Unavailable in the browser.',
     'Checking the server-side capability broker. No provider secret is stored in the browser.':
         'Checking the broker; provider credentials remain server-side.',
@@ -398,6 +448,13 @@ const Map<String, Map<String, String>> _translations = {
     'Inferenza Cloud / AUTO': 'Cloud / AUTO inference',
   },
   'es': {
+    'Modifica applicazione': 'Modificar aplicación',
+    'Versioni': 'Versiones',
+    'Descrivi la modifica': 'Describe el cambio',
+    'Crea versione': 'Crear versión',
+    'Invita un utente': 'Invitar a un usuario',
+    'Usa un invito': 'Usar una invitación',
+    'Pubblicazione privata': 'Publicación privada',
     'Accessi clienti': 'Acceso de clientes',
     'Aggiorna': 'Actualizar',
     'Accesso non autorizzato.': 'Acceso no autorizado.',
@@ -444,6 +501,10 @@ const Map<String, Map<String, String>> _translations = {
     'Scrivi all’IA…': 'Escribe a la IA…',
     'Invia messaggio': 'Enviar mensaje',
     'Tu': 'Tú',
+    'Esporta dati JSON': 'Exportar datos JSON',
+    'Esportazione dei dati non riuscita.': 'No se pudo exportar los datos.',
+    'Limite di generazione raggiunto. Riprova più tardi.':
+        'Límite de generación alcanzado. Inténtalo más tarde.',
 
     'Titolo': 'Título',
     'Tipo progetto': 'Tipo de proyecto',
@@ -523,9 +584,9 @@ const Map<String, Map<String, String>> _translations = {
         'Los contratos compartidos están previstos; el adaptador llegará después.',
     'Browser-safe queue/transport is planned; public privacy projection stays shared.':
         'Los diagnósticos Web se añadirán más adelante.',
-    'Explicitly unavailable in W1; no llama.cpp/FFI fallback is attempted.':
+    'Local inference requires the desktop app. Cloud inference is available in the browser.':
         'No disponible en Web; sin alternativa mediante FFI.',
-    'Explicitly unavailable in the browser.':
+    'Native execution requires the desktop app. Studio verifies Web apps on a server runner.':
         'No disponible en el navegador.',
     'Checking the server-side capability broker. No provider secret is stored in the browser.':
         'Comprobando el broker; las credenciales siguen en el servidor.',

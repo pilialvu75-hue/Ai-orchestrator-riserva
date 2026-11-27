@@ -2,12 +2,72 @@ import 'dart:async';
 
 import 'package:ai_orchestrator/core/runtime/inference/android/native_generation_budget.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('engine readings preserve zero and reject invalid CPU percentages', () {
+    final tracker = WindowsEngineProcessTracker();
+    addTearDown(tracker.dispose);
+    final lease = tracker.register(123);
+    final reading = ResourceSample({
+      'enginePid': 123, 'engineGeneration': lease.generation,
+      'engineRssBytes': 4096, 'engineCpuPercent': 0, 'appCpuPercent': 12.5,
+    });
+    expect(reading.belongsTo(lease), isTrue);
+    expect(reading.engineCpuPercent, 0);
+    expect(reading.engineRssBytes, 4096);
+    expect(reading.appCpuPercent, 12.5);
+    tracker.unregister(lease);
+    final replacement = tracker.register(123);
+    expect(reading.belongsTo(replacement), isFalse);
+    for (final value in [null, -1, 101, double.nan, double.infinity, '25']) {
+      final invalid = ResourceSample({
+        'engineCpuPercent': value, 'appCpuPercent': value,
+      });
+      expect(invalid.engineCpuPercent, isNull);
+      expect(invalid.appCpuPercent, isNull);
+    }
+  });
+
+  test('late Windows native sample cannot attach to a replacement process', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    const channel = MethodChannel('com.aiorchestrator/resources');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final tracker = WindowsEngineProcessTracker.instance;
+    final first = tracker.register(123);
+    WindowsEngineProcessLease? replacement;
+    final monitor = ResourceMonitor(logger: (_) {});
+    addTearDown(() {
+      monitor.dispose();
+      tracker.unregister(first);
+      if (replacement != null) tracker.unregister(replacement!);
+      messenger.setMockMethodCallHandler(channel, null);
+      debugDefaultTargetPlatformOverride = null;
+    });
+    final entered = Completer<void>();
+    final reply = Completer<Map<String, Object?>>();
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.arguments, {'enginePid': 123});
+      entered.complete();
+      return reply.future;
+    });
+    final pending = monitor.sample();
+    await entered.future;
+    tracker.unregister(first);
+    replacement = tracker.register(123);
+    reply.complete({'enginePid': 123, 'engineRssBytes': 4096,
+      'engineCpuPercent': 25, 'appCpuPercent': 5});
+    final reading = await pending;
+    expect(reading?.enginePid, isNull);
+    expect(reading?.engineRssBytes, isNull);
+    expect(reading?.engineCpuPercent, isNull);
+    expect(reading?.appCpuPercent, 5);
+  });
 
   test('system CPU accepts measured zero and rejects unavailable or invalid data', () {
     for (final value in [0, 37.5, 100]) {

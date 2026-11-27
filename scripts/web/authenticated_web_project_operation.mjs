@@ -19,6 +19,14 @@ import {
   advanceWebApplicationVerification, readWebApplicationVerification, readWebApplicationZip,
   readVerifiedWebApplicationSource,
 } from './d1_web_application_verification.mjs';
+import { renderWebApplicationPreviewHost } from './web_application_preview_bridge.mjs';
+import { exportWebApplicationRecords, operateWebApplicationRecords } from './d1_web_application_records.mjs';
+import { createWebApplicationInvite, joinWebApplication, readMemberWebApplicationSource } from './d1_web_application_members.mjs';
+import { readWebApplicationIntegration } from './web_application_integrations.mjs';
+import { changeWebApplicationRelease, readWebApplicationReleaseHistory, resolveWebApplicationRelease } from './d1_web_application_releases.mjs';
+import {
+  createWebApplicationRevision, readWebApplicationRevisions, selectWebApplicationRevision,
+} from './d1_web_application_revisions.mjs';
 import { previewWebApplication } from './web_application_preview.mjs';
 
 const MAX_JSON_BYTES = 2048;
@@ -27,8 +35,12 @@ const MAX_JSON_BYTES = 2048;
 const MAX_GENERATION_JSON_BYTES = 49152;
 const OPERATIONS = new Set([
   'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
+  'create_app_revision', 'app_revision_history', 'select_app_revision',
   'generate_app', 'generation_status', 'generation_quota', 'generation_reuse',
   'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
+  'app_records', 'app_records_export', 'app_preview_host',
+  'app_invite', 'app_join', 'app_integration',
+  'app_release_change', 'app_release_history', 'app_release_launch',
 ]);
 const PROJECT_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
@@ -122,6 +134,13 @@ function operationFailure(result) {
   if (reason === 'verification_checks_missing') return reject(409, 'verification_checks_missing');
   if (reason === 'verification_payload_too_large') return reject(413, 'verification_payload_too_large');
   if (reason === 'verification_unavailable') return reject(503, 'verification_unavailable');
+  if (reason === 'collection_not_found') return reject(404, reason);
+  if (reason === 'record_conflict') return reject(409, reason);
+  if (reason === 'invalid_record') return reject(400, reason);
+  if (reason === 'invite_not_found' || reason === 'integration_not_found') return reject(404, reason);
+  if (reason === 'integration_unavailable') return reject(503, reason);
+  if (reason === 'release_unavailable') return reject(503, reason);
+  if (reason === 'release_conflict') return reject(409, reason);
   if (reason === 'storage_unavailable' ||
       reason === 'storage_inconsistent') return reject(503, 'storage_unavailable');
   if (reason === 'approval_required' ||
@@ -148,7 +167,7 @@ function zipResponse(bytes, filename) {
  */
 export function createAuthenticatedWebProjectOperation({
   operation, expectedOrigin, accessIssuer, accessAudience, db, bucket, runner,
-  infer, adminSubject, ownerEmail, clientAccessEnabled = false,
+  infer, integrationConfig, releasesEnabled = false, appMemberInvitesEnabled = false, adminSubject, ownerEmail, clientAccessEnabled = false,
   ownerOnly = false, fetchImpl, nowSeconds,
 } = {}) {
   const config = { operation, expectedOrigin, db };
@@ -160,8 +179,13 @@ export function createAuthenticatedWebProjectOperation({
   const readsVerification = operation === 'verification_status';
   const downloadsApp = operation === 'download_app';
   const previewsApp = operation === 'preview_app';
-  const readsSource = operation === 'read_app_source' || previewsApp;
-  const readOnly = readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
+  const readsHost = operation === 'app_preview_host';
+  const readsSource = operation === 'read_app_source' || previewsApp || readsHost;
+  const readsHistory = operation === 'app_revision_history';
+  const readsReleases = operation === 'app_release_history';
+  const launchesRelease = operation === 'app_release_launch';
+  const exportsRecords = operation === 'app_records_export';
+  const readOnly = exportsRecords || readsReleases || launchesRelease || readsHistory || readsStatus || downloads || readsGeneration || readsQuota || readsReuse || readsVerification || downloadsApp || readsSource;
   const resolver = createCloudflareAccessPrincipalResolver({
     expectedIssuer: accessIssuer, expectedAudience: accessAudience,
     ...(fetchImpl ? { fetchImpl } : {}),
@@ -214,6 +238,9 @@ export function createAuthenticatedWebProjectOperation({
     // Private Studio phase: signed Access *owner* has all supported
     // application privileges. A previously accepted client or any other
     // Access login is not an owner. Deny before touching D1 or provider AI.
+    if ((operation === 'app_invite' || operation === 'app_join') && !appMemberInvitesEnabled) {
+      return reject(404, 'invite_not_found');
+    }
     if (ownerOnly && !authorizedOwnerSubject) {
       return reject(403, 'owner_required');
     }
@@ -295,10 +322,47 @@ export function createAuthenticatedWebProjectOperation({
       }
     }
 
-    if (readsGeneration || readsVerification || downloadsApp || readsSource) {
+    if (launchesRelease) {
+      if (!releasesEnabled) return reject(503, 'release_unavailable');
       if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
       try {
-        const read = downloadsApp ? readWebApplicationZip : readsSource ? readVerifiedWebApplicationSource :
+        const result = await resolveWebApplicationRelease({ db, ownerSubject: verified.principal.subject,
+          releaseId: url.searchParams.get('releaseId') });
+        return result.ok ? renderWebApplicationPreviewHost(result.generationId) : operationFailure(result);
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+    }
+
+    if (exportsRecords) {
+      const { searchParams } = url;
+      const generationId = searchParams.get('generationId');
+      const afterCollection = searchParams.get('afterCollection');
+      const afterRecordId = searchParams.get('afterRecordId');
+      const parameterCount = afterCollection !== null ? 3 : 1;
+      if (!generationId || searchParams.size !== parameterCount) return reject(400, 'invalid_request');
+      try {
+        const records = await exportWebApplicationRecords({ db, ownerSubject: verified.principal.subject,
+          generationId, afterCollection, afterRecordId });
+        if (!records.ok) return operationFailure(records);
+        const response = respond(200, records);
+        response.headers.set('Content-Disposition', 'attachment; filename="aivexus-app-data.json"');
+        if (records.next) {
+          const next = new URLSearchParams({ generationId, ...records.next });
+          response.headers.set('Link', `<${url.pathname}?${next}>; rel="next"`);
+        }
+        return response;
+      } catch (_) {
+        return reject(503, 'storage_unavailable');
+      }
+    }
+
+    if (readsGeneration || readsVerification || downloadsApp || readsSource || readsHistory || readsReleases) {
+      if (url.searchParams.size !== 1) return reject(400, 'invalid_request');
+      try {
+        const read = readsReleases ? readWebApplicationReleaseHistory :
+          previewsApp || readsHost ? readMemberWebApplicationSource : readsHistory ? readWebApplicationRevisions :
+          downloadsApp ? readWebApplicationZip : readsSource ? readVerifiedWebApplicationSource :
           readsVerification ? readWebApplicationVerification : readWebApplicationGeneration;
         const result = await read({
           db, ownerSubject: verified.principal.subject,
@@ -306,13 +370,19 @@ export function createAuthenticatedWebProjectOperation({
         });
         if (!result.ok) return operationFailure(result);
         if (previewsApp) return previewWebApplication(result.source);
+        if (readsHost) return renderWebApplicationPreviewHost(result.generationId);
+        if (readsVerification && appMemberInvitesEnabled) {
+          return respond(200, { ...result, appMemberInvitesEnabled: true });
+        }
         return downloadsApp ? zipResponse(result.bytes, 'aivexus-application.zip') : respond(200, result);
       } catch (_) {
         return reject(503, 'storage_unavailable');
       }
     }
 
-    const parsed = await readJson(request, operation === 'generate_app' ? MAX_GENERATION_JSON_BYTES : MAX_JSON_BYTES);
+    const modelInput = operation === 'generate_app' || operation === 'create_app_revision';
+    const maxBytes = operation === 'app_records' ? 24576 : modelInput ? MAX_GENERATION_JSON_BYTES : MAX_JSON_BYTES;
+    const parsed = await readJson(request, maxBytes);
     if (!parsed.ok) return reject(parsed.status, parsed.reason);
 
     let result;
@@ -320,6 +390,22 @@ export function createAuthenticatedWebProjectOperation({
       const principal = verified.principal;
       if (operation === 'generate_app') {
         result = await generateWebApplication({ request: parsed.value, ownerSubject: principal.subject, adminSubject: authorizedOwnerSubject, db, infer });
+      } else if (operation === 'create_app_revision') {
+        result = await createWebApplicationRevision({
+          request: parsed.value, ownerSubject: principal.subject, adminSubject: authorizedOwnerSubject, db, infer,
+        });
+      } else if (operation === 'select_app_revision') {
+        result = await selectWebApplicationRevision({ request: parsed.value, ownerSubject: principal.subject, db });
+      } else if (operation === 'app_records') {
+        result = await operateWebApplicationRecords({ request: parsed.value, ownerSubject: principal.subject, db });
+      } else if (operation === 'app_invite') {
+        result = await createWebApplicationInvite({ request: parsed.value, ownerSubject: principal.subject, db });
+      } else if (operation === 'app_join') {
+        result = await joinWebApplication({ request: parsed.value, ownerSubject: principal.subject, db });
+      } else if (operation === 'app_integration') {
+        result = await readWebApplicationIntegration({ request: parsed.value, ownerSubject: principal.subject, db, integrationConfig });
+      } else if (operation === 'app_release_change') {
+        result = await changeWebApplicationRelease({ request: parsed.value, ownerSubject: principal.subject, db, releasesEnabled });
       } else if (operation === 'verify_app') {
         result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'advance') {

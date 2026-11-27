@@ -9,9 +9,13 @@ import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_models.dar
 import 'package:ai_orchestrator/core/runtime/inference/chat_turn.dart';
 
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_language.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_download.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_record_export.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_joined_app_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_preview_frame.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_generator_workspace.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_platform_picker.dart';
+import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_releases_page.dart';
 import 'package:ai_orchestrator/app_factory/workshop/web/workshop_web_source_page.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -24,9 +28,11 @@ class WorkshopWebGeneratorPage extends StatefulWidget {
     super.key,
     this.client,
     this.modelPreference,
+    this.initialPrompt,
   });
 
   final http.Client? client;
+  final String? initialPrompt;
   /// Uses the already-configured Web Cloud/AUTO route; no new backend.
   final WorkshopWebModelPreference? modelPreference;
 
@@ -73,6 +79,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       SharedPreferences.getInstance();
   String? _generationId;
   String? _pendingPrompt;
+  ({String baseId, String instruction, String id})? _pendingRevision;
   String? _error;
   Map<String, dynamic>? _receipt;
   Map<String, dynamic>? _verification;
@@ -105,7 +112,13 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       );
     }
     _chatController?.addListener(_onChatControllerChanged);
-    _restore();
+    final initialPrompt = widget.initialPrompt;
+    if (initialPrompt == null) {
+      _restore();
+    } else {
+      _prompt.text = initialPrompt;
+      _busy = false;
+    }
     _refreshQuota();
   }
 
@@ -458,6 +471,173 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     await _refreshQuota();
   }
 
+  Future<void> _inviteUser(String id) async {
+    await _run(() async {
+      final result = await _revisionCall('invite', {'generationId': id});
+      final token = result['token'];
+      if (token is! String ||
+          !RegExp(r'^[A-Za-z0-9+/]{43}=$').hasMatch(token)) {
+        throw const FormatException('Invalid invitation code');
+      }
+      if (!mounted) return;
+      await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+                title: const Text('Invito per un utente'),
+                content: SelectableText(token),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Chiudi'))
+                ],
+              ));
+    });
+  }
+
+  Future<void> _requestRevision(String baseId) async {
+    final instruction = await showDialog<String>(
+      context: context,
+      builder: (_) => _RevisionInstructionDialog(
+        initialInstruction: _pendingRevision?.baseId == baseId
+            ? _pendingRevision!.instruction
+            : '',
+      ),
+    );
+    if (!mounted || instruction == null) return;
+    await _run(() async {
+      final prior = _pendingRevision;
+      final id = prior != null && prior.baseId == baseId && prior.instruction == instruction
+          ? prior.id
+          : const Uuid().v4();
+      _pendingRevision = (baseId: baseId, instruction: instruction, id: id);
+      final result = await _revisionCall('revisions', {
+        'generationId': id,
+        'baseGenerationId': baseId,
+        'instruction': instruction,
+      });
+      if (result['generationId'] != id) {
+        throw const FormatException('Unexpected revised generation');
+      }
+      await _openGeneration(id);
+      _pendingRevision = null;
+    });
+    if (mounted) await _refreshQuota();
+  }
+
+  Future<Map<String, dynamic>> _revisionCall(
+      String route, Map<String, String> payload) async {
+    final response = await _client
+        .post(
+          Uri.base.resolve('/api/cantiere/proposals/$route'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 95));
+    final result = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode == 429 &&
+        result is Map<String, dynamic> &&
+        result['error'] == 'generation_quota_exceeded') {
+      throw const _GeneratorRequestException(
+          'Limite di generazione raggiunto. Riprova più tardi.');
+    }
+    if (response.statusCode != 200 ||
+        result is! Map<String, dynamic> ||
+        result['version'] != 1 ||
+        result['ok'] != true) {
+      throw const _GeneratorRequestException(
+          'Operazione sul progetto non riuscita.');
+    }
+    return result;
+  }
+
+  Future<void> _openGeneration(String id) async {
+    final saved = await (await _preferences).setString(_storageKey, id);
+    if (!saved) {
+      throw const _GeneratorRequestException(
+          'Impossibile salvare la versione nel browser.');
+    }
+    if (!mounted) return;
+    setState(() {
+      _generationId = id;
+      _receipt = null;
+      _verification = null;
+      _pendingPrompt = null;
+    });
+    await _readStatus(id);
+  }
+
+  Future<Map<String, dynamic>> _loadHistory(String id) async {
+    final response = await _client
+        .get(_generationResource('revisions', id))
+        .timeout(const Duration(seconds: 15));
+    final result = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode != 200 ||
+        result is! Map<String, dynamic> ||
+        result['version'] != 1 ||
+        result['ok'] != true ||
+        result['revisions'] is! List) {
+      throw const FormatException('Invalid application version history');
+    }
+    return result;
+  }
+
+  Future<void> _showHistory(String id) async {
+    final history = _loadHistory(id);
+    final selection = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Versioni del progetto'),
+        children: [
+          FutureBuilder<Map<String, dynamic>>(
+            future: history,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const SimpleDialogOption(
+                    child: Text('Cronologia non disponibile.'));
+              }
+              final data = snapshot.data;
+              if (data == null) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final version in (data['revisions'] as List)
+                      .whereType<Map<String, dynamic>>())
+                    ListTile(
+                      title: Text('Versione ${version['revision']}'),
+                      subtitle: Text(version['instruction'] as String? ??
+                          'Generazione iniziale'),
+                      trailing: Icon(
+                          version['generationId'] == data['activeGenerationId']
+                              ? Icons.check_circle_outline
+                              : Icons.history_outlined),
+                      enabled: version['verificationStatus'] == 'verified',
+                      onTap: version['verificationStatus'] == 'verified'
+                          ? () => Navigator.pop(
+                              context, version['generationId'] as String)
+                          : null,
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+    if (!mounted || selection == null || !_idPattern.hasMatch(selection)) {
+      return;
+    }
+    await _run(() async {
+      final result =
+          await _revisionCall('select-revision', {'generationId': selection});
+      if (result['activeGenerationId'] != selection) {
+        throw const FormatException('Unexpected selected version');
+      }
+      await _openGeneration(selection);
+    });
+  }
+
   Future<void> _readStatus(String id) async {
     final result = await _call(id);
     if (!mounted) return;
@@ -531,6 +711,16 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     });
   }
 
+  Future<void> _exportRecords(String id) => _run(() async {
+    try {
+      final bytes = await collectWorkshopRecordExport(
+        _client, _generationResource('export-records', id), id);
+      if (mounted) downloadWorkshopJson(bytes, 'aivexus-app-data.json');
+    } catch (_) {
+      throw const _GeneratorRequestException('Esportazione dei dati non riuscita.');
+    }
+  });
+
   Uri _generationResource(String route, String id) => Uri.base
       .resolve('/api/cantiere/proposals/$route')
       .replace(queryParameters: {'generationId': id});
@@ -581,7 +771,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => Scaffold(
         appBar: AppBar(title: Text(title)),
-        body: WorkshopWebPreviewFrame(uri: _generationResource('preview', id)),
+        body: WorkshopWebPreviewFrame(uri: _generationResource('view', id)),
       ),
     ));
   }
@@ -926,6 +1116,23 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                         ),
                       if (verificationStatus == 'verified') ...[
                         OutlinedButton(
+                          onPressed: _busy ? null : () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => WorkshopWebReleasesPage(generationId: id, client: _client),
+                            ),
+                          ),
+                          child: Text(tr('Pubblicazione privata')),
+                        ),
+                        if (_verification?['appMemberInvitesEnabled'] == true)
+                          OutlinedButton(
+                            onPressed: _busy ? null : () => _inviteUser(id),
+                            child: Text(tr('Invita un utente')),
+                          ),
+                        OutlinedButton(
+                          onPressed: _busy ? null : () => _requestRevision(id),
+                          child: Text(tr('Modifica applicazione')),
+                        ),
+                        OutlinedButton(
                           onPressed: _busy ? null : () => _openPreview(id),
                           child: Text(tr('Anteprima')),
                         ),
@@ -943,6 +1150,12 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                             label: Text(tr('Scarica ZIP')),
                           ),
                         ),
+                        if (receipt['hasRecords'] == true)
+                          OutlinedButton.icon(
+                            onPressed: _busy ? null : () => _exportRecords(id),
+                            icon: const Icon(Icons.download_outlined),
+                            label: Text(tr('Esporta dati JSON')),
+                          ),
                       ],
                     ],
                   ),
@@ -963,6 +1176,11 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
                           ? null
                           : () => _run(() => _readStatus(id)),
                       child: Text(tr('Aggiorna stato')),
+                    ),
+                  if (id != null && status != null)
+                    OutlinedButton(
+                      onPressed: _busy ? null : () => _showHistory(id),
+                      child: Text(tr('Versioni')),
                     ),
                   if (_terminalStates.contains(status) ||
                       (status == null && _pendingPrompt != null))
@@ -1057,7 +1275,17 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
     final canAdvance = {'ready', 'dispatching', 'submitted', 'importing'}
         .contains(verificationStatus);
     return Scaffold(
-      appBar: AppBar(title: Text(tr('AIVEXUS Studio'))),
+      appBar: AppBar(
+        title: Text(tr('AIVEXUS Studio')),
+        actions: [
+          TextButton(
+            onPressed: _busy ? null : () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const WorkshopWebJoinedAppPage()),
+            ),
+            child: Text(tr('Usa un invito')),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: WorkshopWebGeneratorWorkspace(
           showIntro: id == null,
@@ -1069,7 +1297,7 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
               : null,
           generationStatus: state == null ? null : tr(state),
           previewUri: id != null && verificationStatus == 'verified'
-              ? _generationResource('preview', id)
+              ? _generationResource('view', id)
               : null,
           onOpenPreview: id != null && verificationStatus == 'verified'
               ? () => _openPreview(id)
@@ -1090,6 +1318,54 @@ class _WorkshopWebGeneratorPageState extends State<WorkshopWebGeneratorPage> {
       ),
     );
   }
+}
+
+class _RevisionInstructionDialog extends StatefulWidget {
+  const _RevisionInstructionDialog({required this.initialInstruction});
+
+  final String initialInstruction;
+
+  @override
+  State<_RevisionInstructionDialog> createState() =>
+      _RevisionInstructionDialogState();
+}
+
+class _RevisionInstructionDialogState
+    extends State<_RevisionInstructionDialog> {
+  late String _instruction = widget.initialInstruction;
+  late final _controller = TextEditingController(text: widget.initialInstruction);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(WorkshopWebLanguageScope.tr(context, 'Modifica applicazione')),
+        content: TextField(
+          controller: _controller,
+          autofocus: true,
+          maxLength: 1200,
+          minLines: 2,
+          maxLines: 6,
+          decoration: InputDecoration(
+              labelText: WorkshopWebLanguageScope.tr(context, 'Descrivi la modifica')),
+          onChanged: (value) => setState(() => _instruction = value.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annulla')),
+          FilledButton(
+            onPressed: _instruction.isEmpty
+                ? null
+                : () => Navigator.pop(context, _instruction),
+            child: Text(WorkshopWebLanguageScope.tr(context, 'Crea versione')),
+          ),
+        ],
+      );
 }
 
 class _GeneratorRequestException implements Exception {

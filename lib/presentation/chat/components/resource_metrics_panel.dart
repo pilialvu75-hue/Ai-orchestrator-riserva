@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_generation_metrics.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
 
 class ResourceMetricsPanel extends StatefulWidget {
   const ResourceMetricsPanel({super.key});
@@ -25,12 +26,16 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
 
   String mib(int? bytes) =>
       bytes == null ? 'n/d' : '${(bytes / 1048576).round()} MiB';
+  String percent(double? value) => value == null ? 'n/d' : '${value.toStringAsFixed(1)}%';
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([monitor, WindowsGenerationMetrics.instance]),
+        listenable: Listenable.merge([
+          monitor, WindowsGenerationMetrics.instance, WindowsEngineProcessTracker.instance,
+        ]),
         builder: (context, _) {
           final ram = monitor.latest;
           final generation = WindowsGenerationMetrics.instance;
+          final engine = ram?.belongsTo(WindowsEngineProcessTracker.instance.current) == true ? ram : null;
           final time = ram?.timestamp;
           final sampleTime = time == null
               ? 'n/d'
@@ -61,6 +66,10 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
                 Text('CPU sistema: ${ram?.systemCpuPercent?.toStringAsFixed(1) ?? 'n/d'}${ram?.systemCpuPercent == null ? '' : '%'}'),
               Text('App RSS: ${mib(ram?.rssBytes)}'),
               if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) ...[
+                Text('CPU AIVEXUS: ${percent(ram?.appCpuPercent)}'),
+                Text('PID motore: ${engine?.enginePid ?? 'n/d'}'),
+                Text('CPU motore: ${percent(engine?.engineCpuPercent)}'),
+                Text('RAM motore RSS: ${mib(engine?.engineRssBytes)}'),
                 Text('Ultima inferenza LOCAL: ${generation.phase}'),
                 Text('Percorso selezionato: ${generation.route ?? 'n/d'}'),
                 Text('Durata: ${generation.elapsedMs ?? 'n/d'} ms'),
