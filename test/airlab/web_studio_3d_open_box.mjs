@@ -221,10 +221,11 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
       const root = viewer.shadowRoot;
       const state = document.querySelector('#state');
       const status = root.querySelectorAll('output');
-      new MutationObserver(() => {
+      const observer = new MutationObserver(() => {
         state.textContent = status[1].textContent.includes('90 × 60 × 30 mm')
           ? 'revision rendered' : status[0].textContent;
-      }).observe(root, { childList: true, subtree: true });
+      });
+      for (const output of status) observer.observe(output, { childList: true });
       document.querySelector('#start').onclick = () => {
         root.querySelector('[name=width]').value = 90;
         const form = root.querySelector('form');
