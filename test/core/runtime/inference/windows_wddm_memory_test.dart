@@ -3,6 +3,37 @@ import 'package:ai_orchestrator/core/runtime/inference/windows_wddm_memory.dart'
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('WDDM utilization sums processes on one engine then takes the maximum', () {
+    final samples = WindowsWddmMemorySample.parse(
+      'luid_0x0_0x123_phys_0|1024|2048\n'
+      'E|pid_1_luid_0x0_0x123_phys_0_eng_0_engtype_3D|30\n'
+      'E|pid_2_luid_0x0_0x123_phys_0_eng_0_engtype_3D|40\n'
+      'E|pid_1_luid_0x0_0x123_phys_0_eng_1_engtype_compute|60\n'
+      'E|pid_1_luid_0x0_0x456_phys_0_eng_0_engtype_3D|0\n',
+    );
+    expect(samples.length, 2);
+    expect(samples.first.busiestEnginePercent, 70);
+    expect(samples.first.dedicatedBytes, 1024);
+    expect(samples.last.busiestEnginePercent, 0);
+    expect(samples.last.dedicatedBytes, isNull);
+  });
+
+  test('missing or inconsistent WDDM utilization is unknown, not zero', () {
+    const memory = 'luid_0x0_0x123_phys_0|1024|2048\n';
+    const prefix = 'E|pid_1_luid_0x0_0x123_phys_0_eng_0_engtype_3D|';
+    for (final suffix in [
+      '',
+      '${prefix}101\n',
+      '${prefix}bad\n',
+      '${prefix}40\n${prefix}40\n',
+      '${prefix}80\nE|pid_2_luid_0x0_0x123_phys_0_eng_0_engtype_3D|30\n',
+    ]) {
+      final reading = WindowsWddmMemorySample.parse(memory + suffix).single;
+      expect(reading.busiestEnginePercent, isNull);
+      expect(reading.sharedBytes, 2048);
+    }
+  });
+
   test('WDDM memory keeps adapters and dedicated/shared bytes separate', () {
     final samples = WindowsWddmMemorySample.parse(
       'luid_0x00000000_0x00001234_phys_0|0|1073741824\r\n'
