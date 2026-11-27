@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_wddm_memory.dart';
 
 /// Device-wide NVIDIA measurements, not per-process GPU attribution.
 class WindowsGpuSample {
@@ -43,13 +44,19 @@ class WindowsGpuSample {
 /// Polls only while the Windows metrics panel is visible. No inference gates.
 class WindowsGpuMetrics extends ChangeNotifier {
   WindowsGpuMetrics({Future<List<WindowsGpuSample>> Function()? sampler,
+      Future<List<WindowsWddmMemorySample>> Function()? wddmSampler,
       void Function(String)? logger})
       : _sampler = sampler ?? _sampleDriver,
+        _wddmSampler = wddmSampler ?? (sampler == null ? WindowsWddmMemory.sample : _emptyWddm),
         _logger = logger ?? RuntimeEventLog.instance.emit;
 
   static final instance = WindowsGpuMetrics();
   final Future<List<WindowsGpuSample>> Function() _sampler;
+  final Future<List<WindowsWddmMemorySample>> Function() _wddmSampler;
+  static Future<List<WindowsWddmMemorySample>> _emptyWddm() async => const [];
   final void Function(String) _logger;
+  List<WindowsWddmMemorySample> _wddmLatest = const [];
+  List<WindowsWddmMemorySample> get wddmLatest => _wddmLatest;
   List<WindowsGpuSample> _latest = const [];
   List<WindowsGpuSample> get latest => _latest;
   Timer? _timer;
@@ -73,6 +80,7 @@ class WindowsGpuMetrics extends ChangeNotifier {
     _timer = null;
     _epoch++;
     _latest = const [];
+    _wddmLatest = const [];
   }
 
   Future<void> sample() async {
@@ -80,15 +88,39 @@ class WindowsGpuMetrics extends ChangeNotifier {
     _pending = true;
     final epoch = _epoch;
     List<WindowsGpuSample> readings = const [];
+    List<WindowsWddmMemorySample> memory = const [];
     try {
-      readings = await _sampler();
-    } on Object {
-      // Driver missing, unsupported or failed: remain unknown.
+      await Future.wait<void>([
+        () async {
+          try {
+            readings = await _sampler();
+          } on Object {
+            // NVIDIA unsupported or failed.
+          }
+        }(),
+        () async {
+          try {
+            memory = await _wddmSampler();
+          } on Object {
+            // WDDM counters unsupported or failed.
+          }
+        }(),
+      ]);
     } finally {
       _pending = false;
     }
     if (_disposed || _owners == 0 || epoch != _epoch) return;
     _latest = List.unmodifiable(readings);
+    _wddmLatest = List.unmodifiable(memory);
+    for (final (index, adapter) in memory.indexed) {
+      try {
+        _logger('[WINDOWS_WDDM_MEMORY] index=$index '
+            'dedicated_bytes=${adapter.dedicatedBytes ?? -1} '
+            'shared_bytes=${adapter.sharedBytes ?? -1}');
+      } on Object {
+        // Diagnostic failures must not affect display.
+      }
+    }
     for (final gpu in readings) {
       try {
         _logger('[WINDOWS_GPU_RESOURCE] index=${gpu.index} '
@@ -147,6 +179,7 @@ class WindowsGpuMetrics extends ChangeNotifier {
     _timer?.cancel();
     _epoch++;
     _latest = const [];
+    _wddmLatest = const [];
     super.dispose();
   }
 }

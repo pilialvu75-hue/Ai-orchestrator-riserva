@@ -105,6 +105,14 @@ class _ResourceMetricsPanelState extends State<ResourceMetricsPanel> {
                 ],
               ] else
                 const Text('GPU utilizzo / memoria: n/d'),
+              if (_gpuRetained && gpuMonitor.wddmLatest.isNotEmpty) ...[
+                const Text('Windows WDDM • memoria per adattatore (non sommare a NVIDIA)'),
+                for (final (index, adapter) in gpuMonitor.wddmLatest.indexed) ...[
+                  Text('Adattatore WDDM ${index + 1} (${adapter.adapterId})'),
+                  Text('Memoria dedicata: ${mib(adapter.dedicatedBytes)}'),
+                  Text('Memoria condivisa: ${mib(adapter.sharedBytes)}'),
+                ],
+              ],
               Text(
                 'Decode completati: ${monitor.native['decode_calls'] ?? 'n/d'}',
               ),
