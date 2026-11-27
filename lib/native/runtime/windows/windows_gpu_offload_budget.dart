@@ -21,11 +21,13 @@ class WindowsGpuOffloadBudget {
     required int freeRamBytes,
     required int gpuReserveBytes,
     required int hostReserveBytes,
+    bool allowReducedReserve = false,
   }) {
+    final minimumReserve = (allowReducedReserve ? 1024 : 2048) * mib;
     if (modelBytes <= 0 ||
         blockBytes.length < 2 || blockBytes.length > 512 ||
         freeVramBytes <= 0 || freeRamBytes <= 0 ||
-        gpuReserveBytes < 2048 * mib || hostReserveBytes < 2048 * mib ||
+        gpuReserveBytes < minimumReserve || hostReserveBytes < minimumReserve ||
         blockBytes.any((bytes) => bytes <= 0 || bytes > modelBytes)) {
       return null;
     }
