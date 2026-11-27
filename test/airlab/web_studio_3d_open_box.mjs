@@ -195,6 +195,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
         if (url.pathname.endsWith('/job')) {
           const request = JSON.parse(options.body);
           if (request.projectId !== projectId) throw new Error('Bad project');
+          if (request.action === 'resume') return json({ activeJob: null });
           if (request.action === 'start') {
             if (request.parameters.width !== 90 || request.parameters.wall !== 2 ||
                 request.photoEstimates?.join() !== 'width' || request.baseRevisionId !== null || revisionId) throw new Error('Bad job');

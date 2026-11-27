@@ -186,6 +186,7 @@ class AivexusStlPreview extends HTMLElement {
     let pending;
     let busy = false;
     let historyReady = false;
+    let resuming = false;
 
     function showEstimateNote() {
       estimateNote.hidden = !estimatedFields.size;
@@ -207,7 +208,7 @@ class AivexusStlPreview extends HTMLElement {
     }
 
     function updateControls() {
-      fields.disabled = busy || Boolean(pending) || !historyReady;
+      fields.disabled = busy || resuming || Boolean(pending) || !historyReady;
       refresh.hidden = !pending;
       refresh.disabled = busy;
     }
@@ -265,6 +266,28 @@ class AivexusStlPreview extends HTMLElement {
         if (!requests.signal.aborted) jobStatus.textContent = 'Generazione CAD non disponibile. Riprova tra poco.';
       } finally {
         busy = false;
+        updateControls();
+      }
+    }
+
+    async function recoverCadJob() {
+      if (pending) return;
+      resuming = true;
+      updateControls();
+      try {
+        const response = await fetch('/api/cantiere/cad/job', {
+          method: 'POST', redirect: 'error', cache: 'no-store', signal: requests.signal,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'resume', projectId }),
+        });
+        if (!response.ok) return;
+        const { activeJob } = await response.json();
+        if (!activeJob || requests.signal.aborted || pending) return;
+        remember({ revisionId: activeJob.revisionId, submitted: true });
+        jobStatus.textContent = 'Generazione CAD recuperata. Usa Aggiorna generazione per verificarne l’esito.';
+      } catch { /* a temporary read error must not submit a new job */ }
+      finally {
+        resuming = false;
         updateControls();
       }
     }
@@ -327,7 +350,7 @@ class AivexusStlPreview extends HTMLElement {
       });
       form.addEventListener('submit', event => {
         event.preventDefault();
-        if (busy || pending || !historyReady) return;
+        if (busy || resuming || pending || !historyReady) return;
         const baseRevisionId = history.value || history.options[0]?.value || null;
         const isEdit = event.submitter?.hasAttribute('data-apply');
         const instruction = instructionField.value.trim();
@@ -343,6 +366,7 @@ class AivexusStlPreview extends HTMLElement {
         void runJob('start');
       });
       refresh.addEventListener('click', () => void runJob(pending?.submitted ? 'collect' : 'start'));
+      void recoverCadJob();
       loadHistory().catch(() => {
         if (!loadNumber && !requests.signal.aborted) status.textContent = 'Cronologia delle revisioni non disponibile.';
       });

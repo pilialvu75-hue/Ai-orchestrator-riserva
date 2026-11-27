@@ -27,7 +27,7 @@ import { changeWebApplicationRelease, readWebApplicationReleaseHistory, resolveW
 import {
   createWebApplicationRevision, readWebApplicationRevisions, selectWebApplicationRevision,
 } from './d1_web_application_revisions.mjs';
-import { collectWebCadJob, startWebCadJob } from './d1_web_cad_jobs.mjs';
+import { collectWebCadJob, findActiveWebCadJob, startWebCadJob } from './d1_web_cad_jobs.mjs';
 import { listWebCadRevisions, readWebCadRevision, selectWebCadRevision, WEB_CAD_PROJECT_ID } from './d1_web_cad_revisions.mjs';
 import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 import { previewWebApplication } from './web_application_preview.mjs';
@@ -462,8 +462,9 @@ export function createAuthenticatedWebProjectOperation({
           return result.ok ? respond(200, result) : operationFailure(result);
         }
         if (!runner) return reject(503, 'cad_unavailable');
-        if (action !== 'start' && action !== 'collect') return reject(400, 'invalid_request');
-        const runCad = action === 'start' ? startWebCadJob : collectWebCadJob;
+        const cadActions = { start: startWebCadJob, collect: collectWebCadJob, resume: findActiveWebCadJob };
+        if (!Object.hasOwn(cadActions, action)) return reject(400, 'invalid_request');
+        const runCad = cadActions[action];
         result = await runCad({ request: cadRequest, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'verify_app') {
         result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });

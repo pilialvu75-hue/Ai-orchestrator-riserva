@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { listWebCadRevisions, readWebCadRevision, saveWebCadRevision, selectWebCadRevision } from '../../scripts/web/d1_web_cad_revisions.mjs';
 import { applyOpenBoxInstruction } from '../../scripts/web/studio_3d_box_parameters.mjs';
-import { collectWebCadJob, startWebCadJob } from '../../scripts/web/d1_web_cad_jobs.mjs';
+import { collectWebCadJob, findActiveWebCadJob, startWebCadJob } from '../../scripts/web/d1_web_cad_jobs.mjs';
 import { decodeWebAppJob, encodeRunnerBase64, encodeWebAppResult, importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
 const sqliteValue = value => value instanceof ArrayBuffer ? new Uint8Array(value) : value;
@@ -141,11 +141,18 @@ test('reserves one CAD dispatch and imports its ticket-bound result into private
     assert.equal((await start()).status, 'submitted');
     assert.equal(dispatches, 1);
     const { projectId, revisionId } = request;
+    const recover = (ownerSubject, id = projectId) => findActiveWebCadJob({
+      ...options, ownerSubject, request: { projectId: id },
+    });
+    assert.deepEqual((await recover('owner')).activeJob, { revisionId, status: 'submitted' });
+    assert.equal((await recover('stranger')).activeJob, null);
+    assert.equal((await recover('owner', 'web-project:1')).activeJob, null);
     const collect = ownerSubject => collectWebCadJob({
       ...options, ownerSubject, request: { projectId, revisionId },
     });
     assert.equal((await collect('stranger')).reason, 'cad_job_not_found');
     assert.equal((await collect('owner')).status, 'verified');
+    assert.equal((await recover('owner')).activeJob, null);
     assert.equal((await collect('owner')).status, 'verified');
     const saved = await readWebCadRevision({ db, ownerSubject: 'owner', projectId, revisionId });
     assert.deepEqual(saved.stl, stl);

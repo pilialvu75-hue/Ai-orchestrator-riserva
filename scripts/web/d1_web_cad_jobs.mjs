@@ -131,3 +131,15 @@ export async function collectWebCadJob({ db, ownerSubject, request, runner,
     .bind(...keys(args), status).run();
   return { ok: true, revisionId, status };
 }
+
+export async function findActiveWebCadJob({ db, ownerSubject, request }) {
+  const { projectId } = request;
+  if (Object.keys(request).length !== 1 || !WEB_CAD_PROJECT_ID.test(projectId)) return fail('invalid_request');
+  const row = await db.prepare(`
+    SELECT revision_id AS revisionId, status
+    FROM web_cad_jobs
+    WHERE owner_subject = ?1 AND project_id = ?2 AND status IN ('dispatching','submitted')
+      AND created_at > unixepoch() - 86400
+  `).bind(ownerSubject, projectId).first();
+  return { ok: true, activeJob: row ? { revisionId: row.revisionId, status: row.status } : null };
+}
