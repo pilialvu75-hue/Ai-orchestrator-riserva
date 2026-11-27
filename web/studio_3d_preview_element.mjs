@@ -34,6 +34,7 @@ class AivexusStlPreview extends HTMLElement {
           <output data-job role="status"></output>
         </form>
         <label hidden>Revisione salvata <select></select></label>
+        <button type="button" data-select hidden>Imposta come revisione attiva</button>
         <a data-file="stl" hidden>Scarica STL</a> <a data-file="scad" hidden>Scarica SCAD</a>
         <label>File STL <input type="file" accept=".stl,model/stl"></label>
         <output role="status"></output>
@@ -47,6 +48,8 @@ class AivexusStlPreview extends HTMLElement {
     const status = root.querySelector('output:not([data-job])');
     const canvas = root.querySelector('canvas');
     const history = root.querySelector('select');
+    const useRevision = root.querySelector('[data-select]');
+    let activeRevisionId;
     let revisionParameters = new Map();
     const projectId = this.getAttribute('project-id');
     const requests = new AbortController();
@@ -75,6 +78,7 @@ class AivexusStlPreview extends HTMLElement {
     const reset = () => {
       this.disposePreview?.();
       canvas.hidden = true;
+      useRevision.hidden = true;
       for (const link of links) link.hidden = true;
       return ++loadNumber;
     };
@@ -93,6 +97,7 @@ class AivexusStlPreview extends HTMLElement {
         const source = await response.text();
         if (version !== loadNumber || requests.signal.aborted) return;
         show(source);
+        useRevision.hidden = revisionId === activeRevisionId;
         for (const link of links) {
           link.href = endpoint(link.dataset.file, revisionId);
           link.hidden = false;
@@ -159,6 +164,10 @@ class AivexusStlPreview extends HTMLElement {
             remember(null);
             jobStatus.textContent = 'Revisione CAD verificata.';
             instructionField.value = '';
+            try { await persistRevision(revisionId); } catch {
+              if (requests.signal.aborted) return;
+              jobStatus.textContent = 'Revisione verificata. Impossibile impostarla come attiva.';
+            }
             await loadHistory(revisionId);
             break;
           case 'submitted':
@@ -183,9 +192,20 @@ class AivexusStlPreview extends HTMLElement {
       }
     }
 
+    async function persistRevision(revisionId) {
+      const response = await fetch('/api/cantiere/cad/job', {
+        method: 'POST', redirect: 'error', cache: 'no-store', signal: requests.signal,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'select', projectId, revisionId }),
+      });
+      if (!response.ok) throw new Error('CAD selection unavailable');
+      activeRevisionId = revisionId;
+    }
+
     async function loadHistory(selectedId) {
       const { revisions } = await (await read('history')).json();
       if (requests.signal.aborted) return;
+      activeRevisionId = revisions.find(revision => revision.selected)?.revisionId ?? revisions[0]?.revisionId;
       revisionParameters = new Map(revisions.map(({ revisionId, parameters }) => [revisionId, parameters]));
       history.replaceChildren(...revisions.map(({ revisionId, revisionNumber }) =>
         new Option('Revisione ' + revisionNumber, revisionId)));
@@ -193,7 +213,7 @@ class AivexusStlPreview extends HTMLElement {
       historyReady = true;
       updateControls();
       if (revisions.length && (selectedId || !loadNumber)) {
-        if (selectedId) history.value = selectedId;
+        history.value = selectedId ?? activeRevisionId;
         await selectRevision();
       } else if (loadNumber) {
         history.selectedIndex = -1;
@@ -205,6 +225,20 @@ class AivexusStlPreview extends HTMLElement {
       try { pending = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* browser storage optional */ }
       updateControls();
       history.addEventListener('change', selectRevision);
+      useRevision.addEventListener('click', async () => {
+        const revisionId = history.value;
+        if (!revisionId) return;
+        useRevision.disabled = true;
+        try {
+          await persistRevision(revisionId);
+          useRevision.hidden = history.value === revisionId;
+          jobStatus.textContent = 'Revisione attiva salvata.';
+        } catch {
+          if (!requests.signal.aborted) jobStatus.textContent = 'Impossibile salvare la revisione attiva.';
+        } finally {
+          useRevision.disabled = false;
+        }
+      });
       form.addEventListener('submit', event => {
         event.preventDefault();
         if (busy || pending || !historyReady) return;

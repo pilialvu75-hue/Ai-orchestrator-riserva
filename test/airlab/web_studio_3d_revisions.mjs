@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { readStudioStl } from '../../web/studio_3d_preview.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { listWebCadRevisions, readWebCadRevision, saveWebCadRevision } from '../../scripts/web/d1_web_cad_revisions.mjs';
+import { listWebCadRevisions, readWebCadRevision, saveWebCadRevision, selectWebCadRevision } from '../../scripts/web/d1_web_cad_revisions.mjs';
 import { applyOpenBoxInstruction } from '../../scripts/web/studio_3d_box_parameters.mjs';
 import { collectWebCadJob, startWebCadJob } from '../../scripts/web/d1_web_cad_jobs.mjs';
 import { decodeWebAppJob, encodeRunnerBase64, encodeWebAppResult, importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
@@ -43,6 +43,9 @@ test('stores immutable CAD artifacts, rejects altered bytes and isolates owners'
   const afterRollback = { ...next, revisionId: crypto.randomUUID() };
   assert.deepEqual(await saveWebCadRevision(afterRollback), { ok: true, revisionNumber: 3 });
   assert.deepEqual((await listWebCadRevisions(root)).map(item => item.revisionNumber), [3, 2, 1]);
+  assert.deepEqual(await selectWebCadRevision(root), { ok: true, activeRevisionId: root.revisionId });
+  assert.equal((await listWebCadRevisions(root)).find(entry => entry.selected).revisionId, root.revisionId);
+  assert.equal((await selectWebCadRevision({ ...root, ownerSubject: 'stranger' })).reason, 'cad_revision_conflict');
   assert.deepEqual(await listWebCadRevisions({ ...root, ownerSubject: 'stranger' }), []);
   sqlite.close();
 });

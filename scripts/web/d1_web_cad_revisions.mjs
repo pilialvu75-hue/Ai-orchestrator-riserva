@@ -63,13 +63,27 @@ export async function readWebCadRevision({ db, ownerSubject, projectId, revision
 export async function listWebCadRevisions({ db, ownerSubject, projectId }) {
   const query = await db.prepare(`
     SELECT revision_id AS revisionId, revision_number AS revisionNumber,
+      revision_id IS (SELECT revision_id FROM web_cad_project_selection WHERE owner_subject = ?1 AND project_id = ?2) AS selected,
       base_revision_id AS baseRevisionId, json_extract(manifest_json, '$.parameters') AS parametersJson
     FROM web_cad_revisions
     WHERE owner_subject = ?1 AND project_id = ?2
     ORDER BY revision_number DESC LIMIT 50
   `).bind(ownerSubject, projectId).all();
   if (query.success === false || !Array.isArray(query.results)) throw new Error('CAD history unavailable');
-  return query.results.map(({ parametersJson, ...revision }) => ({
-    ...revision, parameters: parametersJson ? JSON.parse(parametersJson) : null,
+  return query.results.map(({ parametersJson, selected, ...revision }) => ({
+    ...revision, selected: Boolean(selected), parameters: parametersJson ? JSON.parse(parametersJson) : null,
   }));
+}
+
+export async function selectWebCadRevision({ db, ownerSubject, projectId, revisionId }) {
+  if (!WEB_CAD_PROJECT_ID.test(projectId) || !WEB_RUNNER_TICKET.test(revisionId)) return invalid();
+  const row = await db.prepare(`
+    INSERT INTO web_cad_project_selection(owner_subject, project_id, revision_id)
+    SELECT owner_subject, project_id, revision_id FROM web_cad_revisions
+    WHERE owner_subject = ?1 AND project_id = ?2 AND revision_id = ?3
+    ON CONFLICT(owner_subject, project_id) DO UPDATE SET revision_id = excluded.revision_id
+    RETURNING revision_id AS activeRevisionId
+  `).bind(ownerSubject, projectId, revisionId).first();
+  return row ? { ok: true, activeRevisionId: row.activeRevisionId } :
+    { ok: false, reason: 'cad_revision_conflict' };
 }

@@ -176,6 +176,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
     assets.set('fixture.mjs', `
       // Chromium's intercepted test origin is HTTP, so supply a deterministic UUID.
       Object.defineProperty(crypto, 'randomUUID', { value: () => 'a1000000-0000-4000-8000-000000000001' });
+      const json = data => ({ ok: true, json: async () => data });
       let revisionId;
       let saved = false;
       const projectId = 'web-project:1795000000000000';
@@ -188,14 +189,15 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
             if (request.parameters.width !== 90 || request.parameters.wall !== 2 ||
                 request.baseRevisionId !== null || revisionId) throw new Error('Bad job');
             revisionId = request.revisionId;
-            return Response.json({ status: 'submitted' });
+            return json({ status: 'submitted' });
           }
+          if (request.action === 'select') return json({ activeRevisionId: revisionId });
           if (request.action !== 'collect' || request.revisionId !== revisionId) throw new Error('Bad ticket');
           saved = true;
-          return Response.json({ status: 'verified' });
+          return json({ status: 'verified' });
         }
         if (url.searchParams.get('file') === 'history') {
-          return Response.json({ revisions: saved ? [{ revisionId, revisionNumber: 1 }] : [] });
+          return json({ revisions: saved ? [{ revisionId, revisionNumber: 1, selected: true }] : [] });
         }
         if (saved && url.searchParams.get('file') === 'stl' &&
             url.searchParams.get('revisionId') === revisionId) {

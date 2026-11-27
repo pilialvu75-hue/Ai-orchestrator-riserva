@@ -14,3 +14,12 @@ CREATE TABLE web_cad_revisions (
   CHECK ((revision_number = 1 AND base_revision_id IS NULL) OR
          (revision_number > 1 AND base_revision_id IS NOT NULL))
 );
+
+CREATE TABLE web_cad_project_selection (
+  owner_subject TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  revision_id TEXT NOT NULL,
+  PRIMARY KEY (owner_subject, project_id),
+  FOREIGN KEY (owner_subject, project_id, revision_id)
+    REFERENCES web_cad_revisions(owner_subject, project_id, revision_id)
+);

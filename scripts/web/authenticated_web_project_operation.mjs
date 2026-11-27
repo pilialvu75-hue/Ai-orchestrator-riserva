@@ -28,7 +28,7 @@ import {
   createWebApplicationRevision, readWebApplicationRevisions, selectWebApplicationRevision,
 } from './d1_web_application_revisions.mjs';
 import { collectWebCadJob, startWebCadJob } from './d1_web_cad_jobs.mjs';
-import { listWebCadRevisions, readWebCadRevision, WEB_CAD_PROJECT_ID } from './d1_web_cad_revisions.mjs';
+import { listWebCadRevisions, readWebCadRevision, selectWebCadRevision, WEB_CAD_PROJECT_ID } from './d1_web_cad_revisions.mjs';
 import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 import { previewWebApplication } from './web_application_preview.mjs';
 
@@ -456,6 +456,11 @@ export function createAuthenticatedWebProjectOperation({
         result = await changeWebApplicationRelease({ request: parsed.value, ownerSubject: principal.subject, db, releasesEnabled });
       } else if (operation === 'cad_job') {
         const { action, ...cadRequest } = parsed.value;
+        if (action === 'select') {
+          if (Object.keys(cadRequest).length !== 2) return reject(400, 'invalid_request');
+          result = await selectWebCadRevision({ ...cadRequest, ownerSubject: principal.subject, db });
+          return result.ok ? respond(200, result) : operationFailure(result);
+        }
         if (!runner) return reject(503, 'cad_unavailable');
         if (action !== 'start' && action !== 'collect') return reject(400, 'invalid_request');
         const runCad = action === 'start' ? startWebCadJob : collectWebCadJob;
