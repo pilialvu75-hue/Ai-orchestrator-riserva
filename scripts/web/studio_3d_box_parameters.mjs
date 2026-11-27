@@ -52,3 +52,15 @@ export function parseOpenBoxDescription(description) {
   const [width, depth, height, wall, floor] = match.slice(1).map(value => Number(value.replace(',', '.')));
   return validateOpenBoxParameters({ width, depth, height, wall, floor });
 }
+
+export function validateStudioCadParameters(parameters) {
+  if (!parameters || !Object.hasOwn(parameters, 'baseWidth')) return validateOpenBoxParameters(parameters);
+  const { baseWidth, baseDepth, cornerRadius, ...box } = parameters;
+  const normalized = validateOpenBoxParameters(box);
+  if (![baseWidth, baseDepth, cornerRadius].every(Number.isFinite) ||
+      baseWidth > normalized.width || baseDepth > normalized.depth ||
+      cornerRadius <= normalized.wall || 2 * cornerRadius >= Math.min(baseWidth, baseDepth)) {
+    throw new RangeError('Invalid tapered box dimensions');
+  }
+  return { ...normalized, baseWidth, baseDepth, cornerRadius };
+}

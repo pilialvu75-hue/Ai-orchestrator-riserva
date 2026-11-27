@@ -10,7 +10,7 @@ import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio
 import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
   importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
-import { estimatePhotoDimension } from '../../web/studio_3d_photo.mjs';
+import { detectPhotoCavity, detectPhotoSilhouette, estimatePhotoDimension, isRectangularPhotoSilhouette, nextPhotoView } from '../../web/studio_3d_photo.mjs';
 import { checkOpenBoxFdm } from '../../web/studio_3d_fdm.mjs';
 
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
@@ -182,7 +182,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
     const names = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs', 'studio_3d_fdm.mjs', 'studio_3d_photo.mjs'];
     const assets = new Map(await Promise.all(names.map(async name =>
       [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
-    assets.set('index.html', '<!doctype html><button id="photo">Load synthetic photo</button><button id="start">Start</button><button id="refresh">Refresh</button><button id="bed">Smaller bed</button><output id="state"></output><script type="module" src="fixture.mjs"></script>');
+    assets.set('index.html', '<!doctype html><button id="photo">Load synthetic photo</button><button id="side">Load side photo</button><button id="start">Start</button><button id="confirm">Confirm dimensions</button><button id="refresh">Refresh</button><button id="bed">Smaller bed</button><output id="state"></output><script type="module" src="fixture.mjs"></script>');
     assets.set('fixture.mjs', `
       // Chromium's intercepted test origin is HTTP, so supply a deterministic UUID.
       Object.defineProperty(crypto, 'randomUUID', { value: () => 'a1000000-0000-4000-8000-000000000001' });
@@ -198,7 +198,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
           if (request.action === 'resume') return json({ activeJob: null });
           if (request.action === 'start') {
             if (request.parameters.width !== 90 || request.parameters.wall !== 2 ||
-                request.photoEstimates?.join() !== 'width' || request.baseRevisionId !== null || revisionId) throw new Error('Bad job');
+                request.parameters.depth !== 60 || request.photoEstimates?.join() !== 'width,depth' || request.baseRevisionId !== null || revisionId) throw new Error('Bad job');
             revisionId = request.revisionId;
             return json({ status: 'submitted' });
           }
@@ -228,7 +228,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
           ? 'revision rendered' : status[0].textContent;
       });
       for (const output of status) observer.observe(output, { childList: true });
-      document.querySelector('#photo').onclick = () => {
+      const loadPhoto = (objectWidth, view) => {
         const panel = root.querySelector('[data-photo]');
         panel.open = true;
         const source = document.createElement('canvas');
@@ -239,7 +239,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
         ink.fillRect(0, 0, 220, 80);
         ink.fillStyle = '#222';
         ink.fillRect(10, 10, 100, 5);
-        ink.fillRect(10, 40, 180, 20);
+        ink.fillRect(10, 40, objectWidth, 20);
         const bytes = Uint8Array.from(atob(source.toDataURL('image/png').split(',')[1]), char => char.charCodeAt(0));
         const photo = panel.querySelector('[data-photo-file]');
         const marker = panel.querySelector('[data-photo-status]');
@@ -251,27 +251,48 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
           measure.value = 50;
           measure.dispatchEvent(new Event('input'));
           const rect = image.getBoundingClientRect();
-          for (const [x, y] of [[10, 12], [110, 12], [10, 45], [190, 45]]) {
+          for (const [x, y] of [[10, 12], [110, 12]]) {
             image.dispatchEvent(new MouseEvent('click', {
               clientX: rect.left + rect.width * x / image.width,
               clientY: rect.top + rect.height * y / image.height,
             }));
           }
+          panel.querySelector('[data-photo-detect]').click();
           panel.querySelector('[data-photo-apply]').click();
+          if (view === 'front') {
+            const angle = panel.querySelector('[data-photo-view]');
+            angle.value = 'side';
+            angle.dispatchEvent(new Event('change'));
+            if (!image.hidden || !panel.querySelector('[data-photo-apply]').disabled) {
+              throw new Error('A front photo cannot supply a side measurement');
+            }
+          }
           state.textContent = root.querySelector('[data-estimate-note]').textContent;
         });
         ready.observe(marker, { childList: true });
         const selection = new DataTransfer();
-        selection.items.add(new File([bytes], 'synthetic-reference.png', { type: 'image/png' }));
+        selection.items.add(new File([bytes], 'synthetic-' + view + '.png', { type: 'image/png' }));
         photo.files = selection.files;
         photo.dispatchEvent(new Event('change'));
       };
+      document.querySelector('#photo').onclick = () => loadPhoto(180, 'front');
+      document.querySelector('#side').onclick = () => loadPhoto(120, 'side');
       document.querySelector('#start').onclick = () => {
         const form = root.querySelector('form');
         if (!form.checkValidity()) throw new Error('Invalid CAD form fixture');
         // The verifier's CSP sandbox blocks native form submission. Exercise
         // the same event handler without permitting navigation or form posts.
         form.dispatchEvent(new SubmitEvent('submit', { cancelable: true }));
+      };
+      document.querySelector('#confirm').onclick = () => {
+        for (const [axis, value] of Object.entries({ height: 30, wall: 2, floor: 3 })) {
+          const field = root.querySelector('[name=' + axis + ']');
+          field.value = value;
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const checkbox = root.querySelector('[data-photo-confirm]');
+        if (checkbox.disabled) throw new Error('Cannot confirm complete photo dimensions');
+        checkbox.checked = true;
       };
       document.querySelector('#refresh').onclick = () => root.querySelector('[data-refresh]').click();
       document.querySelector('#bed').onclick = () => {
@@ -288,6 +309,11 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
       checks: [
         { action: 'click', selector: '#photo' },
         { action: 'text', selector: '#state', value: 'larghezza: 90 mm (stima da foto)' },
+        { action: 'click', selector: '#side' },
+        { action: 'text', selector: '#state', value: 'larghezza: 90 mm (stima da foto) · profondità: 60 mm (stima da foto)' },
+        { action: 'click', selector: '#start' },
+        { action: 'text', selector: '#state', value: 'Completa e conferma le quote della fotografia.' },
+        { action: 'click', selector: '#confirm' },
         { action: 'click', selector: '#start' },
         { action: 'text', selector: '#state', value: 'Generazione CAD in corso. Usa Aggiorna generazione per verificarne l’esito.' },
         { action: 'click', selector: '#refresh' },
@@ -305,4 +331,35 @@ test('estimates only a calibrated visible segment from a synthetic photo fixture
   assert.equal(estimatePhotoDimension(points.slice(0, 3), 50), null);
   assert.equal(estimatePhotoDimension([points[0], points[0], ...points.slice(2)], 50), null);
   assert.equal(estimatePhotoDimension(points, 0), null);
+});
+
+test('finds the main image silhouette and requests the missing viewing angle', () => {
+  const width = 30, height = 20;
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  for (let y = 6; y <= 15; y++) {
+    for (let x = 4; x <= 24; x++) data.fill(20, (y * width + x) * 4, (y * width + x) * 4 + 3);
+  }
+  assert.deepEqual(detectPhotoSilhouette({ data, width, height }),
+    { left: 4, top: 6, right: 24, bottom: 15, size: 210 });
+  assert.equal(isRectangularPhotoSilhouette(detectPhotoSilhouette({ data, width, height })), true);
+  assert.equal(isRectangularPhotoSilhouette({ left: 92, top: 61, right: 921, bottom: 801, size: 360645 }), false);
+  data[0] = 0;
+  assert.equal(detectPhotoSilhouette({ data, width, height }), null);
+  assert.match(nextPhotoView(new Set(['width', 'height'])), /foto laterale/);
+  assert.match(nextPhotoView(new Set(['width', 'height', 'depth'])), /foto superiore/);
+});
+
+test('estimates uniform walls only when a rectangular cavity is visible from above', () => {
+  const width = 30, height = 30;
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  const draw = (start, end, color) => {
+    for (let y = start; y < end; y++) {
+      for (let x = start; x < end; x++) data.fill(color, (y * width + x) * 4, (y * width + x) * 4 + 3);
+    }
+  };
+  draw(5, 25, 30);
+  const image = { data, width, height };
+  assert.equal(detectPhotoCavity(image, detectPhotoSilhouette(image)), null);
+  draw(8, 22, 140);
+  assert.deepEqual(detectPhotoCavity(image, detectPhotoSilhouette(image)), { wallPixels: 3 });
 });

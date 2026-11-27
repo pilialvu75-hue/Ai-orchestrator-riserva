@@ -11,7 +11,7 @@ export async function runStudio3dBoxJob(parameters) {
   ].map(async ([name, mediaType, content]) => ({
     name, mediaType, bytes: content.length, sha256: await runnerPayloadSha256(content),
   })));
-  const manifest = { version: 1, kind: 'cad', shape: 'open_box', unit: 'mm',
+  const manifest = { version: 1, kind: 'cad', shape: Object.hasOwn(parameters, 'baseWidth') ? 'tapered_box' : 'open_box', unit: 'mm',
     parameters, verification, fdm: checkOpenBoxFdm(parameters), files };
   return { manifest, scad, stl };
 }

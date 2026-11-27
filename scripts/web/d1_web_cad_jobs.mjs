@@ -1,11 +1,11 @@
 import { createGitHubStudioCadRunnerClient } from './github_counter_runner_client.mjs';
 import { readWebCadRevision, saveWebCadRevision, WEB_CAD_PROJECT_ID } from './d1_web_cad_revisions.mjs';
-import { applyOpenBoxInstruction, parseOpenBoxDescription, validateOpenBoxParameters } from './studio_3d_box_parameters.mjs';
+import { applyOpenBoxInstruction, parseOpenBoxDescription, validateStudioCadParameters } from './studio_3d_box_parameters.mjs';
 import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 import { decodeRunnerBase64, decodeWebAppResult, encodeWebAppJob, importWebAppAuthorizationKey,
   importWebAppPrivateKey, importWebAppPublicKey } from './web_application_runner_packet.mjs';
 
-const photoAxes = ['width', 'depth', 'height'];
+const photoAxes = ['width', 'depth', 'height', 'wall'];
 const fail = reason => ({ ok: false, reason });
 const validIds = (projectId, revisionId) => WEB_CAD_PROJECT_ID.test(projectId) && WEB_RUNNER_TICKET.test(revisionId);
 const keys = ({ ownerSubject, projectId, revisionId }) => [ownerSubject, projectId, revisionId];
@@ -38,14 +38,17 @@ export async function startWebCadJob({ db, ownerSubject, request, runner,
       const base = await readWebCadRevision({ db, ownerSubject, projectId, revisionId: baseRevisionId });
       if (!base.ok) return fail('cad_revision_conflict');
       try {
-        parameters = applyOpenBoxInstruction(base.manifest.parameters, request.instruction);
+        const { baseWidth, baseDepth, cornerRadius, ...box } = base.manifest.parameters;
+        const edited = applyOpenBoxInstruction(box, request.instruction);
+        parameters = validateStudioCadParameters(baseWidth === undefined ? edited :
+          { ...edited, baseWidth, baseDepth, cornerRadius });
         photoEstimates = photoAxes.filter(axis => base.manifest.photoEstimates?.includes(axis));
       } catch (_) {
         return fail('unsupported_cad_instruction');
       }
     }
   } else {
-    try { parameters = validateOpenBoxParameters(request.parameters); } catch (_) { return fail('invalid_request'); }
+    try { parameters = validateStudioCadParameters(request.parameters); } catch (_) { return fail('invalid_request'); }
   }
 
   const args = { ownerSubject, projectId, revisionId };
@@ -67,7 +70,7 @@ export async function startWebCadJob({ db, ownerSubject, request, runner,
   ]);
   const job = await encodeWebAppJob({
     publicKey, authorizationKey, ticket: revisionId, resultPublicKeySpki: runner.resultPublicKey,
-    source: { kind: 'cad_open_box', parameters }, checks: [],
+    source: { kind: Object.hasOwn(parameters, 'baseWidth') ? 'cad_tapered_box' : 'cad_open_box', parameters }, checks: [],
   });
 
   const claim = await db.prepare(`
@@ -120,7 +123,7 @@ export async function collectWebCadJob({ db, ownerSubject, request, runner,
     const { manifest, scad, stl } = await decodeWebAppResult({
       privateKey, authorizationKey, ticket: revisionId, packet, jobSha256: row.job_sha256,
     });
-    const parameters = validateOpenBoxParameters(manifest?.parameters);
+    const parameters = validateStudioCadParameters(manifest?.parameters);
     if (JSON.stringify(parameters) !== row.parameters_json) return fail('invalid_cad_result');
     const stored = await saveWebCadRevision({
       db, ...args, baseRevisionId: row.base_revision_id,

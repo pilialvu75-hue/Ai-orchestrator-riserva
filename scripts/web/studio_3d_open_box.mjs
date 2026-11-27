@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { validateOpenBoxParameters } from './studio_3d_box_parameters.mjs';
 
+import { createTaperedBoxCad } from './studio_3d_tapered_box.mjs';
+
 const run = promisify(execFile);
 
 export function createOpenBoxCad(parameters) {
@@ -24,7 +26,7 @@ difference() {
 `;
 }
 
-function verifyBoxMesh(stl, { width, depth, height, wall, floor }) {
+function verifyBoxMesh(stl, { width, depth, height, wall, floor, baseWidth }) {
   const vertices = [...stl.toString('ascii').matchAll(/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/g)]
     .map(match => match.slice(1).map(Number));
   if (vertices.length < 12 || vertices.length % 3 ||
@@ -35,15 +37,19 @@ function verifyBoxMesh(stl, { width, depth, height, wall, floor }) {
   const extent = [width, depth, height];
   for (let axis = 0; axis < extent.length; axis++) {
     const coordinates = vertices.map(vertex => vertex[axis]);
-    if (Math.abs(Math.min(...coordinates)) > 0.001 ||
-        Math.abs(Math.max(...coordinates) - extent[axis]) > 0.001) {
+    const minimum = baseWidth && axis < 2 ? -extent[axis] / 2 : 0;
+    if (Math.abs(Math.min(...coordinates) - minimum) > 0.001 ||
+        Math.abs(Math.max(...coordinates) - (minimum + extent[axis])) > 0.001) {
       throw new Error('STL dimensions differ from the CAD parameters');
     }
   }
 
   // A valid outer envelope can still hide a missing or mis-sized cavity.
   const toleranceMm = 0.001;
-  for (const x of [wall, width - wall]) {
+  if (baseWidth && !vertices.some(vertex => Math.abs(vertex[2] - floor) <= toleranceMm)) {
+    throw new Error('STL does not contain the cavity floor');
+  }
+  for (const x of baseWidth ? [] : [wall, width - wall]) {
     for (const y of [wall, depth - wall]) {
       for (const z of [floor, height]) {
         if (!vertices.some(vertex => vertex.every((value, axis) =>
@@ -83,7 +89,7 @@ function verifyBoxMesh(stl, { width, depth, height, wall, floor }) {
 
 // Runs a fixed template with numeric inputs. The caller never supplies executable CAD.
 export async function renderOpenBox(parameters, { executable = 'openscad' } = {}) {
-  const source = createOpenBoxCad(parameters);
+  const source = Object.hasOwn(parameters, 'baseWidth') ? createTaperedBoxCad(parameters) : createOpenBoxCad(parameters);
   const directory = await mkdtemp(join(tmpdir(), 'aivexus-open-box-'));
   try {
     await writeFile(join(directory, 'box.scad'), source);

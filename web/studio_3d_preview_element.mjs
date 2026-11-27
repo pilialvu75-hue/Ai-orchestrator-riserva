@@ -12,6 +12,7 @@ class AivexusStlPreview extends HTMLElement {
         output { display: block; min-height: 1.5em; margin: 12px 0; }
         fieldset { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
         input[type=number] { width: 5em; }
+        fieldset[hidden] { display: none; }
         canvas[hidden] { display: none; }
         canvas { width: 100%; height: auto; display: block; touch-action: none; }
       </style>
@@ -19,6 +20,13 @@ class AivexusStlPreview extends HTMLElement {
         <form hidden>
           <fieldset>
             <legend>Scatola aperta · misure in mm</legend>
+            <label>Forma <select data-cad-shape><option value="box">Scatola dritta</option><option value="tapered">Contenitore rastremato</option></select></label>
+            <fieldset data-tapered hidden disabled>
+              <legend>Base esterna e angoli</legend>
+              <label>Larghezza base <input name="baseWidth" type="number" min="0.1" step="any" required></label>
+              <label>Profondità base <input name="baseDepth" type="number" min="0.1" step="any" required></label>
+              <label>Raggio angoli <input name="cornerRadius" type="number" min="0.1" step="any" required></label>
+            </fieldset>
             <label>Larghezza <input name="width" type="number" min="0.1" max="500" step="any" value="80" required></label>
             <label>Profondità <input name="depth" type="number" min="0.1" max="500" step="any" value="60" required></label>
             <label>Altezza <input name="height" type="number" min="0.1" max="500" step="any" value="30" required></label>
@@ -33,10 +41,14 @@ class AivexusStlPreview extends HTMLElement {
             </div>
           </fieldset>
           <p data-estimate-note hidden></p>
+          <div data-photo-review hidden>
+            <p data-photo-question aria-live="polite"></p>
+            <label><input type="checkbox" data-photo-confirm> Confermo le quote della scatola</label>
+          </div>
           <button type="button" data-refresh hidden>Aggiorna generazione</button>
           <output data-job role="status"></output>
         </form>
-        <label hidden>Revisione salvata <select></select></label>
+        <label hidden>Revisione salvata <select data-cad-history></select></label>
         <button type="button" data-select hidden>Imposta come revisione attiva</button>
         <a data-file="stl" hidden>Scarica STL</a> <a data-file="scad" hidden>Scarica SCAD</a>
         <label>File STL <input type="file" accept=".stl,model/stl"></label>
@@ -45,15 +57,20 @@ class AivexusStlPreview extends HTMLElement {
           aria-describedby="controls"></canvas>
         <details data-photo hidden>
           <summary>Stima da fotografia</summary>
+          <p data-photo-guide role="status"></p>
+          <label>Angolazione <select data-photo-view>
+            <option value="front">Frontale</option><option value="side">Laterale</option><option value="top">Superiore</option>
+          </select></label>
           <p>Usa una foto frontale e un riferimento sullo stesso piano. La foto resta nel browser.</p>
           <label>Foto <input data-photo-file type="file" accept="image/jpeg,image/png,image/webp"></label>
           <label>Riferimento (mm) <input data-photo-reference type="number" min="0.1" step="any"></label>
           <label>Dimensione <select data-photo-axis>
-            <option value="width">Larghezza</option><option value="depth">Profondità</option>
-            <option value="height">Altezza</option>
+            <option value="width">Larghezza</option><option value="depth" disabled>Profondità</option>
+            <option value="height">Altezza</option><option value="wall" disabled>Parete</option>
           </select></label>
           <canvas hidden aria-label="Foto da misurare"></canvas>
           <output data-photo-status role="status"></output>
+          <button type="button" data-photo-detect>Rileva contorno</button>
           <button type="button" data-photo-reset>Azzera punti</button>
           <button type="button" data-photo-apply disabled>Usa stima nel progetto</button>
         </details>
@@ -76,7 +93,7 @@ class AivexusStlPreview extends HTMLElement {
     const input = root.querySelector('input[accept=".stl,model/stl"]');
     const status = root.querySelector('output:not([data-job]):not([data-photo-status])');
     const canvas = root.querySelector('canvas');
-    const history = root.querySelector('select');
+    const history = root.querySelector('[data-cad-history]');
     const useRevision = root.querySelector('[data-select]');
     let activeRevisionId;
     let revisionsById = new Map();
@@ -143,6 +160,11 @@ class AivexusStlPreview extends HTMLElement {
       const revisionId = history.value;
       const revision = revisionsById.get(revisionId);
       const parameters = revision?.parameters;
+      shape.value = parameters?.baseWidth ? 'tapered' : 'box';
+      updateShape();
+      review.hidden = true;
+      confirmed.checked = false;
+      manuallyEntered.clear();
       estimatedFields.clear();
       for (const axis of revision?.photoEstimates ?? []) {
         if (Number.isFinite(parameters?.[axis])) estimatedFields.set(axis, parameters[axis]);
@@ -175,8 +197,18 @@ class AivexusStlPreview extends HTMLElement {
 
     const form = root.querySelector('form');
     const fields = form.querySelector('fieldset');
+    const shape = form.querySelector('[data-cad-shape]');
+    const tapered = form.querySelector('[data-tapered]');
+    function updateShape() {
+      tapered.hidden = tapered.disabled = shape.value !== 'tapered';
+    }
+    shape.addEventListener('change', () => {
+      updateShape();
+      confirmed.checked = false;
+    });
     const edit = form.querySelector('[data-edit]');
     const instructionField = edit.querySelector('input');
+    const projectDescription = this.getAttribute('project-description') ?? '';
     function setTextCommand(hasRevision) {
       edit.hidden = false;
       edit.querySelector('[data-instruction-label]').textContent = hasRevision ? 'Modifica della revisione' : 'Descrizione quotata';
@@ -189,7 +221,22 @@ class AivexusStlPreview extends HTMLElement {
     const jobStatus = form.querySelector('[data-job]');
     const estimateNote = form.querySelector('[data-estimate-note]');
     const estimatedFields = new Map();
-    const axisLabels = { width: 'larghezza', depth: 'profondità', height: 'altezza' };
+    const manuallyEntered = new Set();
+    const review = form.querySelector('[data-photo-review]');
+    const question = review.querySelector('[data-photo-question]');
+    const confirmed = review.querySelector('[data-photo-confirm]');
+    const dimensionLabels = { width: 'larghezza', depth: 'profondità', height: 'altezza',
+      wall: 'spessore delle pareti', floor: 'spessore del fondo' };
+    function reviewPhotoDimensions() {
+      const missing = Object.keys(dimensionLabels).filter(axis =>
+        !estimatedFields.has(axis) && !manuallyEntered.has(axis));
+      question.textContent = missing.length
+        ? 'Puoi indicare queste misure in millimetri? ' + missing.map(axis => dimensionLabels[axis]).join(', ') + '.'
+        : 'Puoi confermare le quote qui sopra prima che generi il modello?';
+      confirmed.disabled = missing.length > 0;
+      return missing.length === 0 && confirmed.checked;
+    }
+    const axisLabels = { width: 'larghezza', depth: 'profondità', height: 'altezza', wall: 'parete' };
     const storageKey = 'aivexus.cad.pending.' + projectId;
     let pending;
     let busy = false;
@@ -203,7 +250,15 @@ class AivexusStlPreview extends HTMLElement {
     }
 
     fields.addEventListener('input', event => {
-      if (estimatedFields.delete(event.target.name)) showEstimateNote();
+      const field = event.target;
+      if (!Object.hasOwn(dimensionLabels, field.name)) return;
+      if (estimatedFields.delete(field.name)) showEstimateNote();
+      if (field.value && field.validity.valid) manuallyEntered.add(field.name);
+      else manuallyEntered.delete(field.name);
+      if (!review.hidden) {
+        confirmed.checked = false;
+        reviewPhotoDimensions();
+      }
     });
 
     function remember(value) {
@@ -324,6 +379,9 @@ class AivexusStlPreview extends HTMLElement {
       history.parentElement.hidden = !revisions.length;
       historyReady = true;
       setTextCommand(Boolean(revisions.length));
+      if (!revisions.length && !instructionField.value && projectDescription.length <= instructionField.maxLength) {
+        instructionField.value = projectDescription;
+      }
       updateControls();
       if (revisions.length && (selectedId || !loadNumber)) {
         history.value = selectedId ?? activeRevisionId;
@@ -339,11 +397,17 @@ class AivexusStlPreview extends HTMLElement {
       photoPanel.hidden = false;
       mountStudioPhotoMeasurement(photoPanel, (axis, estimate) => {
         const field = fields.elements.namedItem(axis);
-        if (!field || fields.disabled) return;
+        if (!field || fields.disabled) return false;
         field.value = estimate;
         estimatedFields.set(axis, estimate);
+        confirmed.checked = false;
+        reviewPhotoDimensions();
         showEstimateNote();
-      }, requests.signal);
+      }, requests.signal, () => {
+        review.hidden = false;
+        confirmed.checked = false;
+        reviewPhotoDimensions();
+      });
       try { pending = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* browser storage optional */ }
       updateControls();
       history.addEventListener('change', selectRevision);
@@ -365,8 +429,20 @@ class AivexusStlPreview extends HTMLElement {
         event.preventDefault();
         if (busy || resuming || pending || !historyReady) return;
         const baseRevisionId = history.value || history.options[0]?.value || null;
+        if (!review.hidden && !reviewPhotoDimensions()) {
+          jobStatus.textContent = 'Completa e conferma le quote della fotografia.';
+          return;
+        }
         const isEdit = event.submitter?.hasAttribute('data-apply');
         const instruction = instructionField.value.trim();
+        if (isEdit && shape.value === 'tapered' && !baseRevisionId) {
+          jobStatus.textContent = 'Inserisci le quote del contenitore e scegli Genera revisione CAD.';
+          return;
+        }
+        if (isEdit && !review.hidden) {
+          jobStatus.textContent = 'Per usare le quote della fotografia, scegli Genera revisione CAD.';
+          return;
+        }
         if (isEdit && !instruction) {
           jobStatus.textContent = 'Inserisci una descrizione quotata o una modifica della revisione.';
           return;
