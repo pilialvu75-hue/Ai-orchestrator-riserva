@@ -110,12 +110,20 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
   const measured = new Set();
   guide.textContent = nextPhotoView(measured);
   let image;
+  let imageView;
   let points = [];
   let estimate;
   let imageVersion = 0;
 
   function redraw() {
     if (!image) return;
+    if (imageView !== view.value) {
+      apply.disabled = true;
+      canvas.hidden = true;
+      status.textContent = 'Carica una foto per la nuova angolazione selezionata.';
+      return;
+    }
+    canvas.hidden = false;
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     for (const [index, point] of points.entries()) {
       context.beginPath();
@@ -138,6 +146,7 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
 
   input.addEventListener('change', async () => {
     const version = ++imageVersion;
+    const uploadedView = view.value;
     image?.close();
     image = undefined;
     points = [];
@@ -157,6 +166,7 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
         throw new Error('Invalid photo dimensions');
       }
       image = bitmap;
+      imageView = uploadedView;
       bitmap = undefined;
       const scale = Math.min(1, 1000 / Math.max(image.width, image.height));
       canvas.width = Math.max(2, Math.round(image.width * scale));
@@ -174,7 +184,7 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
   }, { signal });
 
   canvas.addEventListener('click', event => {
-    if (!image || points.length === 4) return;
+    if (!image || imageView !== view.value || points.length === 4) return;
     const bounds = canvas.getBoundingClientRect();
     points.push({
       x: (event.clientX - bounds.left) * canvas.width / bounds.width,
@@ -196,7 +206,7 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
     redraw();
   }, { signal });
   panel.querySelector('[data-photo-detect]').addEventListener('click', () => {
-    if (!image || points.length < 2) {
+    if (!image || imageView !== view.value || points.length < 2) {
       status.textContent = 'Segna prima i due estremi del riferimento.';
       return;
     }
@@ -236,7 +246,7 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
     redraw();
   }, { signal });
   apply.addEventListener('click', () => {
-    if (estimate === null || axis.selectedOptions[0]?.disabled) return;
+    if (imageView !== view.value || estimate === null || axis.selectedOptions[0]?.disabled) return;
     if (onApply(axis.value, estimate) === false) return;
     measured.add(axis.value);
     guide.textContent = nextPhotoView(measured);

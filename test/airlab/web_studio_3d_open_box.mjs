@@ -259,6 +259,12 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
           }
           panel.querySelector('[data-photo-detect]').click();
           panel.querySelector('[data-photo-apply]').click();
+          const angle = panel.querySelector('[data-photo-view]');
+          angle.value = 'side';
+          angle.dispatchEvent(new Event('change'));
+          if (!image.hidden || !panel.querySelector('[data-photo-apply]').disabled) {
+            throw new Error('A front photo cannot supply a side measurement');
+          }
           state.textContent = root.querySelector('[data-estimate-note]').textContent;
         });
         ready.observe(marker, { childList: true });
