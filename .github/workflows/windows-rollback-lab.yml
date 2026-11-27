@@ -10,6 +10,7 @@ on:
       - 'windows/installer/ai_orchestrator.iss'
       - '.github/workflows/windows-release-publish.yml'
       - 'test/scripts/test_windows_release_recovery_contract.py'
+      - 'test/scripts/test_windows_selective_gpu_installation.py'
   workflow_dispatch:
 
 permissions:
@@ -23,7 +24,11 @@ jobs:
       - uses: actions/checkout@v6
       - name: Assert release pipelines include the recovery gate
         shell: pwsh
-        run: python -m unittest discover -s test/scripts -p test_windows_release_recovery_contract.py -v
+        run: |
+          python -m unittest discover -s test/scripts -p test_windows_release_recovery_contract.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Recovery contract failed' }
+          python -m unittest discover -s test/scripts -p test_windows_selective_gpu_installation.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'GPU selection contract failed' }
       - name: Compile .NET Framework recovery helper and test snapshot/restore
         shell: pwsh
         run: .\tool\windows_rollback\test_recovery.ps1
@@ -65,6 +70,20 @@ jobs:
             throw 'Recovery-enabled Inno package failed to compile.'
           }
           Write-Host 'PASS: recovery-enabled Inno installer compiles without public release.'
+          # Compile both conditional backend entries as well as the no-GPU
+          # fixture above. Fake files are never executed or published.
+          foreach ($backend in @('runtime-cuda', 'runtime-vulkan')) {
+            $folder = Join-Path $payload $backend
+            New-Item $folder -ItemType Directory -Force | Out-Null
+            Set-Content (Join-Path $folder 'llama-server.exe') 'fake-ci-only' -NoNewline
+            Set-Content (Join-Path $folder 'backend.dll') 'fake-ci-only' -NoNewline
+          }
+          & $iscc (Join-Path $PWD 'windows\installer\ai_orchestrator.iss')
+          if ($LASTEXITCODE -ne 0) {
+            throw 'GPU-conditional Inno package failed to compile.'
+          }
+          Write-Host 'PASS: CUDA and Vulkan conditional entries compile.'
+          Remove-Item (Join-Path $payload 'runtime-cuda'), (Join-Path $payload 'runtime-vulkan') -Recurse -Force
           # The explicit unsigned legacy exception must compile only with the
           # helper enabled; the ordinary Windows package remains unchanged.
           $legacyOutput = Join-Path $base 'win81-only'
