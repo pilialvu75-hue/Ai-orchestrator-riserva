@@ -110,11 +110,13 @@ void main() {
     );
     addTearDown(controller.dispose);
 
+    String? studioBrief;
     Widget page(WorkshopWebProjectStorage store) => MaterialApp(
       home: Scaffold(
         body: WorkshopWebProjectsPage(
           controller: controller,
           storage: store,
+          onOpenWebStudio: (value) => studioBrief = value,
         ),
       ),
     );
@@ -150,7 +152,10 @@ void main() {
 
     expect(find.text('15%'), findsOneWidget);
     expect(find.text('Inizia creazione'), findsOneWidget);
-    expect(find.textContaining('non è ancora collegato'), findsOneWidget);
+    await tester.ensureVisible(find.text('Inizia creazione'));
+    await tester.tap(find.text('Inizia creazione'));
+    expect(studioBrief, contains(original.goal));
+    expect(studioBrief, contains(original.proposal));
     expect(find.text('Approva progetto'), findsNothing);
     expect(provider.calls, 0);
     expect(tester.takeException(), isNull);
