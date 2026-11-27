@@ -73,6 +73,36 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+
+  slice-open-box:
+    if: github.event_name == 'pull_request'
+    needs: open-box-stl
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: studio-3d-open-box
+          path: cad-samples
+      - name: Install PrusaSlicer
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y prusa-slicer xvfb xauth
+      - name: Slice both real STL revisions
+        run: |
+          for width in 80 90; do
+            source="cad-samples/box-${width}mm/box.stl"
+            output="$RUNNER_TEMP/box-${width}mm.gcode"
+            xvfb-run -a prusa-slicer --export-gcode --layer-height 0.2 \
+              --nozzle-diameter 0.4 --output "$output" "$source"
+            test -s "$output"
+            layers="$(grep -c '^;LAYER_CHANGE' "$output")"
+            test "$layers" -gt 1
+            grep -Eq '^G1 .* E[0-9]' "$output"
+            printf 'Box %s mm: %s layers, G-code SHA-256 ' "$width" "$layers"
+            sha256sum "$output" | cut -d' ' -f1
+          done
+
   render-private-cad:
     if: >-
       github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
