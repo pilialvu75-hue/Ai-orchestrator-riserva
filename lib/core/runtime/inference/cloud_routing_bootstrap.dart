@@ -29,6 +29,7 @@ import 'package:ai_orchestrator/core/runtime/inference/directive_aware_inference
 import 'package:ai_orchestrator/core/runtime/inference/inference_service.dart';
 import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_self_test_service.dart';
 import 'package:ai_orchestrator/core/tools/search/assistant_public_web_link.dart';
 import 'package:ai_orchestrator/core/tools/search/duckduckgo_lite_provider.dart';
 import 'package:ai_orchestrator/core/tools/search/duckduckgo_provider.dart';
@@ -285,6 +286,18 @@ abstract final class CloudRoutingBootstrap {
         ),
       ),
     );
+
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      // Share the already-registered Assistant resident instance; do not
+      // start a second resident model just to verify its communication.
+      await _unregisterIfPresent<RuntimeSelfTestService>(sl);
+      sl.registerLazySingleton<RuntimeSelfTestService>(() => RuntimeSelfTestService(
+        runtimeProvider: sl<LocalRuntimeProvider>(),
+        desktopVerificationProvider: residentAssistantRuntime,
+        localAiRepository: sl<LocalAiRepository>(),
+        chatRepository: sl<ChatRepository>(),
+      ));
+    }
 
     debugPrint(
       '[CLOUD_ROUTING] direct Cloud safety path, Assistant general web search, '
