@@ -32,6 +32,7 @@ class AivexusStlPreview extends HTMLElement {
               <button type="submit" data-apply>Applica modifica</button>
             </div>
           </fieldset>
+          <p data-estimate-note hidden></p>
           <button type="button" data-refresh hidden>Aggiorna generazione</button>
           <output data-job role="status"></output>
         </form>
@@ -141,6 +142,8 @@ class AivexusStlPreview extends HTMLElement {
       const version = reset();
       const revisionId = history.value;
       const parameters = revisionParameters.get(revisionId);
+      estimatedFields.clear();
+      showEstimateNote();
       edit.hidden = !parameters;
       for (const field of fields.querySelectorAll('input[name]')) {
         if (Number.isFinite(parameters?.[field.name])) field.value = parameters[field.name];
@@ -172,10 +175,23 @@ class AivexusStlPreview extends HTMLElement {
     const instructionField = edit.querySelector('input');
     const refresh = form.querySelector('[data-refresh]');
     const jobStatus = form.querySelector('[data-job]');
+    const estimateNote = form.querySelector('[data-estimate-note]');
+    const estimatedFields = new Map();
+    const axisLabels = { width: 'larghezza', depth: 'profondità', height: 'altezza' };
     const storageKey = 'aivexus.cad.pending.' + projectId;
     let pending;
     let busy = false;
     let historyReady = false;
+
+    function showEstimateNote() {
+      estimateNote.hidden = !estimatedFields.size;
+      estimateNote.textContent = [...estimatedFields].map(([axis, value]) =>
+        axisLabels[axis] + ': ' + value + ' mm (stima da foto)').join(' · ');
+    }
+
+    fields.addEventListener('input', event => {
+      if (estimatedFields.delete(event.target.name)) showEstimateNote();
+    });
 
     function remember(value) {
       pending = value;
@@ -283,7 +299,10 @@ class AivexusStlPreview extends HTMLElement {
       photoPanel.hidden = false;
       mountStudioPhotoMeasurement(photoPanel, (axis, estimate) => {
         const field = fields.elements.namedItem(axis);
-        if (field && !fields.disabled) field.value = estimate;
+        if (!field || fields.disabled) return;
+        field.value = estimate;
+        estimatedFields.set(axis, estimate);
+        showEstimateNote();
       }, requests.signal);
       try { pending = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* browser storage optional */ }
       updateControls();
