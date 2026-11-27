@@ -328,6 +328,7 @@ void main() {
   test('upcoming episode is current public evidence, not ordinary conversation', () {
     const question = 'est ce que koyuki hikawa et minato amamya vont finir ensemble dans le prochain episode de la saison 2?';
     expect(AssistantWebSearchPolicy.shouldSearch(question), isTrue);
+    expect(AssistantWebSearchPolicy.shouldSearch('Que va-t-il se passer dans le prochain épisode ?'), isTrue);
     expect(AssistantWebSearchPolicy.shouldSearch('sans internet: $question'), isFalse);
     expect(AssistantWebSearchPolicy.shouldSearch('Spiegami il primo episodio della serie'), isFalse);
     for (final followUp in ['cita le tue fonti', 'cite your sources',

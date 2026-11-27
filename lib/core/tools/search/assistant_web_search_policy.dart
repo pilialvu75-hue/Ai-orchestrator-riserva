@@ -81,7 +81,7 @@ abstract final class AssistantWebSearchPolicy {
   /// Future episodes are changing public facts, not model-memory questions.
   static bool isUpcomingEpisodeQuery(String prompt) {
     final value = prompt.toLowerCase();
-    final episode = RegExp(r'\b(?:episod[ioei]|episodes?|épisodes?|cap[ií]tulos?)\b');
+    final episode = RegExp(r'(?:^|[^\p{L}])(?:episod[ioei]|episodes?|épisodes?|cap[ií]tulos?)(?:$|[^\p{L}])', unicode: true);
     final future = RegExp(r'\b(?:prossim[oaie]|prochain(?:e|s|es)?|next|pr[oó]xim[oa])\b');
     return episode.hasMatch(value) && future.hasMatch(value);
   }
