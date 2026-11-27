@@ -1,3 +1,4 @@
+import { checkOpenBoxFdm } from './studio_3d_fdm.mjs';
 import { mountStudioStlPreview } from './studio_3d_preview.mjs';
 
 class AivexusStlPreview extends HTMLElement {
@@ -40,6 +41,18 @@ class AivexusStlPreview extends HTMLElement {
         <output role="status"></output>
         <canvas width="800" height="560" tabindex="0" aria-label="Anteprima 3D"
           aria-describedby="controls"></canvas>
+        <details data-fdm hidden>
+          <summary>Controlli di stampa FDM</summary>
+          <form data-fdm-profile>
+            <label>Volume X <input data-bed type="number" min="1" max="2000" step="any" value="220" required></label>
+            <label>Y <input data-bed type="number" min="1" max="2000" step="any" value="220" required></label>
+            <label>Z <input data-bed type="number" min="1" max="2000" step="any" value="250" required></label>
+            <label>Ugello <input data-nozzle type="number" min="0.1" max="3" step="any" value="0.4" required></label>
+            <label>Altezza strato <input data-layer type="number" min="0.05" max="3" step="any" value="0.2" required></label>
+            <label>Materiale <select data-material><option>PLA</option><option>PETG</option><option>ABS</option></select></label>
+          </form>
+          <ul data-fdm-report aria-live="polite"></ul>
+        </details>
         <p id="controls">Trascina per ruotare, usa Maiusc per spostare la vista.
           Usa la rotella o i tasti + e − per lo zoom.</p>
       </section>
@@ -56,6 +69,30 @@ class AivexusStlPreview extends HTMLElement {
     this.requests = requests;
     let loadNumber = 0;
     const links = root.querySelectorAll('a[data-file]');
+    const printPanel = root.querySelector('[data-fdm]');
+    const printForm = printPanel.querySelector('form');
+    const printReport = printPanel.querySelector('ul');
+    let printParameters;
+    function updatePrintReport() {
+      printReport.replaceChildren();
+      if (!printParameters || !printForm.checkValidity()) return;
+      const nozzleMm = printForm.querySelector('[data-nozzle]').valueAsNumber;
+      const layerMm = printForm.querySelector('[data-layer]').valueAsNumber;
+      const bedMm = [...printForm.querySelectorAll('[data-bed]')].map(field => field.valueAsNumber);
+      const material = printForm.querySelector('[data-material]').value;
+      const result = checkOpenBoxFdm(printParameters, { bedMm, nozzleMm, layerMm, material });
+      for (const message of [
+        result.fitsVolume ? 'Compatibile con il volume scelto.' : 'La scatola supera il volume scelto.',
+        result.wallMeetsMinimum ? 'Pareti compatibili con la soglia di due diametri ugello.' : 'Pareti sotto la soglia di due diametri ugello.',
+        result.floorMeetsMinimum ? 'Fondo compatibile con la soglia di tre strati.' : 'Fondo sotto la soglia di tre strati.',
+      ]) {
+        const item = document.createElement('li');
+        item.textContent = message;
+        printReport.append(item);
+      }
+    }
+    printForm.addEventListener('input', updatePrintReport);
+    printForm.addEventListener('submit', event => event.preventDefault());
 
     function endpoint(file, revisionId) {
       const query = new URLSearchParams({ projectId, file });
@@ -79,6 +116,8 @@ class AivexusStlPreview extends HTMLElement {
       this.disposePreview?.();
       canvas.hidden = true;
       useRevision.hidden = true;
+      printPanel.hidden = true;
+      printParameters = null;
       for (const link of links) link.hidden = true;
       return ++loadNumber;
     };
@@ -98,6 +137,9 @@ class AivexusStlPreview extends HTMLElement {
         if (version !== loadNumber || requests.signal.aborted) return;
         show(source);
         useRevision.hidden = revisionId === activeRevisionId;
+        printPanel.hidden = !parameters;
+        printParameters = parameters;
+        updatePrintReport();
         for (const link of links) {
           link.href = endpoint(link.dataset.file, revisionId);
           link.hidden = false;

@@ -1,4 +1,4 @@
-import { checkOpenBoxFdm } from './studio_3d_box_parameters.mjs';
+import { checkOpenBoxFdm } from '../../web/studio_3d_fdm.mjs';
 import { renderOpenBox } from './studio_3d_open_box.mjs';
 import { runnerPayloadSha256 } from './web_application_runner_packet.mjs';
 

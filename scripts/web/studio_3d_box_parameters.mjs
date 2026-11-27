@@ -39,13 +39,3 @@ export function applyOpenBoxInstruction(parameters, instruction) {
     ...baseline, [field]: Number((baseline[field] + direction * Number(incremental[2].replace(',', '.'))).toFixed(6)),
   });
 }
-
-export function checkOpenBoxFdm(parameters, profile = {
-  bedMm: [220, 220, 250], nozzleMm: 0.4, layerMm: 0.2, material: 'PLA',
-}) {
-  const { width, depth, height, wall, floor } = validateOpenBoxParameters(parameters);
-  const fitsVolume = [width, depth, height].every((value, axis) => value <= profile.bedMm[axis]);
-  const wallMeetsMinimum = wall >= 2 * profile.nozzleMm;
-  const floorMeetsMinimum = floor >= 3 * profile.layerMm - 1e-9;
-  return { profile, fitsVolume, wallMeetsMinimum, floorMeetsMinimum };
-}

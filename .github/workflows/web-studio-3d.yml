@@ -20,6 +20,7 @@ on:
       - 'functions/api/cantiere/cad/job.js'
       - 'web/studio_3d_preview.mjs'
       - 'web/studio_3d_preview_element.mjs'
+      - 'web/studio_3d_fdm.mjs'
 
   workflow_dispatch:
     inputs:

@@ -10,7 +10,7 @@ import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio
 import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
   importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
-import { checkOpenBoxFdm } from '../../scripts/web/studio_3d_box_parameters.mjs';
+import { checkOpenBoxFdm } from '../../web/studio_3d_fdm.mjs';
 
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
 
@@ -120,7 +120,7 @@ test('Chromium draws the OpenSCAD STL and changes canvas pixels after rotation a
 test('Chromium imports the actual STL through the preview element file input',
   { skip: !chromium, timeout: 45000 }, async () => {
     const { stl } = await renderOpenBox({ ...box, width: 90 });
-    const elementFiles = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs'];
+    const elementFiles = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs', 'studio_3d_fdm.mjs'];
     const assets = new Map(await Promise.all(elementFiles.map(async name =>
       [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
     assets.set('index.html', '<!doctype html><aivexus-stl-preview></aivexus-stl-preview><output id="result"></output><script type="module" src="fixture.mjs"></script>');
@@ -178,10 +178,10 @@ test('encrypts the real CAD job and verifies its encrypted result and ticket',
 test('Chromium submits dimensions and opens the verified CAD revision after refresh',
   { skip: !chromium, timeout: 45000 }, async () => {
     const { stl } = await renderOpenBox({ ...box, width: 90 });
-    const names = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs'];
+    const names = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs', 'studio_3d_fdm.mjs'];
     const assets = new Map(await Promise.all(names.map(async name =>
       [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
-    assets.set('index.html', '<!doctype html><button id="start">Start</button><button id="refresh">Refresh</button><output id="state"></output><script type="module" src="fixture.mjs"></script>');
+    assets.set('index.html', '<!doctype html><button id="start">Start</button><button id="refresh">Refresh</button><button id="bed">Smaller bed</button><output id="state"></output><script type="module" src="fixture.mjs"></script>');
     assets.set('fixture.mjs', `
       // Chromium's intercepted test origin is HTTP, so supply a deterministic UUID.
       Object.defineProperty(crypto, 'randomUUID', { value: () => 'a1000000-0000-4000-8000-000000000001' });
@@ -206,7 +206,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
           return json({ status: 'verified' });
         }
         if (url.searchParams.get('file') === 'history') {
-          return json({ revisions: saved ? [{ revisionId, revisionNumber: 1, selected: true }] : [] });
+          return json({ revisions: saved ? [{ revisionId, revisionNumber: 1, selected: true, parameters: { ...${JSON.stringify(box)}, width: 90 } }] : [] });
         }
         if (saved && url.searchParams.get('file') === 'stl' &&
             url.searchParams.get('revisionId') === revisionId) {
@@ -234,6 +234,14 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
         form.dispatchEvent(new SubmitEvent('submit', { cancelable: true }));
       };
       document.querySelector('#refresh').onclick = () => root.querySelector('[data-refresh]').click();
+      document.querySelector('#bed').onclick = () => {
+        const panel = root.querySelector('[data-fdm]');
+        if (panel.hidden) throw new Error('Missing printer checks');
+        const width = panel.querySelector('[data-bed]');
+        width.value = 60;
+        width.dispatchEvent(new Event('input', { bubbles: true }));
+        document.querySelector('#state').textContent = panel.querySelector('li').textContent;
+      };
     `);
     const result = await createChromiumWebVerifier({ executable: chromium })({
       assets,
@@ -242,6 +250,8 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
         { action: 'text', selector: '#state', value: 'Generazione CAD in corso. Usa Aggiorna generazione per verificarne l’esito.' },
         { action: 'click', selector: '#refresh' },
         { action: 'text', selector: '#state', value: 'revision rendered' },
+        { action: 'click', selector: '#bed' },
+        { action: 'text', selector: '#state', value: 'La scatola supera il volume scelto.' },
       ],
     });
     assert.equal(result.status, 'passed', JSON.stringify(result));
