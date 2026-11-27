@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Strict non-secret manifest for coordinated, owner-authorized HYBRID betas.
+"""Strict non-secret manifest for coordinated, owner-authorized HYBRID releases.
 
 The release asset is read only after checking the Android run and the release
 tag/SHA. It is an integrity/provenance cross-check, NOT a digital signature.
-Default release behavior is always consent-gate OFF.
+Historical OFF manifests remain readable. New beta/stable publishers require ON.
 """
 from __future__ import annotations
 
@@ -37,8 +37,8 @@ def _validate(data: dict[str, str], *, source_sha: str, run_number: str,
         channel != "ci" and tag_channel != channel
     ):
         raise ValueError("Release channel and tag disagree")
-    if enabled == "true" and channel != "beta":
-        raise ValueError("HYBRID consent is allowed ONLY on explicitly opted-in beta")
+    if enabled == "true" and channel not in {"beta", "stable"}:
+        raise ValueError("HYBRID consent requires an authorized beta or stable")
     return enabled
 
 
