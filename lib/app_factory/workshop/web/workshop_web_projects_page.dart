@@ -681,9 +681,7 @@ proposta breve, concreta e approvabile.
                         'la proposta e dovrai approvarla esplicitamente.'
                     : _newProjectKind == AivexusProjectKind.cad
                         ? 'Apri Studio Stampa 3D dopo aver salvato il progetto.'
-                        : 'La bozza viene salvata nello stesso elenco progetti. '
-                        'Il runner specializzato non è ancora collegato e '
-                        'nessuna generazione viene simulata.'),
+                        : 'Apri AIVEXUS Studio dopo aver salvato il progetto.'),
                 style: const TextStyle(color: Colors.white54, height: 1.4),
               ),
             ],
@@ -820,18 +818,16 @@ proposta breve, concreta e approvabile.
                   label: const Text('Apri Studio Stampa 3D'),
                 ),
               if (!project.isReadOnly &&
-                  project.projectKind == AivexusProjectKind.game)
-                Card(
-                  child: ListTile(
-                    leading: Icon(_projectKindIcon(project.projectKind)),
-                    title: Text(
-                      '${_projectKindLabel(project.projectKind)} · bozza salvata',
-                    ),
-                    subtitle: const Text(
-                      'Il percorso condiviso è attivo, ma il runner specializzato '
-                      'non è ancora collegato. Nessuna generazione viene simulata.',
-                    ),
+                  project.projectKind == AivexusProjectKind.game &&
+                  widget.onOpenWebStudio != null)
+                FilledButton.icon(
+                  onPressed: () => widget.onOpenWebStudio!(
+                    'Crea un gioco 2D autonomo per il browser. '
+                    'Usa risorse originali e locali, controlli per computer '
+                    'e touch e un layout adattabile.\n\n${project.goal}',
                   ),
+                  icon: Icon(_projectKindIcon(project.projectKind)),
+                  label: Text(_tr('Apri AIVEXUS Studio')),
                 ),
               if (!project.isReadOnly &&
                   project.projectKind == AivexusProjectKind.software &&
@@ -900,7 +896,7 @@ proposta breve, concreta e approvabile.
     AivexusProjectKind.cad =>
       'Salva il progetto per aprire Studio Stampa 3D e generare il modello.',
     AivexusProjectKind.game =>
-      'Videogiochi salva una bozza GameSpec nello stesso progetto; il runner gioco arriverà nello Studio dedicato.',
+      'Crea un gioco 2D per il browser con AIVEXUS Studio.',
   };
 
   static IconData _projectKindIcon(AivexusProjectKind? kind) => switch (kind) {
