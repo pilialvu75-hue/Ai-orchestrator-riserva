@@ -74,8 +74,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
   }
 
   Future<void> _prepareSelectedModel(AiModel model) async {
-    if (!_isWindowsHost() || _gpuUnavailable ||
-        !AssistantWindowsGpuPolicy.supports(model.effectiveRuntimeModelId)) return;
+    if (!_isWindowsHost() || !_isModernWindowsHost() || _gpuUnavailable ||
+        !AssistantWindowsGpuPolicy.supportsAutomaticPreparation(model.effectiveRuntimeModelId)) return;
     final cpuExecutable = _executable();
     final modelPath = model.localPath;
     if (cpuExecutable == null || modelPath == null || !File(modelPath).existsSync()) return;

@@ -1,8 +1,9 @@
 import 'package:ai_orchestrator/core/runtime/inference/local_inference_model_ids.dart';
 
-/// Windows Assistant profiles exercised with the bundled Vulkan engine.
-/// This is an explicit compatibility list, not a general family/GGUF allow rule.
-/// Device selection and VRAM headroom checks remain mandatory in the provider.
+/// User-selected GGUF models are candidates for the Windows GPU runtime.
+/// The provider still verifies the file header, OS, bundled engine, device,
+/// VRAM headroom and actual startup. A candidate is not a compatibility guarantee.
+/// Automatic background preparation remains restricted to measured profiles.
 abstract final class AssistantWindowsGpuPolicy {
   static const _measuredModels = <String>{
     'deepseek_r1_1_5b',
@@ -23,7 +24,9 @@ abstract final class AssistantWindowsGpuPolicy {
     'spark-x2.5-4b-q4_k_m.gguf',
   };
 
-  static bool supports(String modelId) {
+  static bool supports(String modelId) => modelId.trim().isNotEmpty;
+
+  static bool supportsAutomaticPreparation(String modelId) {
     // Preserve the previously supported Nemotron route.
     if (LocalInferenceModelIds.resolveTemplate(modelId) ==
         LocalInferenceModelIds.templateNemotron) return true;

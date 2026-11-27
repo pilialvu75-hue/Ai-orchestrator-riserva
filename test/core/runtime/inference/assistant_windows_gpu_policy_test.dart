@@ -17,13 +17,16 @@ void main() {
     for (final pair in pairs.entries) {
       expect(AssistantWindowsGpuPolicy.supports(pair.key), isTrue, reason: pair.key);
       expect(AssistantWindowsGpuPolicy.supports(pair.value), isTrue, reason: pair.value);
+      expect(AssistantWindowsGpuPolicy.supportsAutomaticPreparation(pair.key), isTrue);
+      expect(AssistantWindowsGpuPolicy.supportsAutomaticPreparation(pair.value), isTrue);
     }
   });
-  test('family membership alone cannot enable unmeasured models or legacy TinyLlama', () {
+  test('explicit selection is size and catalog independent; preload remains measured', () {
     for (final id in ['', 'llama_1b', 'tinyllama', 'gemma_2b',
       'deepseek_r1_7b', 'qwen3_8b', 'llama3_2_70b', 'mistral',
-      'custom-qwen3-4b.gguf', 'custom-model.gguf']) {
-      expect(AssistantWindowsGpuPolicy.supports(id), isFalse, reason: id);
+      'custom-qwen3-4b.gguf', 'custom-model.gguf', 'qwen3_32b', 'qwen3_16b', ' ']) {
+      expect(AssistantWindowsGpuPolicy.supports(id), id.trim().isNotEmpty, reason: id);
+      expect(AssistantWindowsGpuPolicy.supportsAutomaticPreparation(id), isFalse, reason: id);
     }
   });
   test('catalog matching is case-insensitive and trims whitespace', () {
