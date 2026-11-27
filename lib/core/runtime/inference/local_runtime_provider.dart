@@ -40,6 +40,10 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   static const int _maxModelFileSizeBytes =
       12 * 1024 * 1024 * 1024; // Cap di sicurezza 12GB
 
+  @visibleForTesting
+  static bool isAllowedModelFileSize(int bytes, {required bool modernWindows}) =>
+      bytes > 0 && (modernWindows || bytes <= _maxModelFileSizeBytes);
+
   static final Set<String> _mobileValidatedModelIds = {
     ...AndroidFfiRuntimeModelIds.validatedModelIds,
     LocalInferenceModelIds.phi3_5_mini,
@@ -116,6 +120,14 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
   //@override
   bool supportsModel(AiModel model) {
     final modelId = model.effectiveRuntimeModelId;
+    // Windows modern engines validate the GGUF and perform a fresh memory
+    // admission before launch. Catalogue names are not a compatibility test.
+    if (Platform.isWindows && WindowsLlamaRuntime.isModernWindows(
+        Platform.operatingSystemVersion)) {
+      return model.isDownloaded &&
+          (model.localPath?.trim().isNotEmpty ?? false) &&
+          (model.validationStatus == ModelValidationStatus.validatedOk || _isDeveloperMode);
+    }
 
     final allowed = _isModelAllowedOnPlatform(modelId);
 
@@ -192,8 +204,9 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
 
     final fileSize = await File(modelPath).length();
 
-    if (fileSize <= 0 ||
-        fileSize > _maxModelFileSizeBytes) {
+    final modernWindows = Platform.isWindows && WindowsLlamaRuntime.isModernWindows(
+        Platform.operatingSystemVersion);
+    if (!isAllowedModelFileSize(fileSize, modernWindows: modernWindows)) {
       RuntimeEventLog.instance.emit('[MODEL_FOUND] status=invalid_size modelId=${selectedModel.id} size_bytes=$fileSize');
       RuntimeEventLog.instance.emit('[VALIDATION_FAILURE] reason=invalid_model_size modelId=${selectedModel.id}');
       return const LocalRuntimeState(
