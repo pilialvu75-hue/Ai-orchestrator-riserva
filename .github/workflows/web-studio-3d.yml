@@ -13,6 +13,11 @@ on:
       - 'test/airlab/web_studio_3d_revisions.mjs'
       - 'scripts/web/d1_web_cad_revisions.mjs'
       - 'scripts/web/sql/013_web_cad_revisions.sql'
+      - 'scripts/web/sql/014_web_cad_jobs.sql'
+      - 'scripts/web/d1_web_cad_jobs.mjs'
+      - 'scripts/web/studio_3d_box_parameters.mjs'
+      - 'scripts/web/github_counter_runner_client.mjs'
+      - 'functions/api/cantiere/cad/job.js'
       - 'web/studio_3d_preview.mjs'
       - 'web/studio_3d_preview_element.mjs'
 

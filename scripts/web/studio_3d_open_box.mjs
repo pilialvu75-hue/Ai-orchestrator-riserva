@@ -3,22 +3,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { validateOpenBoxParameters } from './studio_3d_box_parameters.mjs';
 
 const run = promisify(execFile);
-const dimensions = ['width', 'depth', 'height', 'wall', 'floor'];
 
 export function createOpenBoxCad(parameters) {
-  if (!parameters || Object.keys(parameters).length !== dimensions.length ||
-      dimensions.some(name => !Object.hasOwn(parameters, name) ||
-        !Number.isFinite(parameters[name]) ||
-        parameters[name] < 0.1 || parameters[name] > 500)) {
-    throw new RangeError('Expected five dimensions in millimetres, between 0.1 and 500');
-  }
-  const { width, depth, height, wall, floor } = parameters;
-  if (2 * wall >= Math.min(width, depth) || floor >= height) {
-    throw new RangeError('The dimensions must leave room for an open cavity');
-  }
-
+  const { width, depth, height, wall, floor } = validateOpenBoxParameters(parameters);
   return `// Dimensions in millimetres
 width = ${width};
 depth = ${depth};

@@ -5,7 +5,8 @@ import { readStudioStl } from '../../web/studio_3d_preview.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { listWebCadRevisions, readWebCadRevision, saveWebCadRevision } from '../../scripts/web/d1_web_cad_revisions.mjs';
-import { runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
+import { collectWebCadJob, startWebCadJob } from '../../scripts/web/d1_web_cad_jobs.mjs';
+import { decodeWebAppJob, encodeRunnerBase64, encodeWebAppResult, importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
 const sqliteValue = value => value instanceof ArrayBuffer ? new Uint8Array(value) : value;
 
@@ -79,3 +80,70 @@ test('stores both real OpenSCAD results and recovers either revision by ID',
       sqlite.close();
     }
   });
+
+test('reserves one CAD dispatch and imports its ticket-bound result into private history', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  try {
+    for (const migration of ['013_web_cad_revisions.sql', '014_web_cad_jobs.sql']) {
+      sqlite.exec(readFileSync(new URL('../../scripts/web/sql/' + migration, import.meta.url), 'utf8'));
+    }
+    const db = { prepare: query => ({ bind: (...args) => ({
+      first: async () => sqlite.prepare(query).get(...args.map(sqliteValue)),
+      run: async () => sqlite.prepare(query).run(...args.map(sqliteValue)),
+    }) }) };
+    const makeKey = () => crypto.subtle.generateKey({
+      name: 'RSA-OAEP', modulusLength: 2048, hash: 'SHA-256',
+      publicExponent: Uint8Array.of(1, 0, 1),
+    }, true, ['encrypt', 'decrypt']);
+    const [sender, receiver] = await Promise.all([makeKey(), makeKey()]);
+    const exportKey = async (format, key) => encodeRunnerBase64(new Uint8Array(
+      await crypto.subtle.exportKey(format, key)));
+    const runner = {
+      token: 'test', headSha: 'a'.repeat(40),
+      jobPublicKey: await exportKey('spki', sender.publicKey),
+      resultPublicKey: await exportKey('spki', receiver.publicKey),
+      resultPrivateKey: await exportKey('pkcs8', receiver.privateKey),
+      authorizationKey: encodeRunnerBase64(crypto.getRandomValues(new Uint8Array(32))),
+    };
+    const authorizationKey = await importWebAppAuthorizationKey(runner.authorizationKey);
+    const parameters = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
+    const request = { projectId: 'web-project:1795000000000000', revisionId: crypto.randomUUID(), parameters };
+    const scad = Uint8Array.of(1, 2, 3);
+    const stl = Uint8Array.of(4, 5, 6);
+    const manifest = { version: 1, kind: 'cad', shape: 'open_box', unit: 'mm', parameters, files: [
+      { name: 'box.scad', mediaType: 'text/plain', bytes: 3, sha256: await runnerPayloadSha256(scad) },
+      { name: 'box.stl', mediaType: 'model/stl', bytes: 3, sha256: await runnerPayloadSha256(stl) },
+    ] };
+    let packet;
+    let dispatches = 0;
+    const githubClient = () => ({
+      async dispatch({ ticket, input }) {
+        dispatches++;
+        const job = await decodeWebAppJob({ privateKey: sender.privateKey, authorizationKey, ticket, input });
+        assert.deepEqual(job.source, { kind: 'cad_open_box', parameters });
+        packet = await encodeWebAppResult({
+          publicKey: job.resultPublicKey, authorizationKey, ticket, jobSha256: job.jobSha256,
+          result: { manifest, scad: encodeRunnerBase64(scad), stl: encodeRunnerBase64(stl) },
+        });
+        return 123;
+      },
+      async readResult(runId) { assert.equal(runId, 123); return { status: 'ready' }; },
+      async downloadArchive() { return packet; },
+    });
+    const options = { db, ownerSubject: 'owner', runner, githubClient };
+    const start = () => startWebCadJob({ ...options, request });
+    assert.equal((await start()).status, 'submitted');
+    assert.equal((await start()).status, 'submitted');
+    assert.equal(dispatches, 1);
+    const { projectId, revisionId } = request;
+    const collect = ownerSubject => collectWebCadJob({
+      ...options, ownerSubject, request: { projectId, revisionId },
+    });
+    assert.equal((await collect('stranger')).reason, 'cad_job_not_found');
+    assert.equal((await collect('owner')).status, 'verified');
+    assert.equal((await collect('owner')).status, 'verified');
+    const saved = await readWebCadRevision({ db, ownerSubject: 'owner', projectId, revisionId });
+    assert.deepEqual(saved.stl, stl);
+    assert.deepEqual(saved.manifest, manifest);
+  } finally { sqlite.close(); }
+});

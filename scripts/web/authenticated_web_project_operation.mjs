@@ -27,6 +27,7 @@ import { changeWebApplicationRelease, readWebApplicationReleaseHistory, resolveW
 import {
   createWebApplicationRevision, readWebApplicationRevisions, selectWebApplicationRevision,
 } from './d1_web_application_revisions.mjs';
+import { collectWebCadJob, startWebCadJob } from './d1_web_cad_jobs.mjs';
 import { listWebCadRevisions, readWebCadRevision, WEB_CAD_PROJECT_ID } from './d1_web_cad_revisions.mjs';
 import { WEB_RUNNER_TICKET } from './web_runner_envelope.mjs';
 import { previewWebApplication } from './web_application_preview.mjs';
@@ -37,7 +38,7 @@ const MAX_JSON_BYTES = 2048;
 const MAX_GENERATION_JSON_BYTES = 49152;
 const OPERATIONS = new Set([
   'stage_counter', 'approve', 'revoke', 'reserve', 'status', 'download', 'advance',
-  'cad_revision_read',
+  'cad_revision_read', 'cad_job',
   'create_app_revision', 'app_revision_history', 'select_app_revision',
   'generate_app', 'generation_status', 'generation_quota', 'generation_reuse',
   'verify_app', 'verification_status', 'download_app', 'read_app_source', 'preview_app',
@@ -127,6 +128,9 @@ async function readJson(request, maxBytes = MAX_JSON_BYTES) {
 }
 function operationFailure(result) {
   const reason = result?.reason;
+  if (reason === 'cad_job_not_found') return reject(404, reason);
+  if (reason === 'cad_job_conflict' || reason === 'cad_revision_conflict') return reject(409, reason);
+  if (reason === 'cad_unavailable' || reason === 'invalid_cad_result') return reject(503, reason);
   if (reason === 'invalid_request') return reject(400, 'invalid_request');
   if (reason === 'execution_not_found') return reject(404, 'execution_not_found');
   if (reason === 'generation_not_found') return reject(404, 'generation_not_found');
@@ -245,7 +249,7 @@ export function createAuthenticatedWebProjectOperation({
     if ((operation === 'app_invite' || operation === 'app_join') && !appMemberInvitesEnabled) {
       return reject(404, 'invite_not_found');
     }
-    if ((ownerOnly || readsCad) && !authorizedOwnerSubject) {
+    if ((ownerOnly || readsCad || operation === 'cad_job') && !authorizedOwnerSubject) {
       return reject(403, 'owner_required');
     }
 
@@ -449,6 +453,12 @@ export function createAuthenticatedWebProjectOperation({
         result = await readWebApplicationIntegration({ request: parsed.value, ownerSubject: principal.subject, db, integrationConfig });
       } else if (operation === 'app_release_change') {
         result = await changeWebApplicationRelease({ request: parsed.value, ownerSubject: principal.subject, db, releasesEnabled });
+      } else if (operation === 'cad_job') {
+        const { action, ...cadRequest } = parsed.value;
+        if (!runner) return reject(503, 'cad_unavailable');
+        if (action !== 'start' && action !== 'collect') return reject(400, 'invalid_request');
+        const runCad = action === 'start' ? startWebCadJob : collectWebCadJob;
+        result = await runCad({ request: cadRequest, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'verify_app') {
         result = await advanceWebApplicationVerification({ request: parsed.value, ownerSubject: principal.subject, db, runner });
       } else if (operation === 'advance') {
