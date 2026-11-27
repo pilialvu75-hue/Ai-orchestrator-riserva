@@ -18,6 +18,7 @@ import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
 import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_memory_guard.dart';
+import 'package:ai_orchestrator/native/runtime/windows/windows_large_model_admission.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_inference_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/sampling_metadata.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
@@ -373,6 +374,15 @@ class LocalRuntimeProvider implements RuntimeInferenceProvider {
         var firstVisibleOutputMs = -1;
 
         if (Platform.isWindows) {
+          final modelBytes = await File(modelPath).length();
+          if (modelBytes > WindowsLargeModelAdmission.protectedFileBytes) {
+            final ram = await ResourceMonitor.instance.sample();
+            if (ram?.windowsSample != true || ram?.critical != false ||
+                ram?.availableBytes == null ||
+                !WindowsLargeModelAdmission.cpuFits(modelBytes, ram!.availableBytes!)) {
+              throw WindowsMemoryPressure();
+            }
+          }
           memory = WindowsMemoryGuard(ResourceMonitor.instance, abort: () {
             process?.kill();
           });
