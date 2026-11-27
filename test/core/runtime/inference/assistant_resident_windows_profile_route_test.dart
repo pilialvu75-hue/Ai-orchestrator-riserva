@@ -35,6 +35,7 @@ class _RecordingResident extends ResidentCompletionRuntime {
   int? lastBatchSize;
   int? lastUbatchSize;
   bool lastFlashAttention = false;
+  bool? lastRejectTokenLimit;
   bool failOnCuda = false;
 
   @override
@@ -63,6 +64,7 @@ class _RecordingResident extends ResidentCompletionRuntime {
     lastBatchSize = batchSize;
     lastUbatchSize = ubatchSize;
     lastFlashAttention = flashAttention;
+    lastRejectTokenLimit = rejectTokenLimit;
     if (failOnCuda && device?.startsWith('CUDA') == true) {
       throw StateError('simulated CUDA startup failure');
     }
@@ -106,6 +108,40 @@ void main() {
       await provider.dispose();
       await temp.delete(recursive: true);
     }
+  });
+
+  test('synthetic verification observes native completion on selected CUDA route', () async {
+    final temp = await Directory.systemTemp.createTemp('aivexus-cuda-verification-');
+    try {
+      final cpu = File(p.join(temp.path, 'runtime-modern', 'llama-server.exe'));
+      final cuda = File(p.join(temp.path, 'runtime-cuda', 'llama-server.exe'));
+      await cpu.parent.create(recursive: true);
+      await cuda.parent.create(recursive: true);
+      await cpu.writeAsString('fixture');
+      await cuda.writeAsString('fixture');
+      final model = File(p.join(temp.path, 'model.gguf'));
+      await model.writeAsBytes([71, 71, 85, 70]);
+      final resident = _RecordingResident();
+      final cli = _RecordingCli();
+      final provider = AssistantResidentLocalRuntimeProvider(
+        delegate: cli, runtime: resident, executable: () => cpu.path,
+        isWindowsHost: () => true, isModernWindowsHost: () => true,
+        cudaQaEnabled: () => true,
+        gpuDeviceListing: (_) async => 'CUDA0: NVIDIA GPU (8192 MiB, 7000 MiB free)',
+      );
+      try {
+        final chunks = await provider.streamVerificationInference(
+          request: InferenceRequest(sessionId: 'runtime_self_test',
+            prompt: 'Reply with the single word: OK', modelId: 'deepseek_r1_7b',
+            modelPath: model.path, maxTokens: 4),
+          cancellationToken: CancellationToken(),
+        ).toList();
+        expect(resident.lastDevice, 'CUDA0');
+        expect(resident.lastRejectTokenLimit, isFalse);
+        expect(cli.calls, 0);
+        expect(chunks.last.terminalState, InferenceTerminalState.success);
+      } finally { await provider.dispose(); }
+    } finally { await temp.delete(recursive: true); }
   });
 
   test('Assistant chat decorator preserves resident Qwen completion',
