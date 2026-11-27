@@ -128,6 +128,7 @@ const Map<String, Map<String, String>> _translations = {
     'Invia messaggio': 'Envoyer le message',
     'Tu': 'Vous',
     'Esporta dati JSON': 'Exporter les données JSON',
+    'Esportazione dei dati non riuscita.': 'Échec de l’exportation des données.',
     'Limite di generazione raggiunto. Riprova più tardi.':
         'Limite de génération atteinte. Réessayez plus tard.',
     'Self-Test Cloud': 'Test automatique Cloud',
@@ -320,6 +321,7 @@ const Map<String, Map<String, String>> _translations = {
     'Invia messaggio': 'Send message',
     'Tu': 'You',
     'Esporta dati JSON': 'Export JSON data',
+    'Esportazione dei dati non riuscita.': 'Data export failed.',
     'Limite di generazione raggiunto. Riprova più tardi.':
         'Generation limit reached. Try again later.',
 
@@ -472,6 +474,7 @@ const Map<String, Map<String, String>> _translations = {
     'Invia messaggio': 'Enviar mensaje',
     'Tu': 'Tú',
     'Esporta dati JSON': 'Exportar datos JSON',
+    'Esportazione dei dati non riuscita.': 'No se pudo exportar los datos.',
     'Limite di generazione raggiunto. Riprova più tardi.':
         'Límite de generación alcanzado. Inténtalo más tarde.',
 
