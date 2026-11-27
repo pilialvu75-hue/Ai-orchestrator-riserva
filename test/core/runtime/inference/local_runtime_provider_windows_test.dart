@@ -21,6 +21,13 @@ class _ProcessProvider extends LocalRuntimeProvider {
 }
 
 void main() {
+  test('modern Windows validation has no arbitrary 12 GiB file ceiling', () {
+    const gib = 1024 * 1024 * 1024;
+    expect(LocalRuntimeProvider.isAllowedModelFileSize(20 * gib, modernWindows: true), isTrue);
+    expect(LocalRuntimeProvider.isAllowedModelFileSize(20 * gib, modernWindows: false), isFalse);
+    expect(LocalRuntimeProvider.isAllowedModelFileSize(0, modernWindows: true), isFalse);
+  });
+
   group('Windows process completion', () {
     late Directory temporary;
     late File model;
