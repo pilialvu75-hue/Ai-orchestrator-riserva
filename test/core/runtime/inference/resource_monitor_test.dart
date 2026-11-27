@@ -101,9 +101,30 @@ void main() {
     expect(sample?.availableBytes, 4 << 30);
     expect(sample?.totalBytes, 16 << 30);
     expect(sample?.thresholdBytes, isNull);
-    expect(sample?.pressure, 'unknown');
+    expect(sample?.pressure, 'normal');
     expect(sample?.critical, isFalse);
+    expect(sample?.windowsPressureThresholdBytes, (16 << 30) ~/ 20);
   });
+  test('Windows physical RAM pressure recognizes owner logs and preserves unknown data', () {
+    for (final available in [13742080, 478056448, 0]) {
+      final reading = ResourceSample({
+        'windowsSample': true,
+        'totalBytes': 16784617472,
+        'availableBytes': available,
+      });
+      expect(reading.pressure, 'critical', reason: '$available');
+      expect(reading.thresholdBytes, isNull);
+    }
+    expect(ResourceSample({'windowsSample': true, 'totalBytes': 16 << 30,
+      'availableBytes': 1100 << 20}).pressure, 'high');
+    expect(ResourceSample({'windowsSample': true, 'totalBytes': 16 << 30,
+      'availableBytes': 4 << 30}).pressure, 'normal');
+    expect(ResourceSample({'windowsSample': true,
+      'availableBytes': 0}).pressure, 'unknown');
+    expect(ResourceSample({'totalBytes': 16 << 30,
+      'availableBytes': 13742080}).pressure, 'unknown');
+  });
+
   test('Phi remembers pressure after unloading and uses a smaller next session',
       () async {
     var data = <Object?, Object?>{

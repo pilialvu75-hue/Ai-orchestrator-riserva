@@ -6,12 +6,14 @@ import 'package:flutter/services.dart';
 
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:ai_orchestrator/core/runtime/inference/windows_engine_process_tracker.dart';
+import 'package:ai_orchestrator/core/runtime/inference/windows_generation_metrics.dart';
 
 /// Unknown readings stay null. RSS, native heap and system RAM are distinct;
 /// they must never be added together as an estimate of app memory.
 class ResourceSample {
   ResourceSample(Map<Object?, Object?> data, {DateTime? timestamp})
       : timestamp = timestamp ?? DateTime.now(),
+        windowsSample = data['windowsSample'] == true,
         availableBytes = _number(data['availableBytes']),
         totalBytes = _number(data['totalBytes']),
         thresholdBytes = _number(data['thresholdBytes']),
@@ -33,6 +35,17 @@ class ResourceSample {
         trimLevel = _number(data['trimLevel']) ?? 0;
 
   final DateTime timestamp;
+  final bool windowsSample;
+
+  /// Diagnostic policy, not an OS low-memory notification or allocation guarantee.
+  /// Reserve 5% of physical RAM, bounded to 256–1024 MiB.
+  int? get windowsPressureThresholdBytes {
+    final total = totalBytes;
+    if (!windowsSample || total == null || total <= 0) return null;
+    return (total ~/ 20).clamp(256 * 1048576, 1024 * 1048576).toInt();
+  }
+  int? get effectiveThresholdBytes => windowsSample
+      ? windowsPressureThresholdBytes : thresholdBytes;
   final double? systemCpuPercent, appCpuPercent, engineCpuPercent;
   final int? enginePid, engineGeneration, engineRssBytes;
 
@@ -88,20 +101,20 @@ class ResourceSample {
       lowMemory ||
       trimLevel == 15 ||
       (availableBytes != null &&
-          thresholdBytes != null &&
-          availableBytes! <= thresholdBytes!);
+          effectiveThresholdBytes != null &&
+          availableBytes! <= effectiveThresholdBytes!);
   bool get pressured =>
       critical ||
       trimLevel == 5 ||
       trimLevel == 10 ||
       (availableBytes != null &&
-          thresholdBytes != null &&
-          availableBytes! < thresholdBytes! + 512 * 1024 * 1024);
+          effectiveThresholdBytes != null &&
+          availableBytes! < effectiveThresholdBytes! + 512 * 1024 * 1024);
   String get pressure => critical
       ? 'critical'
       : pressured
           ? 'high'
-          : availableBytes != null && thresholdBytes != null
+          : availableBytes != null && effectiveThresholdBytes != null
               ? 'normal'
               : 'unknown';
 }
@@ -214,6 +227,7 @@ class ResourceMonitor extends ChangeNotifier {
     );
     if (data == null) return null;
     final clean = Map<Object?, Object?>.of(data);
+    clean['windowsSample'] = true;
     clean.remove('engineGeneration');
     if (lease != null && identical(tracker.current, lease) &&
         clean['enginePid'] == lease.pid) {
@@ -318,15 +332,21 @@ class ResourceMonitor extends ChangeNotifier {
               'engine_cpu=${current ? reading.engineCpuPercent ?? -1 : -1} '
               'engine_rss_bytes=${current ? reading.engineRssBytes ?? -1 : -1}');
         }
+        final windowsPhase = WindowsGenerationMetrics.instance.phase;
+        final samplePhase = reading.windowsSample
+            ? (windowsPhase == 'preparing' || windowsPhase == 'streaming'
+                ? windowsPhase : 'idle')
+            : phase;
         _logger(
           '[RESOURCE_SAMPLE] available_bytes=${reading.availableBytes ?? -1} '
           'rss_bytes=${reading.rssBytes ?? -1} native_heap_bytes=${reading.nativeHeapBytes ?? -1} '
           'battery_temp_decic=${reading.batteryTemperatureDeciC ?? -1} '
-          'critical=${reading.critical} phase=$phase '
+          'critical=${reading.critical} phase=$samplePhase '
           'gpu_layers=${native['gpu_layers'] ?? -1} '
           'decode_calls=${native['decode_calls'] ?? -1} '
           'prefill_ms=${native['prefill_ms'] ?? -1} '
           'total_bytes=${reading.totalBytes ?? -1} threshold_bytes=${reading.thresholdBytes ?? -1} '
+          'windows_pressure_threshold_bytes=${reading.windowsPressureThresholdBytes ?? -1} '
           'pressure=${reading.pressure} low_memory=${reading.lowMemory} trim_level=${reading.trimLevel} '
           'n_ctx=${native['context'] ?? -1} n_batch=${native['batch'] ?? -1} '
           'n_ubatch=${native['micro_batch'] ?? -1}',
