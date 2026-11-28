@@ -4,16 +4,59 @@ import { createChromiumWebVerifier } from '../../scripts/web/chromium_web_verifi
 import { test } from 'node:test';
 import { createOpenBoxCad, renderOpenBox } from '../../scripts/web/studio_3d_open_box.mjs';
 
-import { mountStudioStlPreview } from '../../web/studio_3d_preview.mjs';
+import { mountStudioStlPreview, readStudioStl } from '../../web/studio_3d_preview.mjs';
 
 import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio_cad_job.mjs';
 import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
   importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
-import { detectPhotoCavity, detectPhotoSilhouette, estimatePhotoDimension, isRectangularPhotoSilhouette, nextPhotoView } from '../../web/studio_3d_photo.mjs';
+import { detectPhotoCavity, detectPhotoSilhouette, estimatePhotoDimension, extrudePhotoProfile, isRectangularPhotoSilhouette, nextPhotoView, tracePhotoProfile } from '../../web/studio_3d_photo.mjs';
 import { checkOpenBoxFdm } from '../../web/studio_3d_fdm.mjs';
 
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
+
+test('traces a non-rectangular silhouette while rejecting a profile with a hole', () => {
+  const width = 32, height = 32;
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  for (let y = 6; y < 26; y++) {
+    for (let x = 6; x < (y < 13 ? 26 : 13); x++) {
+      data.fill(0, (y * width + x) * 4, (y * width + x) * 4 + 3);
+    }
+  }
+  const image = { width, height, data };
+  const contour = tracePhotoProfile(image);
+  assert.equal(contour.length, 6);
+  assert.deepEqual(readStudioStl(extrudePhotoProfile(contour, 40, 5)).bounds,
+    [[0, 40], [0, 40], [0, 5]]);
+  data.fill(255, (9 * width + 9) * 4, (9 * width + 9) * 4 + 4);
+  assert.equal(tracePhotoProfile(image), null);
+});
+
+test('extrudes a concave outline to scale with closed, oriented edges', () => {
+  const profile = [[0, 0], [40, 0], [40, 10], [10, 10], [10, 30], [0, 30]]
+    .map(([x, y]) => ({ x, y }));
+  for (const points of [profile, [...profile].reverse()]) {
+    const { bounds, faces } = readStudioStl(extrudePhotoProfile(points, 80, 5));
+    assert.deepEqual(bounds, [[0, 80], [0, 60], [0, 5]]);
+    assert.equal(faces.length, 20);
+    const edgeCounts = new Map();
+    const edgeDirections = new Map();
+    for (const face of faces) {
+      for (let i = 0; i < 3; i++) {
+        const start = face[i].join(',');
+        const end = face[(i + 1) % 3].join(',');
+        const key = [start, end].sort().join('|');
+        edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+        edgeDirections.set(key, (edgeDirections.get(key) ?? 0) + (start < end ? 1 : -1));
+      }
+    }
+    assert.ok([...edgeCounts.values()].every(count => count === 2));
+    assert.ok([...edgeDirections.values()].every(direction => direction === 0));
+  }
+  const crossing = [[0, 0], [20, 20], [20, 0], [0, 20]].map(([x, y]) => ({ x, y }));
+  assert.throws(() => extrudePhotoProfile(crossing, 80, 5), /si incrocia/);
+  assert.throws(() => extrudePhotoProfile(profile, 80, 0), RangeError);
+});
 
 test('accepts numeric dimensions and rejects invalid cavities and source injection', () => {
   assert.match(createOpenBoxCad(box), /width = 80;/);
