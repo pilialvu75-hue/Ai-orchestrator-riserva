@@ -110,6 +110,37 @@ void main() {
     }
   }
 
+  test('failed evidence stops generative providers for unrelated factual domains', () async {
+    final local = _CountingLocalRuntimeProvider(onStream: () {
+      fail('Must not generate unverified current facts locally');
+    });
+    final cloud = CloudRuntimeProvider(
+      sendQuery: (_, __) async {
+        fail('Must not generate or replay unverified current facts in Cloud');
+      },
+      supportedProviders: () => const <String>['openAi'],
+      isProviderAvailable: (_) => true,
+      providerDisplayName: ([name]) => name ?? 'OpenAI',
+    );
+    final service = DirectiveAwareInferenceService(
+      loadSelectedModel: () async => null,
+      loadRuntimeMode: () async => AiRuntimeMode.cloud,
+      runtimeProvider: local,
+      cloudRuntimeProvider: cloud,
+      sessionManager: RuntimeSessionManager(),
+    );
+    for (final prompt in ['Quali sono le ultime notizie?',
+      'Quali treni ci sono domani?', 'Quali sono le leggi attuali in Francia?']) {
+      final result = await service.stream(InferenceRequest(
+        sessionId: 'failed-evidence',
+        prompt: prompt,
+        systemPrompt: '[WEB SEARCH UNAVAILABLE]',
+      )).toList();
+      expect(result.single.providerId, 'web_verification_unavailable');
+      expect(result.single.text, contains('Non posso confermare'));
+    }
+  });
+
   test('cloudOnly never falls back to the selected local model', () async {
     var selectedModelLoads = 0;
     var cloudCalls = 0;
