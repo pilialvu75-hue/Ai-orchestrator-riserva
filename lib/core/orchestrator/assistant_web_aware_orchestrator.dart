@@ -445,7 +445,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       temperature: temperature ?? InferenceRequest.defaultTemperature,
     );
 
-    if (!local && !AssistantWebSearchPolicy.isSportsScheduleQuery(input) &&
+    if (!local && !AssistantWebSearchPolicy.requiresFreshEvidence(input) &&
         (!_cloudRuntimeProvider.shouldPreferCloudFor(probe) ||
         _cloudRuntimeProvider.recommendProviderFor(
               probe,
@@ -477,7 +477,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
           'status=unavailable reason=tool_unavailable '
           'action=continue_without_web',
         );
-        return local || AssistantWebSearchPolicy.isSportsScheduleQuery(input)
+        return local || AssistantWebSearchPolicy.requiresFreshEvidence(input)
             ? '${systemPrompt ?? ''}\n\n[WEB SEARCH UNAVAILABLE]\nLive verification failed. Do not invent current facts.'
             : systemPrompt;
       }
@@ -494,7 +494,7 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
         'status=failed error_type=${error.runtimeType} '
         'action=continue_without_web',
       );
-      return local || AssistantWebSearchPolicy.isSportsScheduleQuery(input)
+      return local || AssistantWebSearchPolicy.requiresFreshEvidence(input)
             ? '${systemPrompt ?? ''}\n\n[WEB SEARCH UNAVAILABLE]\nLive verification failed. Do not invent current facts.'
             : systemPrompt;
     }
@@ -527,14 +527,25 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
   }
 
   InferenceResponse? _unverifiedFreshFact(String input, String? systemPrompt, bool offline) {
-    final schedule = AssistantWebSearchPolicy.isSportsScheduleQuery(input);
-    if ((!schedule && _runtimeSettingsService.runtimeMode != AiRuntimeMode.local) ||
+    if (_gatedHybrid) return null;
+    final requiredEvidence = AssistantWebSearchPolicy.requiresFreshEvidence(input);
+    if ((!requiredEvidence && _runtimeSettingsService.runtimeMode != AiRuntimeMode.local) ||
         (!offline && !(systemPrompt?.contains('[WEB SEARCH UNAVAILABLE]') ?? false)) ||
-        !(schedule || AssistantWebSearchPolicy.isPresentOfficeHolderQuery(input) ||
+        !(requiredEvidence || AssistantWebSearchPolicy.isPresentOfficeHolderQuery(input) ||
           AssistantWebSearchPolicy.isSportsResultQuery(input) ||
           AssistantWebSearchPolicy.isUpcomingEpisodeQuery(input) ||
           (!offline && (AssistantWebSearchPolicy.isSportsResultFollowUp(input) ||
             AssistantWebSearchPolicy.isAnswerVerification(input))))) return null;
+    if (requiredEvidence &&
+        !AssistantWebSearchPolicy.isPresentOfficeHolderQuery(input) &&
+        !AssistantWebSearchPolicy.isSportsResultQuery(input) &&
+        !AssistantWebSearchPolicy.isUpcomingEpisodeQuery(input)) {
+      return InferenceResponse.finalChunk(
+        text: AssistantWebSearchPolicy.unavailableEvidenceMessage(input),
+        tokensGenerated: 0,
+        providerId: 'web_verification_unavailable',
+      );
+    }
     final french = RegExp(
       r'\b(?:résultat|resultat|championnat|quel|est|donc|prochain|prochaine|épisode|saison)\b',
       caseSensitive: false,
