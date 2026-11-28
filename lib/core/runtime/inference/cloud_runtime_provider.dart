@@ -71,6 +71,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
   static const int _maxCacheEntries = 40;
   static const Duration _rateLimitBackoff = Duration(minutes: 2);
   static const Duration _quotaBackoff = Duration(minutes: 15);
+  static const Duration _authBackoff = Duration(minutes: 2);
   static const Duration _temporaryFailureBackoff = Duration(seconds: 20);
 
   CloudRuntimeProvider({
@@ -695,6 +696,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     final now = _now();
     for (final provider in configured) {
       final health = _providerHealth[provider];
+      if (health?.authBlockedUntil?.isAfter(now) ?? false) {
+        return '${_providerDisplayName(provider)} authentication failed. '
+            'Verify your API key in Settings > AI mode.';
+      }
       if (health?.rateLimitedUntil?.isAfter(now) ?? false) {
         return '${_providerDisplayName(provider)} rate limit reached. '
             'Retry later or choose another provider in Settings > AI mode.';
@@ -735,6 +740,11 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     final state = _providerHealth.putIfAbsent(provider, _ProviderHealth.new);
     final now = _now();
 
+    // A manually pinned provider may be retried after the user fixes the
+    // API key. AUTO avoids repeatedly dispatching known bad credentials.
+    if (enforceAutomaticPolicy && (state.authBlockedUntil?.isAfter(now) ?? false)) {
+      return false;
+    }
     if (state.rateLimitedUntil != null && state.rateLimitedUntil!.isAfter(now)) {
       return false;
     }
@@ -761,6 +771,7 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
     state.successfulRequests++;
     state.consecutiveFailures = 0;
     state.lastError = null;
+    state.authBlockedUntil = null;
     state.rateLimitedUntil = null;
     state.quotaBlockedUntil = null;
     state.unavailableUntil = null;
@@ -791,6 +802,16 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
           ? retryAfter
           : null;
       switch (failure.kind) {
+        case CloudFailureKind.authentication:
+          state.authBlockedUntil = now.add(_authBackoff);
+          return;
+        case CloudFailureKind.incompleteOutput:
+        case CloudFailureKind.emptyOutput:
+        case CloudFailureKind.timeout:
+        case CloudFailureKind.network:
+        case CloudFailureKind.providerUnavailable:
+          state.unavailableUntil = now.add(delay ?? _temporaryFailureBackoff);
+          return;
         case CloudFailureKind.rateLimit:
           state.rateLimitedUntil = now.add(delay ?? _rateLimitBackoff);
           return;
@@ -846,6 +867,10 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
       );
     }
 
+    if (health.authBlockedUntil?.isAfter(now) ?? false) {
+      return _snapshot(provider, health, CloudProviderOperationalState.authRequired,
+        retryAt: health.authBlockedUntil);
+    }
     if (health.rateLimitedUntil?.isAfter(now) ?? false) {
       return _snapshot(
         provider,
@@ -941,6 +966,14 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
           ? ''
           : ' (HTTP ${error.statusCode})';
       switch (error.kind) {
+        case CloudFailureKind.authentication:
+          return '${_providerDisplayName(provider)} authentication failed$httpStatus.';
+        case CloudFailureKind.incompleteOutput:
+          return '${_providerDisplayName(provider)} returned incomplete output.';
+        case CloudFailureKind.emptyOutput:
+          return '${_providerDisplayName(provider)} returned empty output.';
+        case CloudFailureKind.timeout:
+          return '${_providerDisplayName(provider)} timed out.';
         case CloudFailureKind.quota:
           return '${_providerDisplayName(provider)} quota unavailable$httpStatus.';
         case CloudFailureKind.rateLimit:
@@ -1084,6 +1117,7 @@ class _ProviderHealth {
   int failedRequests = 0;
   int consecutiveFailures = 0;
   String? lastError;
+  DateTime? authBlockedUntil;
   DateTime? rateLimitedUntil;
   DateTime? quotaBlockedUntil;
   DateTime? unavailableUntil;
