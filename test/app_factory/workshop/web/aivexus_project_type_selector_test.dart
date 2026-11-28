@@ -92,7 +92,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(provider.calls, 0);
-        expect(find.text(testCase.detailLabel), findsOneWidget);
+        final studioButton = find.widgetWithText(FilledButton, testCase.detailLabel);
+        expect(find.text(testCase.detailLabel), findsWidgets);
 
         final reopened = await WorkshopWebProjectStorage.open();
         final projects = await reopened.loadAll();
@@ -112,9 +113,9 @@ void main() {
 
         await tester.tap(find.text(testCase.title));
         await tester.pumpAndSettle();
-        expect(find.text(testCase.detailLabel), findsOneWidget);
+        expect(find.text(testCase.detailLabel), findsWidgets);
         if (testCase.kind == AivexusProjectKind.game) {
-          await tester.tap(find.text(testCase.detailLabel));
+          await tester.tap(studioButton);
           expect(studioBrief, startsWith('Crea un gioco 2D'));
           expect(studioBrief, endsWith('Descrizione dominio persistente'));
         }

@@ -183,7 +183,7 @@ final class _WorkshopWebProjectsPageState
         currentPhase: _projectKindLabel(kind),
         currentItem: kind == AivexusProjectKind.cad
             ? 'Apri Studio Stampa 3D per generare il modello'
-            : 'Bozza salvata · runner non ancora collegato',
+            : 'Apri AIVEXUS Studio',
         createdAt: now,
         updatedAt: now,
         extension: AivexusProjectExtension.draft(kind),
@@ -746,10 +746,7 @@ proposta breve, concreta e approvabile.
               _infoRow('Fase', _tr(project.currentPhase)),
               _infoRow(
                 'Elemento',
-                _tr(project.projectKind == AivexusProjectKind.cad &&
-                        project.currentItem == 'Bozza salvata · runner non ancora collegato'
-                    ? 'Apri Studio Stampa 3D per generare il modello'
-                    : project.currentItem),
+                _tr(_currentItem(project)),
               ),
               _infoRow('Stato progetto', _tr(_statusLabel(project.status))),
               const SizedBox(height: 16),
@@ -881,6 +878,18 @@ proposta breve, concreta e approvabile.
         ),
       ),
     );
+  }
+
+  String _currentItem(WorkshopWebProject project) {
+    if (project.currentItem != 'Bozza salvata · runner non ancora collegato') {
+      return project.currentItem;
+    }
+    return switch (project.projectKind) {
+      AivexusProjectKind.cad => 'Apri Studio Stampa 3D per generare il modello',
+      AivexusProjectKind.game when !project.isReadOnly &&
+          widget.onOpenWebStudio != null => 'Apri AIVEXUS Studio',
+      _ => project.currentItem,
+    };
   }
 
   static String _projectKindLabel(AivexusProjectKind? kind) => switch (kind) {
