@@ -905,6 +905,36 @@ void main() {
     expect(request.systemPrompt, 'Base prompt.');
   });
 
+  test('HYBRID local preference still searches current fixtures', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(false);
+    when(() => webSearch.execute(any())).thenAnswer((_) async => const ToolResult(
+      toolId: 'web_search', output: 'Fixture evidence https://example.test/fixtures',
+    ));
+    final chunks = await build().handleStream(
+      'Quali partite ci sono stasera?', sessionId: 'hybrid-fixtures',
+    ).toList();
+    expect(chunks.last.text, 'ok');
+    verify(() => webSearch.execute(any())).called(1);
+    final request = verify(() => inference.stream(captureAny())).captured.single
+        as InferenceRequest;
+    expect(request.systemPrompt, contains('https://example.test/fixtures'));
+  });
+
+  test('HYBRID failed fixture lookup cannot generate invented fixtures', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(false);
+    when(() => webSearch.execute(any())).thenAnswer((_) async => const ToolResult(
+      toolId: 'web_search', output: '', success: false,
+    ));
+    final chunks = await build().handleStream(
+      'Quali partite ci sono stasera?', sessionId: 'hybrid-fixtures-unavailable',
+    ).toList();
+    expect(chunks.last.providerId, 'web_verification_unavailable');
+    verify(() => webSearch.execute(any())).called(1);
+    verifyNever(() => inference.stream(any()));
+  });
+
   test('pre-searches Local mode without asking the model to emit a tool call', () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.local);
     when(() => webSearch.execute(any())).thenAnswer(
