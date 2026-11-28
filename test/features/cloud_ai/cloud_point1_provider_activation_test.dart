@@ -67,6 +67,21 @@ void main() {
       );
     });
 
+    test('Mistral HTTP 402 is quota exhaustion without secret leakage', () async {
+      final repository = _repository(MockClient((_) async =>
+        http.Response('{"error":"quota secret-test-value"}', 402)));
+      final result = await repository.sendQueryWithProvider(
+        'mistral', const AiRequest(prompt: 'test'));
+      result.fold((failure) {
+        expect(failure, isA<CloudFailure>());
+        final cloud = failure as CloudFailure;
+        expect(cloud.kind, CloudFailureKind.quota);
+        expect(cloud.statusCode, 402);
+        expect(cloud.retryable, isFalse);
+        expect(cloud.message, isNot(contains('secret-test-value')));
+      }, (_) => fail('HTTP 402 must be a quota failure'));
+    });
+
     test('system routes preserve HTTP rate-limit metadata', () async {
       final client = MockClient(
         (_) async => http.Response(
