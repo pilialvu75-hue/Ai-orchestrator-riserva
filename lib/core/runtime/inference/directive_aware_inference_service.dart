@@ -122,13 +122,13 @@ final class DirectiveAwareInferenceService extends InferenceService {
   TokenStream stream(InferenceRequest request) {
     // The Assistant Cloud repository records a failed lookup in system context.
     // Do not invoke a generative provider or replay its cache for this case.
-    if (AssistantWebSearchPolicy.isSportsScheduleQuery(request.prompt) &&
+    if (AssistantWebSearchPolicy.requiresFreshEvidence(request.prompt) &&
         (request.systemPrompt?.contains('[WEB SEARCH UNAVAILABLE]') ?? false)) {
       RuntimeEventLog.instance.emit(
-        '[ASSISTANT_VERIFICATION] outcome=unavailable topic=sports_schedule',
+        '[ASSISTANT_VERIFICATION] outcome=unavailable reason=required_public_evidence',
       );
       return Stream<InferenceResponse>.value(InferenceResponse.finalChunk(
-        text: AssistantWebSearchPolicy.unavailableScheduleMessage(request.prompt),
+        text: AssistantWebSearchPolicy.unavailableEvidenceMessage(request.prompt),
         tokensGenerated: 0,
         providerId: 'web_verification_unavailable',
       ));
