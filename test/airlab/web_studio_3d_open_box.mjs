@@ -121,6 +121,66 @@ test('renders the real STL and redraws the mesh after keyboard rotation and zoom
 });
 
 const chromium = process.env.AIVEXUS_WEB_CHROMIUM;
+
+test('Chromium turns a photo into a downloadable STL preview',
+  { skip: !chromium, timeout: 45000 }, async () => {
+    const names = ['studio_3d_preview.mjs', 'studio_3d_preview_element.mjs',
+      'studio_3d_fdm.mjs', 'studio_3d_photo.mjs'];
+    const assets = new Map(await Promise.all(names.map(async name =>
+      [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
+    assets.set('index.html', '<!doctype html><button id="start">Load photo</button><output id="result"></output><script type="module" src="fixture.mjs"></script>');
+    assets.set('fixture.mjs', `
+      import './studio_3d_preview_element.mjs';
+      globalThis.fetch = async () => ({ ok: true, json: async () => ({ revisions: [], activeJob: null }) });
+      const viewer = document.createElement('aivexus-stl-preview');
+      viewer.setAttribute('project-id', 'web-project:1795000000000000');
+      document.body.append(viewer);
+      const root = viewer.shadowRoot;
+      const panel = root.querySelector('[data-photo]');
+      panel.open = true;
+      document.querySelector('#start').onclick = () => {
+        panel.querySelector('[data-photo-profile-mode]').click();
+        panel.querySelector('[data-profile-width]').value = 80;
+        panel.querySelector('[data-profile-thickness]').value = 5;
+        const image = document.createElement('canvas');
+        image.width = image.height = 120;
+        const ink = image.getContext('2d');
+        ink.fillStyle = '#fff';
+        ink.fillRect(0, 0, 120, 120);
+        ink.fillStyle = '#111';
+        ink.fillRect(20, 20, 80, 20);
+        ink.fillRect(20, 40, 20, 40);
+        const bytes = Uint8Array.from(atob(image.toDataURL().split(',')[1]), ch => ch.charCodeAt(0));
+        const file = panel.querySelector('[data-photo-file]');
+        const observer = new MutationObserver(() => {
+          if (panel.querySelector('canvas').hidden) return;
+          observer.disconnect();
+          panel.querySelector('[data-profile-detect]').click();
+          panel.querySelector('[data-profile-generate]').click();
+          const link = root.querySelector('[data-profile-download]');
+          const preview = root.querySelector('canvas');
+          if (!preview.hidden && !link.hidden && link.download === 'sagoma.stl' &&
+              link.href.startsWith('blob:')) {
+            document.querySelector('#result').textContent =
+              root.querySelector('output:not([data-job])').textContent;
+          }
+        });
+        observer.observe(panel.querySelector('[data-photo-status]'), { childList: true });
+        const selection = new DataTransfer();
+        selection.items.add(new File([bytes], 'profile.png', { type: 'image/png' }));
+        file.files = selection.files;
+        file.dispatchEvent(new Event('change'));
+      };
+    `);
+    const result = await createChromiumWebVerifier({ executable: chromium })({
+      assets,
+      checks: [
+        { action: 'click', selector: '#start' },
+        { action: 'text', selector: '#result', value: '80 × 60 × 5 mm' },
+      ],
+    });
+    assert.equal(result.status, 'passed', JSON.stringify(result));
+  });
 test('Chromium draws the OpenSCAD STL and changes canvas pixels after rotation and zoom',
   { skip: !chromium, timeout: 45000 }, async () => {
     const { stl } = await renderOpenBox(box);
@@ -293,6 +353,7 @@ test('Chromium submits dimensions and opens the verified CAD revision after refr
           const measure = panel.querySelector('[data-photo-reference]');
           measure.value = 50;
           measure.dispatchEvent(new Event('input'));
+          image.style.width = '220px';
           const rect = image.getBoundingClientRect();
           for (const [x, y] of [[10, 12], [110, 12]]) {
             image.dispatchEvent(new MouseEvent('click', {
