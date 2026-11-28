@@ -30,6 +30,7 @@ void main() {
     AiModel? preferred,
     ResourceSample? memory,
     bool android = false,
+    bool windows = false,
     bool Function(AiModel)? supports,
     List<ChatTurn> context = const [],
     String? lastCompletedModelId,
@@ -45,9 +46,37 @@ void main() {
     supportsModel: supports ?? (_) => true,
     resources: memory,
     isAndroid: android,
+    isWindows: windows,
     lastCompletedModelId: lastCompletedModelId,
     successfulTurnsSinceSwitch: successfulTurnsSinceSwitch,
   );
+
+  test('Windows AUTO general dialogue does not prefer a coding favourite', () {
+    final coder = installed('deepseek_coder_6_7b_instruct', 4000000000);
+    final general = installed('qwen3_4b', 2500000000);
+    final memory = ResourceSample({
+      'windowsSample': true,
+      'availableBytes': 3669225472,
+      'totalBytes': 16784617472,
+    });
+    expect(route('Ciao, come stai?', models: [coder, general],
+      preferred: coder, memory: memory, windows: true)?.id, general.id);
+    expect(route('Scrivi codice Dart', models: [coder, general],
+      preferred: coder, memory: memory, windows: true)?.id, coder.id);
+  });
+
+  test('Windows physical RAM is a preference, not model exclusion', () {
+    final large = installed('qwen3_8b', 5000000000);
+    final reading = ResourceSample({
+      'windowsSample': true, 'availableBytes': 597405696,
+      'totalBytes': 16784617472,
+    });
+    expect(route('Ciao', models: [large], preferred: large,
+        memory: reading, windows: true)?.id, large.id);
+    expect(route('Ciao', models: [large, qwen], preferred: qwen,
+        lastCompletedModelId: large.id, memory: reading,
+        windows: true)?.id, large.id);
+  });
 
   test('ordinary chat sticks to the manual favorite where possible', () {
     expect(route('Ciao, come stai?')?.id, phi.id);
