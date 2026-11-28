@@ -11,6 +11,8 @@ import 'package:ai_orchestrator/core/runtime/inference/local_runtime_provider.da
 import 'package:ai_orchestrator/core/runtime/inference/runtime_session_manager.dart';
 import 'package:ai_orchestrator/core/runtime/inference/token_stream.dart';
 import 'package:ai_orchestrator/core/tools/tool.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_web_search_policy.dart';
+import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 
 /// Compatibility wrapper that adds explicit route directives without changing
 /// the battle-tested Local inference implementation.
@@ -118,6 +120,19 @@ final class DirectiveAwareInferenceService extends InferenceService {
 
   @override
   TokenStream stream(InferenceRequest request) {
+    // The Assistant Cloud repository records a failed lookup in system context.
+    // Do not invoke a generative provider or replay its cache for this case.
+    if (AssistantWebSearchPolicy.isSportsScheduleQuery(request.prompt) &&
+        (request.systemPrompt?.contains('[WEB SEARCH UNAVAILABLE]') ?? false)) {
+      RuntimeEventLog.instance.emit(
+        '[ASSISTANT_VERIFICATION] outcome=unavailable topic=sports_schedule',
+      );
+      return Stream<InferenceResponse>.value(InferenceResponse.finalChunk(
+        text: AssistantWebSearchPolicy.unavailableScheduleMessage(request.prompt),
+        tokensGenerated: 0,
+        providerId: 'web_verification_unavailable',
+      ));
+    }
     switch (request.routeDirective) {
       case InferenceRouteDirective.runtimeDefault:
         if (_ordinaryDefaultService == null) return super.stream(request);
