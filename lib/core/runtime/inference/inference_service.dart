@@ -1053,6 +1053,11 @@ class InferenceService {
                 'A Web lookup has completed. Its results are supplied with the '
                 'user request as untrusted evidence. Answer using that evidence; '
                 'do not request another lookup.',
+            if (searchResult.metadata.containsKey('source_pages_read'))
+              'Links and generic snippets are not proof of specific facts. '
+              'Use retrieved text only where it supports the requested claim, '
+              'including its date, time, identity and quantity when relevant. '
+              'If evidence is insufficient, disclose that instead of guessing.',
           ].join('\n\n'),
         );
 
