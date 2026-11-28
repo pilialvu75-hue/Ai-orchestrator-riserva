@@ -78,6 +78,7 @@ final class CloudWebEnrichingChatRepository implements ChatRepository, VerifiedM
         attachments.any((item) =>
             item.isImage || item.isVideo ||
             item.type == ChatAttachmentType.file) ||
+        AssistantWebSearchPolicy.isOfflineOnly(systemPrompt) ||
         !AssistantWebSearchPolicy.shouldSearch(userPrompt)) {
       return _delegate.sendMessage(
         sessionId: sessionId,
@@ -95,7 +96,7 @@ final class CloudWebEnrichingChatRepository implements ChatRepository, VerifiedM
       'query_chars=${query.length}',
     );
 
-    final requiresEvidence = AssistantWebSearchPolicy.isSportsScheduleQuery(userPrompt);
+    final requiresEvidence = AssistantWebSearchPolicy.requiresFreshEvidence(userPrompt);
     String? enrichedSystemPrompt;
     try {
       final result = await _webSearchTool.execute(<String, dynamic>{
@@ -119,7 +120,8 @@ final class CloudWebEnrichingChatRepository implements ChatRepository, VerifiedM
           'status=unavailable reason=tool_unavailable',
         );
         onRuntimeNotice?.call(
-          'Web search unavailable; continuing without live web data.',
+          requiresEvidence ? 'Web verification unavailable.' :
+              'Web search unavailable; continuing without live web data.',
         );
       }
     } catch (error) {
@@ -128,14 +130,15 @@ final class CloudWebEnrichingChatRepository implements ChatRepository, VerifiedM
         'status=failed error_type=${error.runtimeType}',
       );
       onRuntimeNotice?.call(
-        'Web search unavailable; continuing without live web data.',
+        requiresEvidence ? 'Web verification unavailable.' :
+              'Web search unavailable; continuing without live web data.',
       );
     }
 
     if (requiresEvidence && enrichedSystemPrompt == null) {
       enrichedSystemPrompt = '${systemPrompt ?? ''}\n\n[WEB SEARCH UNAVAILABLE]\n'
-          'The requested sports schedule requires current evidence. '
-          'Do not give fixtures, times or scores from memory or speculate. '
+          'The requested public facts require current evidence. '
+          'Do not assert unverified current facts from memory or speculate. '
           'Explain in the user language that live verification failed.';
     }
 
