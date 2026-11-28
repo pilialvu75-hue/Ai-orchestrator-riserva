@@ -1,4 +1,4 @@
-export function detectPhotoSilhouette({ data, width, height }) {
+export function detectPhotoSilhouette({ data, width, height }, withPixels = false) {
   if (width < 8 || height < 8 || width * height > 1_000_000) return null;
   const count = width * height;
   const contrast = id => {
@@ -38,6 +38,7 @@ export function detectPhotoSilhouette({ data, width, height }) {
     if (!largest || size > largest.size) {
       runnerUp = largest?.size ?? 0;
       largest = { left, top, right, bottom, size };
+      if (withPixels) largest.pixels = queue.slice(0, size);
     } else {
       runnerUp = Math.max(runnerUp, size);
     }
@@ -46,6 +47,41 @@ export function detectPhotoSilhouette({ data, width, height }) {
       !largest.left || !largest.top || largest.right === width - 1 ||
       largest.bottom === height - 1) return null;
   return largest;
+}
+
+export function tracePhotoProfile(image) {
+  const silhouette = detectPhotoSilhouette(image, true);
+  if (!silhouette) return null;
+  const { width } = image;
+  const stride = width + 1;
+  const pixels = new Set(silhouette.pixels);
+  const boundary = new Map();
+  function edge(start, end) {
+    if (boundary.has(start)) return false;
+    boundary.set(start, end);
+    return true;
+  }
+  for (const pixel of pixels) {
+    const x = pixel % width, y = Math.floor(pixel / width);
+    const corner = y * stride + x;
+    if ((!pixels.has(pixel - width) && !edge(corner, corner + 1)) ||
+        (!pixels.has(pixel + 1) && !edge(corner + 1, corner + stride + 1)) ||
+        (!pixels.has(pixel + width) && !edge(corner + stride + 1, corner + stride)) ||
+        (!pixels.has(pixel - 1) && !edge(corner + stride, corner))) return null;
+  }
+  const start = boundary.keys().next().value;
+  let vertex = start;
+  const contour = [];
+  do {
+    contour.push({ x: vertex % stride, y: Math.floor(vertex / stride) });
+    const next = boundary.get(vertex);
+    boundary.delete(vertex);
+    if (next === undefined) return null;
+    vertex = next;
+  } while (vertex !== start);
+  if (boundary.size) return null;
+  const corners = contour.filter((p, i) => turn(contour.at(i - 1), p, contour[(i + 1) % contour.length]) !== 0);
+  return corners.length >= 3 && corners.length <= 64 ? corners : null;
 }
 
 export function isRectangularPhotoSilhouette(outline) {
@@ -94,7 +130,78 @@ export function estimatePhotoDimension(points, referenceMm) {
   return estimate >= 0.1 && estimate <= 500 ? Number(estimate.toFixed(1)) : null;
 }
 
-export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoaded) {
+const turn = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+
+export function extrudePhotoProfile(points, widthMm, thicknessMm) {
+  if (points.length < 3 || points.length > 64 || points.some(p =>
+    !Number.isFinite(p.x) || !Number.isFinite(p.y)) ||
+    ![widthMm, thicknessMm].every(value => value >= 0.1 && value <= 500)) {
+    throw new RangeError('Servono da 3 a 64 punti, larghezza e spessore da 0,1 a 500 mm.');
+  }
+  const minX = Math.min(...points.map(p => p.x));
+  const maxY = Math.max(...points.map(p => p.y));
+  const span = Math.max(...points.map(p => p.x)) - minX;
+  const scale = widthMm / span;
+  const ring = points.map(p => ({ x: (p.x - minX) * scale, y: (maxY - p.y) * scale }));
+  const height = Math.max(...ring.map(p => p.y));
+  if (!Number.isFinite(scale) || height < 0.1 || height > 500) {
+    throw new RangeError('La sagoma deve avere dimensioni comprese tra 0,1 e 500 mm.');
+  }
+  const next = i => (i + 1) % ring.length;
+  const epsilon = 1e-8;
+  function onSegment(a, b, p) {
+    return Math.abs(turn(a, b, p)) <= epsilon &&
+      p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) &&
+      p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y);
+  }
+  for (const [i, a] of ring.entries()) {
+    const b = ring[next(i)];
+    if (Math.abs(turn(a, b, ring[next(next(i))])) <= epsilon) {
+      throw new RangeError('Rimuovi i punti duplicati o allineati sullo stesso lato.');
+    }
+    for (let j = i + 2; j < ring.length; j++) {
+      if (next(j) === i) continue;
+      const c = ring[j], d = ring[next(j)];
+      if ((turn(a, b, c) * turn(a, b, d) < 0 && turn(c, d, a) * turn(c, d, b) < 0) ||
+          onSegment(a, b, c) || onSegment(a, b, d) || onSegment(c, d, a) || onSegment(c, d, b)) {
+        throw new RangeError('Il contorno si incrocia. Segna i punti seguendo il bordo in ordine.');
+      }
+    }
+  }
+  const area = ring.reduce((sum, p, i) => sum + p.x * ring[next(i)].y - p.y * ring[next(i)].x, 0);
+  if (area < 0) ring.reverse();
+  const remaining = [...ring];
+  const faces = [];
+  const vertex = (p, z) => [p.x, p.y, z];
+  function triangle(u, v, w) {
+    const d = v.map((value, axis) => value - u[axis]);
+    const e = w.map((value, axis) => value - u[axis]);
+    const normal = [d[1] * e[2] - d[2] * e[1], d[2] * e[0] - d[0] * e[2], d[0] * e[1] - d[1] * e[0]];
+    const magnitude = Math.hypot(...normal);
+    const vertices = [u, v, w].map(point => `  vertex ${point.join(' ')}`).join('\n');
+    faces.push(`facet normal ${normal.map(value => value / magnitude).join(' ')}\n outer loop\n${vertices}\n endloop\nendfacet`);
+  }
+  while (remaining.length >= 3) {
+    const ear = remaining.findIndex((b, i) => {
+      const a = remaining.at(i - 1), c = remaining[(i + 1) % remaining.length];
+      return turn(a, b, c) > epsilon && !remaining.some(p => p !== a && p !== b && p !== c &&
+        turn(a, b, p) >= -epsilon && turn(b, c, p) >= -epsilon && turn(c, a, p) >= -epsilon);
+    });
+    if (ear < 0) throw new RangeError('Impossibile chiudere la sagoma. Controlla i punti.');
+    const a = remaining.at(ear - 1), b = remaining[ear], c = remaining[(ear + 1) % remaining.length];
+    triangle(vertex(a, thicknessMm), vertex(b, thicknessMm), vertex(c, thicknessMm));
+    triangle(vertex(c, 0), vertex(b, 0), vertex(a, 0));
+    remaining.splice(ear, 1);
+  }
+  for (const [i, a] of ring.entries()) {
+    const b = ring[next(i)];
+    triangle(vertex(a, 0), vertex(b, 0), vertex(b, thicknessMm));
+    triangle(vertex(a, 0), vertex(b, thicknessMm), vertex(a, thicknessMm));
+  }
+  return `solid sagoma\n${faces.join('\n')}\nendsolid sagoma\n`;
+}
+
+export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoaded, onProfile) {
   const input = panel.querySelector('[data-photo-file]');
   const canvas = panel.querySelector('canvas');
   const status = panel.querySelector('output');
@@ -102,6 +209,8 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
   const axis = panel.querySelector('[data-photo-axis]');
   const apply = panel.querySelector('[data-photo-apply]');
   const reset = panel.querySelector('[data-photo-reset]');
+  const profileMode = panel.querySelector('[data-photo-profile-mode]');
+  const profile = panel.querySelector('[data-photo-profile]');
   const context = canvas.getContext('2d');
   if (!context) return;
 
@@ -117,7 +226,7 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
 
   function redraw() {
     if (!image) return;
-    if (imageView !== view.value) {
+    if (!profileMode.checked && imageView !== view.value) {
       apply.disabled = true;
       canvas.hidden = true;
       status.textContent = 'Carica una foto per la nuova angolazione selezionata.';
@@ -125,11 +234,24 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
     }
     canvas.hidden = false;
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    if (profileMode.checked && points.length > 1) {
+      context.beginPath();
+      context.moveTo(points[0].x, points[0].y);
+      for (const point of points.slice(1)) context.lineTo(point.x, point.y);
+      if (points.length > 2) context.closePath();
+      context.strokeStyle = '#54e7ff';
+      context.lineWidth = 2;
+      context.stroke();
+    }
     for (const [index, point] of points.entries()) {
       context.beginPath();
       context.arc(point.x, point.y, 5, 0, Math.PI * 2);
       context.fillStyle = index < 2 ? '#ffcd52' : '#54e7ff';
       context.fill();
+    }
+    if (profileMode.checked) {
+      status.textContent = `${points.length} punti. Segna il contorno esterno in ordine.`;
+      return;
     }
     const prompts = [
       'Segna il primo estremo del riferimento.',
@@ -172,7 +294,7 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
       canvas.width = Math.max(2, Math.round(image.width * scale));
       canvas.height = Math.max(2, Math.round(image.height * scale));
       canvas.hidden = false;
-      onPhotoLoaded?.();
+      if (!profileMode.checked) onPhotoLoaded?.();
       redraw();
     } catch {
       if (!signal.aborted && version === imageVersion) {
@@ -184,7 +306,8 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
   }, { signal });
 
   canvas.addEventListener('click', event => {
-    if (!image || imageView !== view.value || points.length === 4) return;
+    if (!image || (!profileMode.checked && imageView !== view.value) ||
+        points.length >= (profileMode.checked ? 64 : 4)) return;
     const bounds = canvas.getBoundingClientRect();
     points.push({
       x: (event.clientX - bounds.left) * canvas.width / bounds.width,
@@ -193,6 +316,40 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
     redraw();
   }, { signal });
   reset.addEventListener('click', () => { points = []; redraw(); }, { signal });
+  profileMode.addEventListener('change', () => {
+    points = [];
+    profile.hidden = !profileMode.checked;
+    for (const field of panel.querySelectorAll('[data-photo-measure]')) field.hidden = profileMode.checked;
+    if (!profileMode.checked && image) onPhotoLoaded?.();
+    redraw();
+  }, { signal });
+  profile.querySelector('[data-profile-detect]').addEventListener('click', () => {
+    if (!image) {
+      status.textContent = 'Carica una foto prima di rilevare la sagoma.';
+      return;
+    }
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const detected = tracePhotoProfile(context.getImageData(0, 0, canvas.width, canvas.height));
+    if (!detected) {
+      redraw();
+      status.textContent = 'Contorno incerto o complesso. Usa uno sfondo uniforme oppure traccia il bordo a mano.';
+      return;
+    }
+    points = detected;
+    redraw();
+    status.textContent = 'Sagoma rilevata. Controlla il bordo e inserisci le misure.';
+  }, { signal });
+  profile.querySelector('[data-profile-generate]').addEventListener('click', () => {
+    try {
+      if (!image) throw new RangeError('Carica una foto prima di tracciare la sagoma.');
+      const width = profile.querySelector('[data-profile-width]').valueAsNumber;
+      const thickness = profile.querySelector('[data-profile-thickness]').valueAsNumber;
+      onProfile(extrudePhotoProfile(points, width, thickness));
+      status.textContent = 'Sagoma estrusa. Controlla il modello nell’anteprima 3D.';
+    } catch (error) {
+      status.textContent = error instanceof RangeError ? error.message : 'Impossibile generare la sagoma.';
+    }
+  }, { signal });
   reference.addEventListener('input', redraw, { signal });
   view.addEventListener('change', () => {
     const allowed = { front: ['width', 'height'], side: ['depth', 'height'], top: ['width', 'depth', 'wall'] }[view.value];

@@ -51,28 +51,37 @@ class AivexusStlPreview extends HTMLElement {
         <label hidden>Revisione salvata <select data-cad-history></select></label>
         <button type="button" data-select hidden>Imposta come revisione attiva</button>
         <a data-file="stl" hidden>Scarica STL</a> <a data-file="scad" hidden>Scarica SCAD</a>
+        <a data-profile-download download="sagoma.stl" hidden>Scarica STL della sagoma</a>
         <label>File STL <input type="file" accept=".stl,model/stl"></label>
         <output role="status"></output>
         <canvas width="800" height="560" tabindex="0" aria-label="Anteprima 3D"
           aria-describedby="controls"></canvas>
         <details data-photo hidden>
           <summary>Stima da fotografia</summary>
-          <p data-photo-guide role="status"></p>
-          <label>Angolazione <select data-photo-view>
+          <p data-photo-measure data-photo-guide role="status"></p>
+          <label><input type="checkbox" data-photo-profile-mode> Traccia ed estrudi una sagoma</label>
+          <label data-photo-measure>Angolazione <select data-photo-view>
             <option value="front">Frontale</option><option value="side">Laterale</option><option value="top">Superiore</option>
           </select></label>
-          <p>Usa una foto frontale e un riferimento sullo stesso piano. La foto resta nel browser.</p>
+          <p data-photo-measure>Usa una foto frontale e un riferimento sullo stesso piano. La foto resta nel browser.</p>
           <label>Foto <input data-photo-file type="file" accept="image/jpeg,image/png,image/webp"></label>
-          <label>Riferimento (mm) <input data-photo-reference type="number" min="0.1" step="any"></label>
-          <label>Dimensione <select data-photo-axis>
+          <label data-photo-measure>Riferimento (mm) <input data-photo-reference type="number" min="0.1" step="any"></label>
+          <label data-photo-measure>Dimensione <select data-photo-axis>
             <option value="width">Larghezza</option><option value="depth" disabled>Profondità</option>
             <option value="height">Altezza</option><option value="wall" disabled>Parete</option>
           </select></label>
           <canvas hidden aria-label="Foto da misurare"></canvas>
           <output data-photo-status role="status"></output>
-          <button type="button" data-photo-detect>Rileva contorno</button>
+          <button type="button" data-photo-measure data-photo-detect>Rileva contorno</button>
           <button type="button" data-photo-reset>Azzera punti</button>
-          <button type="button" data-photo-apply disabled>Usa stima nel progetto</button>
+          <button type="button" data-photo-measure data-photo-apply disabled>Usa stima nel progetto</button>
+          <div data-photo-profile hidden>
+            <p>Carica una foto perpendicolare alla sagoma. Rileva o segna il bordo esterno e inserisci la larghezza reale e lo spessore desiderato. I fori interni e le parti nascoste richiedono una ricostruzione separata.</p>
+            <button type="button" data-profile-detect>Rileva sagoma</button>
+            <label>Larghezza reale (mm) <input data-profile-width type="number" min="0.1" max="500" step="any"></label>
+            <label>Spessore (mm) <input data-profile-thickness type="number" min="0.1" max="500" step="any"></label>
+            <button type="button" data-profile-generate>Genera STL da sagoma</button>
+          </div>
         </details>
         <details data-fdm hidden>
           <summary>Controlli di stampa FDM</summary>
@@ -102,6 +111,13 @@ class AivexusStlPreview extends HTMLElement {
     this.requests = requests;
     let loadNumber = 0;
     const links = root.querySelectorAll('a[data-file]');
+    const profileDownload = root.querySelector('[data-profile-download]');
+    const clearProfileDownload = () => {
+      if (profileDownload.hasAttribute('href')) URL.revokeObjectURL(profileDownload.href);
+      profileDownload.removeAttribute('href');
+      profileDownload.hidden = true;
+    };
+    requests.signal.addEventListener('abort', clearProfileDownload, { once: true });
     const printPanel = root.querySelector('[data-fdm]');
     const printForm = printPanel.querySelector('form');
     const printReport = printPanel.querySelector('ul');
@@ -146,6 +162,7 @@ class AivexusStlPreview extends HTMLElement {
       canvas.hidden = false;
     };
     const reset = () => {
+      clearProfileDownload();
       this.disposePreview?.();
       canvas.hidden = true;
       useRevision.hidden = true;
@@ -407,6 +424,12 @@ class AivexusStlPreview extends HTMLElement {
         review.hidden = false;
         confirmed.checked = false;
         reviewPhotoDimensions();
+      }, source => {
+        reset();
+        history.selectedIndex = -1;
+        show(source);
+        profileDownload.href = URL.createObjectURL(new Blob([source], { type: 'model/stl' }));
+        profileDownload.hidden = false;
       });
       try { pending = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* browser storage optional */ }
       updateControls();
