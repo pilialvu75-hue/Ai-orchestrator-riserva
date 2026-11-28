@@ -131,12 +131,32 @@ final class WindowsComputerUseAdapter
     _targetWindow = null;
     _observedForegroundWindow = null;
     _expectedLaunchedProcessId = null;
+    // A detached GUI process supplies no reliable exit status: a PowerShell
+    // syntax/runtime failure used to look identical to a successful launch.
+    // Track the fixed QA game briefly, without retaining or publishing its
+    // stdout/stderr (which can contain Windows desktop information).
+    final qaGame = application == 'qa2048';
     final launched = await Process.start(
       executable,
       args,
-      mode: ProcessStartMode.detached,
+      mode: qaGame ? ProcessStartMode.normal : ProcessStartMode.detached,
       runInShell: false,
     );
+    if (qaGame) {
+      unawaited(launched.stdout.drain<void>());
+      unawaited(launched.stderr.drain<void>());
+      final exitedEarly = await Future.any<bool>(<Future<bool>>[
+        launched.exitCode.then((_) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 1200), () => false),
+      ]);
+      if (exitedEarly) {
+        throw const ComputerUseException(
+          'QA_GAME_EXITED_EARLY',
+          '2048 stopped before its window could become ready. '
+              'No keyboard or mouse input was sent.',
+        );
+      }
+    }
     _expectedLaunchedProcessId = launched.pid;
   }
 
