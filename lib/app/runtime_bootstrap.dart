@@ -159,8 +159,9 @@ class RuntimeBootstrap {
     await CloudRoutingBootstrap.configure(
       di.sl,
       enableConsentGatedAssistantCloud: experimentalConsentGateEnabled,
-      // Reuse Cantiere's DNS-pinned HTTP transport. Never bind it to
-      // Cloud-mode inference, personal memory, or a global URL interceptor.
+      // Reuse Cantiere's DNS-pinned HTTP transport for approved Assistant
+      // web retrieval only. Never send model prompts or personal memory to
+      // the destination or bind it to a global URL interceptor.
       publicWebReader: const AssistantWorkshopPublicWebReader(),
     );
   }
