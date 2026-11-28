@@ -8,6 +8,7 @@ abstract final class WindowsLlamaRuntime {
   static String resolveExecutable({
     required String appExecutable,
     required Map<String, String> environment,
+    String? modelId,
     String windowsVersion = '',
     bool Function(String)? fileExists,
   }) {
@@ -19,6 +20,14 @@ abstract final class WindowsLlamaRuntime {
     // exists. Never auto-select it: keep the bundled standalone helper as the
     // production default, without deleting any previous installation files.
     //
+    // MiniCPM5 requires the newer tokenizer unavailable in the pinned
+    // legacy/Win8.1 helper. Route only this explicit Windows 10/11 candidate
+    // to the separately bundled, verified modern runtime. Do not silently
+    // fall back to legacy if the modern helper is missing: inference must fail
+    // clearly rather than produce misleading text.
+    final miniCpm5 = (modelId ?? '').toLowerCase().contains('minicpm5');
+    if (miniCpm5 && isModernWindows(windowsVersion)) return modern;
+
     // Explicit QA may opt in on Windows 10/11; Windows 8.1 and earlier must
     // never load the modern runtime, even with this environment override.
     final explicitModernQa =

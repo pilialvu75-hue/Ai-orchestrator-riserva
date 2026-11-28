@@ -217,6 +217,23 @@ jobs:
           & (Join-Path $PWD 'tool\test_windows_cuda_bundle.ps1') -ReleaseDir $dir
           if ($LASTEXITCODE -ne 0) { throw 'Pinned CUDA dependencies failed audit.' }
 
+      - name: Bundle SHA256-verified modern tokenizer runtime for MiniCPM5
+        shell: pwsh
+        run: |
+          & (Join-Path $PWD 'tool\bundle_windows_modern_runtime.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
+          if ($LASTEXITCODE -ne 0) { throw 'Modern MiniCPM5 llama.cpp bundle failed.' }
+
+      - name: Verify modern LOCAL inference before code signing
+        shell: pwsh
+        run: |
+          $env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN = '1'
+          try {
+            & (Join-Path $PWD 'tool\test_windows_llama_bundle.ps1') -ReleaseDir (Join-Path $PWD 'build\windows\x64\runner\Release')
+            if ($LASTEXITCODE -ne 0) { throw 'Modern LOCAL smoke test failed.' }
+          } finally {
+            Remove-Item Env:AI_ORCHESTRATOR_WINDOWS_SMOKE_MODERN -ErrorAction SilentlyContinue
+          }
+
       - name: Verify bundled LOCAL inference
         shell: pwsh
         run: |

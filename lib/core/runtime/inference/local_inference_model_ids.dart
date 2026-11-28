@@ -41,6 +41,7 @@ class LocalInferenceModelIds {
   static const String familyGemma = 'gemma';
   static const String familyPhi = 'phi3';
   static const String familyMistral = 'mistral';
+  static const String familyMiniCpm5 = 'minicpm5';
 
   // ===========================================================================
   // TEMPLATE IDS
@@ -55,6 +56,8 @@ class LocalInferenceModelIds {
   static const String templateGemma = 'gemma';
   static const String templatePhi = 'phi3';
   static const String templateMistral = 'mistral';
+  // MiniCPM5 uses ChatML message boundaries, not the Llama 3 headers.
+  static const String templateMiniCpm5 = 'minicpm5_chatml';
 
   /// Template legacy per TinyLlama / Zephyr.
   ///
@@ -208,6 +211,11 @@ class LocalInferenceModelIds {
 
     final id = exactId.toLowerCase();
 
+    // Official OpenBMB MiniCPM5: ChatML, including imported GGUF filename IDs.
+    if (id.contains('minicpm5') || id.contains('minicpm-5')) {
+      return templateMiniCpm5;
+    }
+
     // TinyLlama deve avere precedenza assoluta.
     if (_matchesTinyLlama(id)) {
       return templateZephyr;
@@ -272,6 +280,9 @@ class LocalInferenceModelIds {
 
       case templateMistral:
         return familyMistral;
+
+      case templateMiniCpm5:
+        return familyMiniCpm5;
 
       case templateZephyr:
         // TinyLlama appartiene logicamente alla famiglia Llama,

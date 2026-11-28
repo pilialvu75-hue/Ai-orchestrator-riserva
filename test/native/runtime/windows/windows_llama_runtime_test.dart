@@ -49,6 +49,49 @@ void main() {
     }
   });
 
+  test('MiniCPM5 uses modern tokenizer runtime only on Windows 10/11', () {
+    for (final version in [
+      'Windows 11 10.0',
+      'Windows 10',
+      'Windows Server 2022 10.0',
+    ]) {
+      expect(
+        WindowsLlamaRuntime.resolveExecutable(
+          appExecutable: r'C:\app\app.exe',
+          environment: const {},
+          modelId: 'minicpm5_2b',
+          windowsVersion: version,
+          // A missing modern helper must NEVER silently select legacy.
+          fileExists: (_) => false,
+        ),
+        r'C:\app\runtime-modern\llama-completion.exe',
+      );
+      expect(
+        WindowsLlamaRuntime.resolveExecutable(
+          appExecutable: r'C:\app\app.exe',
+          environment: const {},
+          modelId: 'qwen2_5_3b_instruct',
+          windowsVersion: version,
+          fileExists: (_) => true,
+        ),
+        r'C:\app\llama-completion.exe',
+      );
+    }
+
+    for (final version in ['Windows 8.1 6.3', 'Windows 7 6.1']) {
+      expect(
+        WindowsLlamaRuntime.resolveExecutable(
+          appExecutable: r'C:\app\app.exe',
+          environment: const {},
+          modelId: 'minicpm5_2b',
+          windowsVersion: version,
+          fileExists: (_) => true,
+        ),
+        r'C:\app\llama-completion.exe',
+      );
+    }
+  });
+
   test('stale modern runtime alone is not used without explicit QA opt-in', () {
     expect(
       WindowsLlamaRuntime.resolveExecutable(

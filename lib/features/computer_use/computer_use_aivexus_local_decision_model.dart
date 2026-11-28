@@ -29,6 +29,17 @@ final class AivexusComputerUseLocalDecisionModel
 
   static const int maxOutputChars = 4096;
 
+  static String normalizePlannerText(String modelId, String response) {
+    final text = response.trim();
+    if (!modelId.toLowerCase().contains('minicpm5') ||
+        !text.startsWith('<think>')) {
+      return text;
+    }
+    final end = text.indexOf('</think>');
+    if (end < 0) return text; // Incomplete reasoning must fail JSON parsing.
+    return text.substring(end + '</think>'.length).trim();
+  }
+
   @override
   void cancelPendingCompletion() => _active?.cancel();
 
@@ -61,7 +72,7 @@ final class AivexusComputerUseLocalDecisionModel
         routeDirective: InferenceRouteDirective.localOnly,
         allowWebSearchTool: false,
         allowCloudProviderFailover: false,
-        maxTokens: 256,
+        maxTokens: modelId.toLowerCase().contains('minicpm5') ? 512 : 256,
         preserveMaxTokens: true,
         temperature: 0.1,
         preserveTemperature: true,
@@ -106,7 +117,14 @@ final class AivexusComputerUseLocalDecisionModel
       if (answer.trim().isEmpty || answer.length > maxOutputChars) {
         throw const FormatException('Invalid LOCAL Computer Use output.');
       }
-      return answer.trim();
+      // MiniCPM5 Think may wrap the decision in a completed reasoning block.
+      // Strip only the recognized prefix; the downstream Computer Use planner
+      // still requires exactly one strict JSON action from the allowlist.
+      final normalized = normalizePlannerText(modelId, answer);
+      if (normalized.isEmpty || normalized.length > maxOutputChars) {
+        throw const FormatException('Invalid LOCAL Computer Use decision.');
+      }
+      return normalized;
     } on TimeoutException {
       cancellation.cancel();
       rethrow;

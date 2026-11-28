@@ -567,12 +567,17 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
       // Collect structured game-only experiences in memory. No screenshots,
       // files, prompts, Cloud upload, or automatic weight changes.
       final experience = ComputerUse2048ExperienceCollector(maxTransitions: 24);
+      // MiniCPM5 may spend additional time on reasoning before its JSON
+      // Computer Use move. Keep Qwen's measured limits unchanged.
+      final isMiniCpm5 = model.effectiveRuntimeModelId
+          .toLowerCase()
+          .contains('minicpm5');
       final decisionModel = AivexusComputerUseLocalDecisionModel(
         localRuntime: di.sl<LocalRuntimeProvider>(),
         modelId: model.effectiveRuntimeModelId,
         modelPath: model.localPath!,
         sessionId: 'cu2048-${DateTime.now().microsecondsSinceEpoch}',
-        timeout: const Duration(seconds: 60),
+        timeout: Duration(seconds: isMiniCpm5 ? 120 : 60),
       );
       final runner = ComputerUseAgentRunner(
         session: _session,
@@ -598,10 +603,10 @@ class _ComputerUseLabPageState extends State<ComputerUseLabPage> {
         ),
         maxSteps: 24,
         // Repeating LEFT/UP/etc is legitimate when the board changes.
-        // The game is still limited to 24 actions and eight minutes.
+        // The game remains limited to 24 actions; its total time is bounded.
         maxConsecutiveIdenticalActions: 0,
-        maxDuration: const Duration(minutes: 8),
-        operationTimeout: const Duration(seconds: 70),
+        maxDuration: Duration(minutes: isMiniCpm5 ? 12 : 8),
+        operationTimeout: Duration(seconds: isMiniCpm5 ? 135 : 70),
       );
       _gameRunner = runner;
       try {
