@@ -709,8 +709,8 @@ class CloudRuntimeProvider implements RuntimeInferenceProvider {
             'Check the provider account or choose another provider in Settings > AI mode.';
       }
       if (health?.unavailableUntil?.isAfter(now) ?? false) {
-        return '${_providerDisplayName(provider)} network unavailable. '
-            'Check the connection or choose another provider in Settings > AI mode.';
+        return '${_providerDisplayName(provider)} temporarily unavailable. '
+            'Check provider status or retry later in Settings > AI mode.';
       }
     }
 
