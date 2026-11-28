@@ -8,6 +8,10 @@ import 'package:ai_orchestrator/core/system/update/release_channel.dart';
 import 'package:ai_orchestrator/core/system/update/update_manager.dart';
 import 'package:ai_orchestrator/core/system/update/update_state.dart';
 
+// Microsoft Store owns updates for this optional packaged Windows variant.
+const bool _storeManagedWindowsMsix = bool.fromEnvironment(
+  'AIVEXUS_WINDOWS_STORE_MSIX', defaultValue: false);
+
 class UpdateSettingsPage extends StatefulWidget {
   const UpdateSettingsPage({
     super.key,
@@ -125,6 +129,15 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
                   style: TextStyle(color: Colors.white70),
                 ),
               ),
+              if (_storeManagedWindowsMsix && Platform.isWindows) ...[
+                const Text(
+                  'Questa versione di AIVEXUS viene aggiornata dal Microsoft Store. '
+                  'Gli aggiornamenti EXE di GitHub non possono sostituire '
+                  'un pacchetto MSIX. Apri Microsoft Store per gli aggiornamenti.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 16),
+              ],
               Text(
                 l10n.t('preferred_release_channel'),
                 style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
@@ -233,7 +246,8 @@ class _UpdateSettingsPageState extends State<UpdateSettingsPage> {
                 const SizedBox(height: 16),
               ],
               // ── Action buttons ────────────────────────────────────────────
-              _ActionRow(
+              if (!(_storeManagedWindowsMsix && Platform.isWindows))
+                _ActionRow(
                 state: state,
                 canForceUpdate: canForceUpdate,
                 onCheckNow: _checkNow,
