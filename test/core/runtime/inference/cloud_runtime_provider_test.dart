@@ -415,6 +415,48 @@ void main() {
       expect(repeated.single.isError, isTrue);
     });
 
+    test('AUTO avoids repeating incomplete, quota and invalid credential routes', () async {
+      final attempts = <String>[];
+      var now = DateTime(2026, 11, 28, 8, 33);
+      final provider = CloudRuntimeProvider(
+        sendQuery: (id, _) async {
+          attempts.add(id);
+          if (id == 'openRouter') {
+            throw const CloudFailure('incomplete', kind: CloudFailureKind.incompleteOutput);
+          }
+          if (id == 'mistral') {
+            throw const CloudFailure('payment required', kind: CloudFailureKind.quota, statusCode: 402);
+          }
+          throw const CloudFailure('invalid credential secret-test-value', kind: CloudFailureKind.authentication, statusCode: 401);
+        },
+        supportedProviders: () => ['openRouter', 'mistral', 'nvidiaNim'],
+        isProviderAvailable: (_) => true,
+        providerDisplayName: ([id]) => id ?? 'Cloud',
+        automaticUseAllowed: (_) => true,
+        automaticUseAllowedForTask: (_, __) => true,
+        now: () => now,
+      );
+      const request = InferenceRequest(sessionId: 'auto', prompt: 'hello',
+          routeDirective: InferenceRouteDirective.cloudOnly,
+          allowCloudProviderFailover: true);
+      Future<List<InferenceResponse>> run() => provider.streamInference(
+        request: request, cancellationToken: CancellationToken()).toList();
+      final first = await run();
+      expect(first.last.isError, isTrue);
+      expect(attempts.toSet(), {'openRouter', 'mistral', 'nvidiaNim'});
+      final states = {for (final status in provider.providerStatuses)
+        status.providerId: status.state};
+      expect(states['openRouter'], CloudProviderOperationalState.temporarilyUnavailable);
+      expect(states['mistral'], CloudProviderOperationalState.quotaExhausted);
+      expect(states['nvidiaNim'], CloudProviderOperationalState.authRequired);
+      attempts.clear();
+      expect((await run()).last.isError, isTrue);
+      expect(attempts, isEmpty);
+      now = now.add(const Duration(seconds: 21));
+      await run();
+      expect(attempts, ['openRouter']);
+    });
+
     test('Mistral HTTP 429 classified as quota uses quota cooldown', () async {
       final provider = CloudRuntimeProvider(
         sendQuery: (_, __) async => throw const CloudFailure(
