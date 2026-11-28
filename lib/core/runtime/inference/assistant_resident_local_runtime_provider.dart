@@ -321,6 +321,9 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
         } on ResidentRuntimeBusy {
           yield InferenceResponse.error('Local inference is already running.');
           return;
+        } on ResidentRuntimeShutdownPending {
+          yield InferenceResponse.error('Previous local engine has not exited. Retry after shutdown completes.');
+          return;
         }
         final modelBytes = await file.length();
         final layoutResult = await WindowsGgufBlockSizes.readDetailed(model);
@@ -552,7 +555,10 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           tokensGenerated: (text.length / 4).ceil(), model: request.modelId);
     } catch (error) {
       clearRuntimeVerification();
-      if (error is WindowsMemoryPressure) {
+      if (error is ResidentRuntimeShutdownPending) {
+        RuntimeEventLog.instance.emit('[ASSISTANT_RESIDENT_CLOSE] status=pending action=stop_no_fallback');
+        yield InferenceResponse.error('Previous local engine has not exited. Retry after shutdown completes.');
+      } else if (error is WindowsMemoryPressure) {
         RuntimeEventLog.instance.emit('[WINDOWS_MEMORY_GUARD] stage=generation action=stop_no_fallback');
         yield InferenceResponse.error(WindowsMemoryPressure.message);
       } else if (cancellationToken.isCancelled) {
