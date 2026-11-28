@@ -7,6 +7,11 @@ on:
       - 'scripts/web/chromium_web_verifier.mjs'
       - 'scripts/web/run_web_application_verification.mjs'
       - 'test/airlab/web_generated_application_verification.mjs'
+      - 'test/airlab/web_application_runner_packet.mjs'
+      - 'test/airlab/web_authenticated_project_operation.mjs'
+      - 'scripts/web/web_application_runner_packet.mjs'
+      - 'scripts/web/run_encrypted_web_application_job.mjs'
+      - 'scripts/web/sql/007_web_app_verifications.sql'
   workflow_dispatch:
     inputs:
       ticket:
@@ -25,7 +30,7 @@ jobs:
   verify-chromium-image:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v6
         with:
@@ -40,7 +45,10 @@ jobs:
         run: |
           export AIVEXUS_WEB_CHROMIUM="$(command -v google-chrome)"
           test -x "$AIVEXUS_WEB_CHROMIUM"
-          node --test test/airlab/web_generated_application_verification.mjs
+          node --test \
+            test/airlab/web_generated_application_verification.mjs \
+            test/airlab/web_application_runner_packet.mjs \
+            test/airlab/web_authenticated_project_operation.mjs
 
   verify-application:
     if: >-
