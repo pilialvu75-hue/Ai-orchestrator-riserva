@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:ai_orchestrator/core/tools/web_search_tool.dart';
 import 'package:ai_orchestrator/core/tools/search/search_cache.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_public_web_link.dart';
 import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
 import 'package:ai_orchestrator/core/runtime/inference/runtime_event_log.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -55,7 +56,80 @@ class _ThrowingSearchProvider implements SearchProvider {
   }
 }
 
+class _RecordingPublicReader implements AssistantPublicWebReader {
+  final urls = <String>[];
+  final bool unavailable;
+
+  _RecordingPublicReader({this.unavailable = false});
+
+  @override
+  Future<AssistantPublicWebExcerpt?> read(AssistantPublicWebLink link) async {
+    urls.add(link.url.toString());
+    if (unavailable) return null;
+    return AssistantPublicWebExcerpt(
+      host: link.url.host,
+      text: 'Synthetic dated evidence from ${link.url.host}.',
+    );
+  }
+}
+
 void main() {
+  test('Assistant opens ranked public pages rather than only returning links', () async {
+    final provider = _FakeSearchProvider(const [
+      SearchResult(title: 'Generic calendar', url: 'https://example.com/calendar',
+        snippet: 'Generic calendar with no date'),
+      SearchResult(title: 'Same publisher', url: 'https://www.example.com/other',
+        snippet: 'Duplicate host'),
+      SearchResult(title: 'Tracking URL', url: 'https://example.net/?token=private',
+        snippet: 'Must not open'),
+      SearchResult(title: 'Local endpoint', url: 'https://localhost/status',
+        snippet: 'Must not open'),
+      SearchResult(title: 'Independent page', url: 'https://example.org/article',
+        snippet: 'Generic article'),
+      SearchResult(title: 'Third source', url: 'https://example.edu/news',
+        snippet: 'Beyond read budget'),
+    ]);
+    final reader = _RecordingPublicReader();
+    final tool = WebSearchTool(searchProvider: provider, publicSourceReader: reader);
+    final result = await tool.execute({'query': 'current public fact', 'limit': 6});
+    expect(result.success, isTrue);
+    expect(reader.urls, [
+      'https://example.com/calendar', 'https://example.org/article',
+    ]);
+    expect(result.metadata['source_pages_read'], 2);
+    expect(result.output, contains('Synthetic dated evidence from example.org'));
+    expect(result.output, contains('retrieval alone does not establish accuracy'));
+    expect(result.output, contains('Generic calendar with no date'));
+  });
+
+  test('failed page reading is distinguished from successful search discovery', () async {
+    final provider = _FakeSearchProvider(const [
+      SearchResult(title: 'Calendar', url: 'https://example.com/calendar',
+        snippet: 'No specific date'),
+    ]);
+    final reader = _RecordingPublicReader(unavailable: true);
+    final result = await WebSearchTool(searchProvider: provider,
+      publicSourceReader: reader).execute({'query': 'current public fact'});
+    expect(result.success, isTrue);
+    expect(result.metadata['source_pages_read'], 0);
+    expect(result.output, contains('0 page excerpt(s) retrieved'));
+    expect(result.output, contains('No specific date'));
+  });
+
+  test('automatic source admission rejects unsafe or query-bearing destinations', () {
+    for (final url in [
+      'http://example.org/article', 'https://localhost/status',
+      'https://user:pass@example.org/article',
+      'https://example.org:8443/article',
+      'https://example.org/?private=1',
+      'https://example.org/a https://example.net/b',
+    ]) {
+      expect(AssistantPublicWebLink.fromSearchResult(url), isNull, reason: url);
+    }
+    expect(AssistantPublicWebLink.fromSearchResult('https://example.org/article'),
+      isNotNull);
+  });
+
   test('returns compact search context from DuckDuckGo JSON', () async {
     RuntimeEventLog.instance.clear();
     final client = _FakeClient((request) async {
