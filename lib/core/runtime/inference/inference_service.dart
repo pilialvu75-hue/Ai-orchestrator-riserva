@@ -220,7 +220,9 @@ class InferenceService {
             ResourceSample? resources;
             final android = !kIsWeb &&
                 defaultTargetPlatform == TargetPlatform.android;
-            if (android) {
+            final windows = !kIsWeb &&
+                defaultTargetPlatform == TargetPlatform.windows;
+            if (android || windows) {
               try {
                 resources = await _sampleResources();
               } catch (_) {
@@ -240,6 +242,7 @@ class InferenceService {
               supportsModel: _runtimeProvider.supportsModel,
               resources: resources,
               isAndroid: android,
+              isWindows: windows,
               lastCompletedModelId: affinity?.modelId,
               successfulTurnsSinceSwitch:
                   affinity?.successfulTurnsSinceSwitch ?? 99,
@@ -1284,14 +1287,18 @@ class InferenceService {
 
     final android = !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android;
+    final windows = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.windows;
     ResourceSample? resources;
-    if (android) {
+    if (android || windows) {
       try {
         resources = await _sampleResources();
       } catch (_) {
         // Unknown RAM telemetry cannot authorize a second GGUF.
       }
-      if (resources == null || resources.pressured ||
+      if (resources == null ||
+          (android && resources.pressured) ||
+          (windows && (resources.windowsSample != true || resources.windowsCommitExhausted)) ||
           cancellationToken.isCancelled) {
         _log('[LOCAL_AUTO_RECOVERY] result=skipped reason=ram_or_cancel');
         yield originalFailure;
@@ -1320,7 +1327,8 @@ class InferenceService {
     // path. The normal router enforces device RAM and runtime compatibility.
     final alternatives = availableModels.where((model) =>
         model.id != initialModel.id &&
-        model.localPath != initialModel.localPath);
+        model.localPath != initialModel.localPath &&
+        (!windows || (model.sizeBytes > 0 && model.sizeBytes < initialModel.sizeBytes)));
     final alternative = const LocalModelOrchestrator().decide(
       request: cloudRequest,
       availableModels: alternatives,
@@ -1328,6 +1336,7 @@ class InferenceService {
       supportsModel: _runtimeProvider.supportsModel,
       resources: resources,
       isAndroid: android,
+      isWindows: windows,
     ).model;
     if (alternative == null || cancellationToken.isCancelled) {
       _log('[LOCAL_AUTO_RECOVERY] result=skipped reason=no_safe_alternative');
