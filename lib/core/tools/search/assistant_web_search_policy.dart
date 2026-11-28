@@ -33,6 +33,7 @@ abstract final class AssistantWebSearchPolicy {
         _shoppingIntent(value) ||
         isPresentOfficeHolderQuery(value) ||
         isSportsResultQuery(value) ||
+        isSportsScheduleQuery(value) ||
         isUpcomingEpisodeQuery(value) ||
         _evidenceDrivenIntent(value);
   }
@@ -95,6 +96,26 @@ abstract final class AssistantWebSearchPolicy {
       return null;
     }
     return extractQuery(topic);
+  }
+
+  /// Fixtures are public time-dependent facts, including plural forms
+  /// and relative-day questions in all supported Assistant languages.
+  static bool isSportsScheduleQuery(String prompt) {
+    final value = prompt.toLowerCase().replaceAll('’', "'");
+    final sport = RegExp(
+      r'\b(?:partit[ae]|match(?:es|s)?|gare?|incontr[oi]|football|calcio|'
+      r'basket|basketball|tennis|rugby|serie [ab]|champions league|'
+      r'partidos?|encuentros?|f[uú]tbol|ligue [12])\b',
+    );
+    final schedule = RegExp(
+      r'\b(?:stasera|oggi|domani|ieri|stanotte|questa sera|'
+      r'tonight|today|tomorrow|yesterday|this evening|'
+      r'ce soir|aujourd.hui|demain|hier|'
+      r'esta noche|hoy|ma[ñn]ana|ayer|'
+      r'calendari[oi]|orari|schedule|fixtures|programme|horarios|'
+      r'pr[óo]xim[oa]s?|prossim[aeio]|next|prochains?|prochaines?)\b',
+    );
+    return sport.hasMatch(value) && schedule.hasMatch(value);
   }
 
   /// Competition and match results need evidence, including historical scores
