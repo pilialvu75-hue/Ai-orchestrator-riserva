@@ -16,6 +16,7 @@ class LocalModelOrchestrator {
     required bool Function(AiModel) supportsModel,
     ResourceSample? resources,
     bool isAndroid = false,
+    bool isWindows = false,
     String? lastCompletedModelId,
     int successfulTurnsSinceSwitch = 99,
   }) => decide(
@@ -25,6 +26,7 @@ class LocalModelOrchestrator {
     supportsModel: supportsModel,
     resources: resources,
     isAndroid: isAndroid,
+    isWindows: isWindows,
     lastCompletedModelId: lastCompletedModelId,
     successfulTurnsSinceSwitch: successfulTurnsSinceSwitch,
   ).model;
@@ -36,6 +38,7 @@ class LocalModelOrchestrator {
     required bool Function(AiModel) supportsModel,
     ResourceSample? resources,
     bool isAndroid = false,
+    bool isWindows = false,
     String? lastCompletedModelId,
     int successfulTurnsSinceSwitch = 99,
   }) {
@@ -127,7 +130,13 @@ class LocalModelOrchestrator {
       }
       if (id.contains('coder') || id.contains('codegemma') ||
           id.contains('codestral')) {
-        if (task == LocalConversationTask.coding) result += 38;
+        if (task == LocalConversationTask.coding) {
+          result += 38;
+        } else if (isWindows && current == null) {
+          // AUTO is not MANUAL: a stored coding favourite should not
+          // dominate a fresh general-purpose conversation on desktop.
+          result -= 32;
+        }
       }
       if (id.contains('llama') || id.contains('gemma')) result += 8;
       // Avoid repeatedly choosing a memory-intensive model for a very small
@@ -136,6 +145,17 @@ class LocalModelOrchestrator {
         result -= model.sizeBytes ~/ 700000000;
         if (resources?.pressured ?? false) {
           result -= model.sizeBytes ~/ 200000000;
+        }
+      }
+      if (isWindows && resources?.windowsSample == true) {
+        final free = resources?.availableBytes;
+        if (free != null && free >= 0) {
+          // Preference only, not a model admission limit. A GPU can run a
+          // model larger than available physical RAM. Penalize cold reload
+          // cost, not a resident model that has already completed a turn.
+          if (current?.id != model.id && model.sizeBytes > free) {
+            result -= ((model.sizeBytes - free) ~/ 500000000).clamp(0, 40).toInt();
+          }
         }
       }
       return result;
