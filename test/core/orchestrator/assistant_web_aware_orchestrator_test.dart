@@ -870,7 +870,7 @@ void main() {
     expect(request.cloudProviderId, 'gemini');
   });
 
-  test('Hybrid web failure degrades to the original inference request',
+  test('Hybrid missing current price evidence stops unverified inference',
       () async {
     when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
     when(() => cloud.shouldPreferCloudFor(any())).thenReturn(true);
@@ -897,12 +897,25 @@ void main() {
         )
         .toList();
 
-    expect(chunks.single.text, 'ok');
+    expect(chunks.single.providerId, 'web_verification_unavailable');
     verify(() => webSearch.execute(any())).called(1);
+    verifyNever(() => inference.stream(any()));
+  });
 
+  test('HYBRID local preference still searches current transport data', () async {
+    when(() => settings.runtimeMode).thenReturn(AiRuntimeMode.hybrid);
+    when(() => cloud.shouldPreferCloudFor(any())).thenReturn(false);
+    when(() => webSearch.execute(any())).thenAnswer((_) async => const ToolResult(
+      toolId: 'web_search', output: 'Train evidence https://example.test/trains',
+    ));
+    final chunks = await build().handleStream(
+      'Quali treni ci sono domani?', sessionId: 'hybrid-trains',
+    ).toList();
+    expect(chunks.last.text, 'ok');
+    verify(() => webSearch.execute(any())).called(1);
     final request = verify(() => inference.stream(captureAny())).captured.single
         as InferenceRequest;
-    expect(request.systemPrompt, 'Base prompt.');
+    expect(request.systemPrompt, contains('https://example.test/trains'));
   });
 
   test('HYBRID local preference still searches current fixtures', () async {
