@@ -246,6 +246,16 @@ class AiRepositoryImpl implements AiRepository {
         statusCode: status,
       );
     }
+    if (status == 402) {
+      // Payment required must not look like a transient generic API error.
+      // AUTO may try another authorized provider, never purchase credits.
+      return CloudFailure(
+        '$display quota or credit unavailable.',
+        kind: CloudFailureKind.quota,
+        statusCode: status,
+        retryAfter: error.retryAfter,
+      );
+    }
     if (status == 429) {
       final quota = body.contains('quota') ||
           body.contains('credit') ||
