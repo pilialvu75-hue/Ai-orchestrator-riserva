@@ -75,6 +75,21 @@ bool FlutterWindow::OnCreate() {
               flutter::EncodableValue(static_cast<int64_t>(memory.ullAvailPhys));
           sample[flutter::EncodableValue("totalBytes")] =
               flutter::EncodableValue(static_cast<int64_t>(memory.ullTotalPhys));
+          // Physical RAM available can be temporarily low while the OS
+          // maps model weights and reclaims pages. System commit headroom
+          // is a separate measurement, not free physical memory.
+          PERFORMANCE_INFORMATION performance{};
+          performance.cb = sizeof(performance);
+          if (GetPerformanceInfo(&performance, sizeof(performance)) &&
+              performance.CommitLimit > 0 && performance.PageSize > 0) {
+            const uint64_t remaining_pages =
+                performance.CommitLimit > performance.CommitTotal
+                    ? performance.CommitLimit - performance.CommitTotal
+                    : 0;
+            sample[flutter::EncodableValue("windowsCommitAvailableBytes")] =
+                flutter::EncodableValue(static_cast<int64_t>(
+                    remaining_pages * performance.PageSize));
+          }
           PROCESS_MEMORY_COUNTERS counters{};
           counters.cb = sizeof(counters);
           if (GetProcessMemoryInfo(GetCurrentProcess(), &counters,
