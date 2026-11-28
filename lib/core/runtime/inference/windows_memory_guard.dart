@@ -2,7 +2,7 @@ import 'package:ai_orchestrator/core/runtime/inference/resource_monitor.dart';
 
 class WindowsMemoryPressure implements Exception {
   static const message =
-      'Local inference stopped: insufficient available system RAM. '
+      'Local inference stopped: Windows system commit limit exhausted. '
       'Free memory or select a smaller model.';
   @override
   String toString() => message;
@@ -22,16 +22,18 @@ class WindowsMemoryGuard {
   Future<void> start() async {
     if (_active) return;
     _active = true;
-    monitor.addCriticalListener(_onCritical);
+    monitor.addListener(_onSample);
     monitor.retain();
     await monitor.sample();
     check();
   }
 
-  void _onCritical() {
+  void _onSample() {
     if (!_active || _tripped) return;
     final reading = monitor.latest;
-    if (reading?.windowsSample != true || reading?.critical != true) return;
+    // Low physical RAM is advisory. Do not kill a working GPU engine
+    // merely because the diagnostic 5% threshold has been crossed.
+    if (reading?.windowsCommitExhausted != true) return;
     _tripped = true;
     abort();
   }
@@ -43,7 +45,7 @@ class WindowsMemoryGuard {
   void release() {
     if (!_active) return;
     _active = false;
-    monitor.removeCriticalListener(_onCritical);
+    monitor.removeListener(_onSample);
     monitor.release();
   }
 }
