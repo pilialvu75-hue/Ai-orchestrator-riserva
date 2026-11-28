@@ -1,6 +1,6 @@
 import { checkOpenBoxFdm } from './studio_3d_fdm.mjs';
 import { mountStudioPhotoMeasurement } from './studio_3d_photo.mjs';
-import { mountStudioStlPreview } from './studio_3d_preview.mjs';
+import { createStudioRoundStl, mountStudioStlPreview } from './studio_3d_preview.mjs';
 
 class AivexusStlPreview extends HTMLElement {
   connectedCallback() {
@@ -51,6 +51,22 @@ class AivexusStlPreview extends HTMLElement {
         <label hidden>Revisione salvata <select data-cad-history></select></label>
         <button type="button" data-select hidden>Imposta come revisione attiva</button>
         <a data-file="stl" hidden>Scarica STL</a> <a data-file="scad" hidden>Scarica SCAD</a>
+        <details data-round hidden>
+          <summary>Bicchiere e sfera</summary>
+          <form>
+            <label>Forma <select name="shape"><option value="cup">Bicchiere</option><option value="sphere">Sfera</option></select></label>
+            <label>Diametro esterno (mm) <input name="diameter" type="number" min="0.5" max="500" step="any" value="80" required></label>
+            <fieldset data-round-cup>
+              <legend>Quote del bicchiere</legend>
+              <label>Diametro base (mm) <input name="baseDiameter" type="number" min="0.5" max="500" step="any" value="60" required></label>
+              <label>Altezza (mm) <input name="height" type="number" min="0.5" max="500" step="any" value="90" required></label>
+              <label>Parete (mm) <input name="wall" type="number" min="0.5" max="500" step="any" value="3" required></label>
+              <label>Fondo (mm) <input name="floor" type="number" min="0.5" max="500" step="any" value="4" required></label>
+            </fieldset>
+            <button type="submit">Genera STL della forma</button>
+            <p data-round-status role="status"></p>
+          </form>
+        </details>
         <a data-profile-download download="sagoma.stl" hidden>Scarica STL della sagoma</a>
         <label>File STL <input type="file" accept=".stl,model/stl"></label>
         <output role="status"></output>
@@ -81,6 +97,17 @@ class AivexusStlPreview extends HTMLElement {
             <label>Larghezza reale (mm) <input data-profile-width type="number" min="0.1" max="500" step="any"></label>
             <label>Spessore (mm) <input data-profile-thickness type="number" min="0.1" max="500" step="any"></label>
             <button type="button" data-profile-generate>Genera STL da sagoma</button>
+            <details data-photo-volume>
+              <summary>Stima un volume da tre foto</summary>
+              <p>Usa viste ortogonali della stessa posa. Nella foto laterale il davanti deve essere a sinistra, in quella superiore in alto. Rileva o traccia ogni bordo, poi acquisisci la vista. Il risultato è una stima a griglia delle superfici visibili nelle sagome.</p>
+              <label>Vista <select><option value="front">frontale</option><option value="side">laterale</option><option value="top">superiore</option></select></label>
+              <button type="button" data-volume-save>Acquisisci questa vista</button>
+              <label>Larghezza reale (mm) <input type="number" min="0.1" max="500" step="any"></label>
+              <label>Profondità reale (mm) <input type="number" min="0.1" max="500" step="any"></label>
+              <label>Altezza reale (mm) <input type="number" min="0.1" max="500" step="any"></label>
+              <button type="button" data-volume-generate>Genera STL da tre viste</button>
+              <output data-volume-status aria-live="polite"></output>
+            </details>
           </div>
         </details>
         <details data-fdm hidden>
@@ -100,7 +127,7 @@ class AivexusStlPreview extends HTMLElement {
       </section>
     `;
     const input = root.querySelector('input[accept=".stl,model/stl"]');
-    const status = root.querySelector('output:not([data-job]):not([data-photo-status])');
+    const status = root.querySelector('output:not([data-job]):not([data-photo-status]):not([data-volume-status])');
     const canvas = root.querySelector('canvas');
     const history = root.querySelector('[data-cad-history]');
     const useRevision = root.querySelector('[data-select]');
@@ -410,6 +437,38 @@ class AivexusStlPreview extends HTMLElement {
 
     if (projectId) {
       form.hidden = false;
+      function showLocalStl(source, filename = 'sagoma.stl', label = 'Scarica STL della sagoma') {
+        reset();
+        history.selectedIndex = -1;
+        show(source);
+        profileDownload.download = filename;
+        profileDownload.textContent = label;
+        profileDownload.href = URL.createObjectURL(new Blob([source], { type: 'model/stl' }));
+        profileDownload.hidden = false;
+      }
+      const round = root.querySelector('[data-round]');
+      round.hidden = false;
+      const roundForm = round.querySelector('form');
+      const roundShape = roundForm.elements.namedItem('shape');
+      const roundCup = round.querySelector('[data-round-cup]');
+      const roundStatus = round.querySelector('[data-round-status]');
+      roundShape.addEventListener('change', () => {
+        roundCup.hidden = roundCup.disabled = roundShape.value === 'sphere';
+        roundStatus.textContent = '';
+      }, { signal: requests.signal });
+      roundForm.addEventListener('submit', event => {
+        event.preventDefault();
+        try {
+          const dimensions = Object.fromEntries([...roundForm.querySelectorAll('input')]
+            .map(field => [field.name, field.valueAsNumber]));
+          const source = createStudioRoundStl({ shape: roundShape.value, ...dimensions });
+          const filename = roundShape.value === 'sphere' ? 'sfera.stl' : 'bicchiere.stl';
+          showLocalStl(source, filename, 'Scarica STL della forma');
+          roundStatus.textContent = 'Modello generato. Controlla le quote nell’anteprima.';
+        } catch (error) {
+          roundStatus.textContent = error instanceof RangeError ? error.message : 'Impossibile generare la forma.';
+        }
+      }, { signal: requests.signal });
       const photoPanel = root.querySelector('[data-photo]');
       photoPanel.hidden = false;
       mountStudioPhotoMeasurement(photoPanel, (axis, estimate) => {
@@ -424,13 +483,8 @@ class AivexusStlPreview extends HTMLElement {
         review.hidden = false;
         confirmed.checked = false;
         reviewPhotoDimensions();
-      }, source => {
-        reset();
-        history.selectedIndex = -1;
-        show(source);
-        profileDownload.href = URL.createObjectURL(new Blob([source], { type: 'model/stl' }));
-        profileDownload.hidden = false;
-      });
+      }, (source, filename) => showLocalStl(source, filename,
+        filename ? 'Scarica STL del volume' : 'Scarica STL della sagoma'));
       try { pending = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* browser storage optional */ }
       updateControls();
       history.addEventListener('change', selectRevision);
@@ -492,11 +546,11 @@ class AivexusStlPreview extends HTMLElement {
       if (!file) return;
       try {
         if (file.size > 131072) throw new Error('STL too large');
-        const source = await file.text();
+        const source = await file.arrayBuffer();
         if (version !== loadNumber || requests.signal.aborted) return;
         show(source);
       } catch {
-        if (version === loadNumber && !requests.signal.aborted) status.textContent = 'Impossibile leggere il file STL ASCII.';
+        if (version === loadNumber && !requests.signal.aborted) status.textContent = 'Impossibile leggere il file STL.';
       }
     });
   }

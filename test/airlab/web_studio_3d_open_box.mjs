@@ -4,16 +4,54 @@ import { createChromiumWebVerifier } from '../../scripts/web/chromium_web_verifi
 import { test } from 'node:test';
 import { createOpenBoxCad, renderOpenBox } from '../../scripts/web/studio_3d_open_box.mjs';
 
-import { mountStudioStlPreview, readStudioStl } from '../../web/studio_3d_preview.mjs';
+import { createStudioRoundStl, mountStudioStlPreview, readStudioStl } from '../../web/studio_3d_preview.mjs';
 
 import { runEncryptedStudioCadJob } from '../../scripts/web/run_encrypted_studio_cad_job.mjs';
 import { decodeRunnerBase64, decodeWebAppResult, encodeRunnerBase64, encodeWebAppJob,
   importWebAppAuthorizationKey, runnerPayloadSha256 } from '../../scripts/web/web_application_runner_packet.mjs';
 
-import { detectPhotoCavity, detectPhotoSilhouette, estimatePhotoDimension, extrudePhotoProfile, isRectangularPhotoSilhouette, nextPhotoView, tracePhotoProfile } from '../../web/studio_3d_photo.mjs';
+import { detectPhotoCavity, detectPhotoSilhouette, estimatePhotoDimension, extrudePhotoProfile, isRectangularPhotoSilhouette, nextPhotoView, reconstructPhotoVolume, tracePhotoProfile } from '../../web/studio_3d_photo.mjs';
 import { checkOpenBoxFdm } from '../../web/studio_3d_fdm.mjs';
 
 const box = { width: 80, depth: 60, height: 30, wall: 2, floor: 3 };
+
+test('generates closed binary STL for a sphere and an open tapered cup', () => {
+  const sphere = readStudioStl(createStudioRoundStl({ shape: 'sphere', diameter: 80 }));
+  const parameters = { shape: 'cup', diameter: 80, baseDiameter: 60, height: 90, wall: 3, floor: 4 };
+  const cup = readStudioStl(createStudioRoundStl(parameters));
+  assert.deepEqual(sphere.bounds, [[-40, 40], [-40, 40], [0, 80]]);
+  assert.deepEqual(cup.bounds, [[-40, 40], [-40, 40], [0, 90]]);
+  assert.ok(cup.faces.flat().some(([x, y, z]) => x === 0 && y === 0 && z === 4));
+  assert.ok(cup.faces.flat().filter(vertex => vertex[2] === 90)
+    .every(([x, y]) => Math.hypot(x, y) > 36.9));
+  assert.throws(() => createStudioRoundStl({ ...parameters, wall: 30 }), RangeError);
+  for (const { faces } of [sphere, cup]) {
+    const edges = new Map();
+    for (const face of faces) {
+      for (let i = 0; i < face.length; i++) {
+        const start = face[i].join(',');
+        const end = face[(i + 1) % face.length].join(',');
+        const key = [start, end].sort().join('|');
+        const edge = edges.get(key) ?? [];
+        edge.push(start < end);
+        edges.set(key, edge);
+      }
+    }
+    assert.ok([...edges.values()].every(edge => edge.length === 2 && edge[0] !== edge[1]));
+  }
+});
+
+test('intersects three measured silhouettes into a closed non-extruded volume', () => {
+  const outline = coordinates => coordinates.map(([x, y]) => ({ x, y }));
+  const square = outline([[0, 0], [8, 0], [8, 8], [0, 8]]);
+  const step = outline([[0, 0], [4, 0], [4, 4], [8, 4], [8, 8], [0, 8]]);
+  const { faces, bounds } = readStudioStl(reconstructPhotoVolume(
+    { front: step, side: step, top: square }, [80, 64, 48]));
+  assert.deepEqual(bounds, [[0, 80], [0, 64], [0, 48]]);
+  assert.equal(Math.max(...faces.flat().filter(vertex => vertex[2] === 48).map(vertex => vertex[0])), 40);
+  assert.equal(Math.max(...faces.flat().filter(vertex => vertex[2] === 48).map(vertex => vertex[1])), 32);
+  assert.throws(() => reconstructPhotoVolume({ front: step, side: step }, [80, 64, 48]), /tre le viste/);
+});
 
 test('traces a non-rectangular silhouette while rejecting a profile with a hole', () => {
   const width = 32, height = 32;
@@ -128,7 +166,7 @@ test('Chromium turns a photo into a downloadable STL preview',
       'studio_3d_fdm.mjs', 'studio_3d_photo.mjs'];
     const assets = new Map(await Promise.all(names.map(async name =>
       [name, await readFile(new URL(`../../web/${name}`, import.meta.url), 'utf8')])));
-    assets.set('index.html', '<!doctype html><button id="start">Load photo</button><output id="result"></output><script type="module" src="fixture.mjs"></script>');
+    assets.set('index.html', '<!doctype html><button id="start">Load photo</button><button id="volume">Generate volume</button><button id="round">Generate sphere</button><output id="result"></output><script type="module" src="fixture.mjs"></script>');
     assets.set('fixture.mjs', `
       import './studio_3d_preview_element.mjs';
       globalThis.fetch = async () => ({ ok: true, json: async () => ({ revisions: [], activeJob: null }) });
@@ -138,6 +176,36 @@ test('Chromium turns a photo into a downloadable STL preview',
       const root = viewer.shadowRoot;
       const panel = root.querySelector('[data-photo]');
       panel.open = true;
+      document.querySelector('#round').onclick = () => {
+        const form = root.querySelector('[data-round] form');
+        const shape = form.elements.namedItem('shape');
+        shape.value = 'sphere';
+        shape.dispatchEvent(new Event('change'));
+        form.dispatchEvent(new SubmitEvent('submit', { cancelable: true }));
+        const link = root.querySelector('[data-profile-download]');
+        if (!link.hidden && link.download === 'sfera.stl' && form.querySelector('fieldset').disabled) {
+          document.querySelector('#result').textContent = root.querySelector('output:not([data-job])').textContent;
+        }
+      };
+      document.querySelector('#volume').onclick = () => {
+        const volume = panel.querySelector('[data-photo-volume]');
+        volume.open = true;
+        volume.querySelector('[data-volume-generate]').click();
+        if (!volume.querySelector('output').textContent.includes('tre le viste')) return;
+        const select = volume.querySelector('select');
+        for (const view of ['front', 'side', 'top']) {
+          select.value = view;
+          volume.querySelector('[data-volume-save]').click();
+        }
+        for (const [i, field] of [...volume.querySelectorAll('input')].entries()) {
+          field.value = [80, 60, 50][i];
+        }
+        volume.querySelector('[data-volume-generate]').click();
+        const link = root.querySelector('[data-profile-download]');
+        if (!link.hidden && link.download === 'volume-da-foto.stl' && link.href.startsWith('blob:')) {
+          document.querySelector('#result').textContent = 'Volume STL pronto';
+        }
+      };
       document.querySelector('#start').onclick = () => {
         panel.querySelector('[data-photo-profile-mode]').click();
         panel.querySelector('[data-profile-width]').value = 80;
@@ -177,6 +245,10 @@ test('Chromium turns a photo into a downloadable STL preview',
       checks: [
         { action: 'click', selector: '#start' },
         { action: 'text', selector: '#result', value: '80 × 60 × 5 mm' },
+        { action: 'click', selector: '#volume' },
+        { action: 'text', selector: '#result', value: 'Volume STL pronto' },
+        { action: 'click', selector: '#round' },
+        { action: 'text', selector: '#result', value: '80 × 80 × 80 mm' },
       ],
     });
     assert.equal(result.status, 'passed', JSON.stringify(result));

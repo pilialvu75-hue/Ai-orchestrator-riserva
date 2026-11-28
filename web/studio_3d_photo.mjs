@@ -132,6 +132,82 @@ export function estimatePhotoDimension(points, referenceMm) {
 
 const turn = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 
+export function reconstructPhotoVolume(profiles, dimensions) {
+  const views = ['front', 'side', 'top'];
+  if (views.some(view => !profiles[view])) throw new RangeError('Acquisisci tutte e tre le viste.');
+  if (dimensions.length !== 3 || dimensions.some(value => !Number.isFinite(value) || value < 0.1 || value > 500)) {
+    throw new RangeError('Inserisci larghezza, profondità e altezza reali in mm.');
+  }
+  const resolution = 8;
+  const masks = views.map(view => {
+    const points = profiles[view];
+    // Reuse the profile validator to reject crossing and degenerate outlines.
+    const xs = points.map(p => p.x), ys = points.map(p => p.y);
+    const left = Math.min(...xs), top = Math.min(...ys);
+    const width = Math.max(...xs) - left, height = Math.max(...ys) - top;
+    extrudePhotoProfile(points, Math.min(width, height, 100), 1);
+    return Array.from({ length: resolution ** 2 }, (_, index) => {
+      const x = left + (index % resolution + 0.5) * width / resolution;
+      const y = top + (Math.floor(index / resolution) + 0.5) * height / resolution;
+      let inside = false;
+      for (const [i, a] of points.entries()) {
+        const b = points.at(i - 1);
+        if ((a.y > y) !== (b.y > y) && x < a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y)) inside = !inside;
+      }
+      return inside;
+    });
+  });
+  const [front, side, top] = masks;
+  const at = (u, v) => u + resolution * v;
+  const occupied = new Set();
+  const key = (x, y, z) => `${x},${y},${z}`;
+  for (let z = 0; z < resolution; z++) {
+    for (let y = 0; y < resolution; y++) {
+      for (let x = 0; x < resolution; x++) {
+        const row = resolution - 1 - z;
+        if (front[at(x, row)] && side[at(y, row)] && top[at(x, y)]) occupied.add(key(x, y, z));
+      }
+    }
+  }
+  if (!occupied.size) throw new RangeError('Le tre sagome non hanno un volume comune.');
+  const faces = [];
+  const edges = new Map();
+  const vertex = point => point.map((n, axis) => Number((n * dimensions[axis] / resolution).toFixed(5))).join(' ');
+  for (const cell of occupied) {
+    const origin = cell.split(',').map(Number);
+    for (let axis = 0; axis < 3; axis++) {
+      for (const direction of [-1, 1]) {
+        const neighbor = [...origin];
+        neighbor[axis] += direction;
+        if (occupied.has(key(...neighbor))) continue;
+        const u = (axis + 1) % 3, v = (axis + 2) % 3;
+        const corners = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([du, dv]) => {
+          const point = [...origin];
+          point[axis] += Number(direction > 0);
+          point[u] += du;
+          point[v] += dv;
+          return vertex(point);
+        });
+        if (direction < 0) corners.reverse();
+        for (const [i, point] of corners.entries()) {
+          const edge = [point, corners[(i + 1) % 4]].sort().join('|');
+          edges.set(edge, (edges.get(edge) ?? 0) + 1);
+        }
+        const normal = origin.map((_, index) => index === axis ? direction : 0).join(' ');
+        for (const triangle of [[0, 1, 2], [0, 2, 3]]) {
+          faces.push(`facet normal ${normal}\nouter loop\n${triangle.map(i => 'vertex ' + corners[i]).join('\n')}\nendloop\nendfacet`);
+        }
+      }
+    }
+  }
+  if ([...edges.values()].some(count => count !== 2)) {
+    throw new RangeError('Le sagome creano contatti sottili o ambigui. Controlla i contorni e l’orientamento.');
+  }
+  const source = `solid multivista\n${faces.join('\n')}\nendsolid multivista\n`;
+  if (source.length > 131072) throw new RangeError('Il volume è troppo complesso per questa anteprima.');
+  return source;
+}
+
 export function extrudePhotoProfile(points, widthMm, thicknessMm) {
   if (points.length < 3 || points.length > 64 || points.some(p =>
     !Number.isFinite(p.x) || !Number.isFinite(p.y)) ||
@@ -211,6 +287,8 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
   const reset = panel.querySelector('[data-photo-reset]');
   const profileMode = panel.querySelector('[data-photo-profile-mode]');
   const profile = panel.querySelector('[data-photo-profile]');
+  const volume = panel.querySelector('[data-photo-volume]');
+  const savedViews = {};
   const context = canvas.getContext('2d');
   if (!context) return;
 
@@ -348,6 +426,29 @@ export function mountStudioPhotoMeasurement(panel, onApply, signal, onPhotoLoade
       status.textContent = 'Sagoma estrusa. Controlla il modello nell’anteprima 3D.';
     } catch (error) {
       status.textContent = error instanceof RangeError ? error.message : 'Impossibile generare la sagoma.';
+    }
+  }, { signal });
+  volume.querySelector('[data-volume-save]').addEventListener('click', () => {
+    try {
+      if (!image || points.length < 3) throw new RangeError('Rileva o traccia la sagoma di questa vista.');
+      const orientation = volume.querySelector('select').value;
+      savedViews[orientation] = points.slice();
+      const missing = [...volume.querySelectorAll('option')].filter(option => !savedViews[option.value]);
+      volume.querySelector('output').textContent = missing.length
+        ? 'Vista acquisita. Mancano: ' + missing.map(option => option.textContent).join(', ') + '.'
+        : 'Tre viste acquisite. Controlla le misure prima di generare.';
+    } catch (error) {
+      volume.querySelector('output').textContent = error.message;
+    }
+  }, { signal });
+  volume.querySelector('[data-volume-generate]').addEventListener('click', () => {
+    const feedback = volume.querySelector('output');
+    try {
+      const dimensions = [...volume.querySelectorAll('input')].map(field => field.valueAsNumber);
+      onProfile(reconstructPhotoVolume(savedViews, dimensions), 'volume-da-foto.stl');
+      feedback.textContent = 'Volume stimato. Controlla il modello nell’anteprima 3D.';
+    } catch (error) {
+      feedback.textContent = error instanceof RangeError ? error.message : 'Impossibile generare il volume.';
     }
   }, { signal });
   reference.addEventListener('input', redraw, { signal });

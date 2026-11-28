@@ -1,9 +1,24 @@
 export function readStudioStl(source) {
-  if (typeof source !== 'string' || source.length > 131072) {
+  const size = typeof source === 'string' ? source.length : source?.byteLength;
+  if (!size || size > 131072) {
     throw new Error('Invalid STL size');
   }
-  const vertices = [...source.matchAll(/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/g)]
-    .map(match => match.slice(1).map(Number));
+  let vertices;
+  if (source instanceof ArrayBuffer && size >= 84) {
+    const data = new DataView(source);
+    const triangles = data.getUint32(80, true);
+    if (84 + triangles * 50 === size) {
+      vertices = Array.from({ length: triangles * 3 }, (_, index) => {
+        const offset = 96 + Math.floor(index / 3) * 50 + index % 3 * 12;
+        return [0, 4, 8].map(axis => data.getFloat32(offset + axis, true));
+      });
+    }
+  }
+  if (!vertices) {
+    const text = typeof source === 'string' ? source : new TextDecoder().decode(source);
+    vertices = [...text.matchAll(/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/g)]
+      .map(match => match.slice(1).map(Number));
+  }
   if (vertices.length < 12 || vertices.length % 3 ||
       vertices.some(vertex => vertex.some(value => !Number.isFinite(value)))) {
     throw new Error('Invalid ASCII STL vertices');
@@ -17,6 +32,61 @@ export function readStudioStl(source) {
     faces.push(vertices.slice(index, index + 3));
   }
   return { faces, bounds };
+}
+
+export function createStudioRoundStl({ shape, diameter, baseDiameter, height, wall, floor }) {
+  const dimension = value => Number.isFinite(value) && value >= 0.5 && value <= 500;
+  if (!dimension(diameter)) throw new RangeError('Inserisci un diametro tra 0,5 e 500 mm.');
+  const radius = diameter / 2;
+  let profile;
+  if (shape === 'sphere') {
+    profile = [[0, 0]];
+    for (let i = 1; i < 24; i++) {
+      const angle = Math.PI * i / 24;
+      profile.push([radius * Math.sin(angle), radius * (1 - Math.cos(angle))]);
+    }
+    profile.push([0, diameter]);
+  } else if (shape === 'cup') {
+    if (![baseDiameter, height, wall, floor].every(dimension) ||
+        2 * wall >= Math.min(diameter, baseDiameter) || floor >= height) {
+      throw new RangeError('Verifica le quote. Pareti e fondo devono lasciare spazio alla cavità.');
+    }
+    const base = baseDiameter / 2;
+    const innerFloor = base + (radius - base) * floor / height - wall;
+    profile = [[0, 0], [base, 0], [radius, height], [radius - wall, height], [innerFloor, floor], [0, floor]];
+  } else {
+    throw new RangeError('Seleziona una sfera o un bicchiere.');
+  }
+  const segments = 48;
+  const rings = profile.map(([r, z]) => Array.from({ length: segments }, (_, i) => {
+    const angle = 2 * Math.PI * i / segments;
+    return [Math.fround(r * Math.cos(angle)) || 0, Math.fround(r * Math.sin(angle)) || 0, Math.fround(z)];
+  }));
+  const count = (profile.length - 2) * segments * 2;
+  const bytes = new ArrayBuffer(84 + count * 50);
+  const data = new DataView(bytes);
+  data.setUint32(80, count, true);
+  let offset = 84;
+  function write(a, b, c) {
+    const u = b.map((value, axis) => value - a[axis]);
+    const v = c.map((value, axis) => value - a[axis]);
+    const normal = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const length = Math.hypot(...normal);
+    for (const [index, value] of [...normal.map(n => n / length), ...a, ...b, ...c].entries()) {
+      data.setFloat32(offset + index * 4, value, true);
+    }
+    offset += 50;
+  }
+  for (let ring = 0; ring < rings.length - 1; ring++) {
+    for (let i = 0; i < segments; i++) {
+      const next = (i + 1) % segments;
+      const [a, b] = [rings[ring][i], rings[ring][next]];
+      const [c, d] = [rings[ring + 1][i], rings[ring + 1][next]];
+      if (ring > 0) write(a, b, d);
+      if (ring < rings.length - 2) write(a, d, c);
+    }
+  }
+  return bytes;
 }
 
 export function mountStudioStlPreview(canvas, source, dimensionsLabel) {
