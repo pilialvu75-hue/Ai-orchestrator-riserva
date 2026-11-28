@@ -4,7 +4,7 @@ import 'package:ai_orchestrator/core/tools/search/assistant_public_web_link.dart
 /// Adapter that REUSES Cantiere's DNS-pinned public Web reader.
 ///
 /// It does not send the user's message, chat history, personal memory or model
-/// prompts to the destination: only the explicitly supplied URL is requested.
+/// prompts to the destination: only an admitted public URL is requested.
 /// The page is untrusted and is returned solely as a short, labeled excerpt.
 final class AssistantWorkshopPublicWebReader implements AssistantPublicWebReader {
   const AssistantWorkshopPublicWebReader();
