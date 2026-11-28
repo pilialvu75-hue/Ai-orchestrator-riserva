@@ -129,7 +129,7 @@ class WebSearchTool implements Tool {
             ..writeln();
         }
       }
-      buffer.writeln('Top results (search snippets, not verified claims):');
+      buffer.writeln('Top results:');
       var index = 1;
       for (final result in limited) {
         buffer
@@ -236,5 +236,4 @@ class WebSearchTool implements Tool {
     );
     return pages;
   }
-
 }
