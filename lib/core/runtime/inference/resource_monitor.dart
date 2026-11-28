@@ -16,6 +16,7 @@ class ResourceSample {
         windowsSample = data['windowsSample'] == true,
         availableBytes = _number(data['availableBytes']),
         totalBytes = _number(data['totalBytes']),
+        windowsCommitAvailableBytes = _number(data['windowsCommitAvailableBytes']),
         thresholdBytes = _number(data['thresholdBytes']),
         rssBytes = _number(data['rssBytes']),
         systemCpuPercent = _percent(data['systemCpuPercent']),
@@ -36,6 +37,12 @@ class ResourceSample {
 
   final DateTime timestamp;
   final bool windowsSample;
+  final int? windowsCommitAvailableBytes;
+
+  // A diagnostic physical-RAM threshold alone never proves that the
+  // system-wide commit limit is exhausted. Unknown remains unknown.
+  bool get windowsCommitExhausted => windowsSample &&
+      windowsCommitAvailableBytes == 0;
 
   /// Diagnostic policy, not an OS low-memory notification or allocation guarantee.
   /// Reserve 5% of physical RAM, bounded to 256–1024 MiB.
@@ -347,6 +354,7 @@ class ResourceMonitor extends ChangeNotifier {
           'prefill_ms=${native['prefill_ms'] ?? -1} '
           'total_bytes=${reading.totalBytes ?? -1} threshold_bytes=${reading.thresholdBytes ?? -1} '
           'windows_pressure_threshold_bytes=${reading.windowsPressureThresholdBytes ?? -1} '
+          'windows_commit_available_bytes=${reading.windowsCommitAvailableBytes ?? -1} '
           'pressure=${reading.pressure} low_memory=${reading.lowMemory} trim_level=${reading.trimLevel} '
           'n_ctx=${native['context'] ?? -1} n_batch=${native['batch'] ?? -1} '
           'n_ubatch=${native['micro_batch'] ?? -1}',
