@@ -39,6 +39,9 @@ class ResidentGenerationMetrics {
 
 class ResidentRuntimeBusy implements Exception {}
 
+/// The owned child did not confirm exit; no second engine may be started.
+class ResidentRuntimeShutdownPending implements Exception {}
+
 /// The engine completed transport but exhausted the requested output budget.
 class ResidentGenerationLimitReached implements Exception {}
 
@@ -62,6 +65,8 @@ class ResidentCompletionRuntime {
     });
   }
   Process? _process;
+  Process? _terminating;
+  Future<void>? _closing;
   ResidentProcessLease? _lease;
   HttpClient? _client;
   int? _port;
@@ -94,7 +99,7 @@ class ResidentCompletionRuntime {
     } finally {
       memory?.release();
       _busy = false;
-      if (_process != null) _idle = Timer(idleTimeout, () => unawaited(close()));
+      if (_process != null) _idle = Timer(idleTimeout, _closeInBackground);
     }
   }
 
@@ -125,7 +130,7 @@ class ResidentCompletionRuntime {
     _idle?.cancel();
     _activeCancellation = cancellation;
     cancellation.onCancel(() {
-      if (identical(_activeCancellation, cancellation)) unawaited(close());
+      if (identical(_activeCancellation, cancellation)) _closeInBackground();
     });
     final memory = _memoryGuard();
     try {
@@ -203,7 +208,7 @@ class ResidentCompletionRuntime {
       memory?.release();
       _activeCancellation = null;
       _busy = false;
-      if (_process != null) _idle = Timer(idleTimeout, () => unawaited(close()));
+      if (_process != null) _idle = Timer(idleTimeout, _closeInBackground);
     }
   }
 
@@ -305,10 +310,23 @@ class ResidentCompletionRuntime {
     return requested;
   }
 
-  Future<void> close() async {
+  void _closeInBackground() {
+    unawaited(close().catchError((Object error) {
+      RuntimeEventLog.instance.emit('[ASSISTANT_RESIDENT_CLOSE] status=pending');
+    }));
+  }
+
+  /// All callers share the same shutdown; never release an engine identity
+  /// as proof that its actual OS process has exited.
+  Future<void> close() => _closing ??= _closeOwnedProcess().whenComplete(() {
+    _closing = null;
+  });
+
+  Future<void> _closeOwnedProcess() async {
     _idle?.cancel();
     _idle = null;
-    final process = _process;
+    final process = _terminating ?? _process;
+    _terminating = process;
     _process = null;
     _identity = null;
     _client?.close(force: true);
@@ -317,10 +335,39 @@ class ResidentCompletionRuntime {
     _port = null;
     _lease?.close();
     _lease = null;
-    if (process != null) {
-      process.kill();
-      try { await process.exitCode.timeout(const Duration(seconds: 3)); }
-      on TimeoutException { process.kill(ProcessSignal.sigkill); }
+    if (process == null) return;
+    final watch = Stopwatch()..start();
+    await confirmExit(
+      exitCode: process.exitCode,
+      terminate: (force) {
+        process.kill(force ? ProcessSignal.sigkill : ProcessSignal.sigterm);
+      },
+    );
+    // Retain the process if confirmation failed, so future close/admission
+    // attempts cannot silently forget it and start another memory allocation.
+    _terminating = null;
+    RuntimeEventLog.instance.emit(
+      '[ASSISTANT_RESIDENT_CLOSE] status=exited elapsed_ms=${watch.elapsedMilliseconds}');
+  }
+
+  /// Wait for both graceful and forced termination. Injectable callbacks keep
+  /// the timeout path testable without intentionally hanging a real engine.
+  static Future<void> confirmExit({
+    required Future<int> exitCode,
+    required void Function(bool force) terminate,
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
+    terminate(false);
+    try {
+      await exitCode.timeout(timeout);
+      return;
+    } on TimeoutException {
+      terminate(true);
+    }
+    try {
+      await exitCode.timeout(timeout);
+    } on TimeoutException {
+      throw ResidentRuntimeShutdownPending();
     }
   }
 }
