@@ -298,3 +298,18 @@ transport.
 The first W4 implementation is non-streaming at the broker boundary: the
 existing runtime stream emits one final successful chunk. Streaming/abort
 hardening can be added later without changing the role/capability contract.
+
+### Beta privata di Studio
+
+Il percorso inviti resta disattivato per impostazione predefinita. Per
+abilitarlo servono entrambe le variabili Pages
+`AIVEXUS_WEB_STUDIO_BETA_ENABLED=true` e
+`AIVEXUS_WEB_CLIENT_ACCESS_ENABLED=true`. Il proprietario apre il pannello
+da `/?access=beta`. Il link individuale `/?invite=…` apre lo stesso pannello
+e l'accettazione richiede l'identità firmata da Cloudflare Access.
+
+I partecipanti autorizzati possono generare, revisionare, verificare ed
+esportare i propri progetti. Le regole Access sono un prerequisito
+indipendente. Gli inviti al sito e i rilasci privati sono riservati al
+proprietario. I partecipanti usano la quota standard e la revoca si
+applica alla richiesta successiva.

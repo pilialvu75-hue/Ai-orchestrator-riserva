@@ -1,3 +1,4 @@
+import { studioBetaEnabled } from '../studio-access.js';
 import { createWebCustomerAccessHandler } from
   '../../../../scripts/web/web_client_invitations.mjs';
 
@@ -11,7 +12,8 @@ export function onRequest({ request, env }) {
     accessAudience: env.AIVEXUS_WEB_ACCESS_AUDIENCE,
     configuredOwnerSubject: env.AIVEXUS_WEB_ADMIN_ACCESS_SUBJECT,
     configuredOwnerEmail: env.AIVEXUS_WEB_OWNER_EMAIL,
-    clientAccessEnabled: env.AIVEXUS_WEB_CLIENT_ACCESS_ENABLED === 'true',
+    clientAccessEnabled: studioBetaEnabled(env),
+    enrollmentPaused: !studioBetaEnabled(env),
     db: env.AIVEXUS_WEB_D1,
   })(request);
 }
