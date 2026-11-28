@@ -113,6 +113,7 @@ abstract final class CloudRoutingBootstrap {
         includeErrorDetailsInDiagnostics: false,
       ),
       searchCache: ExpiringSearchCache(),
+      publicSourceReader: publicWebReader,
       includeErrorDetailsInDiagnostics: false,
     );
 
