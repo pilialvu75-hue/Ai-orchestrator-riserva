@@ -118,6 +118,21 @@ abstract final class AssistantWebSearchPolicy {
     return sport.hasMatch(value) && schedule.hasMatch(value);
   }
 
+  /// Deterministic refusal to invent a current fixture when no evidence exists.
+  static String unavailableScheduleMessage(String prompt) {
+    final value = prompt.toLowerCase();
+    if (RegExp(r'\b(?:quali|partit[ae]|stasera|oggi|domani|calcio)\b').hasMatch(value)) {
+      return 'Non posso confermare le partite o gli orari senza fonti aggiornate. Riprova con la ricerca Web disponibile.';
+    }
+    if (RegExp(r'\b(?:quels?|quelles?|ce soir|demain|aujourd.hui)\b').hasMatch(value)) {
+      return 'Je ne peux pas confirmer les matchs ou horaires sans sources à jour.';
+    }
+    if (RegExp(r'\b(?:partidos?|esta noche|hoy|ma[ñn]ana)\b').hasMatch(value)) {
+      return 'No puedo confirmar los partidos ni los horarios sin fuentes actualizadas.';
+    }
+    return 'I cannot confirm the fixtures or times without up-to-date sources.';
+  }
+
   /// Competition and match results need evidence, including historical scores
   /// in French. A generic request for the result of a calculation is not a
   /// sports lookup and must not trigger public Web access.
