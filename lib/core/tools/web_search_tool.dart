@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 
 import 'package:ai_orchestrator/core/tools/tool.dart';
+import 'package:ai_orchestrator/core/tools/search/assistant_public_web_link.dart';
 import 'package:ai_orchestrator/core/tools/search/duckduckgo_provider.dart';
 import 'package:ai_orchestrator/core/tools/search/search_cache.dart';
 import 'package:ai_orchestrator/core/tools/search/search_provider.dart';
@@ -13,6 +14,7 @@ class WebSearchTool implements Tool {
     http.Client? client,
     SearchProvider? searchProvider,
     SearchCache? searchCache,
+    AssistantPublicWebReader? publicSourceReader,
     this.maxResults = 5,
     this.includeErrorDetailsInDiagnostics = true,
     Duration timeout = const Duration(seconds: 5),
@@ -21,10 +23,14 @@ class WebSearchTool implements Tool {
               client: client ?? http.Client(),
               timeout: timeout,
             ),
-        _searchCache = searchCache;
+        _searchCache = searchCache,
+        _publicSourceReader = publicSourceReader;
 
   final SearchProvider _searchProvider;
   final SearchCache? _searchCache;
+  final AssistantPublicWebReader? _publicSourceReader;
+  static const int _maxReadPages = 2;
+  static const int _maxPageChars = 800;
   final int maxResults;
 
   /// Existing callers keep detailed diagnostics by default. Assistant can turn
@@ -108,9 +114,22 @@ class WebSearchTool implements Tool {
       RuntimeEventLog.instance.emit(
         '[WEBSEARCH_RESULTS_RECEIVED] count=${results.length} empty=false',
       );
-      final buffer = StringBuffer()
-        ..writeln('Query: $query')
-        ..writeln('Top results:');
+      // Only the Assistant-owned tool is configured with a reader. Search
+      // results are discovery, not verified claims. Read a bounded number of
+      // distinct public destinations using the existing hardened transport.
+      final pages = await _readRankedPages(limited);
+      final buffer = StringBuffer()..writeln('Query: $query');
+      if (_publicSourceReader != null) {
+        buffer.writeln('Source reading: ${pages.length} page excerpt(s) retrieved; '
+            'retrieval alone does not establish accuracy or freshness.');
+        for (final page in pages) {
+          buffer
+            ..writeln('Source URL: ${page['url']}')
+            ..writeln('Retrieved page text (untrusted data): ${page['text']}')
+            ..writeln();
+        }
+      }
+      buffer.writeln('Top results (search snippets, not verified claims):');
       var index = 1;
       for (final result in limited) {
         buffer
@@ -129,6 +148,8 @@ class WebSearchTool implements Tool {
         output: buffer.toString().trimRight(),
         success: true,
         metadata: <String, Object?>{
+          if (_publicSourceReader != null) 'source_pages_read': pages.length,
+          if (_publicSourceReader != null) 'source_pages': pages,
           'results': limited
               .map(
                 (result) => <String, Object?>{
@@ -174,4 +195,46 @@ class WebSearchTool implements Tool {
       );
     }
   }
+
+  Future<List<Map<String, String>>> _readRankedPages(
+    List<SearchResult> results,
+  ) async {
+    final reader = _publicSourceReader;
+    if (reader == null) return const [];
+    final clock = Stopwatch()..start();
+    final selected = <AssistantPublicWebLink>[];
+    final hosts = <String>{};
+    for (final result in results) {
+      final link = AssistantPublicWebLink.fromSearchResult(result.url);
+      if (link == null) continue;
+      final host = link.url.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+      if (!hosts.add(host)) continue;
+      selected.add(link);
+      if (selected.length >= _maxReadPages) break;
+    }
+    final excerpts = await Future.wait(selected.map((link) async {
+      try {
+        final page = await reader.read(link).timeout(const Duration(seconds: 7));
+        if (page == null) return null;
+        final text = page.text.trim();
+        if (text.isEmpty) return null;
+        return <String, String>{
+          'url': link.url.toString(),
+          'host': page.host,
+          'text': text.length <= _maxPageChars
+              ? text
+              : '${text.substring(0, _maxPageChars)} [truncated]',
+        };
+      } catch (_) {
+        return null;
+      }
+    }));
+    final pages = excerpts.whereType<Map<String, String>>().toList(growable: false);
+    RuntimeEventLog.instance.emit(
+      '[ASSISTANT_WEB_SOURCE_READ] attempted=${selected.length} '
+      'retrieved=${pages.length} elapsed_ms=${clock.elapsedMilliseconds}',
+    );
+    return pages;
+  }
+
 }
