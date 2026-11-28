@@ -94,7 +94,7 @@ void main() {
       expect(delegate.lastSystemPrompt, contains('[WEB SEARCH UNAVAILABLE]'));
     });
 
-    test('search failure never blocks the underlying Cloud request', () async {
+    test('failed current news search marks verification unavailable', () async {
       final delegate = _CapturingChatRepository();
       final tool = _FakeWebSearchTool(
         result: const ToolResult(
@@ -118,7 +118,8 @@ void main() {
 
       expect(tool.calls, 1);
       expect(delegate.sendCalls, 1);
-      expect(delegate.lastSystemPrompt, 'Base assistant prompt.');
+      expect(delegate.lastSystemPrompt, contains('[WEB SEARCH UNAVAILABLE]'));
+      expect(delegate.lastSystemPrompt, contains('Base assistant prompt.'));
     });
 
     test('does not pre-search ordinary Cloud conversation', () async {
