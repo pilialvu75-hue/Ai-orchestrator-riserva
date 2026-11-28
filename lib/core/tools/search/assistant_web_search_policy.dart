@@ -29,15 +29,66 @@ abstract final class AssistantWebSearchPolicy {
     if (_assignedValueRecall(value)) return false;
 
     return _explicitWebIntent(value) ||
-        _timeSensitiveIntent(value) ||
+        requiresFreshEvidence(value) ||
         _shoppingIntent(value) ||
-        isPresentOfficeHolderQuery(value) ||
-        isSportsResultQuery(value) ||
-        isUpcomingEpisodeQuery(value) ||
         _evidenceDrivenIntent(value);
   }
 
 
+
+  /// Public facts that cannot be safely asserted without external evidence.
+  /// This is a conservative baseline, not a complete semantic classifier.
+  /// Explicit offline intent is handled separately by shouldSearch().
+  static bool requiresFreshEvidence(String prompt) {
+    final value = prompt.trim().toLowerCase();
+    if (value.isEmpty || _assignedValueRecall(value)) return false;
+    return _timeSensitiveIntent(value) ||
+        isPresentOfficeHolderQuery(value) ||
+        isSportsResultQuery(value) ||
+        isSportsScheduleQuery(value) ||
+        isUpcomingEpisodeQuery(value) ||
+        _changingPublicFacts(value);
+  }
+
+  static bool _changingPublicFacts(String value) {
+    final temporal = RegExp(
+      r'\b(?:oggi|domani|stasera|ieri|attual[ei]|attualmente|ultim[oaie]|'
+      r'today|tomorrow|tonight|yesterday|current|latest|recent|'
+      r'aujourd.hui|demain|ce soir|actuel(?:le|les|s)?|derni[eè]r[es]+|'
+      r'hoy|ma[ñn]ana|esta noche|actual(?:es)?|[úu]ltim[oa]s?)\b',
+    );
+    final subject = RegExp(
+      r'\b(?:treni?|voli?|scioper[oi]|farmaci[ae]|apert[oi]|chius[oi]|'
+      r'leggi?|normativ[ae]|regolament[oi]|elezion[ei]|sondagg[io]+|'
+      r'concert[oi]|spettacol[oi]|cinema|film|software|driver|'
+      r'vulnerabilit[aà]|sicurezza|disponibilit[aà]|offert[ae]|'
+      r'trains?|flights?|strikes?|pharmac(?:y|ies)|open|closed|'
+      r'laws?|regulations?|elections?|polls?|concerts?|movies?|'
+      r'vulnerabilit(?:y|ies)|security|availability|'
+      r'gr[eè]ves?|vols?|pharmacies?|ouvert(?:e|s|es)?|'
+      r'lois?|r[eè]glements?|[ée]lections?|sondages?|'
+      r'pel[ií]culas?|vuelos?|huelgas?|farmacias?|leyes|'
+      r'reglamentos?|elecciones?|encuestas?|disponibilidad)\b',
+      unicode: true,
+    );
+    return temporal.hasMatch(value) && subject.hasMatch(value);
+  }
+
+  /// A generic failure must not be presented as a verified factual answer.
+  static String unavailableEvidenceMessage(String prompt) {
+    if (isSportsScheduleQuery(prompt)) return unavailableScheduleMessage(prompt);
+    final value = prompt.toLowerCase();
+    if (RegExp(r'\b(?:qual[ei]?|chi|oggi|domani|quanto|prezzo|meteo|notizie|leggi|treni|voli|come|cosa)\b').hasMatch(value)) {
+      return 'Non posso confermare questa informazione senza fonti aggiornate. La verifica Web non è disponibile.';
+    }
+    if (RegExp(r'\b(?:quel(?:le|les|s)?|qui|demain|aujourd.hui|combien|m[eé]t[eé]o|prix|lois)\b').hasMatch(value)) {
+      return 'Je ne peux pas confirmer cette information sans sources à jour. La vérification Web est indisponible.';
+    }
+    if (RegExp(r'\b(?:qu[eé]|cu[aá]l|hoy|ma[ñn]ana|precio|noticias|leyes)\b').hasMatch(value)) {
+      return 'No puedo confirmar esta información sin fuentes actualizadas. La verificación web no está disponible.';
+    }
+    return 'I cannot confirm this information without up-to-date sources. Web verification is unavailable.';
+  }
 
   static bool _assignedValueRecall(String value) {
     final normalized = value.replaceAll('’', "'")
@@ -95,6 +146,41 @@ abstract final class AssistantWebSearchPolicy {
       return null;
     }
     return extractQuery(topic);
+  }
+
+  /// Fixtures are public time-dependent facts, including plural forms
+  /// and relative-day questions in all supported Assistant languages.
+  static bool isSportsScheduleQuery(String prompt) {
+    final value = prompt.toLowerCase().replaceAll('’', "'");
+    final sport = RegExp(
+      r'\b(?:partit[ae]|match(?:es|s)?|gare?|incontr[oi]|football|calcio|'
+      r'basket|basketball|tennis|rugby|serie [ab]|champions league|'
+      r'partidos?|encuentros?|f[uú]tbol|ligue [12])\b',
+    );
+    final schedule = RegExp(
+      r'\b(?:stasera|oggi|domani|ieri|stanotte|questa sera|'
+      r'tonight|today|tomorrow|yesterday|this evening|'
+      r'ce soir|aujourd.hui|demain|hier|'
+      r'esta noche|hoy|ma[ñn]ana|ayer|'
+      r'calendari[oi]|orari|schedule|fixtures|programme|horarios|'
+      r'pr[óo]xim[oa]s?|prossim[aeio]|next|prochains?|prochaines?)\b',
+    );
+    return sport.hasMatch(value) && schedule.hasMatch(value);
+  }
+
+  /// Deterministic refusal to invent a current fixture when no evidence exists.
+  static String unavailableScheduleMessage(String prompt) {
+    final value = prompt.toLowerCase();
+    if (RegExp(r'\b(?:quali|partit[ae]|stasera|oggi|domani|calcio)\b').hasMatch(value)) {
+      return 'Non posso confermare le partite o gli orari senza fonti aggiornate. Riprova con la ricerca Web disponibile.';
+    }
+    if (RegExp(r'\b(?:quels?|quelles?|ce soir|demain|aujourd.hui)\b').hasMatch(value)) {
+      return 'Je ne peux pas confirmer les matchs ou horaires sans sources à jour.';
+    }
+    if (RegExp(r'\b(?:partidos?|esta noche|hoy|ma[ñn]ana)\b').hasMatch(value)) {
+      return 'No puedo confirmar los partidos ni los horarios sin fuentes actualizadas.';
+    }
+    return 'I cannot confirm the fixtures or times without up-to-date sources.';
   }
 
   /// Competition and match results need evidence, including historical scores

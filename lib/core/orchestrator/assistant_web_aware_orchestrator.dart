@@ -445,7 +445,8 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
       temperature: temperature ?? InferenceRequest.defaultTemperature,
     );
 
-    if (!local && (!_cloudRuntimeProvider.shouldPreferCloudFor(probe) ||
+    if (!local && !AssistantWebSearchPolicy.requiresFreshEvidence(input) &&
+        (!_cloudRuntimeProvider.shouldPreferCloudFor(probe) ||
         _cloudRuntimeProvider.recommendProviderFor(
               probe,
               enforceAutomaticPolicy: true,
@@ -476,7 +477,9 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
           'status=unavailable reason=tool_unavailable '
           'action=continue_without_web',
         );
-        return local ? '${systemPrompt ?? ''}\n\n[WEB SEARCH UNAVAILABLE]\nLive verification failed. Do not invent current facts.' : systemPrompt;
+        return local || AssistantWebSearchPolicy.requiresFreshEvidence(input)
+            ? '${systemPrompt ?? ''}\n\n[WEB SEARCH UNAVAILABLE]\nLive verification failed. Do not invent current facts.'
+            : systemPrompt;
       }
 
       RuntimeEventLog.instance.emit(
@@ -491,7 +494,9 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
         'status=failed error_type=${error.runtimeType} '
         'action=continue_without_web',
       );
-      return local ? '${systemPrompt ?? ''}\n\n[WEB SEARCH UNAVAILABLE]\nLive verification failed. Do not invent current facts.' : systemPrompt;
+      return local || AssistantWebSearchPolicy.requiresFreshEvidence(input)
+            ? '${systemPrompt ?? ''}\n\n[WEB SEARCH UNAVAILABLE]\nLive verification failed. Do not invent current facts.'
+            : systemPrompt;
     }
   }
 
@@ -522,18 +527,30 @@ final class AssistantWebAwareOrchestrator extends Orchestrator {
   }
 
   InferenceResponse? _unverifiedFreshFact(String input, String? systemPrompt, bool offline) {
-    if (_runtimeSettingsService.runtimeMode != AiRuntimeMode.local ||
+    if (_gatedHybrid) return null;
+    final requiredEvidence = AssistantWebSearchPolicy.requiresFreshEvidence(input);
+    if ((!requiredEvidence && _runtimeSettingsService.runtimeMode != AiRuntimeMode.local) ||
         (!offline && !(systemPrompt?.contains('[WEB SEARCH UNAVAILABLE]') ?? false)) ||
-        !(AssistantWebSearchPolicy.isPresentOfficeHolderQuery(input) ||
+        !(requiredEvidence || AssistantWebSearchPolicy.isPresentOfficeHolderQuery(input) ||
           AssistantWebSearchPolicy.isSportsResultQuery(input) ||
           AssistantWebSearchPolicy.isUpcomingEpisodeQuery(input) ||
           (!offline && (AssistantWebSearchPolicy.isSportsResultFollowUp(input) ||
             AssistantWebSearchPolicy.isAnswerVerification(input))))) return null;
+    if (requiredEvidence &&
+        !AssistantWebSearchPolicy.isPresentOfficeHolderQuery(input) &&
+        !AssistantWebSearchPolicy.isSportsResultQuery(input) &&
+        !AssistantWebSearchPolicy.isUpcomingEpisodeQuery(input)) {
+      return InferenceResponse.finalChunk(
+        text: AssistantWebSearchPolicy.unavailableEvidenceMessage(input),
+        tokensGenerated: 0,
+        providerId: 'web_verification_unavailable',
+      );
+    }
     final french = RegExp(
       r'\b(?:résultat|resultat|championnat|quel|est|donc|prochain|prochaine|épisode|saison)\b',
       caseSensitive: false,
     ).hasMatch(input.toLowerCase());
-    final italian = !french && RegExp(r'\b(?:chi|quale|qual|vinto|president[ei]|mondiali|risultato|fonti|prossimo|prossima)\b', caseSensitive: false).hasMatch(input);
+    final italian = !french && RegExp(r'\b(?:chi|quale|quali|qual|partit[ae]|stasera|vinto|president[ei]|mondiali|risultato|fonti|prossimo|prossima)\b', caseSensitive: false).hasMatch(input);
     return InferenceResponse.finalChunk(
       text: french
           ? (offline
