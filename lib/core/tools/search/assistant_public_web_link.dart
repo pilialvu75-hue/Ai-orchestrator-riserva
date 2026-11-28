@@ -1,4 +1,4 @@
-/// A single HTTPS page link supplied in the CURRENT user message.
+/// A single public HTTPS page link from an approved Assistant retrieval path.
 ///
 /// This class does not open network connections: callers must still use a
 /// public-address-validated, DNS-pinned HTTP transport. It never interprets
@@ -7,6 +7,20 @@ final class AssistantPublicWebLink {
   const AssistantPublicWebLink._(this.url);
 
   final Uri url;
+
+  /// Ranked public search destinations have a separate, stricter boundary.
+  /// Never fetch query-bearing URLs automatically (they may contain tracking
+  /// identifiers or private tokens), credentials, ports or embedded links.
+  /// The reader MUST still perform public-address checks and DNS pinning.
+  static AssistantPublicWebLink? fromSearchResult(String input) {
+    final raw = input.trim();
+    if (raw.isEmpty || raw.length > 2048 || RegExp(r'\s').hasMatch(raw)) {
+      return null;
+    }
+    final uri = Uri.tryParse(raw);
+    if (uri == null || uri.hasQuery) return null;
+    return fromUserMessage(raw);
+  }
 
   static AssistantPublicWebLink? fromUserMessage(String input) {
     if (input.isEmpty || input.length > 4096) return null;
