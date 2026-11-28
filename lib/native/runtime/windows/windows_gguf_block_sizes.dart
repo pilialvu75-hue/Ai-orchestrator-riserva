@@ -12,20 +12,26 @@ class WindowsGgufBlockSizes {
   final int modelBytes;
   final List<int> blockBytes;
 
-  static Future<WindowsGgufBlockSizes?> read(String path) async {
+  static Future<WindowsGgufBlockSizes?> read(String path) async =>
+      (await readDetailed(path)).layout;
+
+  static Future<({WindowsGgufBlockSizes? layout, String reason})> readDetailed(
+      String path) async {
     try {
       return await Isolate.run(() {
         final file = File(path).openSync();
         try {
           final length = file.lengthSync();
           final prefix = file.readSync(length.clamp(0, 32 * 1024 * 1024).toInt());
-          return parse(prefix, length);
+          var reason = 'unknown';
+          final layout = parse(prefix, length, onReject: (code) => reason = code);
+          return (layout: layout, reason: layout == null ? reason : 'ok');
         } finally {
           file.closeSync();
         }
       });
     } on Object {
-      return null;
+      return (layout: null, reason: 'file_read_failed');
     }
   }
 
@@ -37,23 +43,28 @@ class WindowsGgufBlockSizes {
     13: (256, 176), 14: (256, 210), 15: (256, 292), 30: (1, 2),
   };
 
-  static WindowsGgufBlockSizes? parse(Uint8List header, int fileBytes) {
+  static WindowsGgufBlockSizes? parse(Uint8List header, int fileBytes,
+      {void Function(String)? onReject}) {
+    WindowsGgufBlockSizes? reject(String code) {
+      onReject?.call(code);
+      return null;
+    }
     try {
-      if (header.length > 32 * 1024 * 1024 || header.length > fileBytes) return null;
+      if (header.length > 32 * 1024 * 1024 || header.length > fileBytes) return reject('header_bounds');
       final reader = _GgufReader(header);
-      if (reader.stringBytes(4) != 'GGUF') return null;
+      if (reader.stringBytes(4) != 'GGUF') return reject('magic');
       final version = reader.u32();
-      if (version != 2 && version != 3) return null;
+      if (version != 2 && version != 3) return reject('version');
       final tensors = reader.u64();
       final metadata = reader.u64();
-      if (tensors < 1 || tensors > 100000 || metadata > 10000) return null;
+      if (tensors < 1 || tensors > 100000 || metadata > 10000) return reject('table_counts');
       String? architecture;
       var alignment = 32;
       final blockCounts = <String, int>{};
       final keys = <String>{};
       for (var i = 0; i < metadata; i++) {
         final key = reader.string();
-        if (!keys.add(key)) return null;
+        if (!keys.add(key)) return reject('duplicate_metadata');
         final type = reader.u32();
         if (key == 'general.architecture' && type == 8) {
           architecture = reader.string();
@@ -63,7 +74,7 @@ class WindowsGgufBlockSizes {
           blockCounts[key] = reader.u32();
         } else if (key.startsWith('split.')) {
           // Sharded models need an all-shard estimator, not this file alone.
-          return null;
+          return reject('split_model');
         } else {
           reader.skipValue(type);
         }
@@ -71,53 +82,59 @@ class WindowsGgufBlockSizes {
       final count = blockCounts['$architecture.block_count'];
       if (architecture == null || count == null || count < 2 || count > 512 ||
           alignment <= 0 || alignment > 4096 ||
-          (alignment & (alignment - 1)) != 0) return null;
+          (alignment & (alignment - 1)) != 0) return reject('architecture_blocks_or_alignment');
 
       final rows = <(int, int, int?)>[];
       final names = <String>{};
       final blockPattern = RegExp(r'^blk\.(\d+)\.');
       for (var i = 0; i < tensors; i++) {
         final name = reader.string();
-        if (!names.add(name)) return null;
+        if (!names.add(name)) return reject('duplicate_tensor');
         final dimensions = reader.u32();
-        if (dimensions < 1 || dimensions > 4) return null;
+        if (dimensions < 1 || dimensions > 4) return reject('tensor_dimensions');
         final first = reader.u64();
         var rowsCount = 1;
         for (var d = 1; d < dimensions; d++) {
           final dim = reader.u64();
-          if (dim <= 0 || dim > fileBytes ~/ rowsCount) return null;
+          if (dim <= 0 || dim > fileBytes ~/ rowsCount) return reject('tensor_shape');
           rowsCount *= dim;
         }
-        final layout = _types[reader.u32()];
+        final type = reader.u32();
+        final layout = _types[type];
         final offset = reader.u64();
-        if (layout == null || first <= 0 || first % layout.$1 != 0 ||
-            offset % alignment != 0) return null;
+        if (layout == null) return reject('unsupported_tensor_type_$type');
+        if (first <= 0 || first % layout.$1 != 0 ||
+            offset % alignment != 0) return reject('tensor_alignment');
         final units = first ~/ layout.$1;
-        if (units > fileBytes ~/ layout.$2) return null;
+        if (units > fileBytes ~/ layout.$2) return reject('tensor_row_size');
         final rowBytes = units * layout.$2;
-        if (rowBytes <= 0 || rowsCount > fileBytes ~/ rowBytes) return null;
+        if (rowBytes <= 0 || rowsCount > fileBytes ~/ rowBytes) return reject('tensor_size');
         final bytes = rowsCount * rowBytes;
         final match = blockPattern.firstMatch(name);
         final block = match == null ? null : int.tryParse(match.group(1)!);
-        if (match != null && (block == null || block >= count)) return null;
+        if (match != null && (block == null || block >= count)) return reject('block_index');
         rows.add((offset, bytes, block));
       }
       final dataStart = ((reader.position + alignment - 1) ~/ alignment) * alignment;
       final dataBytes = fileBytes - dataStart;
-      if (dataBytes <= 0) return null;
+      if (dataBytes <= 0) return reject('data_bounds');
       rows.sort((a, b) => a.$1.compareTo(b.$1));
       var previousEnd = 0;
       final sizes = List<int>.filled(count, 0);
       for (final (offset, bytes, block) in rows) {
         if (offset < previousEnd || offset > dataBytes ||
-            bytes > dataBytes - offset) return null;
+            bytes > dataBytes - offset) return reject('tensor_overlap_or_bounds');
         previousEnd = offset + bytes;
         if (block != null) sizes[block] += bytes;
       }
-      if (sizes.any((bytes) => bytes <= 0)) return null;
+      if (sizes.any((bytes) => bytes <= 0)) return reject('missing_blocks');
       return WindowsGgufBlockSizes._(fileBytes, List.unmodifiable(sizes));
+    } on FormatException catch (error) {
+      // Only fixed parser error codes, never file paths or metadata values.
+      final reason = error.message == 'GGUF header bounds' ? 'header_truncated_or_over_limit' : 'metadata_or_header_invalid';
+      return reject(reason);
     } on Object {
-      return null;
+      return reject('parse_failed');
     }
   }
 }

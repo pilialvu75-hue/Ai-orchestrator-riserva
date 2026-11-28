@@ -34,6 +34,14 @@ Uint8List fixture({int secondOffset = 160, int secondType = 12,
 }
 
 void main() {
+  test('unsupported tensor reports a fixed reason rather than generic memory error', () {
+    final bytes = fixture(secondType: 999);
+    String? reason;
+    expect(WindowsGgufBlockSizes.parse(bytes, bytes.length,
+      onReject: (code) => reason = code), isNull);
+    expect(reason, 'unsupported_tensor_type_999');
+  });
+
   test('reads exact quantized storage bytes, not alignment padding', () {
     final bytes = fixture();
     final result = WindowsGgufBlockSizes.parse(bytes, bytes.length)!;

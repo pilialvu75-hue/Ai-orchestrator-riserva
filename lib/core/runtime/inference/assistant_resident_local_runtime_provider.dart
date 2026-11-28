@@ -323,8 +323,15 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           return;
         }
         final modelBytes = await file.length();
-        final layout = await WindowsGgufBlockSizes.read(model);
+        final layoutResult = await WindowsGgufBlockSizes.readDetailed(model);
+        final layout = layoutResult.layout;
         final measuredBlocks = layout?.modelBytes == modelBytes ? layout?.blockBytes : null;
+        RuntimeEventLog.instance.emit(
+          '[WINDOWS_MODEL_LAYOUT] model_id=${request.modelId} model_bytes=$modelBytes '
+          'reason=${layoutResult.reason} '
+          'layout_verified=${measuredBlocks != null} '
+          'blocks=${measuredBlocks?.length ?? -1} '
+          'block_bytes=${measuredBlocks?.fold<int>(0, (a, b) => a + b) ?? -1}');
         Future<({WindowsLargeModelAdmission? normal, WindowsLargeModelAdmission? relaxed,
             int? ram, int? vram})> assess() async {
           WindowsLargeModelAdmission? normal;
@@ -340,6 +347,10 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
             final listing = await _listGpuDevices(candidate);
             final devices = WindowsGpuDeviceCapacity.parse(listing ?? '', cuda: backend == 'cuda');
             readings[backend] = devices;
+            RuntimeEventLog.instance.emit('[WINDOWS_GPU_CAPACITY] backend=$backend parsed_devices=${devices.length} nvidia_devices=${devices.where((d) => d.isNvidia).length}');
+            for (final device in devices.where((d) => d.isNvidia)) {
+              RuntimeEventLog.instance.emit('[WINDOWS_GPU_CAPACITY] backend=$backend device=${device.device} total_mib=${device.totalMiB} free_mib=${device.freeMiB}');
+            }
             for (final device in devices.where((d) => d.isNvidia)) {
               if (availableVram == null || device.freeBytes > availableVram) {
                 availableVram = device.freeBytes;
@@ -367,6 +378,12 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
               relaxed ??= const WindowsLargeModelAdmission('resident_cpu', null, 0);
             }
           }
+          RuntimeEventLog.instance.emit(
+            '[WINDOWS_MODEL_BUDGET] model_bytes=$modelBytes '
+            'ram_bytes=${availableRam ?? -1} vram_bytes=${availableVram ?? -1} '
+            'ram_critical=${ram?.critical} layout_verified=${measuredBlocks != null} '
+            'normal_backend=${normal?.backend ?? 'none'} normal_layers=${normal?.layers ?? -1} '
+            'reduced_backend=${relaxed?.backend ?? 'none'} reduced_layers=${relaxed?.layers ?? -1}');
           return (normal: normal, relaxed: relaxed, ram: availableRam, vram: availableVram);
         }
 
@@ -376,7 +393,8 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
           final choice = await _memoryReview!(request.sessionId,
               WindowsMemoryReview(modelBytes: modelBytes,
                 availableRamBytes: initial.ram, availableVramBytes: initial.vram,
-                canAttempt: initial.relaxed != null),
+                canAttempt: initial.relaxed != null,
+                layoutVerified: measuredBlocks != null),
               cancellationToken);
           if (!cancellationToken.isCancelled && choice != WindowsMemoryChoice.cancel) {
             // Confirmation is request-scoped. Re-measure after the dialog,
@@ -392,6 +410,9 @@ final class AssistantResidentLocalRuntimeProvider extends LocalRuntimeProvider {
             reducedSettings = largePlan != null && choice == WindowsMemoryChoice.reduced;
             RuntimeEventLog.instance.emit('[WINDOWS_MODEL_ADMISSION] user_choice=${choice.name} reduced_reserve=$confirmedReducedReserve reduced_settings=$reducedSettings');
           } else {
+            RuntimeEventLog.instance.emit(
+              '[WINDOWS_MODEL_ADMISSION] result=cancelled choice=${choice.name} '
+              'request_cancelled=${cancellationToken.isCancelled} can_attempt=${initial.relaxed != null}');
             yield InferenceResponse.error('Caricamento annullato. Il modello resta selezionato.',
                 state: InferenceTerminalState.cancelled);
             return;

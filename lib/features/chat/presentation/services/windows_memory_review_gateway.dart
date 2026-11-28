@@ -107,6 +107,12 @@ class WindowsMemoryReviewDialog extends StatelessWidget {
         'Cancel', 'Retry', 'Try anyway', 'Reduced settings',
         'No plan has sufficient verified memory. Free memory and retry.'],
     };
+    final layoutWarning = switch (language) {
+      'it' => 'La struttura GGUF non è stata verificata dal calcolatore GPU. Questo non dimostra che la memoria sia insufficiente o che il modello sia incompatibile.',
+      'fr' => 'La structure GGUF n’a pas été vérifiée par le calculateur GPU. Cela ne prouve pas un manque de mémoire ni une incompatibilité.',
+      'es' => 'El calculador GPU no pudo verificar la estructura GGUF. Esto no demuestra falta de memoria ni incompatibilidad.',
+      _ => 'The GPU planner could not verify the GGUF layout. This does not establish insufficient memory or model incompatibility.',
+    };
     String gib(int? bytes) => bytes == null ? '—' :
         '${(bytes / 1073741824).toStringAsFixed(2)} GiB';
     void choose(WindowsMemoryChoice choice) => Navigator.of(context).pop(choice);
@@ -115,14 +121,14 @@ class WindowsMemoryReviewDialog extends StatelessWidget {
       content: SingleChildScrollView(child: Column(
         mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(strings[1]),
+          Text(review.layoutVerified ? strings[1] : layoutWarning),
           const SizedBox(height: 12),
           Text('${strings[2]}: ${gib(review.availableRamBytes)}'),
           Text('${strings[3]}: ${gib(review.availableVramBytes)}'),
           Text('${strings[4]}: ${gib(review.modelBytes)}'),
           const SizedBox(height: 12),
           Text(strings[5]),
-          if (!review.canAttempt) Text(strings[10]),
+          if (!review.canAttempt && review.layoutVerified) Text(strings[10]),
         ],
       )),
       actions: [

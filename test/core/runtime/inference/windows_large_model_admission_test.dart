@@ -51,6 +51,24 @@ void main() {
       modelBytes: 9 * gib, blockBytes: List.filled(8, gib),
       freeRamBytes: 0, reduced: true), isNull);
   });
+  test('owner 7B memory snapshot permits full CUDA when layout is verified', () {
+    final actualDevices = WindowsGpuDeviceCapacity.parse(
+      'CUDA0: NVIDIA RTX 4060 (8188 MiB, 7188 MiB free)', cuda: true);
+    final modelBytes = (4.36 * gib).round();
+    final freeRamBytes = (5.51 * gib).round();
+    // Synthetic 28-block layout: actual model structure is not in the screenshot.
+    final blocks = List.filled(28, (3.8 * gib / 28).floor());
+    final admitted = WindowsLargeModelAdmission.gpu(
+      backend: 'cuda', devices: actualDevices, modelBytes: modelBytes,
+      blockBytes: blocks, freeRamBytes: freeRamBytes);
+    expect(admitted?.device, 'CUDA0');
+    expect(admitted?.layers, 29);
+    expect(WindowsLargeModelAdmission.gpu(
+      backend: 'cuda', devices: actualDevices, modelBytes: modelBytes,
+      blockBytes: null, freeRamBytes: freeRamBytes, reduced: true), isNull);
+    expect(WindowsLargeModelAdmission.cpuFits(modelBytes, freeRamBytes,
+      reduced: true), isFalse);
+  });
   test('native layer request preserves defaults and rejects inconsistent bounds', () {
     expect(ResidentCompletionRuntime.resolveGpuLayers(null, null), 0);
     expect(ResidentCompletionRuntime.resolveGpuLayers('CUDA0', null), 99);
