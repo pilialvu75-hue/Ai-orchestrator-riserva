@@ -81,6 +81,17 @@ class AivexusStlPreview extends HTMLElement {
             <label>Larghezza reale (mm) <input data-profile-width type="number" min="0.1" max="500" step="any"></label>
             <label>Spessore (mm) <input data-profile-thickness type="number" min="0.1" max="500" step="any"></label>
             <button type="button" data-profile-generate>Genera STL da sagoma</button>
+            <details data-photo-volume>
+              <summary>Stima un volume da tre foto</summary>
+              <p>Usa viste ortogonali della stessa posa. Nella foto laterale il davanti deve essere a sinistra, in quella superiore in alto. Rileva o traccia ogni bordo, poi acquisisci la vista. Il risultato è una stima a griglia delle superfici visibili nelle sagome.</p>
+              <label>Vista <select><option value="front">frontale</option><option value="side">laterale</option><option value="top">superiore</option></select></label>
+              <button type="button" data-volume-save>Acquisisci questa vista</button>
+              <label>Larghezza reale (mm) <input type="number" min="0.1" max="500" step="any"></label>
+              <label>Profondità reale (mm) <input type="number" min="0.1" max="500" step="any"></label>
+              <label>Altezza reale (mm) <input type="number" min="0.1" max="500" step="any"></label>
+              <button type="button" data-volume-generate>Genera STL da tre viste</button>
+              <output data-volume-status aria-live="polite"></output>
+            </details>
           </div>
         </details>
         <details data-fdm hidden>
@@ -100,7 +111,7 @@ class AivexusStlPreview extends HTMLElement {
       </section>
     `;
     const input = root.querySelector('input[accept=".stl,model/stl"]');
-    const status = root.querySelector('output:not([data-job]):not([data-photo-status])');
+    const status = root.querySelector('output:not([data-job]):not([data-photo-status]):not([data-volume-status])');
     const canvas = root.querySelector('canvas');
     const history = root.querySelector('[data-cad-history]');
     const useRevision = root.querySelector('[data-select]');
@@ -424,10 +435,12 @@ class AivexusStlPreview extends HTMLElement {
         review.hidden = false;
         confirmed.checked = false;
         reviewPhotoDimensions();
-      }, source => {
+      }, (source, filename = 'sagoma.stl') => {
         reset();
         history.selectedIndex = -1;
         show(source);
+        profileDownload.download = filename;
+        profileDownload.textContent = filename === 'sagoma.stl' ? 'Scarica STL della sagoma' : 'Scarica STL del volume';
         profileDownload.href = URL.createObjectURL(new Blob([source], { type: 'model/stl' }));
         profileDownload.hidden = false;
       });
