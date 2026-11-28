@@ -266,8 +266,15 @@ export async function generateWebApplication({ request, ownerSubject, adminSubje
     { role: 'user', content: brief },
   ], isManual ? builderRouteId : null).catch(() => ({ ok: false }));
   const reply = inference.ok ? parseResponse(inference.text) : null;
+  const source = normalizeSource(reply);
+  if (!source) {
+    const reason = inference.failureKind === 'output_limit' ? 'output_limit'
+      : !inference.ok ? 'provider_unavailable'
+      : !reply ? 'invalid_json' : 'invalid_source';
+    console.warn('Web generation rejected:', reason);
+  }
   return saveWebApplicationCandidate({ db, ownerSubject, generationId, inference,
-    source: normalizeSource(reply), checks: validateWebApplicationChecks(reply?.checks) });
+    source, checks: validateWebApplicationChecks(reply?.checks) });
 }
 
 export async function saveWebApplicationCandidate({ db, ownerSubject, generationId, inference, source, checks }) {
@@ -278,6 +285,7 @@ export async function saveWebApplicationCandidate({ db, ownerSubject, generation
     const sourceSha256 = await sha256Text(JSON.stringify(source));
     const serialized = JSON.stringify({ source, sourceSha256, provenance, checks });
     if (encoder.encode(serialized).byteLength <= 65536) resultJson = serialized;
+    else console.warn('Web generation rejected:', 'storage_limit');
   }
   const status = resultJson ? 'generated' : 'failed';
   const written = await db.prepare(FINISH).bind(ownerSubject, generationId, status, resultJson).first();
