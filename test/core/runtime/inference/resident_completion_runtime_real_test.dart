@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -46,6 +47,28 @@ void main() {
   final server = helper == null ? null : p.join(p.dirname(helper), 'runtime-modern', 'llama-server.exe');
   final skip = !Platform.isWindows || server == null || model == null || !File(server).existsSync();
 
+  test('shutdown waits for confirmed forced exit and reports unconfirmed exit', () async {
+    final exit = Completer<int>();
+    final signals = <bool>[];
+    final shutdown = ResidentCompletionRuntime.confirmExit(
+      exitCode: exit.future, timeout: const Duration(milliseconds: 10),
+      terminate: (force) {
+        signals.add(force);
+        if (force) exit.complete(0);
+      },
+    );
+    await shutdown;
+    expect(signals, [false, true]);
+    final stuck = Completer<int>();
+    final stuckSignals = <bool>[];
+    await expectLater(ResidentCompletionRuntime.confirmExit(
+      exitCode: stuck.future, terminate: stuckSignals.add,
+      timeout: const Duration(milliseconds: 10)),
+      throwsA(isA<ResidentRuntimeShutdownPending>()));
+    expect(stuckSignals, [false, true]);
+    stuck.complete(0);
+  });
+
   test('closing the Windows lifetime lease terminates only its child process', () async {
     final child = await Process.start('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Start-Sleep -Seconds 60']);
     ResidentProcessLease? lease;
@@ -91,6 +114,10 @@ void main() {
       expect(identical(runtime.lastGenerationMetrics, firstMetrics), isFalse);
       expect(cached[1], greaterThan(0));
       print('Resident cache check: new conversation');
+      // Explicitly exercise coalesced shutdown before loading a new model.
+      final firstClose = runtime.releaseForAdmission();
+      await Future.wait([firstClose, runtime.close()]);
+      expect(runtime.processId, isNull);
       await generate('two', 'Once upon a time');
       expect(cached[2], 0, reason: 'A different conversation must not inherit KV state.');
       final cancelled = CancellationToken()..cancel();
