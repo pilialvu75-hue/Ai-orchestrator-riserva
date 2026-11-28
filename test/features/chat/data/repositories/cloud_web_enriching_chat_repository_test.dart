@@ -61,6 +61,39 @@ void main() {
       expect(delegate.lastSystemPrompt, 'Base assistant prompt.');
     });
 
+    test('edited or repeated fixture question requires a lookup each turn', () async {
+      final delegate = _CapturingChatRepository();
+      final tool = _FakeWebSearchTool(
+        result: const ToolResult(toolId: 'web_search',
+          output: 'Fixtures URL: https://example.test/fixtures'),
+      );
+      final repository = CloudWebEnrichingChatRepository(
+        delegate: delegate, webSearchTool: tool,
+        runtimeMode: () => AiRuntimeMode.cloud,
+      );
+      for (var i = 0; i < 2; i++) {
+        await repository.sendMessage(sessionId: 'repeat-fixtures',
+          userPrompt: 'Quali partite ci sono stasera?');
+      }
+      expect(tool.calls, 2);
+      expect(delegate.lastSystemPrompt, contains('[WEB SEARCH RESULTS]'));
+    });
+
+    test('failed fixture search marks the answer unavailable', () async {
+      final delegate = _CapturingChatRepository();
+      final tool = _FakeWebSearchTool(result: const ToolResult(
+        toolId: 'web_search', output: '', success: false,
+      ));
+      final repository = CloudWebEnrichingChatRepository(
+        delegate: delegate, webSearchTool: tool,
+        runtimeMode: () => AiRuntimeMode.cloud,
+      );
+      await repository.sendMessage(sessionId: 'failed-fixtures',
+        userPrompt: 'Quali partite ci sono stasera?');
+      expect(tool.calls, 1);
+      expect(delegate.lastSystemPrompt, contains('[WEB SEARCH UNAVAILABLE]'));
+    });
+
     test('search failure never blocks the underlying Cloud request', () async {
       final delegate = _CapturingChatRepository();
       final tool = _FakeWebSearchTool(
