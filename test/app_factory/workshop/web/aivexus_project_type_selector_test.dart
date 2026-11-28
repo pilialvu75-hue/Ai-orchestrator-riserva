@@ -36,7 +36,7 @@ void main() {
       goalLabel: 'Descrivi il gioco',
       button: 'Crea bozza Videogioco',
       title: 'Raccogli stelle',
-      detailLabel: 'Videogiochi · bozza salvata',
+      detailLabel: 'Apri AIVEXUS Studio',
       kind: AivexusProjectKind.game,
       platforms: const <String>['Web'],
     ),
@@ -51,6 +51,7 @@ void main() {
           inferenceGateway: WorkshopInferenceGateway(provider: provider),
         );
         addTearDown(controller.dispose);
+        String? studioBrief;
 
         await tester.pumpWidget(
           MaterialApp(
@@ -58,6 +59,7 @@ void main() {
               body: WorkshopWebProjectsPage(
                 controller: controller,
                 storage: storage,
+                onOpenWebStudio: (brief) => studioBrief = brief,
               ),
             ),
           ),
@@ -90,13 +92,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(provider.calls, 0);
-        expect(find.text(testCase.detailLabel), findsOneWidget);
-        expect(
-          find.textContaining('runner specializzato non è ancora collegato'),
-          testCase.kind == AivexusProjectKind.game
-              ? findsOneWidget
-              : findsNothing,
-        );
+        final studioButton = find.widgetWithText(FilledButton, testCase.detailLabel);
+        expect(find.text(testCase.detailLabel), findsWidgets);
 
         final reopened = await WorkshopWebProjectStorage.open();
         final projects = await reopened.loadAll();
@@ -116,7 +113,12 @@ void main() {
 
         await tester.tap(find.text(testCase.title));
         await tester.pumpAndSettle();
-        expect(find.text(testCase.detailLabel), findsOneWidget);
+        expect(find.text(testCase.detailLabel), findsWidgets);
+        if (testCase.kind == AivexusProjectKind.game) {
+          await tester.tap(studioButton);
+          expect(studioBrief, startsWith('Crea un gioco 2D'));
+          expect(studioBrief, endsWith('Descrizione dominio persistente'));
+        }
         expect(provider.calls, 0);
         expect(tester.takeException(), isNull);
       },
