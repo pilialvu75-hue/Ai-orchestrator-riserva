@@ -61,7 +61,7 @@ void main() {
     });
     expect(route('Ciao, come stai?', models: [coder, general],
       preferred: coder, memory: memory, windows: true)?.id, general.id);
-    expect(route('Scrivi codice Dart', models: [coder, general],
+    expect(route('Scrivi codice Dart', models: [coder, phi],
       preferred: coder, memory: memory, windows: true)?.id, coder.id);
   });
 
